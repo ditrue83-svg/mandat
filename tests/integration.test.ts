@@ -152,6 +152,27 @@ describe("Regressioni di revisione e invio", () => {
     });
     return id;
   }
+  it("conserva una correzione manuale quando la fonte viene importata invariata", async () => {
+    const p = await ready("manual-correction-source-unchanged");
+    const corrected = {
+      ...p,
+      revision: "manual-v2",
+      summary: "Riassunto verificato e corretto dal fondatore",
+    };
+    await db
+      .update(schema.publications)
+      .set({ data: corrected, aiRevision: corrected.revision })
+      .where(eq(schema.publications.id, p.id));
+
+    expect(await storePublication(p)).toBe(false);
+    const [current] = await db
+      .select()
+      .from(schema.publications)
+      .where(eq(schema.publications.id, p.id));
+    expect(current.revision).toBe(p.revision);
+    expect(current.aiRevision).toBe(corrected.revision);
+    expect(current.data).toEqual(corrected);
+  });
   it("recupera un annullamento arrivato prima della conferma SMTP tardiva", async () => {
     const p = await ready("late-confirmation"),
       id = await pending(p);

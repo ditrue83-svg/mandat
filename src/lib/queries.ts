@@ -1,4 +1,4 @@
-import { and, eq, lte, gt, isNull, or, desc, inArray } from "drizzle-orm";
+import { and, eq, lte, gt, isNull, or, desc, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { matches, publications, feedback, settings } from "@/db/schema";
 import { fingerprint } from "@/sources/common";
@@ -14,7 +14,8 @@ export async function getRadarStatus(
   const db = getDb();
   const rows = await db
     .select({
-      publicationRevision: publications.revision,
+      // Matches follow corrected content; the column retains the source revision.
+      publicationRevision: sql<string>`${publications.data}->>'revision'`,
       matchRevision: matches.revision,
     })
     .from(publications)

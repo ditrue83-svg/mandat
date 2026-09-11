@@ -75,6 +75,7 @@ async function publication(id = "p", input: Partial<Publication> = {}) {
       data: p,
       revision: p.revision,
     });
+  return p;
 }
 async function match(
   companyId = "a",
@@ -135,6 +136,36 @@ it.each(["pending", "ready:test-model:true:retry"])(
     expect((await getRadarStatus(viewer, now)).state).toBe("ready");
   },
 );
+it("attende la rivalutazione dopo una correzione manuale del contenuto", async () => {
+  const p = await publication();
+  await match("a", currentRevision(), true);
+  await db
+    .update(schema.publications)
+    .set({
+      data: { ...p, revision: "manual-v2", summary: "Riassunto corretto" },
+      aiRevision: "manual-v2",
+    })
+    .where(eq(schema.publications.id, p.id));
+  expect(await getRadarStatus(viewer, now)).toEqual({
+    state: "processing",
+    pendingCount: 1,
+  });
+});
+it("conclude l’attesa quando il match usa la revisione manuale corrente", async () => {
+  const p = await publication();
+  await db
+    .update(schema.publications)
+    .set({
+      data: { ...p, revision: "manual-v2", summary: "Riassunto corretto" },
+      aiRevision: "manual-v2",
+    })
+    .where(eq(schema.publications.id, p.id));
+  await match("a", currentRevision("manual-v2"), true);
+  expect(await getRadarStatus(viewer, now)).toEqual({
+    state: "ready",
+    pendingCount: 0,
+  });
+});
 it("esclude scaduti, annullati, aggiudicati, futuri e Foglio senza riutilizzo autorizzato", async () => {
   await publication("expired", { deadline: now.toISOString() });
   await publication("cancelled", { status: "cancelled" });
