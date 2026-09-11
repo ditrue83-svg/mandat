@@ -30,6 +30,22 @@ const searchSchema = z.object({
   projects: z.array(projectSchema),
   pagination: z.object({ lastItem: z.string().nullish() }).passthrough(),
 });
+const publicationHeaderSchema = z.object({
+  id: z.uuid(),
+  dates: z.object({ publicationDate: z.string().min(1) }),
+  pubType: z.string().min(1),
+  title: z.unknown(),
+});
+const projectHeaderSchema = z.object({
+  id: z.uuid(),
+  projectNumber: z.string().min(1),
+  processType: z.string().min(1),
+  lotsType: z.string().nullish(),
+  latestPublication: publicationHeaderSchema.nullish(),
+  lots: z
+    .array(z.object({ latestPublication: publicationHeaderSchema.nullish() }))
+    .nullish(),
+});
 const record = (v: unknown) =>
   v && typeof v === "object" && !Array.isArray(v)
     ? (v as Record<string, unknown>)
@@ -205,14 +221,39 @@ export const simap: SourceAdapter = {
 
 // Recheck tracked open projects even when their publication is outside the search window.
 simap.refresh = async (previous) => {
-  const header = JSON.parse(
-    await fetchOfficial(
-      `https://www.simap.ch/api/publications/v2/project/${previous.externalId}/project-header`,
-      ["www.simap.ch"],
+  const parsed = projectHeaderSchema.safeParse(
+    JSON.parse(
+      await fetchOfficial(
+        `https://www.simap.ch/api/publications/v2/project/${previous.externalId}/project-header`,
+        ["www.simap.ch"],
+      ),
     ),
   );
-  const latest = header.latestPublication;
-  if (!latest?.id) throw new Error("Header simap non riconosciuto");
+  if (!parsed.success || parsed.data.id !== previous.externalId)
+    throw new Error("Header simap non riconosciuto");
+  const header = parsed.data;
+  let latest = header.latestPublication;
+  if (!latest) {
+    // For projects with lots, simap puts the latest publication on each lot.
+    // A single project record is safe only when every lot points to the same
+    // publication. Divergent or incomplete lots need review, not a guessed state.
+    const first = header.lots?.[0]?.latestPublication;
+    if (
+      header.lotsType !== "with" ||
+      !first ||
+      header.lots!.some(
+        ({ latestPublication: candidate }) =>
+          !candidate ||
+          candidate.id !== first.id ||
+          candidate.pubType !== first.pubType ||
+          candidate.dates.publicationDate !== first.dates.publicationDate,
+      )
+    )
+      throw new Error(
+        "Pubblicazioni dei lotti simap incomplete o discordanti: richiesta revisione",
+      );
+    latest = first;
+  }
   return simap.detail({
     id: previous.externalId,
     raw: {
