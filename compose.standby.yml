@@ -1,0 +1,21 @@
+# Standalone HTTPS entry point while the application services are configured.
+# Run with DOMAIN=mandat-app.com docker compose -f compose.standby.yml up -d.
+# Uses the same project, network and certificate volumes as the live stack.
+name: mandat
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN}
+    volumes:
+      - ./infra/Caddyfile.standby:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [app]
+networks:
+  app:
+volumes:
+  caddy_data:
+  caddy_config:
