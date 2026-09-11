@@ -388,14 +388,12 @@ export async function enrichAndMatch(
           requirements: result.requirements.map((r) => r.text),
           evidence: [
             ...p.evidence,
-            ...result.evidence.map((e) => ({
-              ...e,
-              ...evidenceLocation(p, e.quote),
-            })),
+            ...result.evidence,
             ...result.requirements.map((r) => ({
               field: "Requisito",
               quote: r.quote,
-              ...evidenceLocation(p, r.quote),
+              url: r.url,
+              ...(r.page === undefined ? {} : { page: r.page }),
             })),
           ],
         };
@@ -512,8 +510,4 @@ export async function enrichAndMatch(
       });
     }
   }
-}
-function evidenceLocation(p: Publication, quote: string) {
-  const page = p.documentPages?.find((page) => page.text.includes(quote));
-  return page ? { url: page.url, page: page.page } : { url: p.sourceUrl };
 }

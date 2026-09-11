@@ -499,21 +499,50 @@ describe("AI: budget e aggiornamenti concorrenti", () => {
       id: "summary-request-contract",
       originalText:
         "Il servizio richiede la pulizia ordinaria degli uffici comunali.",
-      documentPages: [],
+      documentPages: [
+        {
+          page: 3,
+          url: "https://example.invalid/annexe-francaise.pdf",
+          text: "Une référence pour des prestations similaires est exigée.",
+        },
+      ],
     };
+    const request = buildSummaryRequest(publication);
+    const original = request.passages.find((p) => p.documentIndex === null)!;
+    const attachment = request.passages.find((p) => p.documentIndex === 0)!;
     const output = {
-      summary: "È richiesta la pulizia ordinaria degli uffici comunali.",
-      requirements: [],
+      summary:
+        "È richiesta la pulizia ordinaria degli uffici comunali, con una referenza per servizi analoghi.",
+      requirements: [
+        { text: "Presentare una referenza.", quoteId: attachment.id },
+      ],
       sectors: ["pulizie"],
-      evidence: [{ field: "oggetto", quote: publication.originalText }],
+      evidence: [{ field: "oggetto", quoteId: original.id }],
     };
     const complete = vi.fn(async () => ({
       text: JSON.stringify(output),
       inputTokens: 100,
       outputTokens: 50,
     }));
-    await expect(summarize(publication, { complete })).resolves.toEqual(output);
-    const request = buildSummaryRequest(publication);
+    await expect(summarize(publication, { complete })).resolves.toEqual({
+      summary: output.summary,
+      sectors: output.sectors,
+      requirements: [
+        {
+          text: "Presentare una referenza.",
+          quote: publication.documentPages[0].text,
+          url: publication.documentPages[0].url,
+          page: 3,
+        },
+      ],
+      evidence: [
+        {
+          field: "oggetto",
+          quote: publication.originalText,
+          url: publication.sourceUrl,
+        },
+      ],
+    });
     expect(complete).toHaveBeenCalledExactlyOnceWith(
       request.system,
       request.prompt,
@@ -525,6 +554,183 @@ describe("AI: budget e aggiornamenti concorrenti", () => {
       .where(eq(schema.aiUsage.publicationId, publication.id));
     expect(usage.status).toBe("completed");
     expect(Number(usage.costChf)).toBe(0.0002);
+  });
+  it.each(
+    (["requirements", "evidence"] as const).flatMap((field) =>
+      (["unknown-id", "legacy-quote"] as const).map((kind) => ({
+        field,
+        kind,
+      })),
+    ),
+  )(
+    "registra il costo ma non salva il riassunto con $kind in $field",
+    async ({ field, kind }) => {
+      const publication = {
+        ...getDemoOpportunities()[1],
+        id: `invalid-citation-${field}-${kind}`,
+        externalId: `invalid-citation-${field}-${kind}`,
+        canonicalKey: `invalid-citation-${field}-${kind}`,
+        originalText:
+          "The contract covers cleaning the offices. References for comparable services are required.",
+        documentPages: [],
+        summary: null,
+        revision: "original-language-v1",
+      };
+      const request = buildSummaryRequest(publication);
+      const quoteId = request.passages[0].id;
+      const output = {
+        summary:
+          "Il servizio comprende la pulizia degli uffici e richiede referenze per servizi analoghi.",
+        requirements: [
+          {
+            text: "Presentare referenze per servizi analoghi.",
+            quoteId,
+          },
+        ],
+        sectors: ["pulizie"],
+        evidence: [
+          {
+            field: "oggetto",
+            quoteId,
+          },
+        ],
+      };
+      const unknownId = "s999999";
+      expect(request.passages.some((p) => p.id === unknownId)).toBe(false);
+      const entry =
+        field === "requirements"
+          ? { text: output.requirements[0].text }
+          : { field: output.evidence[0].field };
+      const invalidOutput = {
+        ...output,
+        [field]: [
+          kind === "unknown-id"
+            ? { ...entry, quoteId: unknownId }
+            : {
+                ...entry,
+                quote:
+                  field === "requirements"
+                    ? "Sono richieste referenze per servizi analoghi."
+                    : "Il servizio comprende la pulizia degli uffici.",
+              },
+        ],
+      };
+      const complete = vi
+        .spyOn(configuredTransport, "complete")
+        .mockResolvedValue({
+          text: JSON.stringify(invalidOutput),
+          inputTokens: 120,
+          outputTokens: 80,
+        });
+      await storePublication(publication);
+      const [before] = await db
+        .select()
+        .from(schema.publications)
+        .where(eq(schema.publications.id, publication.id));
+
+      await enrichAndMatch({ publicationId: publication.id });
+
+      expect(complete).toHaveBeenCalledTimes(1);
+      const usages = await db
+        .select()
+        .from(schema.aiUsage)
+        .where(eq(schema.aiUsage.publicationId, publication.id));
+      expect(usages).toHaveLength(1);
+      expect(usages[0]).toMatchObject({
+        purpose: "summary",
+        status: "completed",
+        inputTokens: 120,
+        outputTokens: 80,
+      });
+      expect(Number(usages[0].costChf)).toBeCloseTo(0.00028, 8);
+      const [current] = await db
+        .select()
+        .from(schema.publications)
+        .where(eq(schema.publications.id, publication.id));
+      expect(current.data.summary).toBeNull();
+      expect(current.aiRevision).toBeNull();
+      expect(current.data).toEqual(before.data);
+      const problems = await db
+        .select()
+        .from(schema.issues)
+        .where(eq(schema.issues.key, `ai:${publication.id}`));
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toMatchObject({
+        publicationId: publication.id,
+        severity: "warning",
+        resolvedAt: null,
+      });
+      expect(problems[0].detail.length).toBeGreaterThan(0);
+    },
+  );
+  it("salva la pagina selezionata dal modello senza riassegnare una citazione duplicata", async () => {
+    const originalQuote = "Les références pour des travaux similaires sont exigées.";
+    const publication = {
+      ...getDemoOpportunities()[1],
+      id: "selected-evidence-page",
+      externalId: "selected-evidence-page",
+      canonicalKey: "selected-evidence-page",
+      canton: "ZH",
+      originalText: originalQuote,
+      documentPages: [
+        {
+          page: 1,
+          text: originalQuote,
+          url: "https://example.invalid/premier-document.pdf",
+        },
+        {
+          page: 7,
+          text: originalQuote,
+          url: "https://example.invalid/deuxieme-document.pdf",
+        },
+      ],
+      summary: null,
+      revision: "duplicate-evidence-v1",
+    };
+    const selected = buildSummaryRequest(publication).passages.find(
+      (p) => p.documentIndex === 1,
+    )!;
+    const complete = vi
+      .spyOn(configuredTransport, "complete")
+      .mockResolvedValue({
+        text: JSON.stringify({
+          summary: "Sono richieste referenze per lavori analoghi.",
+          requirements: [
+            { text: "Presentare referenze.", quoteId: selected.id },
+          ],
+          sectors: ["pulizie"],
+          evidence: [{ field: "requisiti", quoteId: selected.id }],
+        }),
+        inputTokens: 100,
+        outputTokens: 50,
+      });
+    await storePublication(publication);
+
+    await enrichAndMatch({ publicationId: publication.id });
+
+    expect(complete).toHaveBeenCalledTimes(1);
+    const [current] = await db
+      .select()
+      .from(schema.publications)
+      .where(eq(schema.publications.id, publication.id));
+    expect(current.aiRevision).toBe(publication.revision);
+    expect(current.data.requirements).toEqual(["Presentare referenze."]);
+    expect(current.data.evidence).toEqual(
+      expect.arrayContaining([
+        {
+          field: "requisiti",
+          quote: originalQuote,
+          url: publication.documentPages[1].url,
+          page: 7,
+        },
+        {
+          field: "Requisito",
+          quote: originalQuote,
+          url: publication.documentPages[1].url,
+          page: 7,
+        },
+      ]),
+    );
   });
   it("non chiama il modello a budget esaurito e registra il blocco", async () => {
     vi.stubEnv("AI_MONTHLY_BUDGET_CHF", "0");
@@ -598,7 +804,9 @@ describe("AI: budget e aggiornamenti concorrenti", () => {
         summary: "Servizio di pulizia per gli spazi dell’ente.",
         requirements: [],
         sectors: ["pulizie"],
-        evidence: [{ field: "oggetto", quote: p.originalText.slice(0, 40) }],
+        evidence: [
+          { field: "oggetto", quoteId: buildSummaryRequest(p).passages[0].id },
+        ],
       }),
       inputTokens: 100,
       outputTokens: 100,
