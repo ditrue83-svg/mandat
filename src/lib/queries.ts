@@ -4,6 +4,7 @@ import { matches, publications, feedback, settings } from "@/db/schema";
 import { fingerprint } from "@/sources/common";
 import { getDemoOpportunities } from "./demo";
 import type { Opportunity, RadarStatus, Viewer } from "./domain";
+import { presentMatch } from "./match-presentation";
 
 export async function getRadarStatus(
   viewer: Viewer,
@@ -117,7 +118,12 @@ export async function listOpportunities(
           ...r.publication.data,
           id: r.publication.id,
           score: r.match.score,
-          reason: r.match.reason,
+          ...presentMatch({
+            match: r.match,
+            publication: r.publication.data,
+            aiRevision: r.publication.aiRevision,
+            profileRevision: fingerprint(viewer.profile),
+          }),
           saved: r.feedback?.saved ?? false,
           dismissed: r.feedback?.dismissed ?? false,
           feedback:
@@ -165,7 +171,12 @@ export async function getOpportunity(
     ...row.p.data,
     id: row.p.id,
     score: row.m.score,
-    reason: row.m.reason,
+    ...presentMatch({
+      match: row.m,
+      publication: row.p.data,
+      aiRevision: row.p.aiRevision,
+      profileRevision: fingerprint(viewer.profile),
+    }),
     saved: row.f?.saved ?? false,
     dismissed: row.f?.dismissed ?? false,
     feedback:

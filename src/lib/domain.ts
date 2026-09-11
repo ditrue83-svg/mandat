@@ -122,9 +122,18 @@ export type CompanyProfile = {
   maxValue: number | null;
   emailEnabled: boolean;
 };
+export type MatchAssessment =
+  | "preliminary"
+  | "uncertain"
+  | "ai"
+  | "reviewed"
+  | "rejected"
+  | "excluded"
+  | "demo";
 export type Opportunity = Publication & {
   score: number;
   reason: string;
+  assessment: MatchAssessment;
   saved: boolean;
   dismissed: boolean;
   feedback: "relevant" | "irrelevant" | null;

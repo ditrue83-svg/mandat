@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Mail, ShieldCheck, ArrowUpRight } from "lucide-react";
 import { Shell } from "./shell";
+import { MatchNote } from "./match-note";
 import type { Viewer } from "@/lib/domain";
 import type { AdminSnapshot } from "@/lib/admin";
 import { SECTORS, formatDate } from "@/lib/domain";
@@ -223,11 +224,14 @@ export function AdminDashboard({
             <div key={m.id} className="admin-review">
               <div className="admin-review-heading">
                 <h3>{m.title}</h3>
-                <span className="status-badge">{m.score}/100</span>
+                {m.assessment === "ai" && (
+                  <span className="status-badge">Stima AI · {m.score}/100</span>
+                )}
               </div>
               <p>
-                <strong>{m.company}</strong> · {m.reason}
+                <strong>{m.company}</strong>
               </p>
+              <MatchNote assessment={m.assessment} reason={m.reason} />
               {m.reviewRequired && (
                 <div className="notice">{m.reviewReasons.join("; ")}</div>
               )}

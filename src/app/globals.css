@@ -692,6 +692,19 @@ h1 {
 }
 .match-note svg {
   margin-top: 1px;
+  flex-shrink: 0;
+}
+.match-note p {
+  margin: 3px 0 0;
+}
+.match-note.needs-review {
+  background: #fbf3df;
+  color: #745819;
+}
+.publication-review-note {
+  color: #745819;
+  font-size: 12px;
+  margin: 10px 0 0;
 }
 .card-bottom {
   display: flex;

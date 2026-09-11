@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ArrowUpRight, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowUpRight } from "lucide-react";
 import { pageViewer } from "@/lib/viewer";
 import { getOpportunity } from "@/lib/queries";
 import {
@@ -11,6 +11,7 @@ import {
 } from "@/lib/domain";
 import { Shell } from "@/components/shell";
 import { DetailActions } from "@/components/detail-actions";
+import { MatchNote } from "@/components/match-note";
 export const dynamic = "force-dynamic";
 export default async function Detail({
   params,
@@ -104,10 +105,7 @@ export default async function Detail({
               {item.summary ||
                 "Il riassunto non è ancora disponibile. Puoi leggere la pubblicazione originale qui sotto."}
             </p>
-            <div className="match-note">
-              <Sparkles size={16} />
-              {item.reason}
-            </div>
+            <MatchNote assessment={item.assessment} reason={item.reason} />
             {item.requirements.length > 0 && (
               <>
                 <h3>Da controllare prima di partecipare</h3>

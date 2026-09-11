@@ -196,6 +196,7 @@ export function getDemoOpportunities(now = new Date()): Opportunity[] {
     revision: "demo-v1",
     score: s.score,
     reason: s.reason,
+    assessment: "demo",
     saved: false,
     dismissed: false,
     feedback: null,

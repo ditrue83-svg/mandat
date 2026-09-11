@@ -12,7 +12,6 @@ import {
   MapPin,
   Search,
   SlidersHorizontal,
-  Sparkles,
   X,
   Leaf,
   BrushCleaning,
@@ -26,6 +25,7 @@ import {
   Bell,
 } from "lucide-react";
 import { Shell } from "./shell";
+import { MatchNote } from "./match-note";
 import { profileSchema } from "@/lib/validation";
 import { preliminaryMatch } from "@/lib/matching";
 import {
@@ -400,10 +400,13 @@ export function Dashboard({
                     </span>
                     {viewer.demo && <span className="meta">· Esempio</span>}
                   </div>
-                  <div className="match-note">
-                    <Sparkles size={15} />
-                    <span>{o.reason}</span>
-                  </div>
+                  <MatchNote assessment={o.assessment} reason={o.reason} />
+                  {o.reviewRequired && (
+                    <p className="publication-review-note">
+                      Dati del bando da verificare. Consulta gli avvisi nella
+                      scheda.
+                    </p>
+                  )}
                   <div className="card-bottom">
                     <div className="card-facts">
                       <span

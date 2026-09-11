@@ -21,6 +21,8 @@ import { emailLayout, escapeHtml, sendMail } from "./mail";
 import { appUrl } from "./config";
 import { HttpError } from "./viewer";
 import { DateTime } from "luxon";
+import { fingerprint } from "@/sources/common";
+import { presentMatch } from "./match-presentation";
 export async function provisionInvite(
   email: string,
   name: string,
@@ -173,6 +175,9 @@ export async function adminSnapshot(demo: boolean) {
         reason: matches.reason,
         approved: matches.approved,
         reviewedAt: matches.reviewedAt,
+        revision: matches.revision,
+        reviewNotes: matches.reviewNotes,
+        aiRevision: publications.aiRevision,
         reviewRequired: publications.data,
       })
       .from(matches)
@@ -253,7 +258,12 @@ export async function adminSnapshot(demo: boolean) {
       company: r.company.name,
       score: r.score,
       eligible: r.eligible,
-      reason: r.reason,
+      ...presentMatch({
+        match: r,
+        publication: r.reviewRequired,
+        aiRevision: r.aiRevision,
+        profileRevision: fingerprint(r.company),
+      }),
       approved: r.approved,
       reviewed: !!r.reviewedAt,
       reviewRequired: r.reviewRequired.reviewRequired,
