@@ -1,10 +1,15 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Check, Building2 } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Shell } from "./shell";
 import { SECTORS, ZONES, type CompanyProfile, type Viewer } from "@/lib/domain";
-import { profileSchema } from "@/lib/validation";
+import {
+  profileBasicsSchema,
+  profileSearchSchema,
+  profileSchema,
+  profileFieldStep,
+} from "@/lib/validation";
 export function ProfileForm({
   viewer,
   onboarding = false,
@@ -21,7 +26,19 @@ export function ProfileForm({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [failed, setFailed] = useState(false);
+  const [errorField, setErrorField] = useState<string>();
+  const formRef = useRef<HTMLFormElement>(null);
+  const feedbackRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+  useEffect(() => {
+    if (!failed) return;
+    const field = errorField
+      ? formRef.current?.elements.namedItem(errorField)
+      : null;
+    const target = field instanceof RadioNodeList ? field.item(0) : field;
+    if (target instanceof HTMLElement) target.focus();
+    else feedbackRef.current?.focus();
+  }, [failed, errorField, message, step]);
   useEffect(() => {
     if (viewer.demo) {
       try {
@@ -45,9 +62,21 @@ export function ProfileForm({
   }
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setMessage("");
     setFailed(false);
+    setErrorField(undefined);
     if (onboarding && step < 3) {
+      const result = (
+        step === 1 ? profileBasicsSchema : profileSearchSchema
+      ).safeParse(form);
+      if (!result.success) {
+        const issue = result.error.issues[0];
+        setFailed(true);
+        setMessage(issue.message);
+        setErrorField(String(issue.path[0]));
+        return;
+      }
       setStep(step + 1);
       return;
     }
@@ -62,8 +91,11 @@ export function ProfileForm({
       exclusions: words(exclusions),
     });
     if (!result.success) {
+      const issue = result.error.issues[0];
       setFailed(true);
-      setMessage(result.error.issues[0].message);
+      setMessage(issue.message);
+      setErrorField(String(issue.path[0]));
+      if (onboarding) setStep(profileFieldStep(issue.path[0]));
       return;
     }
     setBusy(true);
@@ -116,13 +148,14 @@ export function ProfileForm({
             ))}
           </div>
         )}
-        <form onSubmit={save}>
+        <form ref={formRef} onSubmit={save}>
           {(!onboarding || step === 1) && (
             <section className="panel">
               <h2>Partiamo dalle basi</h2>
               <label className="field">
                 Come si chiama la tua ditta?
                 <input
+                  name="name"
                   required
                   minLength={2}
                   maxLength={150}
@@ -134,6 +167,7 @@ export function ProfileForm({
               <label className="field">
                 Di cosa vi occupate?
                 <textarea
+                  name="activities"
                   required
                   minLength={5}
                   maxLength={2000}
@@ -148,6 +182,7 @@ export function ProfileForm({
               <label className="field">
                 Quante persone lavorano nella ditta?
                 <select
+                  name="employees"
                   value={form.employees}
                   onChange={(e) => update("employees", Number(e.target.value))}
                 >
@@ -163,11 +198,24 @@ export function ProfileForm({
           )}
           {(!onboarding || step === 2) && (
             <section className="panel">
-              <h2>Quali lavori cerchi?</h2>
-              <div className="check-grid">
+              <h2 id="profile-sectors-heading">Quali lavori cerchi?</h2>
+              <p id="profile-sectors-hint">Seleziona almeno un settore.</p>
+              <div
+                className="check-grid"
+                role="group"
+                aria-labelledby="profile-sectors-heading"
+                aria-describedby={
+                  errorField === "sectors"
+                    ? "profile-sectors-hint profile-feedback"
+                    : "profile-sectors-hint"
+                }
+                aria-invalid={errorField === "sectors" || undefined}
+              >
                 {SECTORS.map((s) => (
                   <label key={s.id} className="check-label">
                     <input
+                      name="sectors"
+                      value={s.id}
                       type="checkbox"
                       checked={form.sectors.includes(s.id)}
                       onChange={(e) =>
@@ -183,11 +231,24 @@ export function ProfileForm({
                   </label>
                 ))}
               </div>
-              <h3>Dove vuoi lavorare?</h3>
-              <div className="check-grid">
+              <h3 id="profile-zones-heading">Dove vuoi lavorare?</h3>
+              <p id="profile-zones-hint">Seleziona almeno una zona.</p>
+              <div
+                className="check-grid"
+                role="group"
+                aria-labelledby="profile-zones-heading"
+                aria-describedby={
+                  errorField === "zones"
+                    ? "profile-zones-hint profile-feedback"
+                    : "profile-zones-hint"
+                }
+                aria-invalid={errorField === "zones" || undefined}
+              >
                 {ZONES.map((z) => (
                   <label className="check-label" key={z}>
                     <input
+                      name="zones"
+                      value={z}
                       type="checkbox"
                       checked={form.zones.includes(z)}
                       onChange={(e) =>
@@ -222,6 +283,7 @@ export function ProfileForm({
                 <label className="field">
                   Attività da cercare in particolare
                   <input
+                    name="keywords"
                     placeholder="Ad esempio: pulizie notturne, potatura"
                     value={keywords}
                     onChange={(e) => setKeywords(e.target.value)}
@@ -231,6 +293,7 @@ export function ProfileForm({
                 <label className="field">
                   Lavori che preferisci escludere
                   <input
+                    name="exclusions"
                     placeholder="Ad esempio: disinfestazione, lavori in quota"
                     value={exclusions}
                     onChange={(e) => setExclusions(e.target.value)}
@@ -240,6 +303,7 @@ export function ProfileForm({
                   <label className="field">
                     Importo minimo, CHF
                     <input
+                      name="minValue"
                       type="number"
                       min="0"
                       placeholder="Nessun minimo"
@@ -255,6 +319,7 @@ export function ProfileForm({
                   <label className="field">
                     Importo massimo, CHF
                     <input
+                      name="maxValue"
                       type="number"
                       min="0"
                       placeholder="Nessun massimo"
@@ -277,7 +342,10 @@ export function ProfileForm({
           )}
           {message && (
             <div
-              role="status"
+              ref={feedbackRef}
+              id="profile-feedback"
+              tabIndex={-1}
+              role={failed ? "alert" : "status"}
               className={`notice ${failed ? "error" : "success"}`}
             >
               {message}
@@ -295,7 +363,7 @@ export function ProfileForm({
             ) : (
               <small>Le tue preferenze restano modificabili.</small>
             )}
-            <button disabled={busy} className="button primary">
+            <button type="submit" disabled={busy} className="button primary">
               {busy
                 ? "Salvataggio…"
                 : onboarding && step < 3
