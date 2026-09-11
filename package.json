@@ -17,6 +17,7 @@
     "setup:check": "node --import tsx scripts/setup-check.ts",
     "setup:init": "node --import tsx scripts/setup-init.ts",
     "setup:supabase": "node --import tsx scripts/setup-supabase.ts",
+    "setup:database-password": "node --import tsx scripts/setup-database-password.ts",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.ts\" \"tests/**/*.ts\""
   },
   "engines": {

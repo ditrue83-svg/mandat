@@ -32,6 +32,8 @@ Il backend supporta PostgreSQL locale e Supabase nella regione specifica Zurigo 
 
 `npm run setup:init` prepara `.env.production.local` con segreti casuali e permessi 0600, senza sovrascrivere file esistenti. `npm run setup:supabase` predispone la variante gestita. `npm run setup:check -- --env .env.production.local` verifica la configurazione senza collegarsi ai servizi. Aggiungere `--connections` solo dopo le migrazioni, per controllare PostgreSQL, autenticazione SMTP e disponibilità del modello senza inviare email o generare contenuti AI. Questi file di configurazione sono esclusi da Git.
 
+Per inserire la password Supabase senza includerla nella cronologia del terminale, preparare `DATABASE_URL` con i parametri del proprio progetto e password `CHANGE_ME`. Salvare la password in un file temporaneo locale sotto `.data/`, con permessi 0600, quindi eseguire `npm run setup:database-password -- --env .env.production.local --password-file .data/setup/supabase-password.txt`. Il comando codifica i caratteri riservati, conserva gli altri valori della configurazione e rimuove il file temporaneo dopo il salvataggio. Non sovrascrive connessioni già configurate, non mostra segreti e non esegue connessioni di rete.
+
 I passi seguenti descrivono l’esecuzione locale: i comandi npm leggono `.env.local`, che deve essere configurato in modalità reale. Per Docker e per il file separato `.env.production.local` vedere la sezione Distribuzione.
 
 1. Copiare `.env.example` in `.env.local`, compilare le variabili e impostare `APP_MODE=live`.
