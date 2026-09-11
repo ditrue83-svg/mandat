@@ -1,4 +1,4 @@
-import { and, eq, ne, isNull, sql, desc } from "drizzle-orm";
+import { and, eq, ne, isNull, sql, desc, getTableColumns } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   publications,
@@ -354,7 +354,12 @@ export async function enrichAndMatch(
 ) {
   const db = getDb();
   const rows = await db
-    .select()
+    .select({
+      ...getTableColumns(publications),
+      // Keep PostgreSQL's microseconds: a JavaScript Date truncates them and
+      // would reject an unchanged row inserted with the database default now().
+      updatedToken: sql<string>`${publications.updatedAt}::text`,
+    })
     .from(publications)
     .where(
       and(
@@ -403,7 +408,7 @@ export async function enrichAndMatch(
           .where(
             and(
               eq(publications.id, p.id),
-              eq(publications.updatedAt, row.updatedAt),
+              sql`${publications.updatedAt} = ${row.updatedToken}::timestamptz`,
               eq(publications.revision, row.revision),
             ),
           )
