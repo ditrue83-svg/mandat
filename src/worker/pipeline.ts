@@ -20,6 +20,7 @@ import {
 import { classify, summarize } from "./ai";
 import { queueChangeNotices } from "./notifications";
 import { attachFoglioPdf } from "@/sources/foglio";
+import { legacySimapRevision } from "@/sources/simap";
 export async function recordIssue(
   key: string,
   title: string,
@@ -64,6 +65,38 @@ export async function storePublication(
     )
     .limit(1);
   if (previous?.revision === p.revision) return false;
+  if (
+    previous &&
+    p.source === "simap" &&
+    p.revision.startsWith("simap-v2:") &&
+    legacySimapRevision(p) === previous.revision
+  ) {
+    // Exact equality with the old raw-response hash proves this is a format
+    // migration, not a source update. Preserve editorial/AI content and matches.
+    await db.transaction(async (tx) => {
+      const adopted = await tx
+        .update(publications)
+        .set({ revision: p.revision })
+        .where(
+          and(
+            eq(publications.id, previous.id),
+            eq(publications.revision, previous.revision),
+          ),
+        )
+        .returning({ id: publications.id });
+      if (!adopted.length) return;
+      await tx
+        .insert(publicationVersions)
+        .values({
+          id: crypto.randomUUID(),
+          publicationId: previous.id,
+          revision: p.revision,
+          data: p,
+        })
+        .onConflictDoNothing();
+    });
+    return false;
+  }
   if (options.extractDocuments && p.source === "foglio-ti")
     p = await attachFoglioPdf(p);
   const canonicalId = p.canonicalKey || p.id;

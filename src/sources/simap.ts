@@ -50,6 +50,22 @@ const record = (v: unknown) =>
   v && typeof v === "object" && !Array.isArray(v)
     ? (v as Record<string, unknown>)
     : {};
+const legacyRevisions = new WeakMap<Publication, string>();
+// Only a freshly parsed response can prove equality with an old { p, d } hash.
+// Keep that proof out of serialized publications and customer-facing data.
+export function legacySimapRevision(publication: Publication) {
+  return legacyRevisions.get(publication);
+}
+function ordered(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(ordered);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([key, child]) => [key, ordered(child)]),
+    );
+  return value;
+}
 export function normalizeSimap(
   entry: SourceEntry,
   input: unknown,
@@ -111,7 +127,7 @@ export function normalizeSimap(
       : []),
     ...(!location ? ["Luogo di esecuzione da verificare"] : []),
   ];
-  return {
+  const publication: Publication = {
     id: `simap-${p.id}`,
     externalId: p.id,
     projectId: p.id,
@@ -170,8 +186,28 @@ export function normalizeSimap(
       : [],
     reviewRequired: reviewReasons.length > 0,
     reviewReasons,
-    revision: fingerprint({ p, d }),
+    revision: `simap-v2:${fingerprint(
+      ordered({
+        project: {
+          id: p.id,
+          publicationId: p.publicationId,
+          publicationDate: publicationDate(p.publicationDate),
+          projectNumber: p.projectNumber,
+          pubType: p.pubType,
+          processType: p.processType,
+          title,
+          buyer: translation(p.procOfficeName) || "Ente non indicato",
+          location: location || "Non indicato",
+          canton: String(address.cantonId ?? ""),
+        },
+        // Retain every detail field, including publication identity, terms and
+        // document metadata that may not yet have a dedicated display field.
+        detail: d,
+      }),
+    )}`,
   };
+  legacyRevisions.set(publication, fingerprint({ p, d }));
+  return publication;
 }
 export const simap: SourceAdapter = {
   id: "simap",

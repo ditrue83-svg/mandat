@@ -36,6 +36,7 @@ import { provisionInvite } from "../src/lib/admin";
 import { getAuth } from "../src/lib/auth";
 import { listOpportunities, getOpportunity } from "../src/lib/queries";
 import { storePublication, enrichAndMatch } from "../src/worker/pipeline";
+import { legacySimapRevision, normalizeSimap } from "../src/sources/simap";
 import { updateCompanyProfile, saveCompanyFeedback } from "../src/lib/company";
 import {
   summarize,
@@ -152,6 +153,148 @@ describe("Regressioni di revisione e invio", () => {
     });
     return id;
   }
+  function simapResponse(projectId = crypto.randomUUID()) {
+    const entry = {
+      id: projectId,
+      raw: {
+        id: projectId,
+        publicationId: crypto.randomUUID(),
+        publicationDate: "2030-09-01",
+        projectNumber: projectId,
+        pubType: "tender",
+        processType: "open",
+        title: { it: "Pulizia di locali — esempio" },
+        procOfficeName: { it: "Ente inventato" } as unknown,
+      },
+    };
+    const detail = {
+      id: entry.raw.publicationId,
+      type: "tender",
+      dates: { offerDeadline: "2030-12-01T12:00:00+01:00" },
+      procurement: {
+        orderDescription: { it: "Pulizia ordinaria di locali inventati." },
+        orderAddress: { city: { it: "Lugano" }, cantonId: "TI" },
+      },
+    };
+    return { entry, detail };
+  }
+  async function readyLegacySimap(response: ReturnType<typeof simapResponse>) {
+    const incoming = normalizeSimap(response.entry, response.detail);
+    const legacy = { ...incoming, revision: legacySimapRevision(incoming)! };
+    await storePublication(legacy);
+    const corrected = {
+      ...legacy,
+      revision: "editorial-correction",
+      summary: "Riassunto controllato manualmente",
+      requirements: ["Un requisito già verificato"],
+      reviewRequired: true,
+      reviewReasons: ["Revisione editoriale in corso"],
+    };
+    await db
+      .update(schema.publications)
+      .set({ data: corrected, aiRevision: corrected.revision })
+      .where(eq(schema.publications.id, legacy.id));
+    await db.insert(schema.matches).values({
+      id: `match-${legacy.id}`,
+      companyId: a.companyId,
+      publicationId: legacy.id,
+      revision: corrected.revision,
+      score: 90,
+      reason: "Valutazione già controllata",
+      eligible: true,
+      approved: true,
+      reviewedAt: new Date(),
+    });
+    return { incoming, legacy, corrected };
+  }
+  it("adotta il nuovo fingerprint soltanto con prova legacy esatta, preservando dati e match", async () => {
+    const response = simapResponse();
+    const { incoming, legacy, corrected } = await readyLegacySimap(response);
+    const [before] = await db
+      .select()
+      .from(schema.publications)
+      .where(eq(schema.publications.id, incoming.id));
+    const beforeMatches = await db
+      .select()
+      .from(schema.matches)
+      .where(eq(schema.matches.publicationId, incoming.id));
+
+    expect(await storePublication(incoming)).toBe(false);
+    const [current] = await db
+      .select()
+      .from(schema.publications)
+      .where(eq(schema.publications.id, incoming.id));
+    expect(current).toEqual({ ...before, revision: incoming.revision });
+    expect(current.data).toEqual(corrected);
+    expect(
+      await db
+        .select()
+        .from(schema.matches)
+        .where(eq(schema.matches.publicationId, incoming.id)),
+    ).toEqual(beforeMatches);
+    const versions = await db
+      .select()
+      .from(schema.publicationVersions)
+      .where(eq(schema.publicationVersions.publicationId, incoming.id));
+    expect(versions.map((v) => v.revision).sort()).toEqual(
+      [legacy.revision, incoming.revision].sort(),
+    );
+    expect(
+      versions.find((v) => v.revision === incoming.revision)?.data,
+    ).toEqual(incoming);
+
+    response.entry.raw.procOfficeName = "Ente inventato";
+    const refresh = normalizeSimap(response.entry, response.detail);
+    expect(legacySimapRevision(refresh)).not.toBe(legacy.revision);
+    expect(await storePublication(refresh)).toBe(false);
+    const [afterRefresh] = await db
+      .select()
+      .from(schema.publications)
+      .where(eq(schema.publications.id, incoming.id));
+    expect(afterRefresh).toEqual(current);
+    expect(await db.select().from(schema.notifications)).toHaveLength(0);
+  });
+
+  it("non scambia per prova legacy la sola uguaglianza dei dati normalizzati", async () => {
+    const response = simapResponse();
+    const { incoming, legacy } = await readyLegacySimap(response);
+    response.entry.raw.procOfficeName = "Ente inventato";
+    const refresh = normalizeSimap(response.entry, response.detail);
+    expect(refresh.revision).toBe(incoming.revision);
+    expect(legacySimapRevision(refresh)).not.toBe(legacy.revision);
+
+    expect(await storePublication(refresh)).toBe(true);
+    const [current] = await db
+      .select()
+      .from(schema.publications)
+      .where(eq(schema.publications.id, incoming.id));
+    expect(current.data).toEqual(refresh);
+    expect(current.aiRevision).toBeNull();
+    const [match] = await db
+      .select()
+      .from(schema.matches)
+      .where(eq(schema.matches.publicationId, incoming.id));
+    expect(match.approved).toBeNull();
+    expect(match.reviewedAt).toBeNull();
+    expect(match.revision).toBe(refresh.revision);
+  });
+
+  it("non nasconde una nuova pubblicazione identica durante la migrazione legacy", async () => {
+    const response = simapResponse();
+    const { incoming } = await readyLegacySimap(response);
+    response.entry.raw.publicationId = crypto.randomUUID();
+    response.detail.id = response.entry.raw.publicationId;
+    const next = normalizeSimap(response.entry, response.detail);
+    expect(next.originalText).toBe(incoming.originalText);
+    expect(next.revision).not.toBe(incoming.revision);
+    expect(await storePublication(next)).toBe(true);
+    const [current] = await db
+      .select()
+      .from(schema.publications)
+      .where(eq(schema.publications.id, incoming.id));
+    expect(current.data.revision).toBe(next.revision);
+    expect(current.aiRevision).toBeNull();
+  });
   it("conserva una correzione manuale quando la fonte viene importata invariata", async () => {
     const p = await ready("manual-correction-source-unchanged");
     const corrected = {
