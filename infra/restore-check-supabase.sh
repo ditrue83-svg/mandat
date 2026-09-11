@@ -39,8 +39,12 @@ if [ "$restore_ready" != true ]; then
   printf '%s\n' 'Il database di ripristino non è diventato disponibile entro il limite.' >&2
   exit 1
 fi
+# The schema-filtered dump includes CREATE SCHEMA public. Remove only the fresh
+# container's empty default schema; without CASCADE, unexpected objects stop us.
+docker exec "$restore_container" psql -U postgres -d mandat_restore_check \
+  -v ON_ERROR_STOP=1 -c 'DROP SCHEMA public;'
 docker exec -i "$restore_container" pg_restore -U postgres -d mandat_restore_check \
-  --exit-on-error --no-owner --no-acl < "$restore_dump"
+  --exit-on-error --single-transaction --no-owner --no-acl < "$restore_dump"
 docker exec "$restore_container" psql -U postgres -d mandat_restore_check \
   -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM public.companies; SELECT count(*) FROM public.publication_versions; SELECT count(*) FROM public.notifications; SELECT count(*) FROM drizzle.__drizzle_migrations; SELECT count(*) FROM pgboss.queue;'
 printf '%s\n' 'Ripristino Supabase verificato in PostgreSQL isolato, senza modificare il database remoto.'
