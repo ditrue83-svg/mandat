@@ -36,7 +36,11 @@ import { getAuth } from "../src/lib/auth";
 import { listOpportunities, getOpportunity } from "../src/lib/queries";
 import { storePublication, enrichAndMatch } from "../src/worker/pipeline";
 import { updateCompanyProfile, saveCompanyFeedback } from "../src/lib/company";
-import { summarize, configuredTransport } from "../src/worker/ai";
+import {
+  summarize,
+  configuredTransport,
+  buildSummaryRequest,
+} from "../src/worker/ai";
 import {
   queueDigests,
   sendPending,
@@ -488,6 +492,39 @@ describe("AI: budget e aggiornamenti concorrenti", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
+  });
+  it("usa la richiesta condivisa e registra il costo di un riassunto valido", async () => {
+    const publication = {
+      ...getDemoOpportunities()[1],
+      id: "summary-request-contract",
+      originalText:
+        "Il servizio richiede la pulizia ordinaria degli uffici comunali.",
+      documentPages: [],
+    };
+    const output = {
+      summary: "È richiesta la pulizia ordinaria degli uffici comunali.",
+      requirements: [],
+      sectors: ["pulizie"],
+      evidence: [{ field: "oggetto", quote: publication.originalText }],
+    };
+    const complete = vi.fn(async () => ({
+      text: JSON.stringify(output),
+      inputTokens: 100,
+      outputTokens: 50,
+    }));
+    await expect(summarize(publication, { complete })).resolves.toEqual(output);
+    const request = buildSummaryRequest(publication);
+    expect(complete).toHaveBeenCalledExactlyOnceWith(
+      request.system,
+      request.prompt,
+      request.maxTokens,
+    );
+    const [usage] = await db
+      .select()
+      .from(schema.aiUsage)
+      .where(eq(schema.aiUsage.publicationId, publication.id));
+    expect(usage.status).toBe("completed");
+    expect(Number(usage.costChf)).toBe(0.0002);
   });
   it("non chiama il modello a budget esaurito e registra il blocco", async () => {
     vi.stubEnv("AI_MONTHLY_BUDGET_CHF", "0");

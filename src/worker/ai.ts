@@ -128,6 +128,7 @@ async function infer(
   prompt: string,
   maxTokens: number,
   transport: AiTransport = configuredTransport,
+  systemPrompt: string = system,
 ) {
   if (!process.env.LLM_API_KEY) throw new AiUnavailable("AI non configurata");
   const { input, output } = rates();
@@ -135,7 +136,7 @@ async function infer(
   if (!Number.isFinite(budget) || budget < 0)
     throw new AiUnavailable("Budget AI non valido");
   const reserve =
-    ((Buffer.byteLength(system + prompt, "utf8") + 1000) * input +
+    ((Buffer.byteLength(systemPrompt + prompt, "utf8") + 1000) * input +
       maxTokens * output) /
     1e6;
   const month = DateTime.now().setZone("Europe/Zurich").toFormat("yyyy-MM");
@@ -176,7 +177,7 @@ async function infer(
   }
   await getDb().delete(settings).where(eq(settings.key, "ai_budget_blocked"));
   try {
-    const result = await transport.complete(system, prompt, maxTokens);
+    const result = await transport.complete(systemPrompt, prompt, maxTokens);
     const cost =
       (result.inputTokens * input + result.outputTokens * output) / 1e6;
     await getDb()
@@ -211,7 +212,9 @@ export function validateSummary(input: unknown, p: Publication) {
       throw new Error("Citazione AI non presente nel documento originale");
   return result;
 }
-export async function summarize(p: Publication, transport?: AiTransport) {
+export function buildSummaryRequest(
+  p: Pick<Publication, "originalText" | "documentPages">,
+) {
   if (
     p.originalText.length +
       (p.documentPages?.reduce((n, page) => n + page.text.length, 0) ?? 0) >
@@ -221,12 +224,52 @@ export async function summarize(p: Publication, transport?: AiTransport) {
       "Documento troppo lungo: richiesta revisione prima di elaborare",
     );
   const prompt = JSON.stringify({
-    task: "Riassumi il lavoro richiesto senza importi, date o orari. Estrai soltanto requisiti esplicitamente presenti, con citazioni testuali esatte. Seleziona settori attinenti. Ogni informazione del riassunto deve essere sostenuta dalle citazioni. JSON: {summary:string,requirements:[{text,quote}],sectors:string[],evidence:[{field,quote}]}",
+    task: "Riassumi il lavoro richiesto senza importi, date o orari. Estrai soltanto requisiti esplicitamente presenti, con citazioni testuali esatte. Seleziona settori attinenti. Ogni informazione del riassunto deve essere sostenuta dalle citazioni.",
+    outputRules: [
+      "Restituisci soltanto un oggetto JSON conforme a outputSchema, senza blocchi di codice o testo esterno.",
+      "summary deve essere testo semplice, senza Markdown, grassetto, elenchi o intestazioni.",
+      "Ogni quote in requirements ed evidence deve essere UNA SOLA STRINGA con un passaggio testuale continuo copiato esattamente da document o da una pagina. Non usare mai array, oggetti o concatenazioni di passaggi separati per quote.",
+      "Per sostenere un’informazione con più citazioni, crea un oggetto evidence distinto per ciascuna citazione; puoi ripetere field. Per requisiti distinti crea oggetti requirements distinti.",
+      "L’esempio mostra soltanto il formato. Non copiarne i fatti o le citazioni: la risposta finale deve usare esclusivamente document e pages.",
+    ],
+    outputSchema: z.toJSONSchema(summarySchema),
+    formatExample: {
+      document: "Servizio di pulizia dei locali. Sono richieste referenze.",
+      response: {
+        summary:
+          "Si richiede la pulizia dei locali con presentazione di referenze.",
+        requirements: [
+          {
+            text: "Presentare referenze.",
+            quote: "Sono richieste referenze.",
+          },
+        ],
+        sectors: ["pulizie"],
+        evidence: [
+          { field: "oggetto", quote: "Servizio di pulizia dei locali." },
+          { field: "oggetto", quote: "Sono richieste referenze." },
+        ],
+      },
+    },
     allowedSectors: SECTORS.map((s) => s.id),
     document: p.originalText,
     pages: p.documentPages?.map(({ page, text }) => ({ page, text })),
   });
-  return validateSummary(await infer(p, "summary", prompt, 2200, transport), p);
+  return { system, prompt, maxTokens: 2200 };
+}
+export async function summarize(p: Publication, transport?: AiTransport) {
+  const request = buildSummaryRequest(p);
+  return validateSummary(
+    await infer(
+      p,
+      "summary",
+      request.prompt,
+      request.maxTokens,
+      transport,
+      request.system,
+    ),
+    p,
+  );
 }
 export async function classify(p: Publication, profile: CompanyProfile) {
   return matchSchema.parse(
