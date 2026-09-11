@@ -1,0 +1,14 @@
+node_modules/
+.next/
+.env*
+!.env.example
+coverage/
+*.tsbuildinfo
+.DS_Store
+.data/
+backups/
+artifacts/
+*.log
+# Local product and account documents are not part of the public repository.
+/AGENTS.md
+/docs/

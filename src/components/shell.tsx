@@ -1,0 +1,167 @@
+"use client";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import {
+  Radar,
+  Bookmark,
+  Building2,
+  Bell,
+  ArrowUpRight,
+  ShieldCheck,
+  LogOut,
+} from "lucide-react";
+import type { Viewer } from "@/lib/domain";
+const links = [
+  { href: "/", label: "Il tuo Radar", icon: Radar },
+  { href: "/salvati", label: "Salvati", icon: Bookmark },
+  { href: "/profilo", label: "La tua ditta", icon: Building2 },
+  { href: "/notifiche", label: "Notifiche", icon: Bell },
+];
+export function Shell({
+  viewer,
+  children,
+}: {
+  viewer: Viewer;
+  children: React.ReactNode;
+}) {
+  const path = usePathname();
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <Link
+          href="/"
+          className="wordmark"
+          aria-label="Mandat, pagina iniziale"
+        >
+          <span className="brand-mark">
+            m<span />
+          </span>
+          mandat<span className="brand-dot">.</span>
+        </Link>
+        <div className="workspace-label">IL TUO SPAZIO</div>
+        <nav aria-label="Navigazione principale">
+          {links.map(({ href, label, icon: Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              className={`nav-link ${path === href ? "active" : ""}`}
+              aria-current={path === href ? "page" : undefined}
+            >
+              <Icon size={20} />
+              <span>{label}</span>
+              {href === "/" && <span className="nav-pill">Beta</span>}
+            </Link>
+          ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="pilot-card">
+            <span className="tiny-label">COSTRUITO PER LE PICCOLE DITTE</span>
+            <p>
+              Il tuo prossimo incarico
+              <br />
+              inizia da qui.
+            </p>
+            <span className="pilot-tag">
+              <span className="swiss-cross">✚</span> Ticino, Svizzera
+            </span>
+          </div>
+          {viewer.admin && (
+            <Link href="/admin" className="admin-link">
+              <ShieldCheck size={17} /> Area fondatore{" "}
+              <ArrowUpRight size={15} />
+            </Link>
+          )}
+          <Link href="/profilo" className="company-switch">
+            <span className="avatar">{viewer.name.slice(0, 1)}</span>
+            <span>
+              <strong>{viewer.profile.name}</strong>
+              <small>Beta Radar · gratuita</small>
+            </span>
+          </Link>
+          {!viewer.demo && (
+            <button
+              className="logout"
+              onClick={async () => {
+                await fetch("/api/auth/sign-out", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: "{}",
+                });
+                location.assign("/accedi");
+              }}
+            >
+              <LogOut size={15} /> Esci
+            </button>
+          )}
+        </div>
+      </aside>
+      <div className="main-shell">
+        <header className="topbar">
+          <span>Le opportunità giuste, a portata di mano.</span>
+          <div>
+            {viewer.admin && (
+              <Link
+                href="/admin"
+                className="icon-button"
+                aria-label="Area fondatore"
+              >
+                <ShieldCheck size={19} />
+              </Link>
+            )}
+            <span className="locale">
+              <span className="swiss-flag">✚</span> Ticino · IT
+            </span>
+            <Link
+              href="/notifiche"
+              aria-label="Impostazioni notifiche"
+              className="icon-button"
+            >
+              <Bell size={19} />
+            </Link>
+            <Link
+              href="/profilo"
+              aria-label="Il tuo profilo"
+              className="avatar small"
+            >
+              {viewer.name.slice(0, 1)}
+            </Link>
+          </div>
+        </header>
+        {viewer.demo && (
+          <div className="demo-banner">
+            <span>
+              <strong>Modalità dimostrativa</strong>
+              <span className="demo-detail">
+                {" "}
+                · I bandi e le ditte sono esempi inventati.
+              </span>
+            </span>
+            <Link href="/accedi">
+              Accesso beta <ArrowUpRight size={14} />
+            </Link>
+          </div>
+        )}
+        <main id="main-content">{children}</main>
+        <footer className="footer">
+          <span>© {new Date().getFullYear()} Mandat</span>
+          <span>
+            Pubblicazione non ufficiale. Gli originali prevalgono sempre.{" "}
+            <Link href="/fonti">Fonti e copertura</Link>
+          </span>
+        </footer>
+      </div>
+      <nav className="mobile-nav" aria-label="Navigazione mobile">
+        {links.map(({ href, label, icon: Icon }) => (
+          <Link
+            key={href}
+            href={href}
+            className={path === href ? "active" : ""}
+          >
+            <Icon size={21} />
+            <span>{label}</span>
+          </Link>
+        ))}
+      </nav>
+    </div>
+  );
+}

@@ -1,0 +1,8 @@
+[Unit]
+Description=Backup cifrato Mandat su Swiss Backup
+After=docker.service network-online.target
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/mandat
+EnvironmentFile=/opt/mandat/.env
+ExecStart=/bin/bash /opt/mandat/infra/backup.sh

@@ -1,0 +1,62 @@
+{
+  "name": "mandat-radar",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx --env-file-if-exists=.env.local scripts/migrate.ts",
+    "db:seed": "tsx --env-file-if-exists=.env.local scripts/seed.ts",
+    "worker": "tsx --env-file-if-exists=.env.local src/worker/index.ts",
+    "sources:probe": "tsx --env-file-if-exists=.env.local scripts/probe-sources.ts",
+    "watchdog": "tsx --env-file-if-exists=.env.local scripts/watchdog.ts",
+    "setup:check": "node --import tsx scripts/setup-check.ts",
+    "setup:init": "node --import tsx scripts/setup-init.ts",
+    "setup:supabase": "node --import tsx scripts/setup-supabase.ts",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.ts\" \"tests/**/*.ts\""
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "dependencies": {
+    "@fontsource-variable/dm-sans": "^5.3.0",
+    "@fontsource-variable/manrope": "^5.3.0",
+    "better-auth": "^1.7.4",
+    "drizzle-orm": "^0.45.2",
+    "fast-xml-parser": "^5.11.1",
+    "lucide-react": "^1.44.0",
+    "luxon": "^3.7.2",
+    "next": "^16.3.4",
+    "nodemailer": "^10.0.3",
+    "pdfjs-dist": "^6.3.289",
+    "pg": "^8.23.0",
+    "pg-boss": "^12.31.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zod": "^4.6.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@types/luxon": "^3.7.5",
+    "@types/node": "^22.20.2",
+    "@types/nodemailer": "^8.0.1",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "drizzle-kit": "^0.31.10",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  },
+  "type": "module",
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "^0.25.0"
+    }
+  }
+}

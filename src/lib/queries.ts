@@ -1,0 +1,118 @@
+import { and, eq, lte, gt, isNull, or, desc } from "drizzle-orm";
+import { getDb } from "@/db";
+import { matches, publications, feedback } from "@/db/schema";
+import { getDemoOpportunities } from "./demo";
+import type { Opportunity, Viewer } from "./domain";
+export async function listOpportunities(
+  viewer: Viewer,
+  options: { includeInactive?: boolean } = {},
+): Promise<Opportunity[]> {
+  if (viewer.demo) return getDemoOpportunities();
+  const rows = await getDb()
+    .select({ publication: publications, match: matches, feedback })
+    .from(matches)
+    .innerJoin(publications, eq(matches.publicationId, publications.id))
+    .leftJoin(
+      feedback,
+      and(
+        eq(feedback.companyId, viewer.companyId),
+        eq(feedback.publicationId, publications.id),
+      ),
+    )
+    .where(
+      and(
+        eq(matches.companyId, viewer.companyId),
+        options.includeInactive
+          ? eq(feedback.saved, true)
+          : eq(matches.eligible, true),
+        options.includeInactive ? undefined : eq(publications.status, "open"),
+        lte(publications.visibleAt, new Date()),
+        options.includeInactive
+          ? undefined
+          : or(
+              isNull(publications.deadline),
+              gt(publications.deadline, new Date()),
+            ),
+      ),
+    )
+    .orderBy(desc(matches.score));
+  const seen = new Set<string>();
+  return rows
+    .sort(
+      (a, b) =>
+        Number(a.publication.source !== "simap") -
+          Number(b.publication.source !== "simap") ||
+        b.publication.updatedAt.getTime() - a.publication.updatedAt.getTime(),
+    )
+    .flatMap((r) => {
+      if (seen.has(r.publication.canonicalId)) return [];
+      if (
+        r.publication.source === "foglio-ti" &&
+        process.env.FOGLIO_REUSE_CONFIRMED !== "true"
+      )
+        return [];
+      seen.add(r.publication.canonicalId);
+      return [
+        {
+          ...r.publication.data,
+          id: r.publication.id,
+          score: r.match.score,
+          reason: r.match.reason,
+          saved: r.feedback?.saved ?? false,
+          dismissed: r.feedback?.dismissed ?? false,
+          feedback:
+            r.feedback?.relevant === null || r.feedback?.relevant === undefined
+              ? null
+              : r.feedback.relevant
+                ? "relevant"
+                : "irrelevant",
+        },
+      ];
+    });
+}
+export async function getOpportunity(
+  viewer: Viewer,
+  id: string,
+): Promise<Opportunity | null> {
+  if (viewer.demo)
+    return getDemoOpportunities().find((o) => o.id === id) ?? null;
+  const [row] = await getDb()
+    .select({ p: publications, m: matches, f: feedback })
+    .from(matches)
+    .innerJoin(publications, eq(matches.publicationId, publications.id))
+    .leftJoin(
+      feedback,
+      and(
+        eq(feedback.companyId, viewer.companyId),
+        eq(feedback.publicationId, publications.id),
+      ),
+    )
+    .where(
+      and(
+        eq(matches.companyId, viewer.companyId),
+        eq(publications.id, id),
+        lte(publications.visibleAt, new Date()),
+      ),
+    )
+    .limit(1);
+  if (
+    !row ||
+    (row.p.source === "foglio-ti" &&
+      process.env.FOGLIO_REUSE_CONFIRMED !== "true")
+  )
+    return null;
+  return {
+    ...row.p.data,
+    id: row.p.id,
+    score: row.m.score,
+    reason: row.m.reason,
+    saved: row.f?.saved ?? false,
+    dismissed: row.f?.dismissed ?? false,
+    feedback:
+      row.f?.relevant == null
+        ? null
+        : row.f.relevant
+          ? "relevant"
+          : "irrelevant",
+  };
+}

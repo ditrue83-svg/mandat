@@ -1,0 +1,12 @@
+name: mandat-local
+services:
+  db:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: mandat
+      POSTGRES_DB: mandat
+      POSTGRES_PASSWORD: local-development-only
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["local_postgres:/var/lib/postgresql/data"]
+volumes:
+  local_postgres:

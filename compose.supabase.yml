@@ -1,0 +1,54 @@
+# Standalone deployment file: do not merge with compose.yml.
+# Set COMPOSE_FILE=compose.supabase.yml in .env; PostgreSQL runs at Supabase.
+name: mandat
+services:
+  migrate:
+    build: { context: ., target: worker }
+    env_file: .env
+    command: [npm, run, db:migrate]
+    networks: [app]
+    restart: "no"
+  web:
+    build: { context: ., target: web }
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    networks: [app]
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          'fetch("http://127.0.0.1:3000/api/health").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  worker:
+    build: { context: ., target: worker }
+    restart: unless-stopped
+    env_file: .env
+    volumes: ["runtime_state:/app/.data"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    networks: [app]
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN}
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [app]
+    depends_on: [web]
+networks:
+  app:
+volumes:
+  caddy_data:
+  caddy_config:
+  runtime_state:

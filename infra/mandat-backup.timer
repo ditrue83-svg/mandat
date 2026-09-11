@@ -1,0 +1,7 @@
+[Unit]
+Description=Backup giornaliero Mandat
+[Timer]
+OnCalendar=*-*-* 03:30:00 Europe/Zurich
+Persistent=true
+[Install]
+WantedBy=timers.target

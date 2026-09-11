@@ -1,0 +1,341 @@
+import { z } from "zod";
+import { databaseOptions } from "./database-config";
+
+export type SetupEnvironment = Record<string, string | undefined>;
+export type SetupCheck = {
+  id: string;
+  group: string;
+  status: "ok" | "missing" | "invalid" | "manual";
+  message: string;
+};
+const placeholder =
+  /^(?:change[_ -]?me|replace[_ -]?me|your[_ -].*|example.*|test-only.*)$/i;
+const present = (value: string | undefined) =>
+  Boolean(value?.trim() && !placeholder.test(value.trim()));
+function url(value: string | undefined) {
+  try {
+    return new URL(value!);
+  } catch {
+    return null;
+  }
+}
+function decode(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return "";
+  }
+}
+export function aiBaseUrl(env: SetupEnvironment) {
+  return (
+    env.LLM_API_BASE_URL ||
+    `https://api.infomaniak.com/2/ai/${env.INFOMANIAK_AI_PRODUCT_ID}/openai/v1`
+  );
+}
+export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
+  const checks: SetupCheck[] = [];
+  const add = (
+    id: string,
+    group: string,
+    valid: boolean,
+    message: string,
+    missing = false,
+  ) =>
+    checks.push({
+      id,
+      group,
+      status: valid ? "ok" : missing ? "missing" : "invalid",
+      message: valid ? "Configurato" : message,
+    });
+  const required = (id: string, group: string) =>
+    add(
+      id,
+      group,
+      present(env[id]),
+      `Configurare ${id} con un valore effettivo`,
+      !env[id]?.trim(),
+    );
+  add(
+    "APP_MODE",
+    "app",
+    env.APP_MODE === "live",
+    "Per l’attivazione impostare APP_MODE=live",
+    !env.APP_MODE,
+  );
+  const app = url(env.APP_URL);
+  add(
+    "APP_URL",
+    "app",
+    Boolean(
+      app &&
+      app.protocol === "https:" &&
+      !app.username &&
+      !app.password &&
+      app.pathname === "/" &&
+      !app.search &&
+      !app.hash,
+    ),
+    "APP_URL deve essere l’origine HTTPS pubblica, senza percorso o credenziali",
+    !env.APP_URL,
+  );
+  add(
+    "DOMAIN",
+    "app",
+    Boolean(env.DOMAIN && app?.hostname === env.DOMAIN),
+    "DOMAIN deve coincidere con il dominio di APP_URL",
+    !env.DOMAIN,
+  );
+  checks.push({
+    id: "DOMAIN_OWNERSHIP",
+    group: "app",
+    status: "manual",
+    message:
+      "Confermare disponibilità e titolarità del dominio, DNS verso il VPS svizzero e certificato HTTPS",
+  });
+  add(
+    "BETTER_AUTH_SECRET",
+    "app",
+    present(env.BETTER_AUTH_SECRET) &&
+      (env.BETTER_AUTH_SECRET?.length ?? 0) >= 43,
+    "Generare almeno 32 byte casuali per BETTER_AUTH_SECRET",
+    !env.BETTER_AUTH_SECRET,
+  );
+  add(
+    "FOUNDER_EMAIL",
+    "app",
+    z.email().safeParse(env.FOUNDER_EMAIL).success,
+    "Impostare un indirizzo email valido per il fondatore",
+    !env.FOUNDER_EMAIL,
+  );
+  const db = url(env.DATABASE_URL);
+  const dbValid = Boolean(
+    db &&
+    ["postgres:", "postgresql:"].includes(db.protocol) &&
+    present(decode(db.password)) &&
+    db.username &&
+    db.pathname.length > 1 &&
+    !db.search &&
+    !db.hash,
+  );
+  add(
+    "DATABASE_URL",
+    "database",
+    dbValid,
+    "Configurare un URL PostgreSQL con utente, password effettiva e database, senza parametri aggiuntivi",
+    !env.DATABASE_URL,
+  );
+  if ((env.DATABASE_PROVIDER || "local") === "local") {
+    for (const key of ["POSTGRES_USER", "POSTGRES_DB", "POSTGRES_PASSWORD"])
+      required(key, "database");
+    add(
+      "POSTGRES_MATCH",
+      "database",
+      Boolean(
+        dbValid &&
+        decode(db!.username) === env.POSTGRES_USER &&
+        decode(db!.password) === env.POSTGRES_PASSWORD &&
+        decode(db!.pathname.slice(1)) === env.POSTGRES_DB,
+      ),
+      "DATABASE_URL e POSTGRES_* devono indicare lo stesso accesso",
+    );
+  }
+  let connectionValid = true;
+  let connectionMessage = "";
+  try {
+    databaseOptions(env);
+    databaseOptions(env, "queue");
+  } catch (error) {
+    connectionValid = false;
+    connectionMessage =
+      error instanceof Error
+        ? error.message
+        : "Configurazione database non valida";
+  }
+  add(
+    "DATABASE_CONNECTION_CONFIG",
+    "database",
+    connectionValid,
+    connectionMessage,
+  );
+  if (env.DATABASE_PROVIDER === "supabase") {
+    add(
+      "COMPOSE_FILE",
+      "database",
+      env.COMPOSE_FILE === "compose.supabase.yml",
+      "Per il deployment Supabase usare COMPOSE_FILE=compose.supabase.yml",
+      !env.COMPOSE_FILE,
+    );
+    checks.push({
+      id: "SUPABASE_RESIDENCY",
+      group: "database",
+      status: "manual",
+      message:
+        "Verificare Zurigo nel pannello e residenza di log/backup prima di inserire dati delle ditte: la regione dichiarata nel file non prova la configurazione del servizio",
+    });
+    checks.push({
+      id: "SUPABASE_DATA_API",
+      group: "database",
+      status: "manual",
+      message:
+        "Usare un progetto dedicato Mandat con Data API disabilitata; applicare migrazioni e verificare il blocco dei ruoli client sulle tabelle interne",
+    });
+  }
+  add(
+    "SMTP_HOST",
+    "email",
+    env.SMTP_HOST === "mail.infomaniak.com",
+    "Per la beta svizzera usare il server SMTP Infomaniak",
+    !env.SMTP_HOST,
+  );
+  add(
+    "SMTP_PORT",
+    "email",
+    ["465", "587"].includes(env.SMTP_PORT || "587"),
+    "Usare 465 con TLS oppure 587 con STARTTLS",
+  );
+  add(
+    "SMTP_USER",
+    "email",
+    z.email().safeParse(env.SMTP_USER).success,
+    "SMTP_USER deve essere l’indirizzo completo della casella",
+    !env.SMTP_USER,
+  );
+  required("SMTP_PASSWORD", "email");
+  const sender = env.MAIL_FROM?.match(/<([^<>]+)>$/)?.[1] ?? env.MAIL_FROM;
+  add(
+    "MAIL_FROM",
+    "email",
+    z.email().safeParse(sender).success && !/[\r\n]/.test(env.MAIL_FROM ?? ""),
+    "MAIL_FROM deve contenere un indirizzo mittente valido",
+    !env.MAIL_FROM,
+  );
+  checks.push({
+    id: "MAIL_DELIVERY",
+    group: "email",
+    status: "manual",
+    message:
+      "Verificare SPF/DKIM/DMARC e consegna a una casella reale; l’autenticazione SMTP da sola non prova il recapito",
+  });
+  required("LLM_API_KEY", "ai");
+  required("LLM_MODEL", "ai");
+  if (!env.LLM_API_BASE_URL)
+    add(
+      "INFOMANIAK_AI_PRODUCT_ID",
+      "ai",
+      /^\d+$/.test(env.INFOMANIAK_AI_PRODUCT_ID ?? ""),
+      "Inserire l’identificativo del prodotto AI Services",
+      !env.INFOMANIAK_AI_PRODUCT_ID,
+    );
+  const ai = url(aiBaseUrl(env));
+  add(
+    "LLM_API_BASE_URL",
+    "ai",
+    Boolean(
+      ai &&
+      ai.protocol === "https:" &&
+      ai.hostname === "api.infomaniak.com" &&
+      !ai.username &&
+      !ai.password &&
+      !ai.search &&
+      !ai.hash &&
+      /^\/2\/ai\/\d+\/openai\/v1\/?$/.test(ai.pathname),
+    ),
+    "Configurare l’endpoint AI Infomaniak v2 del prodotto; un altro fornitore richiede una verifica separata",
+  );
+  for (const key of ["LLM_INPUT_CHF_PER_MILLION", "LLM_OUTPUT_CHF_PER_MILLION"])
+    add(
+      key,
+      "ai",
+      present(env[key]) &&
+        Number.isFinite(Number(env[key])) &&
+        Number(env[key]) > 0,
+      `Inserire la tariffa verificata per ${key}, incluse imposte applicabili`,
+      !env[key],
+    );
+  add(
+    "AI_MONTHLY_BUDGET_CHF",
+    "ai",
+    Number.isFinite(Number(env.AI_MONTHLY_BUDGET_CHF)) &&
+      Number(env.AI_MONTHLY_BUDGET_CHF) > 0 &&
+      Number(env.AI_MONTHLY_BUDGET_CHF) <= 40,
+    "Per la beta impostare un limite AI superiore a zero e non oltre CHF 40",
+    !env.AI_MONTHLY_BUDGET_CHF,
+  );
+  checks.push({
+    id: "AI_QUALITY",
+    group: "ai",
+    status: "manual",
+    message:
+      "Validare riassunti, citazioni e pertinenza su un campione; impostare anche il limite nel Manager Infomaniak",
+  });
+  const repository = env.RESTIC_REPOSITORY;
+  const backup = repository?.startsWith("s3:")
+    ? url(repository.slice(3))
+    : null;
+  add(
+    "RESTIC_REPOSITORY",
+    "backup",
+    Boolean(
+      backup &&
+      backup.protocol === "https:" &&
+      !backup.username &&
+      !backup.password &&
+      !backup.search &&
+      !backup.hash &&
+      backup.pathname.length > 1 &&
+      backup.hostname.endsWith(".infomaniak.com"),
+    ),
+    "Configurare il repository S3 HTTPS Swiss Backup con endpoint e bucket forniti dal Manager",
+    !repository,
+  );
+  for (const key of [
+    "RESTIC_PASSWORD",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_DEFAULT_REGION",
+  ])
+    required(key, "backup");
+  add(
+    "RESTIC_PASSWORD_UNIQUE",
+    "backup",
+    Boolean(
+      present(env.RESTIC_PASSWORD) &&
+      env.RESTIC_PASSWORD !== env.POSTGRES_PASSWORD &&
+      env.RESTIC_PASSWORD !== (db ? decode(db.password) : undefined) &&
+      env.RESTIC_PASSWORD !== env.AWS_SECRET_ACCESS_KEY &&
+      env.RESTIC_PASSWORD !== env.BETTER_AUTH_SECRET,
+    ),
+    "La password di cifratura Restic deve essere distinta dagli altri segreti",
+  );
+  checks.push({
+    id: "BACKUP_RESTORE",
+    group: "backup",
+    status: "manual",
+    message:
+      "Eseguire backup e ripristino completo dal repository svizzero prima del pilota",
+  });
+  add(
+    "FOGLIO_REUSE_CONFIRMED",
+    "sources",
+    ["true", "false"].includes(env.FOGLIO_REUSE_CONFIRMED ?? "false"),
+    "Usare soltanto true o false",
+  );
+  checks.push({
+    id: "FOGLIO_COVERAGE",
+    group: "sources",
+    status: "manual",
+    message:
+      env.FOGLIO_REUSE_CONFIRMED === "true"
+        ? "Conservare la conferma delle condizioni di riutilizzo del Foglio TI"
+        : "Foglio TI disattivato: dichiarare l’assenza della fonte ai piloti",
+  });
+  return checks;
+}
+export function setupGroupConfigured(checks: SetupCheck[], group: string) {
+  return (
+    checks.some((c) => c.group === group) &&
+    !checks.some(
+      (c) => c.group === group && ["missing", "invalid"].includes(c.status),
+    )
+  );
+}
