@@ -382,6 +382,25 @@ h1 {
   margin-bottom: 2px;
   font-size: 12px;
 }
+.radar-progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+  border: 1px solid #d5e8e3;
+  border-radius: 16px;
+  background: #f1f8f5;
+  color: #16483f;
+}
+.radar-progress > div {
+  flex: 1 1 240px;
+}
+.radar-progress p {
+  margin: 5px 0 0;
+  font-size: 14px;
+}
 .summary-bar {
   display: grid;
   grid-template-columns: 1fr 1.35fr 1fr 0.7fr;

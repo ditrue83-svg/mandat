@@ -1,8 +1,68 @@
-import { and, eq, lte, gt, isNull, or, desc } from "drizzle-orm";
+import { and, eq, lte, gt, isNull, or, desc, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { matches, publications, feedback } from "@/db/schema";
+import { matches, publications, feedback, settings } from "@/db/schema";
+import { fingerprint } from "@/sources/common";
 import { getDemoOpportunities } from "./demo";
-import type { Opportunity, Viewer } from "./domain";
+import type { Opportunity, RadarStatus, Viewer } from "./domain";
+
+export async function getRadarStatus(
+  viewer: Viewer,
+  now = new Date(),
+): Promise<RadarStatus> {
+  if (viewer.demo) return { state: "ready", pendingCount: 0 };
+  const db = getDb();
+  const rows = await db
+    .select({
+      publicationRevision: publications.revision,
+      matchRevision: matches.revision,
+    })
+    .from(publications)
+    .leftJoin(
+      matches,
+      and(
+        eq(matches.publicationId, publications.id),
+        eq(matches.companyId, viewer.companyId),
+      ),
+    )
+    .where(
+      and(
+        eq(publications.status, "open"),
+        lte(publications.visibleAt, now),
+        or(isNull(publications.deadline), gt(publications.deadline, now)),
+        inArray(
+          publications.source,
+          process.env.FOGLIO_REUSE_CONFIRMED === "true"
+            ? ["simap", "foglio-ti"]
+            : ["simap"],
+        ),
+      ),
+    );
+  const profileRevision = fingerprint(viewer.profile);
+  // A pending/retry AI result has been assessed, even though it still needs
+  // review. Only missing or invalidated assessments count as waiting here.
+  const pendingCount = rows.filter(
+    (row) =>
+      !row.matchRevision?.startsWith(
+        `${row.publicationRevision}:${profileRevision}:`,
+      ) || row.matchRevision.endsWith(":profile-update"),
+  ).length;
+  if (!pendingCount) return { state: "ready", pendingCount };
+  const [heartbeat] = await db
+    .select({ value: settings.value })
+    .from(settings)
+    .where(eq(settings.key, "worker_heartbeat"));
+  const at =
+    typeof heartbeat?.value === "string" ? Date.parse(heartbeat.value) : NaN;
+  const age = now.getTime() - at;
+  return {
+    state:
+      Number.isFinite(age) && age >= -60_000 && age < 15 * 60_000
+        ? "processing"
+        : "delayed",
+    pendingCount,
+  };
+}
+
 export async function listOpportunities(
   viewer: Viewer,
   options: { includeInactive?: boolean } = {},

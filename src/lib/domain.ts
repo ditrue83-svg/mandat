@@ -68,6 +68,10 @@ export const ZONES = [
   "Vallemaggia",
 ];
 export type SourceId = "simap" | "foglio-ti";
+export type RadarStatus = {
+  state: "ready" | "processing" | "delayed";
+  pendingCount: number;
+};
 export type Evidence = {
   url: string;
   field: string;

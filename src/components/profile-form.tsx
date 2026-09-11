@@ -116,7 +116,7 @@ export function ProfileForm({
       setMessage(
         viewer.demo
           ? "Profilo dimostrativo salvato in questo browser."
-          : "Profilo aggiornato. Il Radar userà le tue preferenze al prossimo controllo.",
+          : "Profilo aggiornato. Abbiamo richiesto la rivalutazione delle opportunità: trovi l’avanzamento nel Radar.",
       );
       if (onboarding) router.push("/");
       else router.refresh();

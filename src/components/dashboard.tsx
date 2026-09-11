@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -34,6 +35,7 @@ import {
   formatMoney,
   sectorLabel,
   type Opportunity,
+  type RadarStatus,
   type Viewer,
 } from "@/lib/domain";
 const icons = {
@@ -50,13 +52,24 @@ export function Dashboard({
   viewer,
   opportunities,
   savedOnly = false,
+  radarStatus = { state: "ready", pendingCount: 0 },
 }: {
   viewer: Viewer;
   opportunities: Opportunity[];
   savedOnly?: boolean;
+  radarStatus?: RadarStatus;
 }) {
-  const [items, setItems] = useState(opportunities);
-  const [profile, setProfile] = useState(viewer.profile);
+  const router = useRouter();
+  const [refreshing, startRefresh] = useTransition();
+  const [demoItems, setDemoItems] = useState(opportunities);
+  const [demoProfile, setDemoProfile] = useState(viewer.profile);
+  const [actions, setActions] = useState<
+    Record<string, Partial<Pick<Opportunity, "saved" | "dismissed">>>
+  >({});
+  const items = viewer.demo
+    ? demoItems
+    : opportunities.map((o) => ({ ...o, ...actions[o.id] }));
+  const profile = viewer.demo ? demoProfile : viewer.profile;
   const [query, setQuery] = useState("");
   const [sector, setSector] = useState("all");
   const [sort, setSort] = useState("relevance");
@@ -72,8 +85,8 @@ export function Dashboard({
           localStorage.getItem("mandat-demo-profile") || "null",
         );
         const parsed = profileSchema.safeParse(savedProfile);
-        if (parsed.success) setProfile(parsed.data);
-        setItems(
+        if (parsed.success) setDemoProfile(parsed.data);
+        setDemoItems(
           opportunities
             .filter(
               (o) =>
@@ -86,6 +99,43 @@ export function Dashboard({
       } catch {}
     }
   }, [viewer.demo, opportunities, savedOnly]);
+  useEffect(() => {
+    if (viewer.demo) return;
+    setActions((current) => {
+      const next = { ...current };
+      let changed = false;
+      for (const item of opportunities) {
+        const override = next[item.id];
+        if (!override) continue;
+        const remaining = { ...override };
+        for (const field of ["saved", "dismissed"] as const) {
+          if (
+            remaining[field] !== undefined &&
+            remaining[field] === item[field]
+          ) {
+            delete remaining[field];
+            changed = true;
+          }
+        }
+        if (Object.keys(remaining).length) next[item.id] = remaining;
+        else delete next[item.id];
+      }
+      return changed ? next : current;
+    });
+  }, [viewer.demo, opportunities]);
+  useEffect(() => {
+    if (viewer.demo || savedOnly || radarStatus.state === "ready") return;
+    const refresh = () => {
+      if (document.visibilityState === "visible" && !refreshing)
+        startRefresh(() => router.refresh());
+    };
+    const timer = setInterval(refresh, 15_000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [viewer.demo, savedOnly, radarStatus.state, refreshing, router]);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(""), 4000);
@@ -105,11 +155,14 @@ export function Dashboard({
         });
         if (!response.ok) throw new Error();
       }
-      const next = items.map((o) =>
-        o.id === id ? { ...o, [kind]: value } : o,
-      );
-      setItems(next);
+      setActions((current) => ({
+        ...current,
+        [id]: { ...current[id], [kind]: value },
+      }));
       if (viewer.demo) {
+        setDemoItems((current) =>
+          current.map((o) => (o.id === id ? { ...o, [kind]: value } : o)),
+        );
         const stored = JSON.parse(
           localStorage.getItem("mandat-demo-actions") || "{}",
         );
@@ -177,6 +230,30 @@ export function Dashboard({
           <SlidersHorizontal size={17} /> Personalizza il Radar
         </Link>
       </section>
+      {!savedOnly && !viewer.demo && radarStatus.state !== "ready" && (
+        <div className="radar-progress" role="status">
+          <Clock3 size={20} aria-hidden="true" />
+          <div>
+            <strong>
+              {radarStatus.state === "processing"
+                ? "Stiamo valutando le opportunità per la tua ditta."
+                : "La valutazione sta richiedendo più tempo del previsto."}
+            </strong>
+            <p>
+              {radarStatus.state === "processing"
+                ? "I risultati compariranno qui man mano. Puoi lasciare questa pagina: il lavoro continua."
+                : "Il profilo è salvato. La ricerca riprenderà quando il servizio tornerà disponibile."}
+            </p>
+          </div>
+          <button
+            className="button secondary"
+            disabled={refreshing}
+            onClick={() => startRefresh(() => router.refresh())}
+          >
+            {refreshing ? "Aggiornamento…" : "Aggiorna"}
+          </button>
+        </div>
+      )}
       <div className="summary-bar">
         <div>
           <span className="summary-icon">
@@ -371,22 +448,39 @@ export function Dashboard({
               <h3>
                 {savedOnly
                   ? "Qui troverai i bandi da tenere d’occhio."
-                  : "Nessuna opportunità con questi filtri."}
+                  : query ||
+                      sector !== "all" ||
+                      showDismissed ||
+                      items.length > 0
+                    ? "Nessuna opportunità con questi filtri."
+                    : radarStatus.state !== "ready"
+                      ? "Il tuo Radar si sta aggiornando."
+                      : "Al momento nessuna opportunità pertinente."}
               </h3>
               <p>
                 {savedOnly
                   ? "Tocca il segnalibro su un bando per ritrovarlo qui."
-                  : "Prova un altro settore o modifica la ricerca. Ti avviseremo quando ci saranno novità pertinenti."}
+                  : query ||
+                      sector !== "all" ||
+                      showDismissed ||
+                      items.length > 0
+                    ? "Azzera i filtri o controlla le opportunità che hai nascosto."
+                    : radarStatus.state !== "ready"
+                      ? "Non serve compilare di nuovo il profilo. Questa pagina si aggiorna automaticamente."
+                      : "Non abbiamo proposte da mostrarti per le preferenze attuali. Il Radar continuerà a cercare nuove pubblicazioni."}
               </p>
-              <button
-                className="button secondary"
-                onClick={() => {
-                  setSector("all");
-                  setQuery("");
-                }}
-              >
-                Azzera i filtri
-              </button>
+              {(query || sector !== "all" || showDismissed) && (
+                <button
+                  className="button secondary"
+                  onClick={() => {
+                    setSector("all");
+                    setQuery("");
+                    setShowDismissed(false);
+                  }}
+                >
+                  Azzera i filtri
+                </button>
+              )}
             </div>
           )}
           {!savedOnly && (

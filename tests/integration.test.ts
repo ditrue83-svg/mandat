@@ -9,6 +9,7 @@ import {
   vi,
 } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
+import { PgBoss, fromPglite } from "pg-boss";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { and, eq, sql } from "drizzle-orm";
@@ -60,6 +61,19 @@ beforeAll(async () => {
     "test-only-secret-never-use-in-production-123456789";
   process.env.FOGLIO_REUSE_CONFIRMED = "true";
   await migrate(db, { migrationsFolder: "drizzle" });
+  const queue = new PgBoss({
+    db: fromPglite(pg),
+    backend: "pglite",
+    schema: "pgboss",
+    schedule: false,
+    supervise: false,
+  });
+  await queue.start();
+  try {
+    await queue.createQueue("match", { policy: "singleton" });
+  } finally {
+    await queue.stop();
+  }
   const x = await provisionInvite("a@example.invalid", "Ditta A");
   const y = await provisionInvite("b@example.invalid", "Ditta B");
   a = {

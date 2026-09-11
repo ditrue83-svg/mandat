@@ -8,6 +8,7 @@ import {
   feedback,
 } from "@/db/schema";
 import type { CompanyProfile } from "./domain";
+import { enqueueProfileMatching } from "./profile-matching";
 
 export async function updateCompanyProfile(
   companyId: string,
@@ -40,6 +41,7 @@ export async function updateCompanyProfile(
           eq(notifications.status, "pending"),
         ),
       );
+    await enqueueProfileMatching(tx);
   });
 }
 export async function saveCompanyFeedback(
