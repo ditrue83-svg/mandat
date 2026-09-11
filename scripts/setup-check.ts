@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { parseEnv, parseArgs } from "node:util";
 import { Pool } from "pg";
 import nodemailer from "nodemailer";
+import { smtpPassword } from "../src/lib/smtp-config";
 import { databaseOptions } from "../src/lib/database-config";
 import {
   aiBaseUrl,
@@ -94,7 +95,7 @@ async function main() {
         port: Number(env.SMTP_PORT || 587),
         secure: env.SMTP_PORT === "465",
         requireTLS: env.SMTP_PORT !== "465",
-        auth: { user: env.SMTP_USER, pass: env.SMTP_PASSWORD },
+        auth: { user: env.SMTP_USER, pass: smtpPassword(env) },
         connectionTimeout: 8000,
         socketTimeout: 8000,
         tls: { minVersion: "TLSv1.2" },

@@ -34,6 +34,10 @@ Il backend supporta PostgreSQL locale e Supabase nella regione specifica Zurigo 
 
 Per inserire la password Supabase senza includerla nella cronologia del terminale, preparare `DATABASE_URL` con i parametri del proprio progetto e password `CHANGE_ME`. Salvare la password in un file temporaneo locale sotto `.data/`, con permessi 0600, quindi eseguire `npm run setup:database-password -- --env .env.production.local --password-file .data/setup/supabase-password.txt`. Il comando codifica i caratteri riservati, conserva gli altri valori della configurazione e rimuove il file temporaneo dopo il salvataggio. Non sovrascrive connessioni già configurate, non mostra segreti e non esegue connessioni di rete.
 
+SMTP supporta Aruba (`smtps.aruba.it:465`, TLS, posta in Italia) e Infomaniak (`mail.infomaniak.com:587`, STARTTLS, posta in Svizzera). Impostare `SMTP_USER` con la casella effettiva e `MAIL_FROM` con lo stesso indirizzo, salvo mittenti alternativi autorizzati dal fornitore. L'autenticazione SMTP usa la password della casella.
+
+Per inserire la password SMTP, lasciare vuoti `SMTP_PASSWORD` e `SMTP_PASSWORD_BASE64` e salvare soltanto la password in `.data/setup/smtp-password.txt`, con permessi 0600. Eseguire `npm run setup:smtp-password -- --env .env.production.local --password-file .data/setup/smtp-password.txt`. Il comando aggiorna solo `SMTP_PASSWORD_BASE64` e rimuove il file temporaneo dopo il salvataggio. Base64 preserva i caratteri speciali tra Node.js, Next.js e Docker Compose: non è cifratura, quindi il file di configurazione resta segreto. Il valore diretto `SMTP_PASSWORD` è ancora supportato per ambienti già configurati; non combinarlo con `SMTP_PASSWORD_BASE64`.
+
 I passi seguenti descrivono l’esecuzione locale: i comandi npm leggono `.env.local`, che deve essere configurato in modalità reale. Per Docker e per il file separato `.env.production.local` vedere la sezione Distribuzione.
 
 1. Copiare `.env.example` in `.env.local`, compilare le variabili e impostare `APP_MODE=live`.

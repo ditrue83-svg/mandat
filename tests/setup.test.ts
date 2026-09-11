@@ -60,6 +60,37 @@ describe("Controllo configurazione senza segreti", () => {
     expect(setupGroupConfigured(checks, "database")).toBe(false);
     expect(setupGroupConfigured(checks, "ai")).toBe(false);
   });
+  it("accetta Aruba con TLS sulla porta 465 e password codificata", () => {
+    const password = " a$VAR#'\"`\\passwordè ";
+    const env = {
+      ...configured,
+      SMTP_HOST: "smtps.aruba.it",
+      SMTP_PORT: "465",
+      SMTP_PASSWORD: "",
+      SMTP_PASSWORD_BASE64: Buffer.from(password).toString("base64"),
+    };
+    expect(setupGroupConfigured(inspectSetup(env), "email")).toBe(true);
+    for (const port of ["587", "25", ""]) {
+      expect(
+        inspectSetup({ ...env, SMTP_PORT: port }).find(
+          (c) => c.id === "SMTP_PORT",
+        )?.status,
+      ).toBe("invalid");
+    }
+    expect(JSON.stringify(inspectSetup(env))).not.toContain(password);
+    expect(JSON.stringify(inspectSetup(env))).not.toContain(
+      env.SMTP_PASSWORD_BASE64,
+    );
+  });
+  it("blocca password SMTP ambigue, malformate e host non configurati", () => {
+    for (const env of [
+      { ...configured, SMTP_PASSWORD_BASE64: "c2VjcmV0" },
+      { ...configured, SMTP_PASSWORD: "", SMTP_PASSWORD_BASE64: "%%%" },
+      { ...configured, SMTP_HOST: "unconfigured.example" },
+    ]) {
+      expect(setupGroupConfigured(inspectSetup(env), "email")).toBe(false);
+    }
+  });
   it("rifiuta HTTP, credenziali nelle URL, provider estranei e budget superiore a quello beta", () => {
     const checks = inspectSetup({
       ...configured,

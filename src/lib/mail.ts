@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { smtpPassword } from "./smtp-config";
 export function escapeHtml(value: string) {
   return value.replace(
     /[&<>"']/g,
@@ -18,14 +19,14 @@ export async function sendMail(message: {
 }) {
   if (process.env.APP_MODE === "demo")
     throw new Error("Invio email disabilitato in modalità dimostrativa");
-  for (const key of ["SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "MAIL_FROM"])
+  for (const key of ["SMTP_HOST", "SMTP_USER", "MAIL_FROM"])
     if (!process.env[key]) throw new Error(`Email non configurata: ${key}`);
   transport ??= nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT || 587),
     secure: process.env.SMTP_PORT === "465",
     requireTLS: process.env.SMTP_PORT !== "465",
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD },
+    auth: { user: process.env.SMTP_USER, pass: smtpPassword(process.env) },
     connectionTimeout: 15000,
     socketTimeout: 30000,
     tls: { minVersion: "TLSv1.2" },

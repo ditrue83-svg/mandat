@@ -19,7 +19,7 @@ async function main() {
     flag: "wx",
   });
   console.log(
-    "Configurazione preparata in .env.production.local, accessibile soltanto al proprietario. Segreti locali generati; completare gli accessi Infomaniak quando disponibili. Nessun valore segreto viene mostrato.",
+    "Configurazione preparata in .env.production.local, accessibile soltanto al proprietario. Segreti locali generati; completare gli accessi ai servizi quando disponibili. Nessun valore segreto viene mostrato.",
   );
 }
 main().catch((error) => {

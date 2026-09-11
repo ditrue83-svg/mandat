@@ -1,3 +1,5 @@
+import { smtpPassword } from "./smtp-config";
+
 export function isDemo() {
   return process.env.APP_MODE === "demo";
 }
@@ -20,10 +22,10 @@ export function assertProductionConfig() {
     "BETTER_AUTH_SECRET",
     "SMTP_HOST",
     "SMTP_USER",
-    "SMTP_PASSWORD",
     "MAIL_FROM",
   ])
     if (!process.env[key]) throw new Error(`Configurazione mancante: ${key}`);
+  smtpPassword(process.env);
   if ((process.env.BETTER_AUTH_SECRET?.length ?? 0) < 32)
     throw new Error(
       "BETTER_AUTH_SECRET deve contenere almeno 32 caratteri casuali",

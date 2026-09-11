@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { databaseOptions } from "./database-config";
+import { smtpPassword } from "./smtp-config";
 
 export type SetupEnvironment = Record<string, string | undefined>;
 export type SetupCheck = {
@@ -183,15 +184,17 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
   add(
     "SMTP_HOST",
     "email",
-    env.SMTP_HOST === "mail.infomaniak.com",
-    "Per la beta svizzera usare il server SMTP Infomaniak",
+    ["mail.infomaniak.com", "smtps.aruba.it"].includes(env.SMTP_HOST || ""),
+    "Usare il server SMTP configurato: smtps.aruba.it oppure mail.infomaniak.com",
     !env.SMTP_HOST,
   );
   add(
     "SMTP_PORT",
     "email",
-    ["465", "587"].includes(env.SMTP_PORT || "587"),
-    "Usare 465 con TLS oppure 587 con STARTTLS",
+    env.SMTP_HOST === "smtps.aruba.it"
+      ? env.SMTP_PORT === "465"
+      : ["465", "587"].includes(env.SMTP_PORT || "587"),
+    "Per Aruba usare 465 con TLS; per Infomaniak 465 TLS oppure 587 STARTTLS",
   );
   add(
     "SMTP_USER",
@@ -200,7 +203,19 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
     "SMTP_USER deve essere l’indirizzo completo della casella",
     !env.SMTP_USER,
   );
-  required("SMTP_PASSWORD", "email");
+  let passwordValid = false;
+  try {
+    passwordValid = present(smtpPassword(env));
+  } catch {
+    // Report only the field, never parser details or credentials.
+  }
+  add(
+    "SMTP_PASSWORD",
+    "email",
+    passwordValid,
+    "Configurare SMTP_PASSWORD_BASE64 con setup:smtp-password oppure SMTP_PASSWORD, senza combinarli",
+    !env.SMTP_PASSWORD && !env.SMTP_PASSWORD_BASE64,
+  );
   const sender = env.MAIL_FROM?.match(/<([^<>]+)>$/)?.[1] ?? env.MAIL_FROM;
   add(
     "MAIL_FROM",
