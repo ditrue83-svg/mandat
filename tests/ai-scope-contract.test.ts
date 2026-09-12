@@ -246,6 +246,17 @@ it.each([
   ["Opere edili.", "Piccoli lavori edili e muratura.", false],
   ["Opere di edilizia.", "Edilizia e posa di rivestimenti.", false],
   [
+    "Fornitura di dispositivi elettrici.",
+    "Installazione e manutenzione di impianti elettrici.",
+    false,
+  ],
+  [
+    "Fornitura di apparecchiature idrauliche.",
+    "Installazione di reti idrauliche.",
+    false,
+  ],
+  ["Pulizia di quadri elettrici.", "Pulizia professionale.", true],
+  [
     "Servizi e lavori di manutenzione impianti in edifici e locali.",
     "Eseguiamo servizi di manutenzione degli impianti nei locali di edifici.",
     false,

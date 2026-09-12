@@ -498,7 +498,8 @@ const genericActivityTerms = new Set(
     "come anche non piu solo senza uno una questo quello dell all nell sull dall " +
     "servizio servizi lavoro lavori attivita opera lavorazione intervento eseguiamo svolgiamo " +
     "offriamo occupiamo ditta azienda impresa edificio edifici locale spazio spazi manutenzione " +
-    "impianto realizzazione esecuzione fornitura installazione progettazione gestione cura piccolo grande edile edili edilizia"
+    "impianto realizzazione esecuzione fornitura installazione progettazione gestione cura piccolo grande edile edili edilizia " +
+    "elettrico elettriche idraulico idrauliche termico termiche meccanico meccaniche tecnico tecniche industriale"
   ).split(" ").map(activityTerm),
 );
 function descriptiveActivities(text: string) {
