@@ -253,4 +253,18 @@ describe("Aggiornamento dei progetti simap", () => {
     expect(refreshed.status).toBe("cancelled");
     expect(refreshed.externalId).toBe(projectId);
   });
+
+  it("non applica al progetto uno stato proveniente dal dettaglio di un’altra pubblicazione", async () => {
+    const previous = previousPublication();
+    const before = structuredClone(previous);
+    respondWith(legacyHeader(), publicationDetail(otherPublicationId, "award"));
+
+    await expect(simap.refresh!(previous)).rejects.toThrow(
+      "Dettaglio simap riferito a una pubblicazione diversa",
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(previous).toEqual(before);
+    expect(previous.status).toBe("open");
+  });
 });

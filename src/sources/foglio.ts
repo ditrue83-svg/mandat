@@ -6,6 +6,7 @@ import {
   classifySectors,
   fetchOfficial,
   fingerprint,
+  parseDeadline,
   plainText,
   publicationDate,
   translation,
@@ -61,14 +62,11 @@ export function normalizeFoglio(text: string): Publication {
   const deadlineMatch = body.match(
     /(?:Presentazione\s+dell['’]offerta|Termine\s+(?:per\s+)?(?:l['’])?inoltro\s+(?:delle\s+)?offerte)\s*:?\s*(\d{2}\.\d{2}\.\d{4}),?\s+(\d{2}:\d{2})/i,
   );
-  const parsed = deadlineMatch
-    ? DateTime.fromFormat(
-        `${deadlineMatch[1]} ${deadlineMatch[2]}`,
-        "dd.MM.yyyy HH:mm",
-        { zone: "Europe/Zurich" },
+  const deadline = deadlineMatch
+    ? parseDeadline(
+        `${deadlineMatch[1].split(".").reverse().join("-")}T${deadlineMatch[2]}`,
       )
     : null;
-  const deadline = parsed?.isValid ? parsed.toUTC().toISO() : null;
   const status: Publication["status"] =
     m.publicationState === "CANCELLED" ||
     /^(?:annullamento|revoca|interruzione)/i.test(title)
@@ -123,9 +121,10 @@ export function normalizeFoglio(text: string): Publication {
     originalText: body,
     summary: null,
     requirements: [],
-    evidence: deadlineMatch
-      ? [{ url: sourceUrl, field: "Scadenza", quote: deadlineMatch[0] }]
-      : [],
+    evidence:
+      deadline && deadlineMatch
+        ? [{ url: sourceUrl, field: "Scadenza", quote: deadlineMatch[0] }]
+        : [],
     documents: [
       {
         title: "Pubblicazione ufficiale firmata (PDF)",
@@ -185,20 +184,24 @@ foglio.refresh = async (previous) =>
 
 export async function attachFoglioPdf(p: Publication): Promise<Publication> {
   if (p.status !== "open") return p;
+  let pdf: typeof import("./pdf") | undefined;
   try {
-    const { extractPublicPdf } = await import("./pdf");
-    const pages = await extractPublicPdf(p.sourceUrl);
+    pdf = await import("./pdf");
+    const pages = await pdf.extractPublicPdf(p.sourceUrl);
     return {
       ...p,
       documentPages: pages.map((page) => ({ ...page, url: p.sourceUrl })),
     };
-  } catch {
+  } catch (error) {
+    if (pdf && error instanceof pdf.TemporaryPdfError) throw error;
     return {
       ...p,
       reviewRequired: true,
       reviewReasons: [
         ...p.reviewReasons,
-        "PDF non elaborabile: verificare il documento ufficiale",
+        pdf && error instanceof pdf.PdfReviewRequiredError
+          ? error.message
+          : "PDF non elaborabile: verificare il documento ufficiale",
       ],
     };
   }

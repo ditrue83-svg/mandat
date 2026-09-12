@@ -91,6 +91,8 @@ export function normalizeSimap(
     })
     .passthrough()
     .parse(input);
+  if (d.id !== p.publicationId)
+    throw new Error("Dettaglio simap riferito a una pubblicazione diversa");
   const info = record(d["project-info"]),
     proc = record(d.procurement),
     dates = record(d.dates),

@@ -138,7 +138,23 @@ describe("Identità stabile delle revisioni simap", () => {
     const original = normalizeSimap(entry(), detail());
     const next = entry();
     next.raw.publicationId = "33333333-3333-4333-8333-333333333333";
-    expect(normalizeSimap(next, detail()).revision).not.toBe(original.revision);
+    expect(
+      normalizeSimap(next, { ...detail(), id: next.raw.publicationId })
+        .revision,
+    ).not.toBe(original.revision);
+  });
+
+  it("rifiuta un dettaglio vecchio o estraneo senza attribuirlo alla nuova pubblicazione", () => {
+    const next = entry();
+    next.raw.publicationId = "33333333-3333-4333-8333-333333333333";
+    const before = structuredClone(next);
+    expect(() => normalizeSimap(next, detail())).toThrow(
+      "Dettaglio simap riferito a una pubblicazione diversa",
+    );
+    expect(() => normalizeSimap(next, { ...detail(), type: "award" })).toThrow(
+      "Dettaglio simap riferito a una pubblicazione diversa",
+    );
+    expect(next).toEqual(before);
   });
 
   it("rileva anche campi nuovi del dettaglio non ancora mostrati nell’app", () => {

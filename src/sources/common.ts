@@ -49,8 +49,27 @@ export function publicationDate(value: string, hour = 0) {
 }
 export function parseDeadline(value: unknown): string | null {
   if (typeof value !== "string" || !value.includes("T")) return null;
-  const date = DateTime.fromISO(value, { zone: "Europe/Zurich" });
-  return date.isValid ? date.toUTC().toISO() : null;
+  const date = DateTime.fromISO(value, {
+    zone: "Europe/Zurich",
+    setZone: true,
+  });
+  if (!date.isValid) return null;
+  const hasOffset = /(?:Z|[+-]\d{2}(?::?\d{2})?)(?:\[[^\]]+\])?$/.test(value);
+  if (!hasOffset) {
+    // Luxon shifts nonexistent local times forward and chooses one offset for
+    // repeated times. Neither choice establishes a deadline from the source.
+    const wallClock = DateTime.fromISO(value.replace(/\[[^\]]+\]$/, ""), {
+      zone: "UTC",
+    });
+    if (
+      !wallClock.isValid ||
+      date.toISO({ includeOffset: false }) !==
+        wallClock.toISO({ includeOffset: false }) ||
+      date.getPossibleOffsets().length !== 1
+    )
+      return null;
+  }
+  return date.toUTC().toISO();
 }
 export function classifySectors(text: string, cpv: string[]): Sector[] {
   const normalized = text.toLowerCase();

@@ -182,18 +182,57 @@ export async function storePublication(
     );
   }
   await db.transaction(async (tx) => {
-    for (const cousin of cousins) {
+    const currentCousins = await tx
+      .select()
+      .from(publications)
+      .where(
+        and(
+          eq(publications.canonicalId, canonicalId),
+          ne(publications.id, p.id),
+        ),
+      )
+      .orderBy(publications.id)
+      .for("update");
+    const currentSourceUrls = [
+      ...new Set([
+        p.sourceUrl,
+        ...currentCousins.flatMap((c) => c.data.sourceUrls),
+      ]),
+    ];
+    p = { ...p, sourceUrls: currentSourceUrls };
+    const currentSameSource = currentCousins.filter(
+      (c) => c.source === p.source,
+    );
+    if (currentSameSource.some((c) => newer(c.data, p)))
+      p = { ...p, status: "closed" };
+    // Another source update or an editorial correction may have committed
+    // since cousins were read. Merge links into the current row, never copy
+    // its old JSON back over the newer publication or its source links.
+    const withSourceUrls = sql<Publication>`${publications.data} || jsonb_build_object(
+      'sourceUrls', (
+        select jsonb_agg(url order by first_seen)
+        from (
+          select url, min(position) as first_seen
+          from jsonb_array_elements(
+            coalesce(${publications.data}->'sourceUrls', '[]'::jsonb)
+            || ${JSON.stringify(currentSourceUrls)}::jsonb
+          ) with ordinality as links(url, position)
+          group by url
+        ) as distinct_links
+      )
+    )`;
+    for (const cousin of currentCousins) {
       await tx
         .update(publications)
-        .set({ data: { ...cousin.data, sourceUrls }, updatedAt: new Date() })
+        .set({ data: withSourceUrls, updatedAt: new Date() })
         .where(eq(publications.id, cousin.id));
     }
-    for (const old of sameSource.filter((c) => newer(p, c.data))) {
+    for (const old of currentSameSource.filter((c) => newer(p, c.data))) {
       await tx
         .update(publications)
         .set({
           status: "closed",
-          data: { ...old.data, status: "closed", sourceUrls },
+          data: sql<Publication>`jsonb_set(${publications.data}, '{status}', '"closed"'::jsonb)`,
         })
         .where(eq(publications.id, old.id));
     }
