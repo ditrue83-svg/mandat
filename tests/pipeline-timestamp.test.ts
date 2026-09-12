@@ -22,10 +22,13 @@ vi.mock("@/worker/ai", () => ({
     score: 90,
     reason: "Pertinente nel test locale",
     uncertain: false,
+    needsReview: false,
   })),
 }));
 import { enrichAndMatch } from "../src/worker/pipeline";
 import { summarize, classify } from "../src/worker/ai";
+import { getRadarStatus, listOpportunities } from "../src/lib/queries";
+import { queueDigests } from "../src/worker/notifications";
 
 const pg = new PGlite();
 const db = drizzle(pg, { schema });
@@ -63,6 +66,9 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   vi.clearAllMocks();
+  await db.delete(schema.notifications);
+  await db.delete(schema.settings);
+  await db.delete(schema.sourceRuns);
   await db.delete(schema.matches);
   await db.delete(schema.publications);
   await db.insert(schema.publications).values({
@@ -101,6 +107,122 @@ it("completa analisi e matching con microsecondi PostgreSQL senza ripetere l’A
   const matches = await db.select().from(schema.matches);
   expect(matches).toHaveLength(1);
   expect(matches[0]).toMatchObject({ companyId: "a", eligible: true });
+});
+
+it("mantiene il bando poco descritto in revisione senza ripetere analisi o accodare alert automatici", async () => {
+  vi.stubEnv("FOGLIO_REUSE_CONFIRMED", "false");
+  vi.stubEnv("APP_URL", "https://mandat.example.invalid");
+  try {
+    vi.mocked(classify).mockResolvedValueOnce({
+      score: 0,
+      reason: "La fonte non descrive abbastanza le prestazioni richieste.",
+      uncertain: true,
+      needsReview: true,
+    });
+    await enrichAndMatch({ publicationId: publication.id });
+    await enrichAndMatch({ publicationId: publication.id });
+    expect(classify).toHaveBeenCalledTimes(1);
+    const [match] = await db.select().from(schema.matches);
+    expect(match).toMatchObject({ score: 0, eligible: true, approved: null });
+    expect(match.reviewNotes).toBeTruthy();
+    expect(match.revision).not.toContain(":retry");
+    const [company] = await db.select().from(schema.companies);
+    const viewer = {
+      companyId: company.id,
+      userId: company.ownerId,
+      profile: company.profile,
+      name: "A",
+      email: "a@example.invalid",
+      admin: false,
+      demo: false,
+    };
+    expect(await getRadarStatus(viewer)).toEqual({
+      state: "ready",
+      pendingCount: 0,
+    });
+    expect(await listOpportunities(viewer)).toMatchObject([
+      { id: publication.id, assessment: "uncertain" },
+    ]);
+
+    const now = new Date("2026-09-12T10:00:00Z");
+    await db
+      .insert(schema.settings)
+      .values({ key: "automation_enabled", value: true });
+    await db.insert(schema.sourceRuns).values({
+      id: "current-source",
+      source: "simap",
+      status: "success",
+      finishedAt: now,
+    });
+    const [stored] = await db.select().from(schema.publications);
+    await db.insert(schema.publications).values({
+      ...stored,
+      id: "uncertain-high",
+      externalId: "uncertain-high",
+      canonicalId: "uncertain-high",
+      data: {
+        ...stored.data,
+        id: "uncertain-high",
+        externalId: "uncertain-high",
+      },
+    });
+    await db.insert(schema.matches).values({
+      ...match,
+      id: "uncertain-high-row",
+      publicationId: "uncertain-high",
+      score: 95,
+    });
+    await queueDigests(now);
+    expect(await db.select().from(schema.notifications)).toEqual([]);
+
+    // A positive control proves the empty outbox is due to the review state,
+    // not a disabled sender, stale source or a global guard in this fixture.
+    await db.insert(schema.publications).values({
+      ...stored,
+      id: "clear-match",
+      externalId: "clear-match",
+      canonicalId: "clear-match",
+      data: { ...stored.data, id: "clear-match", externalId: "clear-match" },
+    });
+    await db.insert(schema.matches).values({
+      ...match,
+      id: "clear-match-row",
+      publicationId: "clear-match",
+      score: 90,
+      reviewNotes: null,
+    });
+    await queueDigests(now);
+    const notices = await db.select().from(schema.notifications);
+    expect(notices).toHaveLength(1);
+    expect(notices[0].items.map((item) => item.id)).toEqual(["clear-match"]);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+it("non rivaluta né rende candidato un lavoro escluso esplicitamente dal profilo", async () => {
+  const [company] = await db.select().from(schema.companies);
+  try {
+    await db.update(schema.companies).set({
+      profile: { ...company.profile, exclusions: ["escluso-esplicitamente"] },
+    });
+    await db.update(schema.publications).set({
+      data: {
+        ...publication,
+        originalText: "Pulizia escluso-esplicitamente dal profilo.",
+      },
+    });
+    await enrichAndMatch({ publicationId: publication.id });
+    expect(classify).not.toHaveBeenCalled();
+    const [match] = await db.select().from(schema.matches);
+    expect(match).toMatchObject({
+      score: 0,
+      eligible: false,
+      reason: "Contiene un’attività esclusa dal tuo profilo.",
+    });
+  } finally {
+    await db.update(schema.companies).set({ profile: company.profile });
+  }
 });
 
 it("rifiuta una risposta AI precedente a una modifica nello stesso millisecondo", async () => {

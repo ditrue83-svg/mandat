@@ -481,6 +481,7 @@ export async function enrichAndMatch(
         reason = preliminary.reason;
       let approved: boolean | null = null;
       let uncertain = preliminary.uncertain;
+      let needsReview = false;
       let retry = false;
       if (preliminary.eligible && aiReady) {
         try {
@@ -489,6 +490,7 @@ export async function enrichAndMatch(
           score = ai.score;
           reason = ai.reason;
           uncertain = uncertain || ai.uncertain;
+          needsReview = ai.needsReview;
           await resolveIssue(`match-ai:${firm.id}:${p.id}`);
         } catch (e) {
           uncertain = true;
@@ -502,7 +504,9 @@ export async function enrichAndMatch(
           );
         }
       } else if (preliminary.eligible) uncertain = true;
-      const eligible = preliminary.eligible && score >= 60;
+      // Insufficient evidence is a completed assessment to review, not proof
+      // of irrelevance. Keep it visible; reviewNotes blocks automatic emails.
+      const eligible = preliminary.eligible && (score >= 60 || needsReview);
       const set = {
         revision: retry ? `${revision}:retry` : revision,
         score,

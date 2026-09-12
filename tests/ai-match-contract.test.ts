@@ -101,7 +101,7 @@ it("richiede incertezza per titoli generici che non dettagliano le attività di 
     buildMatchRequest(publication, demoProfile).prompt,
   ) as { outputRules: string[] };
   const specificityRule = outputRules.find((rule) =>
-    rule.includes("soltanto un titolo o una categoria generale"),
+    rule.includes("soltanto un titolo generico o una categoria ampia"),
   );
   expect(specificityRule).toContain("profilo ristretto, indica uncertain: true");
   expect(specificityRule).toContain("Non desumere lavorazioni specifiche");

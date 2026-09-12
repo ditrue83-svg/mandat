@@ -159,6 +159,14 @@ it.each<{
     keepReason: false,
   },
   {
+    label: "dati insufficienti senza punteggio positivo",
+    input: () => ({
+      match: { score: 0, eligible: true, reviewNotes: "Richiesta revisione" },
+    }),
+    assessment: "uncertain",
+    keepReason: false,
+  },
+  {
     label: "AI riuscita in attesa di revisione manuale",
     input: () => ({ match: { approved: null } }),
     assessment: "ai",
