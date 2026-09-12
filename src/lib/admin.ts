@@ -273,6 +273,7 @@ export async function adminSnapshot(demo: boolean) {
       valueChf: r.reviewRequired.valueChf,
       location: r.reviewRequired.location,
       sourceUrl: r.reviewRequired.sourceUrl,
+      sourceConditions: r.reviewRequired.sourceConditions ?? [],
     })),
     issues: problem.map((i) => ({
       id: i.id,

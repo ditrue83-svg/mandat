@@ -1,5 +1,9 @@
 import { z } from "zod";
-import type { OriginalDescription, Publication } from "@/lib/domain";
+import type {
+  OriginalDescription,
+  Publication,
+  SourceCondition,
+} from "@/lib/domain";
 import {
   classifySectors,
   fetchOfficial,
@@ -50,7 +54,10 @@ const record = (v: unknown) =>
   v && typeof v === "object" && !Array.isArray(v)
     ? (v as Record<string, unknown>)
     : {};
-function originalDescriptions(value: unknown, url: string): OriginalDescription[] {
+function originalDescriptions(
+  value: unknown,
+  url: string,
+): OriginalDescription[] {
   if (typeof value === "string") {
     const text = plainText(value);
     return text ? [{ language: null, text, url }] : [];
@@ -60,6 +67,37 @@ function originalDescriptions(value: unknown, url: string): OriginalDescription[
     const raw = descriptions[language];
     const text = typeof raw === "string" ? plainText(raw) : "";
     return text ? [{ language, text, url }] : [];
+  });
+}
+function sourceConditions(
+  terms: Record<string, unknown>,
+  procurement: Record<string, unknown>,
+  url: string,
+): SourceCondition[] {
+  const fields = [
+    ["terms", terms, "subContractorAllowed", false],
+    ["terms", terms, "subContractorNote", true],
+    ["procurement", procurement, "partialOffers", false],
+    ["procurement", procurement, "partialOffersNote", true],
+  ] as const;
+  return fields.flatMap(([section, values, field, translated]) => {
+    if (!Object.hasOwn(values, field)) return [];
+    const path = `${section}.${field}`;
+    const value = values[field];
+    const translations = record(value);
+    const keys = Object.keys(translations).sort();
+    if (translated && keys.length)
+      return keys.map((key): SourceCondition => ({
+        path: `${path}.${key}`,
+        value: translations[key],
+        ...(["it", "de", "fr", "en"].includes(key)
+          ? { language: key as SourceCondition["language"] }
+          : {}),
+        url,
+      }));
+    // Keep nulls, unlabelled notes and unexpected values for source review.
+    // Never flatten subcontracting conditions into selectable service passages.
+    return [{ path, value, url }];
   });
 }
 const legacyRevisions = new WeakMap<Publication, string>();
@@ -101,6 +139,7 @@ export function normalizeSimap(
   const title = translation(info.title) || translation(p.title);
   if (!title) throw new Error("Bando simap privo di titolo");
   const sourceUrl = `https://www.simap.ch/it/project-detail/${p.id}`;
+  const detailUrl = `https://www.simap.ch/api/publications/v1/project/${p.id}/publication-details/${p.publicationId}`;
   const description = plainText(translation(proc.orderDescription));
   const requirements = [
     translation(terms.termsNote),
@@ -173,8 +212,9 @@ export function normalizeSimap(
     originalText: [title, description, ...requirements].join("\n\n"),
     originalDescriptions: originalDescriptions(
       proc.orderDescription,
-      `https://www.simap.ch/api/publications/v1/project/${p.id}/publication-details/${p.publicationId}`,
+      detailUrl,
     ),
+    sourceConditions: sourceConditions(terms, proc, detailUrl),
     summary: null,
     requirements: [],
     evidence: [

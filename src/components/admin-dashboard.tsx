@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { Check, Mail, ShieldCheck, ArrowUpRight } from "lucide-react";
 import { Shell } from "./shell";
 import { MatchNote } from "./match-note";
+import { SourceConditions } from "./source-conditions";
 import type { Viewer } from "@/lib/domain";
 import type { AdminSnapshot } from "@/lib/admin";
 import { SECTORS, formatDate } from "@/lib/domain";
@@ -292,6 +293,7 @@ export function AdminDashboard({
                   >
                     Apri la fonte originale <ArrowUpRight size={14} />
                   </a>
+                  <SourceConditions conditions={m.sourceConditions} />
                   <label className="field">
                     Riassunto
                     <textarea name="summary" defaultValue={m.summary ?? ""} />
