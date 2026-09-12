@@ -342,6 +342,9 @@ describe("Regressioni di revisione e invio", () => {
       .where(eq(schema.notifications.kind, "change"));
     expect(notices).toHaveLength(1);
     expect(notices[0].items).toEqual([{ id: p.id, revision: "v2" }]);
+    expect(notices[0].textBody).toContain("Pubblicazione non ufficiale.");
+    expect(notices[0].textBody).toContain(p.sourceUrl);
+    expect(notices[0].textBody).toContain("Stato: annullato");
     await queueOutstandingChanges();
     expect(
       await db

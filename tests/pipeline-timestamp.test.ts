@@ -195,6 +195,12 @@ it("mantiene il bando poco descritto in revisione senza ripetere analisi o accod
     const notices = await db.select().from(schema.notifications);
     expect(notices).toHaveLength(1);
     expect(notices[0].items.map((item) => item.id)).toEqual(["clear-match"]);
+    expect(notices[0].textBody).toContain("Pubblicazione non ufficiale.");
+    expect(notices[0].html).toContain("Pubblicazione non ufficiale.");
+    expect(notices[0].textBody).toContain(
+      "Valutazione Mandat · Pertinenza stimata dall’AI",
+    );
+    expect(notices[0].textBody).toContain(match.reason);
   } finally {
     vi.unstubAllEnvs();
   }

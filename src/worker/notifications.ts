@@ -14,9 +14,14 @@ import {
   issues,
   sourceRuns,
 } from "@/db/schema";
-import { emailLayout, escapeHtml, sendMail } from "@/lib/mail";
+import { sendMail } from "@/lib/mail";
+import {
+  renderChangeContent,
+  renderDigestContent,
+} from "@/lib/notification-content";
+import { presentMatch } from "@/lib/match-presentation";
 import { appUrl } from "@/lib/config";
-import { formatDeadline, type Publication } from "@/lib/domain";
+import type { Publication } from "@/lib/domain";
 import { digestDue, zurichDigestDay, materialChange } from "@/lib/matching";
 import { HttpError } from "@/lib/viewer";
 import { fingerprint } from "@/sources/common";
@@ -74,13 +79,6 @@ export async function queueChangeNotices(
       after.status === "cancelled"
         ? `Bando annullato: ${after.title}`
         : `Aggiornamento: ${after.title}`;
-    const statusLabel = {
-      open: "aperto",
-      cancelled: "annullato",
-      awarded: "aggiudicato",
-      closed: "chiuso",
-    }[after.status];
-    const text = `La pubblicazione «${after.title}» è cambiata. Stato: ${statusLabel}. Scadenza attuale: ${formatDeadline(after.deadline)}. Controlla la fonte originale: ${after.sourceUrl}`;
     await db
       .insert(notifications)
       .values({
@@ -89,10 +87,7 @@ export async function queueChangeNotices(
         dedupeKey: `change:${companyId}:${after.canonicalKey ?? after.id}:${after.revision}`,
         kind: "change",
         subject,
-        html: emailLayout(
-          `<h2>Un bando che ti abbiamo segnalato è cambiato</h2><p>${escapeHtml(text)}</p><p><a href="${escapeHtml(after.sourceUrl)}">Apri la fonte ufficiale</a></p>`,
-        ),
-        textBody: text,
+        ...renderChangeContent(after),
         items: [{ id: after.id, revision: after.revision }],
       })
       .onConflictDoNothing();
@@ -311,14 +306,21 @@ export async function queueDigests(now = new Date()) {
     });
     if (!selected.length) continue;
     const day = zurichDigestDay(now);
-    const text = selected
-      .map(
-        (r) =>
-          `${r.p.title}\n${r.m.reason}\nScadenza: ${formatDeadline(r.p.data.deadline)}\n${appUrl()}/bandi/${r.p.id}\nFonte: ${r.p.data.sourceUrl}`,
-      )
-      .join("\n\n");
-    const html = emailLayout(
-      `<h2>${selected.length === 1 ? "Una nuova opportunità" : `${selected.length} nuove opportunità`} per la tua ditta</h2>${selected.map((r) => `<section style="padding:20px 0;border-bottom:1px solid #dce4d6"><h3>${escapeHtml(r.p.title)}</h3><p>${escapeHtml(r.m.reason)}</p><p>Scadenza: ${escapeHtml(formatDeadline(r.p.data.deadline))}</p><a href="${appUrl()}/bandi/${r.p.id}">Scopri il bando</a> · <a href="${escapeHtml(r.p.data.sourceUrl)}">Fonte originale</a></section>`).join("")}<p><a href="${appUrl()}/notifiche">Gestisci o sospendi gli alert</a></p>`,
+    const rendered = renderDigestContent(
+      selected.map((r) => ({
+        id: r.p.id,
+        title: r.p.title,
+        deadline: r.p.data.deadline,
+        sourceUrl: r.p.data.sourceUrl,
+        reason: r.m.reason,
+        assessment: presentMatch({
+          match: r.m,
+          publication: r.p.data,
+          aiRevision: r.p.aiRevision,
+          profileRevision: fingerprint(firm.profile),
+        }).assessment,
+      })),
+      appUrl(),
     );
     const content = {
       id: crypto.randomUUID(),
@@ -326,8 +328,7 @@ export async function queueDigests(now = new Date()) {
       dedupeKey: `digest:${firm.id}:${day}`,
       kind: "digest",
       subject: `Il tuo Radar: ${selected.length} ${selected.length === 1 ? "opportunità" : "opportunità"} da scoprire`,
-      html,
-      textBody: text,
+      ...rendered,
       items: selected.map((r) => ({
         id: r.p.id,
         revision: r.p.data.revision,
