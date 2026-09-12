@@ -44,14 +44,18 @@ it.each([
   },
 );
 
-it.each([false, true, 0, 1, "future_value", [], { allowed: true }])(
+it.each(
+  [false, true, 0, 1, "future_value", [], { allowed: true }].map((value) => ({ value })),
+)(
   "non converte il valore inatteso %j in autorizzazione o diniego",
-  (value) => {
+  ({ value }) => {
     const html = render([flag(value)]);
     expect(html).toContain("Valore non riconosciuto");
     expect(html).not.toContain("Ammesso.");
     expect(html).not.toContain("Non ammesso.");
     expect(html).toContain("Valore originale");
+    if (Array.isArray(value))
+      expect(html).toContain('<blockquote class="original-text">[]</blockquote>');
     expect(html).not.toMatch(
       /score|idone[ao]|pertinenza|opportunità aggiuntiv/i,
     );
@@ -80,9 +84,9 @@ it("mantiene letterali le note linguistiche senza eseguire HTML", () => {
   expect(html).not.toContain("<img");
 });
 
-it.each([undefined, []])(
+it.each([undefined, []].map((conditions) => ({ conditions })))(
   "non presenta dati assenti come un diniego",
-  (conditions) => {
+  ({ conditions }) => {
     const html = render(conditions);
     expect(html).toContain("Condizioni non disponibili nei dati acquisiti.");
     expect(html).not.toContain("Non ammesso");
