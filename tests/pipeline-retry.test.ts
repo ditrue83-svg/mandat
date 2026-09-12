@@ -280,7 +280,7 @@ it("propaga un errore di commit senza creare una cache di matching completato", 
 });
 
 it.each([true, false])(
-  "preserva una revisione manuale (%s) salvata mentre il retry AI è in corso",
+  "preserva un aggiornamento concorrente (%s) del match con token SQL cambiato",
   async (approved) => {
     vi.mocked(classify).mockRejectedValueOnce(
       new Error("Timeout iniziale locale"),
@@ -319,6 +319,74 @@ it.each([true, false])(
     expect(classify).toHaveBeenCalledTimes(2);
   },
 );
+
+it.each([true, false])(
+  "preserva i campi della route review (%s) senza modifiche a revision o updatedAt",
+  async (approved) => {
+    vi.mocked(classify).mockRejectedValueOnce(new Error("Timeout locale"));
+    await expect(run()).rejects.toThrow();
+    const [initial] = await storedMatches();
+    let started!: () => void;
+    let finish!: (value: typeof assessment) => void;
+    const waiting = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const response = new Promise<typeof assessment>((resolve) => {
+      finish = resolve;
+    });
+    vi.mocked(classify).mockImplementationOnce(async () => {
+      started();
+      return response;
+    });
+    const running = run();
+    await waiting;
+    // Exactly the five fields written by the deployed admin review route.
+    await db
+      .update(schema.matches)
+      .set({
+        approved,
+        eligible: approved,
+        score: approved ? Math.max(60, initial.score) : initial.score,
+        reviewedAt: now,
+        reviewNotes: "Revisione manuale: a",
+      })
+      .where(eq(schema.matches.id, initial.id));
+    const manual = await storedMatches();
+    expect(manual[0].updatedAt).toEqual(initial.updatedAt);
+    expect(manual[0].revision).toBe(initial.revision);
+    finish(assessment);
+    await running;
+    expect(await storedMatches()).toEqual(manual);
+    await run();
+    expect(classify).toHaveBeenCalledTimes(2);
+  },
+);
+
+it("rileva il nuovo reviewedAt anche nello stesso millisecondo senza altri campi cambiati", async () => {
+  await run();
+  await db.update(schema.matches).set({
+    revision: "older-reviewed-evaluation",
+    approved: true,
+    eligible: true,
+    reviewedAt: sql`'2026-09-12 12:00:00.123456+00'::timestamptz`,
+    reviewNotes: "Revisione manuale: a",
+  });
+  vi.mocked(classify).mockImplementationOnce(async () => {
+    await db.update(schema.matches).set({
+      reviewedAt: sql`'2026-09-12 12:00:00.123789+00'::timestamptz`,
+    });
+    return assessment;
+  });
+  const [before] = await storedMatches();
+  await run();
+  const [after] = await storedMatches();
+  expect(after).toEqual(before); // JavaScript dates alone cannot see the change.
+  const [exact] = await db
+    .select({ token: sql<string>`${schema.matches.reviewedAt}::text` })
+    .from(schema.matches);
+  expect(exact.token).toContain(".123789");
+  expect(classify).toHaveBeenCalledTimes(2);
+});
 
 it("non salva una risposta AI dopo l’annullamento del job", async () => {
   const controller = new AbortController();

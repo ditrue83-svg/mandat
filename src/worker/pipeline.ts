@@ -472,6 +472,7 @@ export async function enrichAndMatch(
         .select({
           ...getTableColumns(matches),
           updatedToken: sql<string>`${matches.updatedAt}::text`,
+          reviewedToken: sql<string | null>`${matches.reviewedAt}::text`,
         })
         .from(matches)
         .where(
@@ -552,7 +553,8 @@ export async function enrichAndMatch(
           ...set,
         });
         // A review or another assessment may have committed while AI ran.
-        // Replace only the exact row we read, preserving sub-ms timestamps.
+        // The deployed review route does not bump updatedAt or revision.
+        // Compare its fields too, retaining exact nullable review timestamps.
         if (existing)
           await insert.onConflictDoUpdate({
             target: [matches.companyId, matches.publicationId],
@@ -560,6 +562,11 @@ export async function enrichAndMatch(
             setWhere: and(
               eq(matches.revision, existing.revision),
               sql`${matches.updatedAt} = ${existing.updatedToken}::timestamptz`,
+              sql`${matches.reviewedAt} IS NOT DISTINCT FROM ${existing.reviewedToken}::timestamptz`,
+              sql`${matches.approved} IS NOT DISTINCT FROM ${existing.approved}::boolean`,
+              eq(matches.eligible, existing.eligible),
+              eq(matches.score, existing.score),
+              sql`${matches.reviewNotes} IS NOT DISTINCT FROM ${existing.reviewNotes}::text`,
             ),
           });
         else await insert.onConflictDoNothing();
