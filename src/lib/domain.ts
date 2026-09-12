@@ -78,6 +78,13 @@ export type Evidence = {
   quote: string;
   page?: number;
 };
+export type OriginalDescription = {
+  // Null means the source supplied an unlabelled string, not an inferred language.
+  language: "it" | "de" | "fr" | "en" | null;
+  // Source wording in its original language, with HTML converted to plain text.
+  text: string;
+  url: string;
+};
 export type Publication = {
   id: string;
   source: SourceId;
@@ -100,6 +107,8 @@ export type Publication = {
   sourceUrl: string;
   sourceUrls: string[];
   originalText: string;
+  // Optional for older records and sources that do not expose language variants.
+  originalDescriptions?: OriginalDescription[];
   summary: string | null;
   requirements: string[];
   evidence: Evidence[];

@@ -17,7 +17,7 @@ import {
   materialChange,
   possibleDuplicate,
 } from "@/lib/matching";
-import { classify, summarize } from "./ai";
+import { AiUnavailable, classify, summarize } from "./ai";
 import { queueChangeNotices } from "./notifications";
 import { attachFoglioPdf } from "@/sources/foglio";
 import { legacySimapRevision } from "@/sources/simap";
@@ -406,6 +406,7 @@ export async function enrichAndMatch(
     .select()
     .from(companies)
     .where(isNull(companies.disabledAt));
+  let failedAnalyses = 0;
   for (const row of rows) {
     options.signal?.throwIfAborted();
     if (
@@ -450,6 +451,8 @@ export async function enrichAndMatch(
         aiReady = true;
         await resolveIssue(`ai:${p.id}`);
       } catch (e) {
+        options.signal?.throwIfAborted();
+        if (!(e instanceof AiUnavailable)) failedAnalyses++;
         await recordIssue(
           `ai:${p.id}`,
           "Analisi AI sospesa",
@@ -466,7 +469,10 @@ export async function enrichAndMatch(
       const preliminary = preliminaryMatch(p, firm.profile, options.now);
       const revision = `${p.revision}:${profileRevision}:${aiReady ? "ready" : "pending"}:${process.env.LLM_MODEL ?? "default"}:${preliminary.eligible}`;
       const [existing] = await db
-        .select()
+        .select({
+          ...getTableColumns(matches),
+          updatedToken: sql<string>`${matches.updatedAt}::text`,
+        })
         .from(matches)
         .where(
           and(eq(matches.companyId, firm.id), eq(matches.publicationId, p.id)),
@@ -493,6 +499,8 @@ export async function enrichAndMatch(
           needsReview = ai.needsReview;
           await resolveIssue(`match-ai:${firm.id}:${p.id}`);
         } catch (e) {
+          options.signal?.throwIfAborted();
+          if (!(e instanceof AiUnavailable)) failedAnalyses++;
           uncertain = true;
           retry = true;
           await recordIssue(
@@ -537,19 +545,32 @@ export async function enrichAndMatch(
           fingerprint(currentFirm.profile) !== profileRevision
         )
           return;
-        await tx
-          .insert(matches)
-          .values({
-            id: crypto.randomUUID(),
-            companyId: firm.id,
-            publicationId: p.id,
-            ...set,
-          })
-          .onConflictDoUpdate({
+        const insert = tx.insert(matches).values({
+          id: crypto.randomUUID(),
+          companyId: firm.id,
+          publicationId: p.id,
+          ...set,
+        });
+        // A review or another assessment may have committed while AI ran.
+        // Replace only the exact row we read, preserving sub-ms timestamps.
+        if (existing)
+          await insert.onConflictDoUpdate({
             target: [matches.companyId, matches.publicationId],
             set,
+            setWhere: and(
+              eq(matches.revision, existing.revision),
+              sql`${matches.updatedAt} = ${existing.updatedToken}::timestamptz`,
+            ),
           });
+        else await insert.onConflictDoNothing();
       });
     }
   }
+  // Persist successful assessments and review states before failing the job.
+  // pg-boss can then retry only uncached work with its configured backoff.
+  // Budget/configuration/input suspensions remain pending for a later sweep.
+  if (failedAnalyses)
+    throw new Error(
+      `Analisi AI da ritentare: ${failedAnalyses} elaborazioni non riuscite.`,
+    );
 }

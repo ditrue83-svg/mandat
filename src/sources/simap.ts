@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Publication } from "@/lib/domain";
+import type { OriginalDescription, Publication } from "@/lib/domain";
 import {
   classifySectors,
   fetchOfficial,
@@ -50,6 +50,18 @@ const record = (v: unknown) =>
   v && typeof v === "object" && !Array.isArray(v)
     ? (v as Record<string, unknown>)
     : {};
+function originalDescriptions(value: unknown, url: string): OriginalDescription[] {
+  if (typeof value === "string") {
+    const text = plainText(value);
+    return text ? [{ language: null, text, url }] : [];
+  }
+  const descriptions = record(value);
+  return (["it", "de", "fr", "en"] as const).flatMap((language) => {
+    const raw = descriptions[language];
+    const text = typeof raw === "string" ? plainText(raw) : "";
+    return text ? [{ language, text, url }] : [];
+  });
+}
 const legacyRevisions = new WeakMap<Publication, string>();
 // Only a freshly parsed response can prove equality with an old { p, d } hash.
 // Keep that proof out of serialized publications and customer-facing data.
@@ -157,6 +169,10 @@ export function normalizeSimap(
     sourceUrl,
     sourceUrls: [sourceUrl],
     originalText: [title, description, ...requirements].join("\n\n"),
+    originalDescriptions: originalDescriptions(
+      proc.orderDescription,
+      `https://www.simap.ch/api/publications/v1/project/${p.id}/publication-details/${p.publicationId}`,
+    ),
     summary: null,
     requirements: [],
     evidence: [

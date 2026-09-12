@@ -806,7 +806,9 @@ describe("AI: budget e aggiornamenti concorrenti", () => {
         .from(schema.publications)
         .where(eq(schema.publications.id, publication.id));
 
-      await enrichAndMatch({ publicationId: publication.id });
+      await expect(
+        enrichAndMatch({ publicationId: publication.id }),
+      ).rejects.toThrow("Analisi AI da ritentare");
 
       expect(complete).toHaveBeenCalledTimes(1);
       const usages = await db
