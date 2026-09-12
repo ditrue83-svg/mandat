@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type {
   OriginalDescription,
+  OriginalTitle,
   Publication,
   SourceCondition,
 } from "@/lib/domain";
@@ -68,6 +69,16 @@ function originalDescriptions(
     const text = typeof raw === "string" ? plainText(raw) : "";
     return text ? [{ language, text, url }] : [];
   });
+}
+function originalTitles(
+  value: unknown,
+  url: string,
+  path: "project-info.title" | "entry.title",
+): OriginalTitle[] {
+  return originalDescriptions(value, url).map((title) => ({
+    ...title,
+    path: title.language ? `${path}.${title.language}` : path,
+  }));
 }
 function sourceConditions(
   terms: Record<string, unknown>,
@@ -140,6 +151,11 @@ export function normalizeSimap(
   if (!title) throw new Error("Bando simap privo di titolo");
   const sourceUrl = `https://www.simap.ch/it/project-detail/${p.id}`;
   const detailUrl = `https://www.simap.ch/api/publications/v1/project/${p.id}/publication-details/${p.publicationId}`;
+  const detailTitles = originalTitles(
+    info.title,
+    detailUrl,
+    "project-info.title",
+  );
   const description = plainText(translation(proc.orderDescription));
   const requirements = [
     translation(terms.termsNote),
@@ -214,6 +230,11 @@ export function normalizeSimap(
       proc.orderDescription,
       detailUrl,
     ),
+    originalTitles: detailTitles.length
+      ? detailTitles
+      : // The entry comes from search, or from the header during refresh.
+        // Its request URL is unavailable; link to the public project page.
+        originalTitles(p.title, sourceUrl, "entry.title"),
     sourceConditions: sourceConditions(terms, proc, detailUrl),
     summary: null,
     requirements: [],

@@ -85,6 +85,10 @@ export type OriginalDescription = {
   text: string;
   url: string;
 };
+export type OriginalTitle = OriginalDescription & {
+  // Identifies the source field, including its translation key when present.
+  path: string;
+};
 export type SourceCondition = {
   // Exact source field, including the translation key when present.
   path: string;
@@ -117,6 +121,7 @@ export type Publication = {
   originalText: string;
   // Optional for older records and sources that do not expose language variants.
   originalDescriptions?: OriginalDescription[];
+  originalTitles?: OriginalTitle[];
   // Source context for review, separate from the requested service and AI text.
   sourceConditions?: SourceCondition[];
   summary: string | null;
