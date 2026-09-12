@@ -380,8 +380,9 @@ export async function summarize(p: Publication, transport?: AiTransport) {
     p,
   );
 }
+const MATCH_SOURCE_LIMIT = 18000;
 function matchPassages(p: Pick<Publication, "originalText">) {
-  let originalText = p.originalText.slice(0, 18000);
+  let originalText = p.originalText.slice(0, MATCH_SOURCE_LIMIT);
   if (/[\uD800-\uDBFF]$/u.test(originalText))
     originalText = originalText.slice(0, -1);
   const passages = sourcePassages({ originalText }, 240);
@@ -519,6 +520,16 @@ export async function classify(
   profile: CompanyProfile,
   transport?: AiTransport,
 ) {
+  // An unread tail may change the commissioned work or its exclusions. This
+  // is a completed review case, not a temporary provider error to retry.
+  if (p.originalText.length > MATCH_SOURCE_LIMIT)
+    return {
+      score: 0,
+      reason:
+        "Il testo disponibile non è stato esaminato integralmente. La pertinenza richiede una verifica del documento completo.",
+      uncertain: true,
+      needsReview: true,
+    };
   const scopeRequest = buildScopeRequest(p);
   const scope = validateScope(
     await infer(

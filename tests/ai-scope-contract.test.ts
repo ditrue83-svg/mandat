@@ -153,6 +153,77 @@ it("ferma lo scoring dopo uno scope generico e registra un solo consumo, senza e
   });
 });
 
+it.each([
+  {
+    prefix: "Pulizia degli uffici comunali.",
+    tail: " La pulizia è affidata ad altri; questa gara riguarda soltanto la fornitura di detergenti.",
+    score: 90,
+  },
+  {
+    prefix: "Fornitura di detergenti per gli uffici comunali.",
+    tail: " L'offerente deve anche eseguire il servizio regolare di pulizia degli uffici.",
+    score: 0,
+  },
+])(
+  "non accetta un giudizio certo $score quando la parte non letta cambia le prestazioni",
+  async ({ prefix, tail, score }) => {
+    const source = {
+      ...publication,
+      originalText: prefix.padEnd(18000, " ") + tail,
+    };
+    const complete = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({ scope: "specific", servicePassageId: "s1" }),
+      )
+      .mockResolvedValueOnce(
+        response({ score, uncertain: false, servicePassageId: "s1" }),
+      );
+    const result = await classify(source, demoProfile, { complete });
+    expect(result).toMatchObject({
+      score: 0,
+      uncertain: true,
+      needsReview: true,
+    });
+    expect(result.reason).toContain("non è stato esaminato integralmente");
+    expect(result.reason).not.toContain("pertinenza stimata");
+    expect(complete).not.toHaveBeenCalled();
+    expect(await db.select().from(schema.aiUsage)).toHaveLength(0);
+  },
+);
+
+it("invia a revisione un testo lungo con prefisso vuoto, senza errore da ritentare", async () => {
+  const complete = vi.fn();
+  const result = await classify(
+    { ...publication, originalText: " ".repeat(18000) + "Pulizia degli uffici." },
+    demoProfile,
+    { complete },
+  );
+  expect(result).toMatchObject({ score: 0, uncertain: true, needsReview: true });
+  expect(complete).not.toHaveBeenCalled();
+  expect(await db.select().from(schema.aiUsage)).toHaveLength(0);
+});
+
+it("valuta normalmente un testo interamente leggibile di esattamente 18.000 caratteri", async () => {
+  const complete = vi
+    .fn()
+    .mockResolvedValueOnce(response({ scope: "specific", servicePassageId: "s1" }))
+    .mockResolvedValueOnce(
+      response({ score: 85, uncertain: false, servicePassageId: "s1" }),
+    );
+  const result = await classify(
+    {
+      ...publication,
+      originalText: "Pulizia degli uffici comunali.".padEnd(18000, " "),
+    },
+    demoProfile,
+    { complete },
+  );
+  expect(result).toMatchObject({ score: 85, uncertain: false, needsReview: false });
+  expect(complete).toHaveBeenCalledTimes(2);
+  expect(await db.select().from(schema.aiUsage)).toHaveLength(2);
+});
+
 it.each([false, true])(
   "chiama lo scoring soltanto dopo scope specifico e conserva needsReview=%s",
   async (uncertain) => {
