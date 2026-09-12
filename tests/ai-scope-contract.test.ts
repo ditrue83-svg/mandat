@@ -153,6 +153,68 @@ it("ferma lo scoring dopo uno scope generico e registra un solo consumo, senza e
   });
 });
 
+it.each(["Puliamo finestre e vetrate.", "Realizziamo impianti elettrici."])(
+  "non lascia al profilo %s la decisione su una verifica dell’oggetto già aperta",
+  async (activities) => {
+    const complete = vi.fn();
+    const result = await classify(
+      {
+        ...publication,
+        sourceScopeReview: {
+          status: "required",
+          kind: "conflicting",
+          token: "00000000-0000-4000-8000-000000000001",
+          sourceRevision: "source-v1",
+          updatedAt: "2026-09-12T10:00:00Z",
+        },
+      },
+      { ...demoProfile, activities },
+      { complete },
+    );
+    expect(result).toMatchObject({
+      score: 0,
+      uncertain: true,
+      needsReview: true,
+    });
+    expect(result.reason).toContain("verifica della fonte");
+    expect(result.reason).not.toContain("pertinenza stimata");
+    expect(complete).not.toHaveBeenCalled();
+    expect(await db.select().from(schema.aiUsage)).toHaveLength(0);
+  },
+);
+
+it("una verifica dell’oggetto risolta non approva il bando e richiede comunque il confronto AI", async () => {
+  const complete = vi
+    .fn()
+    .mockResolvedValueOnce(
+      response({ scope: "specific", servicePassageId: "s1" }),
+    )
+    .mockResolvedValueOnce(
+      response({ score: 0, uncertain: false, servicePassageId: "s1" }),
+    );
+  const result = await classify(
+    {
+      ...publication,
+      sourceScopeReview: {
+        status: "resolved",
+        kind: "conflicting",
+        token: "00000000-0000-4000-8000-000000000002",
+        sourceRevision: "source-v1",
+        updatedAt: "2026-09-12T10:01:00Z",
+      },
+    },
+    demoProfile,
+    { complete },
+  );
+  expect(result).toMatchObject({
+    score: 0,
+    uncertain: false,
+    needsReview: false,
+  });
+  expect(complete).toHaveBeenCalledTimes(2);
+  expect(await db.select().from(schema.aiUsage)).toHaveLength(2);
+});
+
 it.each([
   {
     prefix: "Pulizia degli uffici comunali.",
@@ -195,11 +257,18 @@ it.each([
 it("invia a revisione un testo lungo con prefisso vuoto, senza errore da ritentare", async () => {
   const complete = vi.fn();
   const result = await classify(
-    { ...publication, originalText: " ".repeat(18000) + "Pulizia degli uffici." },
+    {
+      ...publication,
+      originalText: " ".repeat(18000) + "Pulizia degli uffici.",
+    },
     demoProfile,
     { complete },
   );
-  expect(result).toMatchObject({ score: 0, uncertain: true, needsReview: true });
+  expect(result).toMatchObject({
+    score: 0,
+    uncertain: true,
+    needsReview: true,
+  });
   expect(complete).not.toHaveBeenCalled();
   expect(await db.select().from(schema.aiUsage)).toHaveLength(0);
 });
@@ -207,7 +276,9 @@ it("invia a revisione un testo lungo con prefisso vuoto, senza errore da ritenta
 it("valuta normalmente un testo interamente leggibile di esattamente 18.000 caratteri", async () => {
   const complete = vi
     .fn()
-    .mockResolvedValueOnce(response({ scope: "specific", servicePassageId: "s1" }))
+    .mockResolvedValueOnce(
+      response({ scope: "specific", servicePassageId: "s1" }),
+    )
     .mockResolvedValueOnce(
       response({ score: 85, uncertain: false, servicePassageId: "s1" }),
     );
@@ -219,7 +290,11 @@ it("valuta normalmente un testo interamente leggibile di esattamente 18.000 cara
     demoProfile,
     { complete },
   );
-  expect(result).toMatchObject({ score: 85, uncertain: false, needsReview: false });
+  expect(result).toMatchObject({
+    score: 85,
+    uncertain: false,
+    needsReview: false,
+  });
   expect(complete).toHaveBeenCalledTimes(2);
   expect(await db.select().from(schema.aiUsage)).toHaveLength(2);
 });

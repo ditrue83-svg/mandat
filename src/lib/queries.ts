@@ -5,6 +5,12 @@ import { fingerprint } from "@/sources/common";
 import { getDemoOpportunities } from "./demo";
 import type { Opportunity, RadarStatus, Viewer } from "./domain";
 import { presentMatch } from "./match-presentation";
+import { preliminaryMatch } from "./matching";
+import {
+  hasSourceScopeReview,
+  isMatchContentCurrent,
+  isMatchRevisionCurrent,
+} from "./source-scope-review";
 
 export async function getRadarStatus(
   viewer: Viewer,
@@ -15,8 +21,10 @@ export async function getRadarStatus(
   const rows = await db
     .select({
       // Matches follow corrected content; the column retains the source revision.
-      publicationRevision: sql<string>`${publications.data}->>'revision'`,
+      publication: publications.data,
       matchRevision: matches.revision,
+      approved: matches.approved,
+      reviewedAt: matches.reviewedAt,
     })
     .from(publications)
     .leftJoin(
@@ -44,9 +52,17 @@ export async function getRadarStatus(
   // review. Only missing or invalidated assessments count as waiting here.
   const pendingCount = rows.filter(
     (row) =>
-      !row.matchRevision?.startsWith(
-        `${row.publicationRevision}:${profileRevision}:`,
-      ) || row.matchRevision.endsWith(":profile-update"),
+      !(
+        hasSourceScopeReview(row.publication)
+          ? isMatchContentCurrent
+          : isMatchRevisionCurrent
+      )({
+        revision: row.matchRevision,
+        publication: row.publication,
+        profileRevision,
+        manuallyReviewed:
+          row.approved === false || (row.approved === true && !!row.reviewedAt),
+      }),
   ).length;
   if (!pendingCount) return { state: "ready", pendingCount };
   const [heartbeat] = await db
@@ -70,6 +86,8 @@ export async function listOpportunities(
   options: { includeInactive?: boolean } = {},
 ): Promise<Opportunity[]> {
   if (viewer.demo) return getDemoOpportunities();
+  const now = new Date();
+  const profileRevision = fingerprint(viewer.profile);
   const rows = await getDb()
     .select({ publication: publications, match: matches, feedback })
     .from(matches)
@@ -86,15 +104,15 @@ export async function listOpportunities(
         eq(matches.companyId, viewer.companyId),
         options.includeInactive
           ? eq(feedback.saved, true)
-          : eq(matches.eligible, true),
+          : or(
+              eq(matches.eligible, true),
+              sql`${publications.data}->'sourceScopeReview'->>'status' = 'required'`,
+            ),
         options.includeInactive ? undefined : eq(publications.status, "open"),
-        lte(publications.visibleAt, new Date()),
+        lte(publications.visibleAt, now),
         options.includeInactive
           ? undefined
-          : or(
-              isNull(publications.deadline),
-              gt(publications.deadline, new Date()),
-            ),
+          : or(isNull(publications.deadline), gt(publications.deadline, now)),
       ),
     )
     .orderBy(desc(matches.score));
@@ -113,6 +131,14 @@ export async function listOpportunities(
         process.env.FOGLIO_REUSE_CONFIRMED !== "true"
       )
         return [];
+      const preliminary = hasSourceScopeReview(r.publication.data)
+        ? preliminaryMatch(r.publication.data, viewer.profile, now)
+        : undefined;
+      if (
+        !options.includeInactive &&
+        (r.match.approved === false || (preliminary && !preliminary.eligible))
+      )
+        return [];
       seen.add(r.publication.canonicalId);
       return [
         {
@@ -123,7 +149,8 @@ export async function listOpportunities(
             match: r.match,
             publication: r.publication.data,
             aiRevision: r.publication.aiRevision,
-            profileRevision: fingerprint(viewer.profile),
+            profileRevision,
+            preliminary,
           }),
           saved: r.feedback?.saved ?? false,
           dismissed: r.feedback?.dismissed ?? false,
@@ -177,6 +204,9 @@ export async function getOpportunity(
       publication: row.p.data,
       aiRevision: row.p.aiRevision,
       profileRevision: fingerprint(viewer.profile),
+      preliminary: hasSourceScopeReview(row.p.data)
+        ? preliminaryMatch(row.p.data, viewer.profile)
+        : undefined,
     }),
     saved: row.f?.saved ?? false,
     dismissed: row.f?.dismissed ?? false,

@@ -62,6 +62,30 @@ const run = () => enrichAndMatch({ publicationId: publication.id, now });
 const storedMatches = () =>
   db.select().from(schema.matches).orderBy(schema.matches.companyId);
 const storedIssues = () => db.select().from(schema.issues);
+const sourceReview = {
+  status: "required" as const,
+  kind: "conflicting" as const,
+  token: "00000000-0000-4000-8000-000000000001",
+  sourceRevision: publication.revision,
+  updatedAt: "2026-09-12T10:00:00Z",
+};
+async function setSourceReview(
+  review:
+    | typeof sourceReview
+    | (Omit<typeof sourceReview, "status"> & { status: "resolved" }),
+) {
+  const [row] = await db
+    .select()
+    .from(schema.publications)
+    .where(eq(schema.publications.id, publication.id));
+  await db
+    .update(schema.publications)
+    .set({
+      data: { ...row.data, sourceScopeReview: review },
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.publications.id, publication.id));
+}
 
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), "mandat-ai-retry-"));
@@ -98,6 +122,229 @@ beforeEach(async () => {
 afterAll(async () => {
   await pg.close();
   await rm(directory, { recursive: true, force: true });
+});
+
+it("mantiene lo stesso dubbio sulla fonte per due ditte senza chiamate AI o retry", async () => {
+  await db
+    .update(schema.companies)
+    .set({
+      onboardedAt: now,
+      profile: { ...profile, activities: "Pulizia di vetrate e facciate." },
+    })
+    .where(eq(schema.companies.id, "b"));
+  await setSourceReview(sourceReview);
+  await run();
+  const records = await storedMatches();
+  expect(records).toHaveLength(2);
+  for (const match of records) {
+    expect(match).toMatchObject({ score: 0, eligible: true, approved: null });
+    expect(match.reviewNotes).toBeTruthy();
+    expect(match.reason).toContain("verifica della fonte");
+    expect(match.revision).toContain(`:source-scope:${sourceReview.token}`);
+    expect(match.revision).not.toMatch(/:retry$/);
+  }
+  expect(summarize).not.toHaveBeenCalled();
+  expect(classify).not.toHaveBeenCalled();
+  await run();
+  expect(await storedMatches()).toEqual(records);
+});
+
+it("il blocco sulla fonte non annulla le esclusioni dichiarate dalla ditta", async () => {
+  await db
+    .update(schema.companies)
+    .set({
+      profile: { ...profile, exclusions: [publication.title] },
+    })
+    .where(eq(schema.companies.id, "a"));
+  await setSourceReview(sourceReview);
+  await run();
+  const [match] = await storedMatches();
+  expect(match).toMatchObject({ eligible: false, score: 0, reviewNotes: null });
+  expect(match.reason).toContain("esclusa dal tuo profilo");
+  expect(classify).not.toHaveBeenCalled();
+});
+
+it.each([true, false, "legacy-negative"] as const)(
+  "conserva la decisione manuale %s quando cambia solo la verifica della fonte",
+  async (decision) => {
+    await run();
+    const approved = decision === true;
+    await db.update(schema.matches).set({
+      approved,
+      eligible: approved,
+      reviewedAt: decision === "legacy-negative" ? null : now,
+      reviewNotes: "Revisione manuale di prova",
+    });
+    const before = await storedMatches();
+    vi.mocked(classify).mockClear();
+    await setSourceReview(sourceReview);
+    await run();
+    expect(await storedMatches()).toEqual(before);
+    await setSourceReview({
+      ...sourceReview,
+      status: "resolved",
+      token: "00000000-0000-4000-8000-000000000002",
+    });
+    await run();
+    expect(await storedMatches()).toEqual(before);
+    expect(classify).not.toHaveBeenCalled();
+  },
+);
+
+it("rivaluta soltanto la cache automatica dopo la risoluzione esplicita, senza approvare il risultato", async () => {
+  await setSourceReview(sourceReview);
+  await run();
+  const [before] = await storedMatches();
+  await setSourceReview({
+    ...sourceReview,
+    status: "resolved",
+    token: "00000000-0000-4000-8000-000000000002",
+  });
+  vi.mocked(classify).mockResolvedValueOnce({ ...assessment, score: 0 });
+  await run();
+  const [after] = await storedMatches();
+  expect(after.id).toBe(before.id);
+  expect(after).toMatchObject({ eligible: false, score: 0, approved: null });
+  expect(after.revision).toContain("00000000-0000-4000-8000-000000000002");
+  expect(summarize).toHaveBeenCalledTimes(1);
+  expect(classify).toHaveBeenCalledTimes(1);
+});
+
+it("non salva una classificazione iniziata prima della segnalazione del dubbio sulla fonte", async () => {
+  vi.mocked(classify).mockImplementationOnce(async () => {
+    await setSourceReview(sourceReview);
+    return assessment;
+  });
+  await run();
+  expect(await storedMatches()).toHaveLength(0);
+  await run();
+  const [after] = await storedMatches();
+  expect(after).toMatchObject({ score: 0, eligible: true, approved: null });
+  expect(classify).toHaveBeenCalledTimes(1);
+});
+
+it("non sovrascrive una segnalazione arrivata durante la sintesi", async () => {
+  vi.mocked(summarize).mockImplementationOnce(async () => {
+    await setSourceReview(sourceReview);
+    return summary;
+  });
+  await run();
+  const [current] = await db.select().from(schema.publications);
+  expect(current.data.sourceScopeReview).toEqual(sourceReview);
+  expect(current.data.summary).toBeNull();
+  expect(await storedMatches()).toHaveLength(0);
+  expect(classify).not.toHaveBeenCalled();
+});
+
+it("conserva il token della verifica anche se updatedAt coincide con la lettura precedente", async () => {
+  const [before] = await db
+    .select({
+      updatedToken: sql<string>`${schema.publications.updatedAt}::text`,
+    })
+    .from(schema.publications);
+  vi.mocked(summarize).mockImplementationOnce(async () => {
+    await setSourceReview(sourceReview);
+    await db.update(schema.publications).set({
+      updatedAt: sql`${before.updatedToken}::timestamptz`,
+    });
+    return summary;
+  });
+  await run();
+  const [current] = await db.select().from(schema.publications);
+  expect(current.data.sourceScopeReview).toEqual(sourceReview);
+  expect(current.data.summary).toBeNull();
+  expect(await storedMatches()).toHaveLength(0);
+});
+
+it("una rettifica della fonte conserva il dubbio richiesto con la sua origine precedente", async () => {
+  await setSourceReview(sourceReview);
+  await storePublication({
+    ...publication,
+    revision: "local-source-v2",
+    originalText: "Fonte aggiornata, non ancora verificata.",
+  });
+  const [current] = await db.select().from(schema.publications);
+  expect(current.revision).toBe("local-source-v2");
+  expect(current.data.sourceScopeReview).toEqual(sourceReview);
+});
+
+it("l’importazione conserva una segnalazione registrata dopo la lettura iniziale della fonte", async () => {
+  const transaction = db.transaction.bind(db);
+  const hook = vi
+    .spyOn(db, "transaction")
+    .mockImplementationOnce(async (...args) => {
+      await setSourceReview(sourceReview);
+      return transaction(...args);
+    });
+  try {
+    await storePublication({ ...publication, revision: "local-source-v2" });
+  } finally {
+    hook.mockRestore();
+  }
+  const [current] = await db.select().from(schema.publications);
+  expect(current.data.sourceScopeReview).toEqual(sourceReview);
+  expect(current.revision).toBe("local-source-v2");
+});
+
+it("trasmette una verifica ancora aperta alla rettifica della stessa gara con nuovo identificativo", async () => {
+  await setSourceReview(sourceReview);
+  const revised = {
+    ...publication,
+    id: "local-ai-retry-new-notice",
+    externalId: "local-ai-retry-new-notice",
+    revision: "local-source-v2",
+    publishedAt: "2026-09-13T00:00:00Z",
+  };
+  await storePublication(revised);
+  const [current] = await db
+    .select()
+    .from(schema.publications)
+    .where(eq(schema.publications.id, revised.id));
+  expect(current.data.sourceScopeReview).toEqual(sourceReview);
+});
+
+it("propaga il dubbio dalla più recente edizione letta nella transazione", async () => {
+  const middle = {
+    ...publication,
+    id: "middle-notice",
+    externalId: "middle-notice",
+    revision: "middle-revision",
+    publishedAt: "2026-09-13T00:00:00Z",
+  };
+  const middleReview = { ...sourceReview, sourceRevision: middle.revision };
+  const latest = {
+    ...publication,
+    id: "latest-notice",
+    externalId: "latest-notice",
+    revision: "latest-revision",
+    publishedAt: "2026-09-14T00:00:00Z",
+  };
+  const transaction = db.transaction.bind(db);
+  const hook = vi
+    .spyOn(db, "transaction")
+    .mockImplementationOnce(async (...args) => {
+      // The newer predecessor did not exist when storePublication first read
+      // cousins. Its source review must still reach the latest edition.
+      await storePublication(middle);
+      await db
+        .update(schema.publications)
+        .set({
+          data: { ...middle, sourceScopeReview: middleReview },
+        })
+        .where(eq(schema.publications.id, middle.id));
+      return transaction(...args);
+    });
+  try {
+    await storePublication(latest);
+  } finally {
+    hook.mockRestore();
+  }
+  const [current] = await db
+    .select()
+    .from(schema.publications)
+    .where(eq(schema.publications.id, latest.id));
+  expect(current.status).toBe("open");
+  expect(current.data.sourceScopeReview).toEqual(middleReview);
 });
 
 it("persiste lo stato pending dopo un errore di sintesi e recupera senza riusare una falsa cache", async () => {

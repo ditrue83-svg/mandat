@@ -15,7 +15,7 @@ import {
   feedback,
   session,
 } from "@/db/schema";
-import { automationGate } from "./matching";
+import { automationGate, preliminaryMatch } from "./matching";
 import type { CompanyProfile } from "./domain";
 import { emailLayout, escapeHtml, sendMail } from "./mail";
 import { appUrl } from "./config";
@@ -23,6 +23,7 @@ import { HttpError } from "./viewer";
 import { DateTime } from "luxon";
 import { fingerprint } from "@/sources/common";
 import { presentMatch } from "./match-presentation";
+import { hasSourceScopeReview } from "./source-scope-review";
 export async function provisionInvite(
   email: string,
   name: string,
@@ -178,6 +179,7 @@ export async function adminSnapshot(demo: boolean) {
         revision: matches.revision,
         reviewNotes: matches.reviewNotes,
         aiRevision: publications.aiRevision,
+        sourceRevision: publications.revision,
         reviewRequired: publications.data,
       })
       .from(matches)
@@ -263,10 +265,18 @@ export async function adminSnapshot(demo: boolean) {
         publication: r.reviewRequired,
         aiRevision: r.aiRevision,
         profileRevision: fingerprint(r.company),
+        preliminary: hasSourceScopeReview(r.reviewRequired)
+          ? preliminaryMatch(r.reviewRequired, r.company)
+          : undefined,
       }),
       approved: r.approved,
       reviewed: !!r.reviewedAt,
-      reviewRequired: r.reviewRequired.reviewRequired,
+      reviewRequired:
+        r.reviewRequired.reviewRequired ||
+        hasSourceScopeReview(r.reviewRequired),
+      sourceScopeReview: r.reviewRequired.sourceScopeReview,
+      sourceRevision: r.sourceRevision,
+      contentRevision: r.reviewRequired.revision,
       reviewReasons: r.reviewRequired.reviewReasons,
       summary: r.reviewRequired.summary,
       deadline: r.reviewRequired.deadline,
@@ -274,6 +284,7 @@ export async function adminSnapshot(demo: boolean) {
       location: r.reviewRequired.location,
       sourceUrl: r.reviewRequired.sourceUrl,
       sourceConditions: r.reviewRequired.sourceConditions ?? [],
+      originalTitles: r.reviewRequired.originalTitles ?? [],
     })),
     issues: problem.map((i) => ({
       id: i.id,

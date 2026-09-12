@@ -4,6 +4,10 @@ import { getDb } from "@/db";
 import { aiUsage, settings } from "@/db/schema";
 import type { CompanyProfile, Publication } from "@/lib/domain";
 import { SECTORS } from "@/lib/domain";
+import {
+  hasSourceScopeReview,
+  sourceScopeReviewReason,
+} from "@/lib/source-scope-review";
 import { DateTime } from "luxon";
 const summarySchema = z.object({
   summary: z.string().min(20).max(1800),
@@ -416,7 +420,10 @@ export function buildScopeRequest(p: Pick<Publication, "originalText">) {
     passages,
   };
 }
-export function validateScope(input: unknown, p: Pick<Publication, "originalText">) {
+export function validateScope(
+  input: unknown,
+  p: Pick<Publication, "originalText">,
+) {
   const result = scopeSchema.parse(input);
   const passage = matchPassages(p).find(
     ({ id }) => id === result.servicePassageId,
@@ -468,7 +475,10 @@ export function buildMatchRequest(p: Publication, profile: CompanyProfile) {
     passages,
   };
 }
-export function validateMatch(input: unknown, p: Pick<Publication, "originalText">) {
+export function validateMatch(
+  input: unknown,
+  p: Pick<Publication, "originalText">,
+) {
   const result = matchSchema.parse(input);
   const passage = matchPassages(p).find(
     ({ id }) => id === result.servicePassageId,
@@ -485,9 +495,7 @@ export function validateMatch(input: unknown, p: Pick<Publication, "originalText
   };
 }
 function activityTerm(word: string) {
-  return word.length >= 5 && /[aeiou]$/u.test(word)
-    ? word.slice(0, -1)
-    : word;
+  return word.length >= 5 && /[aeiou]$/u.test(word) ? word.slice(0, -1) : word;
 }
 // Ignore grammar, broad contract roles and generic context: their overlap is
 // not enough to link a specific activity. This is only a negative guard, not
@@ -501,16 +509,20 @@ const genericActivityTerms = new Set(
     "offriamo occupiamo ditta azienda impresa edificio edifici locale spazio spazi manutenzione " +
     "impianto realizzazione esecuzione fornitura installazione progettazione gestione cura piccolo grande edile edili edilizia " +
     "elettrico elettriche idraulico idrauliche termico termiche meccanico meccaniche tecnico tecniche industriale"
-  ).split(" ").map(activityTerm),
+  )
+    .split(" ")
+    .map(activityTerm),
 );
 function descriptiveActivities(text: string) {
-  const words = text
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .match(/\p{L}+/gu) ?? [];
+  const words =
+    text
+      .normalize("NFKD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase()
+      .match(/\p{L}+/gu) ?? [];
   return new Set(
-    words.filter((word) => word.length >= 3)
+    words
+      .filter((word) => word.length >= 3)
       .map(activityTerm)
       .filter((word) => !genericActivityTerms.has(word)),
   );
@@ -520,6 +532,15 @@ export async function classify(
   profile: CompanyProfile,
   transport?: AiTransport,
 ) {
+  // A recorded doubt about the commissioned work belongs to the source,
+  // not to the company. Do not ask a scorer to override this review state.
+  if (hasSourceScopeReview(p))
+    return {
+      score: 0,
+      reason: sourceScopeReviewReason,
+      uncertain: true,
+      needsReview: true,
+    };
   // An unread tail may change the commissioned work or its exclusions. This
   // is a completed review case, not a temporary provider error to retry.
   if (p.originalText.length > MATCH_SOURCE_LIMIT)
@@ -564,8 +585,9 @@ export async function classify(
     // validateMatch already checked membership in this exact source window.
     const passage = request.passages.find(({ id }) => id === servicePassageId)!;
     const declared = descriptiveActivities(profile.activities);
-    const shared = [...descriptiveActivities(passage.text)]
-      .some((term) => declared.has(term));
+    const shared = [...descriptiveActivities(passage.text)].some((term) =>
+      declared.has(term),
+    );
     if (!shared)
       return {
         score: 0,

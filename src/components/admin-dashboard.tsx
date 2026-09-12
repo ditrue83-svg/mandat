@@ -5,6 +5,7 @@ import { Check, Mail, ShieldCheck, ArrowUpRight } from "lucide-react";
 import { Shell } from "./shell";
 import { MatchNote } from "./match-note";
 import { SourceConditions } from "./source-conditions";
+import { SourceScopeReviewControls } from "./source-scope-review-controls";
 import type { Viewer } from "@/lib/domain";
 import type { AdminSnapshot } from "@/lib/admin";
 import { SECTORS, formatDate } from "@/lib/domain";
@@ -216,11 +217,18 @@ export function AdminDashboard({
           un campione di scartate per ogni settore.
         </p>
         {data.matches
-          .filter(
-            (m) =>
+          .filter((m) => {
+            // Keep the stored eligibility for diagnostics; the source barrier
+            // changes what is a candidate now, including cached AI negatives.
+            const candidate =
+              m.sourceScopeReview?.status === "required"
+                ? m.assessment === "uncertain" && m.approved !== false
+                : m.eligible;
+            return (
               reviewFilter === "tutte" ||
-              (reviewFilter === "scartate" ? !m.eligible : m.eligible),
-          )
+              (reviewFilter === "scartate" ? !candidate : candidate)
+            );
+          })
           .map((m) => (
             <div key={m.id} className="admin-review">
               <div className="admin-review-heading">
@@ -233,12 +241,16 @@ export function AdminDashboard({
                 <strong>{m.company}</strong>
               </p>
               <MatchNote assessment={m.assessment} reason={m.reason} />
-              {m.reviewRequired && (
+              {m.reviewRequired && m.reviewReasons.length > 0 && (
                 <div className="notice">{m.reviewReasons.join("; ")}</div>
               )}
               <div className="feedback-row">
                 <button
-                  disabled={disabled || m.reviewRequired}
+                  disabled={
+                    disabled ||
+                    m.reviewRequired ||
+                    m.sourceScopeReview?.status === "required"
+                  }
                   className={`button ${m.approved === true ? "primary" : "secondary"}`}
                   onClick={() =>
                     act({ action: "review", id: m.id, approved: true })
@@ -262,6 +274,16 @@ export function AdminDashboard({
                   Verifica dati
                 </button>
               </div>
+              <SourceScopeReviewControls
+                key={`${m.id}:${m.sourceScopeReview?.token ?? "none"}`}
+                publicationId={m.publicationId}
+                sourceRevision={m.sourceRevision}
+                contentRevision={m.contentRevision}
+                review={m.sourceScopeReview}
+                titles={m.originalTitles}
+                disabled={disabled}
+                onAction={act}
+              />
               {editing === m.id && (
                 <form
                   className="space-top"
@@ -389,28 +411,35 @@ export function AdminDashboard({
               <span className="status-badge warning">{i.severity}</span>
             </h3>
             <p>{i.detail}</p>
-            <form
-              className="inline-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void act({
-                  action: "resolve",
-                  id: i.id,
-                  note: String(new FormData(e.currentTarget).get("note")),
-                });
-              }}
-            >
-              <input
-                name="note"
-                required
-                minLength={10}
-                placeholder="Esito del controllo effettuato"
-                aria-label={`Esito del controllo: ${i.title}`}
-              />
-              <button disabled={disabled} className="button secondary">
-                Segna risolto
-              </button>
-            </form>
+            {i.key.startsWith("source-scope:") ? (
+              <p className="meta">
+                Risolvi questo dubbio con “Verifica l’oggetto della fonte” nella
+                scheda del bando.
+              </p>
+            ) : (
+              <form
+                className="inline-form"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void act({
+                    action: "resolve",
+                    id: i.id,
+                    note: String(new FormData(e.currentTarget).get("note")),
+                  });
+                }}
+              >
+                <input
+                  name="note"
+                  required
+                  minLength={10}
+                  placeholder="Esito del controllo effettuato"
+                  aria-label={`Esito del controllo: ${i.title}`}
+                />
+                <button disabled={disabled} className="button secondary">
+                  Segna risolto
+                </button>
+              </form>
+            )}
           </div>
         ))}
       </section>

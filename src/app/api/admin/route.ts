@@ -19,6 +19,14 @@ import { inviteSchema } from "@/lib/validation";
 import { fingerprint, zoneFromCity } from "@/sources/common";
 import { queueChangeNotices, reconcileDelivery } from "@/worker/notifications";
 import { materialChange } from "@/lib/matching";
+import { hasSourceScopeReview } from "@/lib/source-scope-review";
+const sourceScopeSnapshot = {
+  id: z.string().min(1).max(300),
+  expectedSourceRevision: z.string().min(1).max(3000),
+  expectedContentRevision: z.string().min(1).max(3000),
+  expectedScopeToken: z.uuid().nullable(),
+  note: z.string().trim().min(10).max(800),
+};
 const inputSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("invite"), ...inviteSchema.shape }),
   z.object({ action: z.literal("revoke"), id: z.string() }),
@@ -28,6 +36,19 @@ const inputSchema = z.discriminatedUnion("action", [
     approved: z.boolean(),
   }),
   z.object({ action: z.literal("automation"), enabled: z.boolean() }),
+  z
+    .object({
+      action: z.literal("mark-source-scope"),
+      ...sourceScopeSnapshot,
+      kind: z.enum(["ambiguous", "conflicting"]),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("resolve-source-scope"),
+      ...sourceScopeSnapshot,
+    })
+    .strict(),
   z.object({
     action: z.literal("resolve"),
     id: z.string(),
@@ -114,37 +135,148 @@ export async function POST(request: Request) {
         break;
       }
       case "review": {
-        const [match] = await db
-          .select()
+        // Find the publication first, then lock source → match in the same
+        // order as the worker. A source flag committed meanwhile must win.
+        const [reference] = await db
+          .select({ publicationId: matches.publicationId })
           .from(matches)
           .where(eq(matches.id, body.id));
-        if (!match) throw new HttpError(404, "Valutazione non trovata");
-        const [p] = await db
-          .select()
-          .from(publications)
-          .where(eq(publications.id, match.publicationId));
-        if (body.approved && p.data.reviewRequired)
-          throw new HttpError(400, "Verifica prima le informazioni del bando.");
-        if (
-          body.approved &&
-          (p.status !== "open" ||
-            (p.deadline && p.deadline <= new Date()) ||
-            p.visibleAt > new Date())
-        )
-          throw new HttpError(
-            400,
-            "La pubblicazione non è un’opportunità aperta e disponibile.",
-          );
-        await db
-          .update(matches)
-          .set({
-            approved: body.approved,
-            eligible: body.approved,
-            score: body.approved ? Math.max(60, match.score) : match.score,
-            reviewedAt: new Date(),
-            reviewNotes: `Revisione manuale: ${v.userId}`,
-          })
-          .where(eq(matches.id, body.id));
+        if (!reference) throw new HttpError(404, "Valutazione non trovata");
+        await db.transaction(async (tx) => {
+          const [p] = await tx
+            .select()
+            .from(publications)
+            .where(eq(publications.id, reference.publicationId))
+            .for("update");
+          const [match] = await tx
+            .select()
+            .from(matches)
+            .where(eq(matches.id, body.id))
+            .for("update");
+          if (!p || !match) throw new HttpError(404, "Valutazione non trovata");
+          if (match.publicationId !== p.id)
+            throw new HttpError(
+              409,
+              "La valutazione è cambiata. Aggiorna la pagina.",
+            );
+          if (
+            body.approved &&
+            (p.data.reviewRequired || hasSourceScopeReview(p.data))
+          )
+            throw new HttpError(
+              400,
+              "Verifica prima le informazioni del bando.",
+            );
+          if (
+            body.approved &&
+            (p.status !== "open" ||
+              (p.deadline && p.deadline <= new Date()) ||
+              p.visibleAt > new Date())
+          )
+            throw new HttpError(
+              400,
+              "La pubblicazione non è un’opportunità aperta e disponibile.",
+            );
+          await tx
+            .update(matches)
+            .set({
+              approved: body.approved,
+              eligible: body.approved,
+              score: body.approved ? Math.max(60, match.score) : match.score,
+              reviewedAt: new Date(),
+              reviewNotes: `Revisione manuale: ${v.userId}`,
+            })
+            .where(eq(matches.id, body.id));
+        });
+        break;
+      }
+      case "mark-source-scope":
+      case "resolve-source-scope": {
+        await db.transaction(async (tx) => {
+          const [p] = await tx
+            .select()
+            .from(publications)
+            .where(eq(publications.id, body.id))
+            .for("update");
+          if (!p) throw new HttpError(404, "Bando non trovato");
+          const previous = p.data.sourceScopeReview;
+          if (
+            p.revision !== body.expectedSourceRevision ||
+            p.data.revision !== body.expectedContentRevision ||
+            (previous?.token ?? null) !== body.expectedScopeToken
+          )
+            throw new HttpError(
+              409,
+              "La fonte o la sua verifica sono cambiate. Aggiorna la pagina.",
+            );
+          if (
+            body.action === "resolve-source-scope" &&
+            !hasSourceScopeReview(p.data)
+          )
+            throw new HttpError(
+              409,
+              "Non c’è una verifica dell’oggetto aperta da risolvere.",
+            );
+          const now = new Date();
+          const token = crypto.randomUUID();
+          const state = {
+            status:
+              body.action === "mark-source-scope"
+                ? ("required" as const)
+                : ("resolved" as const),
+            kind:
+              body.action === "mark-source-scope" ? body.kind : previous!.kind,
+            token,
+            sourceRevision: p.revision,
+            updatedAt: now.toISOString(),
+          };
+          // Private notes and actor identity belong in the audit, never in the
+          // publication JSON delivered to customers or in source evidence.
+          const detail = JSON.stringify({
+            action: body.action,
+            actorId: v.userId,
+            note: body.note,
+            publicationId: p.id,
+            contentRevision: p.data.revision,
+            previousScopeToken: previous?.token ?? null,
+            ...state,
+          });
+          await tx
+            .update(publications)
+            .set({
+              data: { ...p.data, sourceScopeReview: state },
+              updatedAt: now,
+            })
+            .where(eq(publications.id, p.id));
+          await tx.insert(issues).values({
+            id: crypto.randomUUID(),
+            key: `source-scope-audit:${token}`,
+            publicationId: p.id,
+            severity: "info",
+            title:
+              state.status === "required"
+                ? "Verifica dell’oggetto registrata"
+                : "Verifica dell’oggetto risolta",
+            detail,
+            createdAt: now,
+            resolvedAt: now,
+          });
+          const active = {
+            title: "Oggetto della fonte da verificare",
+            detail: body.note,
+            severity: "warning",
+            resolvedAt: state.status === "required" ? null : now,
+          };
+          await tx
+            .insert(issues)
+            .values({
+              id: crypto.randomUUID(),
+              key: `source-scope:${p.id}`,
+              publicationId: p.id,
+              ...active,
+            })
+            .onConflictDoUpdate({ target: issues.key, set: active });
+        });
         break;
       }
       case "automation": {
@@ -163,13 +295,29 @@ export async function POST(request: Request) {
         break;
       }
       case "resolve": {
-        await db
-          .update(issues)
-          .set({
-            resolvedAt: new Date(),
-            detail: sql`${issues.detail} || ${`\nVerifica ${v.userId}: ${body.note}`}`,
-          })
-          .where(eq(issues.id, body.id));
+        await db.transaction(async (tx) => {
+          const [issue] = await tx
+            .select()
+            .from(issues)
+            .where(eq(issues.id, body.id))
+            .for("update");
+          if (!issue) throw new HttpError(404, "Avviso non trovato");
+          if (
+            issue.key.startsWith("source-scope:") ||
+            issue.key.startsWith("source-scope-audit:")
+          )
+            throw new HttpError(
+              400,
+              "Usa la verifica dell’oggetto nella scheda del bando.",
+            );
+          await tx
+            .update(issues)
+            .set({
+              resolvedAt: new Date(),
+              detail: sql`${issues.detail} || ${`\nVerifica ${v.userId}: ${body.note}`}`,
+            })
+            .where(eq(issues.id, body.id));
+        });
         break;
       }
       case "delivery": {
@@ -177,36 +325,39 @@ export async function POST(request: Request) {
         break;
       }
       case "correct": {
-        const [p] = await db
-          .select()
-          .from(publications)
-          .where(eq(publications.id, body.id));
-        if (!p) throw new HttpError(404, "Bando non trovato");
-        const revision = fingerprint({
-          sourceRevision: p.revision,
-          correction: body,
-          at: new Date().toISOString(),
-        });
-        const data = {
-          ...p.data,
-          summary: body.summary,
-          deadline: body.deadline,
-          location: body.location,
-          zone: zoneFromCity(body.location),
-          valueChf: body.valueChf,
-          reviewRequired: false,
-          reviewReasons: [],
-          revision,
-          evidence: [
-            ...p.data.evidence,
-            {
-              url: p.data.sourceUrl,
-              field: "Verifica manuale del fondatore",
-              quote: body.note,
-            },
-          ],
-        };
-        await db.transaction(async (tx) => {
+        const change = await db.transaction(async (tx) => {
+          // Read inside the transaction: an unrelated correction must retain a
+          // source review committed since the founder opened this form.
+          const [p] = await tx
+            .select()
+            .from(publications)
+            .where(eq(publications.id, body.id))
+            .for("update");
+          if (!p) throw new HttpError(404, "Bando non trovato");
+          const revision = fingerprint({
+            sourceRevision: p.revision,
+            correction: body,
+            at: new Date().toISOString(),
+          });
+          const data = {
+            ...p.data,
+            summary: body.summary,
+            deadline: body.deadline,
+            location: body.location,
+            zone: zoneFromCity(body.location),
+            valueChf: body.valueChf,
+            reviewRequired: false,
+            reviewReasons: [],
+            revision,
+            evidence: [
+              ...p.data.evidence,
+              {
+                url: p.data.sourceUrl,
+                field: "Verifica manuale del fondatore",
+                quote: body.note,
+              },
+            ],
+          };
           await tx.insert(publicationVersions).values({
             id: crypto.randomUUID(),
             publicationId: p.id,
@@ -230,9 +381,10 @@ export async function POST(request: Request) {
             .update(issues)
             .set({ resolvedAt: new Date() })
             .where(eq(issues.key, `review:${p.id}`));
+          return { before: p.data, after: data };
         });
-        if (materialChange(p.data, data))
-          await queueChangeNotices(p.data, data);
+        if (materialChange(change.before, change.after))
+          await queueChangeNotices(change.before, change.after);
         break;
       }
     }

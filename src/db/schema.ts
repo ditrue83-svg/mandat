@@ -196,7 +196,16 @@ export const notifications = pgTable("notifications", {
   subject: text("subject").notNull(),
   html: text("html").notNull(),
   textBody: text("text_body").notNull(),
-  items: jsonb("items").$type<{ id: string; revision: string }[]>().notNull(),
+  items: jsonb("items")
+    .$type<
+      {
+        id: string;
+        revision: string;
+        // Binds a rendered digest to the source review state used to prepare it.
+        sourceScopeToken?: string;
+      }[]
+    >()
+    .notNull(),
   attempts: integer("attempts").notNull().default(0),
   messageId: text("message_id"),
   error: text("error"),

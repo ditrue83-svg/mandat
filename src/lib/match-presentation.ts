@@ -1,4 +1,9 @@
 import type { MatchAssessment, Opportunity, Publication } from "./domain";
+import {
+  hasSourceScopeReview,
+  isMatchRevisionCurrent,
+  sourceScopeReviewReason,
+} from "./source-scope-review";
 
 type Match = {
   revision: string;
@@ -25,19 +30,37 @@ export function presentMatch({
   publication,
   aiRevision,
   profileRevision,
+  preliminary,
 }: {
   match: Match;
-  publication: Pick<Publication, "revision" | "summary">;
+  publication: Pick<Publication, "revision" | "summary" | "sourceScopeReview">;
   aiRevision: string | null;
   profileRevision: string;
+  preliminary?: { eligible: boolean; reason: string };
 }): Pick<Opportunity, "assessment" | "reason"> {
-  if (match.approved === false)
+  const manuallyReviewed =
+    match.approved === false || (match.approved === true && !!match.reviewedAt);
+  const current = isMatchRevisionCurrent({
+    revision: match.revision,
+    publication,
+    profileRevision,
+    manuallyReviewed,
+  });
+  if (current && match.approved === false)
     return {
       assessment: "rejected",
       reason:
         "La revisione manuale ha ritenuto questa proposta non pertinente per la tua ditta.",
     };
-  if (match.approved === true && match.reviewedAt)
+  if (hasSourceScopeReview(publication)) {
+    if (preliminary && !preliminary.eligible)
+      return { assessment: "excluded", reason: preliminary.reason };
+    return {
+      assessment: "uncertain",
+      reason: sourceScopeReviewReason,
+    };
+  }
+  if (current && match.approved === true && match.reviewedAt)
     return {
       assessment: "reviewed",
       reason:
@@ -45,9 +68,6 @@ export function presentMatch({
     };
 
   const prefix = `${publication.revision}:${profileRevision}:`;
-  const current =
-    match.revision.startsWith(prefix) &&
-    !match.revision.endsWith(":profile-update");
   if (current && !match.eligible)
     return { assessment: "excluded", reason: match.reason };
   if (

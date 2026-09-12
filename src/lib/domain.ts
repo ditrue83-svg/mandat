@@ -89,6 +89,13 @@ export type OriginalTitle = OriginalDescription & {
   // Identifies the source field, including its translation key when present.
   path: string;
 };
+export type SourceScopeReview = {
+  status: "required" | "resolved";
+  kind: "ambiguous" | "conflicting";
+  token: string;
+  sourceRevision: string;
+  updatedAt: string;
+};
 export type SourceCondition = {
   // Exact source field, including the translation key when present.
   path: string;
@@ -122,6 +129,7 @@ export type Publication = {
   // Optional for older records and sources that do not expose language variants.
   originalDescriptions?: OriginalDescription[];
   originalTitles?: OriginalTitle[];
+  sourceScopeReview?: SourceScopeReview;
   // Source context for review, separate from the requested service and AI text.
   sourceConditions?: SourceCondition[];
   summary: string | null;

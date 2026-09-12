@@ -25,6 +25,10 @@ import type { Publication } from "@/lib/domain";
 import { digestDue, zurichDigestDay, materialChange } from "@/lib/matching";
 import { HttpError } from "@/lib/viewer";
 import { fingerprint } from "@/sources/common";
+import {
+  hasSourceScopeReview,
+  isMatchRevisionCurrent,
+} from "@/lib/source-scope-review";
 export function deliveryFailureKind(error: unknown): "failed" | "uncertain" {
   const e = error as { code?: string; command?: string; responseCode?: number };
   if (e.responseCode && e.responseCode >= 400) return "failed";
@@ -295,7 +299,19 @@ export async function queueDigests(now = new Date()) {
         process.env.FOGLIO_REUSE_CONFIRMED !== "true"
       )
         return false;
-      if (r.p.data.reviewRequired || r.m.approved === false) return false;
+      if (
+        r.p.data.reviewRequired ||
+        hasSourceScopeReview(r.p.data) ||
+        r.m.approved === false ||
+        (r.p.data.sourceScopeReview &&
+          !isMatchRevisionCurrent({
+            revision: r.m.revision,
+            publication: r.p.data,
+            profileRevision: fingerprint(firm.profile),
+            manuallyReviewed: Boolean(r.m.reviewedAt),
+          }))
+      )
+        return false;
       if (
         r.m.approved !== true &&
         (!automatic || r.m.score < 80 || r.m.reviewNotes || !r.p.aiRevision)
@@ -332,6 +348,9 @@ export async function queueDigests(now = new Date()) {
       items: selected.map((r) => ({
         id: r.p.id,
         revision: r.p.data.revision,
+        ...(r.p.data.sourceScopeReview
+          ? { sourceScopeToken: r.p.data.sourceScopeReview.token }
+          : {}),
       })),
     };
     await db
@@ -417,7 +436,12 @@ export async function sendPending() {
           ),
         )
         .limit(1);
-      if (referenced.some((p) => p.data.reviewRequired) || relatedIssue.length)
+      if (
+        referenced.some(
+          (p) => p.data.reviewRequired || hasSourceScopeReview(p.data),
+        ) ||
+        relatedIssue.length
+      )
         continue;
     }
     if (n.kind === "digest") {
@@ -474,7 +498,18 @@ export async function sendPending() {
             !m.eligible ||
             m.approved === false ||
             (m.approved !== true &&
-              (!auto?.value || m.score < 80 || m.reviewNotes)),
+              (!auto?.value || m.score < 80 || m.reviewNotes)) ||
+            referenced.some(
+              (p) =>
+                p.id === m.publicationId &&
+                p.data.sourceScopeReview &&
+                !isMatchRevisionCurrent({
+                  revision: m.revision,
+                  publication: p.data,
+                  profileRevision: fingerprint(owner.company.profile),
+                  manuallyReviewed: Boolean(m.reviewedAt),
+                }),
+            ),
         );
       if (withdrawn) {
         await db
@@ -498,7 +533,10 @@ export async function sendPending() {
           (n.kind === "digest" &&
             (p.status !== "open" ||
               (p.deadline && p.deadline <= new Date()) ||
-              p.data.reviewRequired)) ||
+              p.data.reviewRequired ||
+              hasSourceScopeReview(p.data) ||
+              n.items.find((i) => i.id === p.id)?.sourceScopeToken !==
+                p.data.sourceScopeReview?.token)) ||
           !n.items.some((i) => i.id === p.id && i.revision === p.data.revision),
       )
     ) {
@@ -511,17 +549,97 @@ export async function sendPending() {
         .where(eq(notifications.id, n.id));
       continue;
     }
-    const [claimed] = await db
-      .update(notifications)
-      .set({
-        status: "sending",
-        attempts: sql`${notifications.attempts}+1`,
-        messageId: `<${n.id}@${new URL(appUrl()).hostname}>`,
-      })
-      .where(
-        and(eq(notifications.id, n.id), eq(notifications.status, "pending")),
+    const claimed = await db.transaction(async (tx) => {
+      // Marking a source review takes an update lock on these same rows.
+      // Recheck under the lock: the preliminary reads above may be stale.
+      // Once this transaction claims an email, its SMTP delivery has started
+      // and a later review cannot recall it.
+      const currentSources = await tx
+        .select()
+        .from(publications)
+        .where(
+          inArray(
+            publications.id,
+            n.items.map((i) => i.id),
+          ),
+        )
+        .orderBy(publications.id)
+        .for("share");
+      if (
+        currentSources.length !== n.items.length ||
+        currentSources.some((p) => {
+          const item = n.items.find((i) => i.id === p.id);
+          return (
+            !item ||
+            p.data.revision !== item.revision ||
+            p.data.reviewRequired ||
+            hasSourceScopeReview(p.data) ||
+            (n.kind === "digest" &&
+              item.sourceScopeToken !== p.data.sourceScopeReview?.token)
+          );
+        })
       )
-      .returning();
+        return null;
+      if (n.kind === "digest") {
+        // Manual review uses the same source → match lock order. A rejection
+        // committed before this claim must also stop the prepared digest.
+        const finalMatches = await tx
+          .select()
+          .from(matches)
+          .where(
+            and(
+              eq(matches.companyId, n.companyId),
+              inArray(
+                matches.publicationId,
+                n.items.map((i) => i.id),
+              ),
+            ),
+          )
+          .orderBy(matches.id)
+          .for("share");
+        const [finalAutomation] = await tx
+          .select()
+          .from(settings)
+          .where(eq(settings.key, "automation_enabled"))
+          .for("share");
+        if (
+          finalMatches.length !== n.items.length ||
+          finalMatches.some(
+            (m) =>
+              !m.eligible ||
+              m.approved === false ||
+              (m.approved !== true &&
+                (finalAutomation?.value !== true ||
+                  m.score < 80 ||
+                  m.reviewNotes)) ||
+              currentSources.some(
+                (p) =>
+                  p.id === m.publicationId &&
+                  p.data.sourceScopeReview &&
+                  !isMatchRevisionCurrent({
+                    revision: m.revision,
+                    publication: p.data,
+                    profileRevision: fingerprint(owner.company.profile),
+                    manuallyReviewed: Boolean(m.reviewedAt),
+                  }),
+              ),
+          )
+        )
+          return null;
+      }
+      const [claimed] = await tx
+        .update(notifications)
+        .set({
+          status: "sending",
+          attempts: sql`${notifications.attempts}+1`,
+          messageId: `<${n.id}@${new URL(appUrl()).hostname}>`,
+        })
+        .where(
+          and(eq(notifications.id, n.id), eq(notifications.status, "pending")),
+        )
+        .returning();
+      return claimed ?? null;
+    });
     if (!claimed) continue;
     try {
       const result = await sendMail({

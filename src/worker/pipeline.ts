@@ -21,6 +21,12 @@ import { AiUnavailable, classify, summarize } from "./ai";
 import { queueChangeNotices } from "./notifications";
 import { attachFoglioPdf } from "@/sources/foglio";
 import { legacySimapRevision } from "@/sources/simap";
+import {
+  hasSourceScopeReview,
+  isMatchRevisionCurrent,
+  sourceScopeReviewReason,
+  sourceScopeReviewSuffix,
+} from "@/lib/source-scope-review";
 export async function recordIssue(
   key: string,
   title: string,
@@ -193,6 +199,29 @@ export async function storePublication(
       )
       .orderBy(publications.id)
       .for("update");
+    const [currentPublication] = await tx
+      .select()
+      .from(publications)
+      .where(
+        and(
+          eq(publications.source, p.source),
+          eq(publications.externalId, p.externalId),
+        ),
+      )
+      .for("update");
+    // A source update does not prove that a recorded scope doubt is resolved.
+    // Read under the lock so a concurrent founder action is not overwritten.
+    // Carry it to a newer notice of the same source/project as well. The
+    // original sourceRevision remains visible as historical evidence.
+    const currentPredecessor =
+      currentPublication ??
+      [...currentCousins.filter((c) => c.source === p.source)].sort((a, b) =>
+        newer(a.data, b.data) ? -1 : 1,
+      )[0] ??
+      currentCousins[0];
+    const priorScope = currentPredecessor?.data.sourceScopeReview;
+    if (priorScope?.status === "required")
+      p = { ...p, sourceScopeReview: priorScope };
     const currentSourceUrls = [
       ...new Set([
         p.sourceUrl,
@@ -455,7 +484,10 @@ export async function enrichAndMatch(
       continue;
     let p = row.data;
     let aiReady = Boolean(p.summary && row.aiRevision === p.revision);
-    if (!p.summary || row.aiRevision !== p.revision) {
+    if (
+      !hasSourceScopeReview(p) &&
+      (!p.summary || row.aiRevision !== p.revision)
+    ) {
       try {
         const result = await summarize(p);
         options.signal?.throwIfAborted();
@@ -483,6 +515,8 @@ export async function enrichAndMatch(
               eq(publications.id, p.id),
               sql`${publications.updatedAt} = ${row.updatedToken}::timestamptz`,
               eq(publications.revision, row.revision),
+              sql`${publications.data}->>'revision' = ${p.revision}`,
+              sql`${publications.data}->'sourceScopeReview'->>'token' IS NOT DISTINCT FROM ${p.sourceScopeReview?.token ?? null}::text`,
             ),
           )
           .returning({ id: publications.id });
@@ -506,7 +540,7 @@ export async function enrichAndMatch(
       const profileRevision = fingerprint(firm.profile);
       options.signal?.throwIfAborted();
       const preliminary = preliminaryMatch(p, firm.profile, options.now);
-      const revision = `${p.revision}:${profileRevision}:${aiReady ? "ready" : "pending"}:${process.env.LLM_MODEL ?? "default"}:${preliminary.eligible}`;
+      const revision = `${p.revision}:${profileRevision}:${aiReady ? "ready" : "pending"}:${process.env.LLM_MODEL ?? "default"}:${preliminary.eligible}${sourceScopeReviewSuffix(p)}`;
       const [existing] = await db
         .select({
           ...getTableColumns(matches),
@@ -520,7 +554,14 @@ export async function enrichAndMatch(
         .limit(1);
       if (
         existing?.revision === revision ||
-        (existing?.reviewedAt && existing.revision === `${revision}:retry`)
+        (existing &&
+          (existing.reviewedAt || existing.approved === false) &&
+          isMatchRevisionCurrent({
+            revision: existing.revision,
+            publication: p,
+            profileRevision,
+            manuallyReviewed: true,
+          }))
       )
         continue;
       let score = preliminary.score,
@@ -529,7 +570,12 @@ export async function enrichAndMatch(
       let uncertain = preliminary.uncertain;
       let needsReview = false;
       let retry = false;
-      if (preliminary.eligible && aiReady) {
+      if (preliminary.eligible && hasSourceScopeReview(p)) {
+        score = 0;
+        reason = sourceScopeReviewReason;
+        uncertain = true;
+        needsReview = true;
+      } else if (preliminary.eligible && aiReady) {
         try {
           const ai = await classify(p, firm.profile);
           options.signal?.throwIfAborted();
@@ -579,6 +625,8 @@ export async function enrichAndMatch(
         if (
           !current ||
           current.data.revision !== p.revision ||
+          current.data.sourceScopeReview?.token !==
+            p.sourceScopeReview?.token ||
           current.status !== "open" ||
           !currentFirm ||
           currentFirm.disabledAt ||
