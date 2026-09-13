@@ -72,11 +72,18 @@ export function parseDeadline(value: unknown): string | null {
   return date.toUTC().toISO();
 }
 export function classifySectors(text: string, cpv: string[]): Sector[] {
-  const normalized = text.toLowerCase();
+  // NFC keeps composed/decomposed accents equivalent without reducing German
+  // compounds to stems. Letters, marks, numbers and connectors belong to the same token.
+  const words = new Set(
+    text
+      .normalize("NFC")
+      .toLowerCase()
+      .match(/[\p{L}\p{M}\p{N}\p{Pc}]+/gu) ?? [],
+  );
   return SECTORS.filter(
     (s) =>
       cpv.some((c) => s.cpv.some((p) => c.startsWith(p))) ||
-      s.words.some((w) => normalized.includes(w)),
+      s.words.some((w) => words.has(w)),
   ).map((s) => s.id);
 }
 export function zoneFromCity(city: string): string | null {
