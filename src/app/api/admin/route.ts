@@ -18,8 +18,34 @@ import { getGate, notifyInvitation, provisionInvite } from "@/lib/admin";
 import { inviteSchema } from "@/lib/validation";
 import { fingerprint, zoneFromCity } from "@/sources/common";
 import { queueChangeNotices, reconcileDelivery } from "@/worker/notifications";
-import { materialChange } from "@/lib/matching";
-import { hasSourceScopeReview } from "@/lib/source-scope-review";
+import { materialChange, preliminaryMatch } from "@/lib/matching";
+import {
+  hasSourceScopeReview,
+  sourceScopeReviewSuffix,
+} from "@/lib/source-scope-review";
+import { readSourceReviewContext } from "@/lib/source-reviews";
+import {
+  sameSourceReviewDependency,
+  sourceReviewBlocksComparison,
+} from "@/lib/source-review-policy";
+import { CONTEXT_VERSION } from "@/lib/source-review-context";
+import { matchReviewToken } from "@/lib/match-review-token";
+const sourceDependencySchema = z
+  .object({
+    version: z.literal(CONTEXT_VERSION),
+    publicationId: z.string().min(1).max(300),
+    sourceSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
+    corpusHash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .nullable(),
+    reviewEventId: z.string().min(1).max(300).nullable(),
+    reviewEventHash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .nullable(),
+  })
+  .strict();
 const sourceScopeSnapshot = {
   id: z.string().min(1).max(300),
   expectedSourceRevision: z.string().min(1).max(3000),
@@ -34,6 +60,19 @@ const inputSchema = z.discriminatedUnion("action", [
     action: z.literal("review"),
     id: z.string(),
     approved: z.boolean(),
+    expectedEvaluationRevision: z.string().min(1).max(5000).optional(),
+    expectedEvaluationToken: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    expectedContentRevision: z.string().min(1).max(3000).optional(),
+    expectedProfileRevision: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    expectedSourceReviewDependency: sourceDependencySchema
+      .nullable()
+      .optional(),
   }),
   z.object({ action: z.literal("automation"), enabled: z.boolean() }),
   z
@@ -159,9 +198,36 @@ export async function POST(request: Request) {
               409,
               "La valutazione è cambiata. Aggiorna la pagina.",
             );
+          const sourceReview = await readSourceReviewContext(tx, p);
+          const [firm] =
+            sourceReview && body.approved
+              ? await tx
+                  .select()
+                  .from(companies)
+                  .where(eq(companies.id, match.companyId))
+              : [];
           if (
             body.approved &&
-            (p.data.reviewRequired || hasSourceScopeReview(p.data))
+            sourceReview &&
+            (body.expectedEvaluationRevision !== match.revision ||
+              body.expectedEvaluationToken !== matchReviewToken(match) ||
+              body.expectedContentRevision !== p.data.revision ||
+              !firm ||
+              fingerprint(firm.profile) !== body.expectedProfileRevision ||
+              !sameSourceReviewDependency(
+                body.expectedSourceReviewDependency,
+                sourceReview.dependency,
+              ))
+          )
+            throw new HttpError(
+              409,
+              "La fonte o la valutazione sono cambiate. Aggiorna la pagina prima di approvare.",
+            );
+          if (
+            body.approved &&
+            (p.data.reviewRequired ||
+              hasSourceScopeReview(p.data) ||
+              sourceReviewBlocksComparison(sourceReview))
           )
             throw new HttpError(
               400,
@@ -177,6 +243,16 @@ export async function POST(request: Request) {
               400,
               "La pubblicazione non è un’opportunità aperta e disponibile.",
             );
+          if (
+            body.approved &&
+            sourceReview &&
+            firm &&
+            !preliminaryMatch(p.data, firm.profile).eligible
+          )
+            throw new HttpError(
+              400,
+              "La proposta non rispetta i filtri del profilo della ditta.",
+            );
           await tx
             .update(matches)
             .set({
@@ -185,6 +261,14 @@ export async function POST(request: Request) {
               score: body.approved ? Math.max(60, match.score) : match.score,
               reviewedAt: new Date(),
               reviewNotes: `Revisione manuale: ${v.userId}`,
+              sourceReviewDependency: body.approved
+                ? (sourceReview?.dependency ?? null)
+                : match.sourceReviewDependency,
+              ...(body.approved && sourceReview && firm
+                ? {
+                    revision: `${p.data.revision}:${fingerprint(firm.profile)}:ready:manual-source-review:true${sourceScopeReviewSuffix(p.data)}`,
+                  }
+                : {}),
             })
             .where(eq(matches.id, body.id));
         });

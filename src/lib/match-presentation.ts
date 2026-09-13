@@ -1,4 +1,10 @@
 import type { MatchAssessment, Opportunity, Publication } from "./domain";
+import type { SourceContext, SourceDependency } from "./source-review-context";
+import {
+  sourceReviewBindingState,
+  sourceReviewReason,
+  manualSourceComparisonReason,
+} from "./source-review-policy";
 import {
   hasSourceScopeReview,
   isMatchRevisionCurrent,
@@ -12,6 +18,7 @@ type Match = {
   approved: boolean | null;
   reviewedAt: Date | null;
   reviewNotes: string | null;
+  sourceReviewDependency?: SourceDependency | null;
 };
 
 export const assessmentLabels: Record<MatchAssessment, string> = {
@@ -31,13 +38,16 @@ export function presentMatch({
   aiRevision,
   profileRevision,
   preliminary,
+  sourceReview = null,
 }: {
   match: Match;
   publication: Pick<Publication, "revision" | "summary" | "sourceScopeReview">;
   aiRevision: string | null;
   profileRevision: string;
   preliminary?: { eligible: boolean; reason: string };
-}): Pick<Opportunity, "assessment" | "reason"> {
+  sourceReview?: SourceContext | null;
+}): Pick<Opportunity, "assessment" | "reason"> &
+  Partial<Pick<Opportunity, "score">> {
   const manuallyReviewed =
     match.approved === false || (match.approved === true && !!match.reviewedAt);
   const current = isMatchRevisionCurrent({
@@ -52,14 +62,43 @@ export function presentMatch({
       reason:
         "La revisione manuale ha ritenuto questa proposta non pertinente per la tua ditta.",
     };
+  const sourceState = sourceReviewBindingState(
+    sourceReview,
+    match.sourceReviewDependency,
+  );
+  if (sourceReview && preliminary && !preliminary.eligible)
+    return { assessment: "excluded", reason: preliminary.reason, score: 0 };
+  if (sourceState === "blocked" || sourceState === "stale") {
+    if (preliminary && !preliminary.eligible)
+      return { assessment: "excluded", reason: preliminary.reason, score: 0 };
+    return {
+      assessment: "uncertain",
+      reason: sourceReviewReason(sourceReview),
+      score: 0,
+    };
+  }
+  if (sourceReview && manuallyReviewed && !current)
+    return {
+      assessment: "uncertain",
+      reason:
+        "Il bando o il profilo della ditta sono cambiati dopo la revisione manuale. La pertinenza deve essere ricontrollata.",
+      score: 0,
+    };
   if (hasSourceScopeReview(publication)) {
     if (preliminary && !preliminary.eligible)
       return { assessment: "excluded", reason: preliminary.reason };
     return {
       assessment: "uncertain",
       reason: sourceScopeReviewReason,
+      ...(sourceReview ? { score: 0 } : {}),
     };
   }
+  if (sourceReview && !manuallyReviewed)
+    return {
+      assessment: "uncertain",
+      reason: manualSourceComparisonReason,
+      score: 0,
+    };
   if (current && match.approved === true && match.reviewedAt)
     return {
       assessment: "reviewed",

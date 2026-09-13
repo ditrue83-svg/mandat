@@ -9,8 +9,15 @@ import {
   index,
   numeric,
   bigint,
+  check,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import type { CompanyProfile, Publication } from "@/lib/domain";
+import type {
+  SourceDependency,
+  SourceReviewEvent,
+  SourceSnapshot,
+} from "@/lib/source-review-context";
 const time = (name: string) => timestamp(name, { withTimezone: true });
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -137,6 +144,35 @@ export const publicationVersions = pgTable(
     uniqueIndex("publication_version_idx").on(t.publicationId, t.revision),
   ],
 ).enableRLS();
+// Human source history is private and append-only. It never shares the JSON
+// written by source ingestion or summary enrichment.
+export const sourceReviewEvents = pgTable(
+  "source_review_events",
+  {
+    id: text("id").primaryKey(),
+    publicationId: text("publication_id")
+      .notNull()
+      .references(() => publications.id, { onDelete: "restrict" }),
+    sequence: integer("sequence").notNull(),
+    event: jsonb("event").$type<SourceReviewEvent>().notNull(),
+    snapshot: jsonb("snapshot").$type<SourceSnapshot>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("source_review_event_sequence_idx").on(
+      t.publicationId,
+      t.sequence,
+    ),
+    check(
+      "source_review_event_identity",
+      sql`${t.sequence} > 0
+      AND ${t.event}->>'id' IS NOT DISTINCT FROM ${t.id}
+      AND ${t.event}->>'publicationId' IS NOT DISTINCT FROM ${t.publicationId}
+      AND ${t.event}->>'sequence' IS NOT DISTINCT FROM ${t.sequence}::text
+      AND ${t.snapshot}->>'publicationId' IS NOT DISTINCT FROM ${t.publicationId}`,
+    ),
+  ],
+).enableRLS();
+
 export const matches = pgTable(
   "matches",
   {
@@ -148,6 +184,10 @@ export const matches = pgTable(
       .notNull()
       .references(() => publications.id, { onDelete: "cascade" }),
     revision: text("revision").notNull(),
+    // Null means this assessment predates source review context binding.
+    sourceReviewDependency: jsonb(
+      "source_review_dependency",
+    ).$type<SourceDependency>(),
     score: integer("score").notNull(),
     reason: text("reason").notNull(),
     eligible: boolean("eligible").notNull().default(false),
@@ -203,6 +243,7 @@ export const notifications = pgTable("notifications", {
         revision: string;
         // Binds a rendered digest to the source review state used to prepare it.
         sourceScopeToken?: string;
+        sourceReviewDependency?: SourceDependency;
       }[]
     >()
     .notNull(),

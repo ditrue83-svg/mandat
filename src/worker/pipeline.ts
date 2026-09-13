@@ -27,6 +27,15 @@ import {
   sourceScopeReviewReason,
   sourceScopeReviewSuffix,
 } from "@/lib/source-scope-review";
+import { readSourceReviewContext } from "@/lib/source-reviews";
+import {
+  sameSourceReviewDependency,
+  sourceReviewReason,
+} from "@/lib/source-review-policy";
+// A human source judgment is not an automatic company comparison. Version
+// this completed manual-review path so an earlier automatic cache cannot win
+// merely because it happens to carry the same documentary dependency.
+const HUMAN_SOURCE_REVIEW_VERSION = "human-source-review-v1";
 export async function recordIssue(
   key: string,
   title: string,
@@ -310,6 +319,7 @@ export async function storePublication(
             eligible: false,
             approved: null,
             reviewedAt: null,
+            sourceReviewDependency: null,
             updatedAt: new Date(),
           })
           .onConflictDoNothing();
@@ -483,9 +493,12 @@ export async function enrichAndMatch(
     )
       continue;
     let p = row.data;
+    const sourceContext = await readSourceReviewContext(db, row);
+    const sourceDependency = sourceContext?.dependency ?? null;
     let aiReady = Boolean(p.summary && row.aiRevision === p.revision);
     if (
       !hasSourceScopeReview(p) &&
+      !sourceContext &&
       (!p.summary || row.aiRevision !== p.revision)
     ) {
       try {
@@ -507,19 +520,34 @@ export async function enrichAndMatch(
             })),
           ],
         };
-        const updated = await db
-          .update(publications)
-          .set({ data: p, aiRevision: p.revision })
-          .where(
-            and(
-              eq(publications.id, p.id),
-              sql`${publications.updatedAt} = ${row.updatedToken}::timestamptz`,
-              eq(publications.revision, row.revision),
-              sql`${publications.data}->>'revision' = ${p.revision}`,
-              sql`${publications.data}->'sourceScopeReview'->>'token' IS NOT DISTINCT FROM ${p.sourceScopeReview?.token ?? null}::text`,
-            ),
+        const updated = await db.transaction(async (tx) => {
+          const [current] = await tx
+            .select()
+            .from(publications)
+            .where(eq(publications.id, p.id))
+            .for("update");
+          if (
+            !current ||
+            !sameSourceReviewDependency(
+              sourceDependency,
+              (await readSourceReviewContext(tx, current))?.dependency,
+            )
           )
-          .returning({ id: publications.id });
+            return [];
+          return tx
+            .update(publications)
+            .set({ data: p, aiRevision: p.revision })
+            .where(
+              and(
+                eq(publications.id, p.id),
+                sql`${publications.updatedAt} = ${row.updatedToken}::timestamptz`,
+                eq(publications.revision, row.revision),
+                sql`${publications.data}->>'revision' = ${p.revision}`,
+                sql`${publications.data}->'sourceScopeReview'->>'token' IS NOT DISTINCT FROM ${p.sourceScopeReview?.token ?? null}::text`,
+              ),
+            )
+            .returning({ id: publications.id });
+        });
         if (!updated.length) continue;
         aiReady = true;
         await resolveIssue(`ai:${p.id}`);
@@ -540,7 +568,7 @@ export async function enrichAndMatch(
       const profileRevision = fingerprint(firm.profile);
       options.signal?.throwIfAborted();
       const preliminary = preliminaryMatch(p, firm.profile, options.now);
-      const revision = `${p.revision}:${profileRevision}:${aiReady ? "ready" : "pending"}:${process.env.LLM_MODEL ?? "default"}:${preliminary.eligible}${sourceScopeReviewSuffix(p)}`;
+      const revision = `${p.revision}:${profileRevision}:${aiReady ? "ready" : "pending"}:${sourceContext ? HUMAN_SOURCE_REVIEW_VERSION : (process.env.LLM_MODEL ?? "default")}:${preliminary.eligible}${sourceScopeReviewSuffix(p)}`;
       const [existing] = await db
         .select({
           ...getTableColumns(matches),
@@ -553,7 +581,16 @@ export async function enrichAndMatch(
         )
         .limit(1);
       if (
-        existing?.revision === revision ||
+        (existing?.revision === revision &&
+          sameSourceReviewDependency(
+            existing.sourceReviewDependency,
+            sourceDependency,
+          )) ||
+        // A source event must not relabel an earlier human company decision.
+        // Readers separately mask its stale positive binding until a new review.
+        (sourceContext &&
+          existing &&
+          (existing.reviewedAt || existing.approved === false)) ||
         (existing &&
           (existing.reviewedAt || existing.approved === false) &&
           isMatchRevisionCurrent({
@@ -570,7 +607,16 @@ export async function enrichAndMatch(
       let uncertain = preliminary.uncertain;
       let needsReview = false;
       let retry = false;
-      if (preliminary.eligible && hasSourceScopeReview(p)) {
+      if (preliminary.eligible && sourceContext) {
+        score = 0;
+        reason =
+          sourceContext.state === "manual_source" &&
+          sourceContext.form === "defined_service"
+            ? "È stato registrato un giudizio umano sull’oggetto della fonte. La pertinenza per la ditta richiede una revisione manuale separata."
+            : sourceReviewReason(sourceContext);
+        uncertain = true;
+        needsReview = true;
+      } else if (preliminary.eligible && hasSourceScopeReview(p)) {
         score = 0;
         reason = sourceScopeReviewReason;
         uncertain = true;
@@ -609,8 +655,10 @@ export async function enrichAndMatch(
         approved,
         reviewedAt: null,
         reviewNotes: uncertain ? "Richiesta revisione della pertinenza" : null,
+        sourceReviewDependency: sourceDependency,
         updatedAt: new Date(),
       };
+      let sourceChangedDuringAssessment = false;
       await db.transaction(async (tx) => {
         const [current] = await tx
           .select()
@@ -627,12 +675,28 @@ export async function enrichAndMatch(
           current.data.revision !== p.revision ||
           current.data.sourceScopeReview?.token !==
             p.sourceScopeReview?.token ||
-          current.status !== "open" ||
+          current.status !== "open"
+        ) {
+          sourceChangedDuringAssessment = true;
+          return;
+        }
+        if (
           !currentFirm ||
           currentFirm.disabledAt ||
           fingerprint(currentFirm.profile) !== profileRevision
         )
           return;
+        // The event writer locks this publication too, including the first
+        // event. Read history under the same lock before committing any score.
+        if (
+          !sameSourceReviewDependency(
+            sourceDependency,
+            (await readSourceReviewContext(tx, current))?.dependency,
+          )
+        ) {
+          sourceChangedDuringAssessment = true;
+          return;
+        }
         const insert = tx.insert(matches).values({
           id: crypto.randomUUID(),
           companyId: firm.id,
@@ -654,10 +718,14 @@ export async function enrichAndMatch(
               eq(matches.eligible, existing.eligible),
               eq(matches.score, existing.score),
               sql`${matches.reviewNotes} IS NOT DISTINCT FROM ${existing.reviewNotes}::text`,
+              sql`${matches.sourceReviewDependency} IS NOT DISTINCT FROM ${existing.sourceReviewDependency ? JSON.stringify(existing.sourceReviewDependency) : null}::jsonb`,
             ),
           });
         else await insert.onConflictDoNothing();
       });
+      // Once a changed source is observed, later companies must not start
+      // another request from this already invalidated source snapshot.
+      if (sourceChangedDuringAssessment) break;
     }
   }
   // Persist successful assessments and review states before failing the job.

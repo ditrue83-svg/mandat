@@ -23,7 +23,13 @@ import { HttpError } from "./viewer";
 import { DateTime } from "luxon";
 import { fingerprint } from "@/sources/common";
 import { presentMatch } from "./match-presentation";
+import { matchReviewToken } from "./match-review-token";
 import { hasSourceScopeReview } from "./source-scope-review";
+import { readSourceReviewContexts } from "./source-reviews";
+import {
+  sourceReviewBindingState,
+  sourceReviewBlocksComparison,
+} from "./source-review-policy";
 export async function provisionInvite(
   email: string,
   name: string,
@@ -177,7 +183,9 @@ export async function adminSnapshot(demo: boolean) {
         approved: matches.approved,
         reviewedAt: matches.reviewedAt,
         revision: matches.revision,
+        updatedAt: matches.updatedAt,
         reviewNotes: matches.reviewNotes,
+        sourceReviewDependency: matches.sourceReviewDependency,
         aiRevision: publications.aiRevision,
         sourceRevision: publications.revision,
         reviewRequired: publications.data,
@@ -230,6 +238,10 @@ export async function adminSnapshot(demo: boolean) {
       .where(sql`${feedback.relevant} is not null`)
       .orderBy(desc(feedback.updatedAt)),
   ]);
+  const sourceReviews = await readSourceReviewContexts(
+    db,
+    review.map((r) => r.reviewRequired),
+  );
   return {
     demo: false,
     gate: {
@@ -253,39 +265,58 @@ export async function adminSnapshot(demo: boolean) {
       acceptedAt: i.acceptedAt?.toISOString() ?? null,
       revokedAt: i.revokedAt?.toISOString() ?? null,
     })),
-    matches: review.map((r) => ({
-      id: r.id,
-      publicationId: r.publicationId,
-      title: r.title,
-      company: r.company.name,
-      score: r.score,
-      eligible: r.eligible,
-      ...presentMatch({
-        match: r,
-        publication: r.reviewRequired,
-        aiRevision: r.aiRevision,
+    matches: review.map((r) => {
+      const sourceReview = sourceReviews.get(r.publicationId) ?? null;
+      return {
+        id: r.id,
+        publicationId: r.publicationId,
+        title: r.title,
+        company: r.company.name,
+        companyActivities: r.company.activities,
         profileRevision: fingerprint(r.company),
-        preliminary: hasSourceScopeReview(r.reviewRequired)
-          ? preliminaryMatch(r.reviewRequired, r.company)
-          : undefined,
-      }),
-      approved: r.approved,
-      reviewed: !!r.reviewedAt,
-      reviewRequired:
-        r.reviewRequired.reviewRequired ||
-        hasSourceScopeReview(r.reviewRequired),
-      sourceScopeReview: r.reviewRequired.sourceScopeReview,
-      sourceRevision: r.sourceRevision,
-      contentRevision: r.reviewRequired.revision,
-      reviewReasons: r.reviewRequired.reviewReasons,
-      summary: r.reviewRequired.summary,
-      deadline: r.reviewRequired.deadline,
-      valueChf: r.reviewRequired.valueChf,
-      location: r.reviewRequired.location,
-      sourceUrl: r.reviewRequired.sourceUrl,
-      sourceConditions: r.reviewRequired.sourceConditions ?? [],
-      originalTitles: r.reviewRequired.originalTitles ?? [],
-    })),
+        score: r.score,
+        eligible: r.eligible,
+        ...presentMatch({
+          match: r,
+          publication: r.reviewRequired,
+          aiRevision: r.aiRevision,
+          profileRevision: fingerprint(r.company),
+          sourceReview,
+          preliminary:
+            hasSourceScopeReview(r.reviewRequired) ||
+            sourceReview ||
+            r.sourceReviewDependency
+              ? preliminaryMatch(r.reviewRequired, r.company)
+              : undefined,
+        }),
+        approved: r.approved,
+        reviewed: !!r.reviewedAt,
+        evaluationRevision: r.revision,
+        evaluationToken: matchReviewToken(r),
+        sourceReviewState: sourceReviewBindingState(
+          sourceReview,
+          r.sourceReviewDependency,
+        ),
+        sourceReviewDependency: sourceReview?.dependency ?? null,
+        reviewRequired:
+          r.reviewRequired.reviewRequired ||
+          hasSourceScopeReview(r.reviewRequired) ||
+          sourceReviewBlocksComparison(sourceReview) ||
+          (!!sourceReview &&
+            !preliminaryMatch(r.reviewRequired, r.company).eligible),
+        sourceScopeReview: r.reviewRequired.sourceScopeReview,
+        sourceRevision: r.sourceRevision,
+        contentRevision: r.reviewRequired.revision,
+        reviewReasons: r.reviewRequired.reviewReasons,
+        summary: r.reviewRequired.summary,
+        deadline: r.reviewRequired.deadline,
+        valueChf: r.reviewRequired.valueChf,
+        location: r.reviewRequired.location,
+        sourceUrl: r.reviewRequired.sourceUrl,
+        sourceConditions: r.reviewRequired.sourceConditions ?? [],
+        originalTitles: r.reviewRequired.originalTitles ?? [],
+      };
+    }),
     issues: problem.map((i) => ({
       id: i.id,
       key: i.key,

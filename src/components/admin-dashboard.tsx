@@ -221,7 +221,9 @@ export function AdminDashboard({
             // Keep the stored eligibility for diagnostics; the source barrier
             // changes what is a candidate now, including cached AI negatives.
             const candidate =
-              m.sourceScopeReview?.status === "required"
+              m.sourceScopeReview?.status === "required" ||
+              m.sourceReviewState === "blocked" ||
+              m.sourceReviewState === "stale"
                 ? m.assessment === "uncertain" && m.approved !== false
                 : m.eligible;
             return (
@@ -240,6 +242,7 @@ export function AdminDashboard({
               <p>
                 <strong>{m.company}</strong>
               </p>
+              <p className="meta">Attività dichiarate: {m.companyActivities}</p>
               <MatchNote assessment={m.assessment} reason={m.reason} />
               {m.reviewRequired && m.reviewReasons.length > 0 && (
                 <div className="notice">{m.reviewReasons.join("; ")}</div>
@@ -253,7 +256,16 @@ export function AdminDashboard({
                   }
                   className={`button ${m.approved === true ? "primary" : "secondary"}`}
                   onClick={() =>
-                    act({ action: "review", id: m.id, approved: true })
+                    act({
+                      action: "review",
+                      id: m.id,
+                      approved: true,
+                      expectedEvaluationRevision: m.evaluationRevision,
+                      expectedEvaluationToken: m.evaluationToken,
+                      expectedContentRevision: m.contentRevision,
+                      expectedProfileRevision: m.profileRevision,
+                      expectedSourceReviewDependency: m.sourceReviewDependency,
+                    })
                   }
                 >
                   Pertinente · Approva
@@ -273,6 +285,12 @@ export function AdminDashboard({
                 >
                   Verifica dati
                 </button>
+                <a
+                  className="button secondary"
+                  href={`/admin/fonti/${encodeURIComponent(m.publicationId)}`}
+                >
+                  Esamina la fonte
+                </a>
               </div>
               <SourceScopeReviewControls
                 key={`${m.id}:${m.sourceScopeReview?.token ?? "none"}`}

@@ -22,9 +22,20 @@ import {
 import { presentMatch } from "@/lib/match-presentation";
 import { appUrl } from "@/lib/config";
 import type { Publication } from "@/lib/domain";
-import { digestDue, zurichDigestDay, materialChange } from "@/lib/matching";
+import {
+  digestDue,
+  zurichDigestDay,
+  materialChange,
+  preliminaryMatch,
+} from "@/lib/matching";
 import { HttpError } from "@/lib/viewer";
 import { fingerprint } from "@/sources/common";
+import { readSourceReviewContexts } from "@/lib/source-reviews";
+import {
+  sameSourceReviewDependency,
+  sourceReviewBindingState,
+  sourceReviewBlocksComparison,
+} from "@/lib/source-review-policy";
 import {
   hasSourceScopeReview,
   isMatchRevisionCurrent,
@@ -290,7 +301,24 @@ export async function queueDigests(now = new Date()) {
           )
       : [];
     const seen = new Set<string>(sentPublications.map((p) => p.canonicalId));
+    const sourceReviews = await readSourceReviewContexts(
+      db,
+      all.map((r) => r.p),
+    );
     const selected = all.filter((r) => {
+      const sourceReview = sourceReviews.get(r.p.id) ?? null;
+      const sourceState = sourceReviewBindingState(
+        sourceReview,
+        r.m.sourceReviewDependency,
+      );
+      if (sourceState === "blocked" || sourceState === "stale") return false;
+      if (sourceReview && (r.m.approved !== true || !r.m.reviewedAt))
+        return false;
+      if (
+        sourceReview &&
+        !preliminaryMatch(r.p.data, firm.profile, now).eligible
+      )
+        return false;
       if (sent.has(r.p.id) || seen.has(r.p.canonicalId) || r.f?.dismissed)
         return false;
       if (r.p.deadline && r.p.deadline <= now) return false;
@@ -303,7 +331,7 @@ export async function queueDigests(now = new Date()) {
         r.p.data.reviewRequired ||
         hasSourceScopeReview(r.p.data) ||
         r.m.approved === false ||
-        (r.p.data.sourceScopeReview &&
+        ((r.p.data.sourceScopeReview || sourceReview) &&
           !isMatchRevisionCurrent({
             revision: r.m.revision,
             publication: r.p.data,
@@ -328,13 +356,13 @@ export async function queueDigests(now = new Date()) {
         title: r.p.title,
         deadline: r.p.data.deadline,
         sourceUrl: r.p.data.sourceUrl,
-        reason: r.m.reason,
-        assessment: presentMatch({
+        ...presentMatch({
           match: r.m,
           publication: r.p.data,
           aiRevision: r.p.aiRevision,
           profileRevision: fingerprint(firm.profile),
-        }).assessment,
+          sourceReview: sourceReviews.get(r.p.id) ?? null,
+        }),
       })),
       appUrl(),
     );
@@ -350,6 +378,9 @@ export async function queueDigests(now = new Date()) {
         revision: r.p.data.revision,
         ...(r.p.data.sourceScopeReview
           ? { sourceScopeToken: r.p.data.sourceScopeReview.token }
+          : {}),
+        ...(sourceReviews.get(r.p.id)
+          ? { sourceReviewDependency: sourceReviews.get(r.p.id)!.dependency }
           : {}),
       })),
     };
@@ -415,6 +446,7 @@ export async function sendPending() {
           sql`,`,
         )})`,
       );
+    const referencedReviews = await readSourceReviewContexts(db, referenced);
     if (n.kind === "change") {
       const relatedIssue = await db
         .select({ id: issues.id })
@@ -438,7 +470,10 @@ export async function sendPending() {
         .limit(1);
       if (
         referenced.some(
-          (p) => p.data.reviewRequired || hasSourceScopeReview(p.data),
+          (p) =>
+            p.data.reviewRequired ||
+            hasSourceScopeReview(p.data) ||
+            sourceReviewBlocksComparison(referencedReviews.get(p.id) ?? null),
         ) ||
         relatedIssue.length
       )
@@ -495,14 +530,28 @@ export async function sendPending() {
         currentMatches.length !== n.items.length ||
         currentMatches.some(
           (m) =>
+            ["blocked", "stale"].includes(
+              sourceReviewBindingState(
+                referencedReviews.get(m.publicationId) ?? null,
+                m.sourceReviewDependency,
+              ),
+            ) ||
             !m.eligible ||
+            (!!referencedReviews.get(m.publicationId) &&
+              (m.approved !== true || !m.reviewedAt)) ||
+            referenced.some(
+              (p) =>
+                p.id === m.publicationId &&
+                referencedReviews.get(p.id) &&
+                !preliminaryMatch(p.data, owner.company.profile).eligible,
+            ) ||
             m.approved === false ||
             (m.approved !== true &&
               (!auto?.value || m.score < 80 || m.reviewNotes)) ||
             referenced.some(
               (p) =>
                 p.id === m.publicationId &&
-                p.data.sourceScopeReview &&
+                (p.data.sourceScopeReview || referencedReviews.get(p.id)) &&
                 !isMatchRevisionCurrent({
                   revision: m.revision,
                   publication: p.data,
@@ -535,6 +584,13 @@ export async function sendPending() {
               (p.deadline && p.deadline <= new Date()) ||
               p.data.reviewRequired ||
               hasSourceScopeReview(p.data) ||
+              sourceReviewBlocksComparison(
+                referencedReviews.get(p.id) ?? null,
+              ) ||
+              !sameSourceReviewDependency(
+                n.items.find((i) => i.id === p.id)?.sourceReviewDependency,
+                referencedReviews.get(p.id)?.dependency,
+              ) ||
               n.items.find((i) => i.id === p.id)?.sourceScopeToken !==
                 p.data.sourceScopeReview?.token)) ||
           !n.items.some((i) => i.id === p.id && i.revision === p.data.revision),
@@ -565,6 +621,7 @@ export async function sendPending() {
         )
         .orderBy(publications.id)
         .for("share");
+      const currentReviews = await readSourceReviewContexts(tx, currentSources);
       if (
         currentSources.length !== n.items.length ||
         currentSources.some((p) => {
@@ -574,8 +631,13 @@ export async function sendPending() {
             p.data.revision !== item.revision ||
             p.data.reviewRequired ||
             hasSourceScopeReview(p.data) ||
+            sourceReviewBlocksComparison(currentReviews.get(p.id) ?? null) ||
             (n.kind === "digest" &&
-              item.sourceScopeToken !== p.data.sourceScopeReview?.token)
+              (item.sourceScopeToken !== p.data.sourceScopeReview?.token ||
+                !sameSourceReviewDependency(
+                  item.sourceReviewDependency,
+                  currentReviews.get(p.id)?.dependency,
+                )))
           );
         })
       )
@@ -606,7 +668,21 @@ export async function sendPending() {
           finalMatches.length !== n.items.length ||
           finalMatches.some(
             (m) =>
+              ["blocked", "stale"].includes(
+                sourceReviewBindingState(
+                  currentReviews.get(m.publicationId) ?? null,
+                  m.sourceReviewDependency,
+                ),
+              ) ||
               !m.eligible ||
+              (!!currentReviews.get(m.publicationId) &&
+                (m.approved !== true || !m.reviewedAt)) ||
+              currentSources.some(
+                (p) =>
+                  p.id === m.publicationId &&
+                  currentReviews.get(p.id) &&
+                  !preliminaryMatch(p.data, owner.company.profile).eligible,
+              ) ||
               m.approved === false ||
               (m.approved !== true &&
                 (finalAutomation?.value !== true ||
@@ -615,7 +691,7 @@ export async function sendPending() {
               currentSources.some(
                 (p) =>
                   p.id === m.publicationId &&
-                  p.data.sourceScopeReview &&
+                  (p.data.sourceScopeReview || currentReviews.get(p.id)) &&
                   !isMatchRevisionCurrent({
                     revision: m.revision,
                     publication: p.data,

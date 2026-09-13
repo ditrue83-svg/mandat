@@ -1,11 +1,25 @@
 import { and, eq, lte, gt, isNull, or, desc, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { matches, publications, feedback, settings } from "@/db/schema";
+import {
+  matches,
+  publications,
+  feedback,
+  settings,
+  sourceReviewEvents,
+} from "@/db/schema";
 import { fingerprint } from "@/sources/common";
 import { getDemoOpportunities } from "./demo";
 import type { Opportunity, RadarStatus, Viewer } from "./domain";
 import { presentMatch } from "./match-presentation";
 import { preliminaryMatch } from "./matching";
+import {
+  readSourceReviewContexts,
+  readSourceReviewContext,
+} from "./source-reviews";
+import {
+  sourceReviewBindingState,
+  sourceReviewBlocksComparison,
+} from "./source-review-policy";
 import {
   hasSourceScopeReview,
   isMatchContentCurrent,
@@ -25,6 +39,7 @@ export async function getRadarStatus(
       matchRevision: matches.revision,
       approved: matches.approved,
       reviewedAt: matches.reviewedAt,
+      sourceReviewDependency: matches.sourceReviewDependency,
     })
     .from(publications)
     .leftJoin(
@@ -48,22 +63,38 @@ export async function getRadarStatus(
       ),
     );
   const profileRevision = fingerprint(viewer.profile);
+  const sourceReviews = await readSourceReviewContexts(
+    db,
+    rows.map((row) => row.publication),
+  );
   // A pending/retry AI result has been assessed, even though it still needs
   // review. Only missing or invalidated assessments count as waiting here.
-  const pendingCount = rows.filter(
-    (row) =>
-      !(
-        hasSourceScopeReview(row.publication)
-          ? isMatchContentCurrent
-          : isMatchRevisionCurrent
-      )({
-        revision: row.matchRevision,
-        publication: row.publication,
-        profileRevision,
-        manuallyReviewed:
-          row.approved === false || (row.approved === true && !!row.reviewedAt),
-      }),
-  ).length;
+  const pendingCount = rows.filter((row) => {
+    const context = sourceReviews.get(row.publication.id) ?? null;
+    const manual =
+      row.approved === false || (row.approved === true && !!row.reviewedAt);
+    // A preserved manual decision waits for a person, never for a worker job.
+    // Presentation suspends an old positive until it is explicitly reviewed.
+    if (manual && (context || row.sourceReviewDependency)) return false;
+    if (
+      !manual &&
+      !sourceReviewBlocksComparison(context) &&
+      sourceReviewBindingState(context, row.sourceReviewDependency) === "stale"
+    )
+      return true;
+    return !(
+      hasSourceScopeReview(row.publication) ||
+        sourceReviewBlocksComparison(context) ||
+        (manual && context)
+        ? isMatchContentCurrent
+        : isMatchRevisionCurrent
+    )({
+      revision: row.matchRevision,
+      publication: row.publication,
+      profileRevision,
+      manuallyReviewed: manual,
+    });
+  }).length;
   if (!pendingCount) return { state: "ready", pendingCount };
   const [heartbeat] = await db
     .select({ value: settings.value })
@@ -107,6 +138,7 @@ export async function listOpportunities(
           : or(
               eq(matches.eligible, true),
               sql`${publications.data}->'sourceScopeReview'->>'status' = 'required'`,
+              sql`exists (select 1 from ${sourceReviewEvents} where ${sourceReviewEvents.publicationId} = ${publications.id})`,
             ),
         options.includeInactive ? undefined : eq(publications.status, "open"),
         lte(publications.visibleAt, now),
@@ -117,6 +149,10 @@ export async function listOpportunities(
     )
     .orderBy(desc(matches.score));
   const seen = new Set<string>();
+  const sourceReviews = await readSourceReviewContexts(
+    getDb(),
+    rows.map((row) => row.publication),
+  );
   return rows
     .sort(
       (a, b) =>
@@ -131,12 +167,29 @@ export async function listOpportunities(
         process.env.FOGLIO_REUSE_CONFIRMED !== "true"
       )
         return [];
-      const preliminary = hasSourceScopeReview(r.publication.data)
-        ? preliminaryMatch(r.publication.data, viewer.profile, now)
-        : undefined;
+      const sourceReview = sourceReviews.get(r.publication.id) ?? null;
+      const preliminary =
+        hasSourceScopeReview(r.publication.data) ||
+        sourceReview ||
+        r.match.sourceReviewDependency
+          ? preliminaryMatch(r.publication.data, viewer.profile, now)
+          : undefined;
       if (
         !options.includeInactive &&
         (r.match.approved === false || (preliminary && !preliminary.eligible))
+      )
+        return [];
+      const bindingState = sourceReviewBindingState(
+        sourceReview,
+        r.match.sourceReviewDependency,
+      );
+      if (
+        !options.includeInactive &&
+        !sourceReview &&
+        !r.match.eligible &&
+        !hasSourceScopeReview(r.publication.data) &&
+        bindingState !== "blocked" &&
+        bindingState !== "stale"
       )
         return [];
       seen.add(r.publication.canonicalId);
@@ -151,6 +204,7 @@ export async function listOpportunities(
             aiRevision: r.publication.aiRevision,
             profileRevision,
             preliminary,
+            sourceReview,
           }),
           saved: r.feedback?.saved ?? false,
           dismissed: r.feedback?.dismissed ?? false,
@@ -158,11 +212,12 @@ export async function listOpportunities(
             r.feedback?.relevant === null || r.feedback?.relevant === undefined
               ? null
               : r.feedback.relevant
-                ? "relevant"
-                : "irrelevant",
+                ? ("relevant" as const)
+                : ("irrelevant" as const),
         },
       ];
-    });
+    })
+    .sort((a, b) => b.score - a.score);
 }
 export async function getOpportunity(
   viewer: Viewer,
@@ -195,6 +250,7 @@ export async function getOpportunity(
       process.env.FOGLIO_REUSE_CONFIRMED !== "true")
   )
     return null;
+  const sourceReview = await readSourceReviewContext(getDb(), row.p);
   return {
     ...row.p.data,
     id: row.p.id,
@@ -204,9 +260,13 @@ export async function getOpportunity(
       publication: row.p.data,
       aiRevision: row.p.aiRevision,
       profileRevision: fingerprint(viewer.profile),
-      preliminary: hasSourceScopeReview(row.p.data)
-        ? preliminaryMatch(row.p.data, viewer.profile)
-        : undefined,
+      sourceReview,
+      preliminary:
+        hasSourceScopeReview(row.p.data) ||
+        sourceReview ||
+        row.m.sourceReviewDependency
+          ? preliminaryMatch(row.p.data, viewer.profile)
+          : undefined,
     }),
     saved: row.f?.saved ?? false,
     dismissed: row.f?.dismissed ?? false,
