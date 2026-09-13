@@ -77,6 +77,27 @@ const scopeSchema = z
   .strict();
 export class AiUnavailable extends Error {}
 class BudgetExceeded extends AiUnavailable {}
+const tokenUsageSchema = z.object({
+  // The ledger stores counts as PostgreSQL INTEGER, never clamped values.
+  inputTokens: z.number().int().min(0).max(2_147_483_647),
+  outputTokens: z.number().int().min(0).max(2_147_483_647),
+});
+type TokenUsage = z.infer<typeof tokenUsageSchema>;
+function recordedCost(cost: number): string | null {
+  if (!Number.isFinite(cost) || cost < 0) return null;
+  const rounded = cost.toFixed(6);
+  // NUMERIC(12,6), as declared for cost_chf and reserved_chf.
+  return Number(rounded) <= 999_999.999999 ? rounded : null;
+}
+// An unusable answer may still have a known, billable token consumption.
+class AiResponseRejected extends Error {
+  constructor(
+    message: string,
+    readonly usage: TokenUsage | null,
+  ) {
+    super(message);
+  }
+}
 function rates() {
   const input = Number(process.env.LLM_INPUT_CHF_PER_MILLION),
     output = Number(process.env.LLM_OUTPUT_CHF_PER_MILLION);
@@ -103,6 +124,8 @@ export interface AiTransport {
 export const configuredTransport: AiTransport = {
   async complete(system, prompt, maxTokens) {
     if (!process.env.LLM_API_KEY) throw new AiUnavailable("AI non configurata");
+    const expectedModel =
+      process.env.LLM_MODEL || "mistralai/Ministral-3-14B-Instruct-2512";
     const base =
       process.env.LLM_API_BASE_URL ||
       `https://api.infomaniak.com/2/ai/${process.env.INFOMANIAK_AI_PRODUCT_ID}/openai/v1`;
@@ -116,8 +139,7 @@ export const configuredTransport: AiTransport = {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model:
-          process.env.LLM_MODEL || "mistralai/Ministral-3-14B-Instruct-2512",
+        model: expectedModel,
         messages: [
           { role: "system", content: system },
           { role: "user", content: prompt },
@@ -129,30 +151,64 @@ export const configuredTransport: AiTransport = {
       redirect: "error",
       signal: AbortSignal.timeout(90000),
     });
-    if (!response.ok) throw new Error(`Servizio AI: HTTP ${response.status}`);
-    const value = await response.json();
+    let value: unknown;
+    try {
+      value = await response.json();
+    } catch {
+      throw new AiResponseRejected(
+        response.ok
+          ? "Risposta AI non leggibile"
+          : `Servizio AI: HTTP ${response.status}`,
+        null,
+      );
+    }
+    // Read usage independently: model, content and finish errors must not
+    // discard a consumption already returned by the provider.
+    const reportedUsage = z
+      .object({
+        usage: z.object({
+          prompt_tokens: tokenUsageSchema.shape.inputTokens,
+          completion_tokens: tokenUsageSchema.shape.outputTokens,
+        }),
+      })
+      .safeParse(value);
+    const usage = reportedUsage.success
+      ? {
+          inputTokens: reportedUsage.data.usage.prompt_tokens,
+          outputTokens: reportedUsage.data.usage.completion_tokens,
+        }
+      : null;
+    if (!response.ok)
+      throw new AiResponseRejected(
+        `Servizio AI: HTTP ${response.status}`,
+        usage,
+      );
+    if (!usage)
+      throw new AiResponseRejected("Consumo AI non valido o assente", null);
     const payload = z
       .object({
+        model: z.literal(expectedModel),
         choices: z
           .array(
             z.object({
-              message: z.object({ content: z.string() }),
-              finish_reason: z.string().nullish(),
+              message: z.object({
+                content: z.string().refine((text) => text.trim().length > 0),
+                refusal: z.null().optional(),
+              }),
+              finish_reason: z.literal("stop"),
             }),
           )
-          .min(1),
-        usage: z.object({
-          prompt_tokens: z.number().nonnegative(),
-          completion_tokens: z.number().nonnegative(),
-        }),
+          .length(1),
       })
-      .parse(value);
-    if (payload.choices[0].finish_reason === "length")
-      throw new Error("Risposta AI incompleta");
+      .safeParse(value);
+    if (!payload.success)
+      throw new AiResponseRejected(
+        "Risposta AI incompleta o non utilizzabile",
+        usage,
+      );
     return {
-      text: payload.choices[0].message.content,
-      inputTokens: payload.usage.prompt_tokens,
-      outputTokens: payload.usage.completion_tokens,
+      text: payload.data.choices[0].message.content,
+      ...usage,
     };
   },
 };
@@ -183,6 +239,9 @@ async function infer(
     ((Buffer.byteLength(systemPrompt + prompt, "utf8") + 1000) * input +
       maxTokens * output) /
     1e6;
+  const reservedChf = recordedCost(reserve);
+  if (reservedChf === null)
+    throw new AiUnavailable("Riserva AI fuori capacità del registro");
   const month = DateTime.now().setZone("Europe/Zurich").toFormat("yyyy-MM");
   const id = crypto.randomUUID();
   try {
@@ -208,7 +267,7 @@ async function infer(
         publicationId: p.id,
         purpose,
         status: "reserved",
-        reservedChf: reserve.toFixed(6),
+        reservedChf,
       });
     });
   } catch (error) {
@@ -220,27 +279,64 @@ async function infer(
     throw error;
   }
   await getDb().delete(settings).where(eq(settings.key, "ai_budget_blocked"));
+  let knownUsage: TokenUsage | null = null;
   try {
     const result = await transport.complete(systemPrompt, prompt, maxTokens);
-    const cost =
-      (result.inputTokens * input + result.outputTokens * output) / 1e6;
+    const usageResult = tokenUsageSchema.safeParse(result);
+    if (!usageResult.success)
+      throw new AiResponseRejected("Consumo AI non valido o assente", null);
+    knownUsage = usageResult.data;
+    const costChf = recordedCost(
+      (knownUsage.inputTokens * input + knownUsage.outputTokens * output) / 1e6,
+    );
+    if (costChf === null)
+      throw new AiResponseRejected(
+        "Costo AI fuori capacità del registro",
+        knownUsage,
+      );
     await getDb()
       .update(aiUsage)
       .set({
         status: "completed",
-        costChf: cost.toFixed(6),
-        inputTokens: result.inputTokens,
-        outputTokens: result.outputTokens,
+        costChf,
+        inputTokens: knownUsage.inputTokens,
+        outputTokens: knownUsage.outputTokens,
       })
       .where(eq(aiUsage.id, id));
-    return parseAiJson(result.text);
+    try {
+      return parseAiJson(result.text);
+    } catch {
+      // JSON parser messages can include fragments of the provider's content.
+      throw new AiResponseRejected(
+        "Risposta AI non conforme al formato JSON",
+        knownUsage,
+      );
+    }
   } catch (error) {
+    const usage =
+      error instanceof AiResponseRejected ? error.usage : knownUsage;
+    const costChf = usage
+      ? recordedCost(
+          (usage.inputTokens * input + usage.outputTokens * output) / 1e6,
+        )
+      : null;
     await getDb()
       .update(aiUsage)
       .set({
         status: "uncertain",
         error:
-          error instanceof Error ? error.message.slice(0, 250) : "Errore AI",
+          usage && costChf === null
+            ? "Costo AI fuori capacità del registro: richiesta verifica"
+            : error instanceof Error
+              ? error.message.slice(0, 250)
+              : "Errore AI",
+        ...(usage
+          ? {
+              costChf,
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+            }
+          : {}),
       })
       .where(eq(aiUsage.id, id));
     throw error;
