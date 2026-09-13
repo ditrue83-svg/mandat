@@ -19,7 +19,7 @@ export default async function LotSourceReviewPage({
     return (
       <Shell viewer={viewer}>
         <section className="panel">
-          <h1>Revisione dei lotti</h1>
+          <h1>Revisione della fonte</h1>
           <p>
             Disponibile nell’area fondatore autenticata. La demo non legge né
             modifica revisioni reali.
@@ -49,7 +49,7 @@ export default async function LotSourceReviewPage({
         Torna all’area fondatore
       </Link>
       <LotSourceEditor
-        key={`${data.expected.snapshotHash}:${data.expected.targetEventId}:${data.expected.projectBarrierHash}:${lot ?? "project"}`}
+        key={`${data.expected.snapshotHash}:${data.expected.shapeEpochToken}:${data.expected.targetEventId}:${data.expected.projectBarrierHash}:${lot ?? "project"}`}
         data={lotSourceEditorData(data)}
       />
     </Shell>

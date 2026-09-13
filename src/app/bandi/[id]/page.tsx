@@ -104,20 +104,31 @@ export default async function Detail({
           </section>
           {item.lotReview ? (
             <section className="panel">
-              <h2>I lotti e la tua ditta</h2>
+              <h2>
+                {item.lotReview.shape === "project"
+                  ? "Il progetto e la tua ditta"
+                  : "I lotti e la tua ditta"}
+              </h2>
               <MatchNote assessment={item.assessment} reason={item.reason} />
-              {!item.lotReview.lots.length && (
+              {item.lotReview.shape === "unresolved" && (
                 <p>
-                  Non sono disponibili lotti documentati da valutare. La fonte
-                  richiede una verifica.
+                  La struttura della gara non è verificata. La fonte richiede
+                  una verifica prima di valutare la pertinenza.
                 </p>
               )}
-              {item.lotReview.lots.map((lot) => (
-                <article key={lot.lotId} className="space-top">
+              {item.lotReview.targets.map((lot) => (
+                <article
+                  key={
+                    lot.target.kind === "project" ? "project" : lot.target.lotId
+                  }
+                  className="space-top"
+                >
                   <h3>
-                    {lot.number === null
-                      ? "Lotto senza numero indicato"
-                      : `Lotto ${lot.number}`}
+                    {lot.target.kind === "project"
+                      ? "Intero progetto — gara senza lotti"
+                      : lot.number === null
+                        ? "Lotto senza numero indicato"
+                        : `Lotto ${lot.number}`}
                   </h3>
                   <p>
                     {lot.state === "current"
@@ -135,7 +146,8 @@ export default async function Detail({
                     {lot.operational?.zone ||
                       lot.operational?.canton ||
                       "Non indicato"}{" "}
-                    · Scadenza: Non indicata · Importo: Non indicato
+                    · Scadenza: {formatDate(lot.operational?.deadline ?? null)}{" "}
+                    · Importo: {formatMoney(lot.operational?.valueChf ?? null)}
                   </p>
                   {!!lot.reviewReasons.length && (
                     <p className="notice">{lot.reviewReasons.join("; ")}</p>

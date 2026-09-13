@@ -6,6 +6,11 @@ export type LotSourceEditorData = {
   expected: LoadedLotSourceReview["expected"];
   state: LoadedLotSourceReview["context"]["state"];
   projectBlocked: boolean;
+  shape: {
+    kind: LoadedLotSourceReview["shapeState"]["shape"]["kind"];
+    reasons: string[];
+    epochToken: string | null;
+  };
   directory: { id: string; number: number }[];
   texts: {
     path: string;
@@ -69,6 +74,11 @@ export function lotSourceEditorData(
     expected: { ...data.expected },
     state: data.context.state,
     projectBlocked: data.context.projectBarrier.state === "blocked",
+    shape: {
+      kind: data.shapeState.shape.kind,
+      reasons: [...data.shapeState.shape.reasons],
+      epochToken: data.shapeState.epochToken,
+    },
     directory: content?.directory.map((lot) => ({ ...lot })) ?? [],
     texts,
     original: content

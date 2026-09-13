@@ -15,7 +15,7 @@ const results: Record<LotAssessmentResult, string> = {
 };
 type Submission = {
   data: LotMatchEditorData;
-  action: "assess_lot" | "veto_project" | "reopen_project";
+  action: "assess_lot" | "assess_project" | "veto_project" | "reopen_project";
   result: LotAssessmentResult | "";
   reason: string;
   note: string;
@@ -36,15 +36,20 @@ export async function submitLotMatchReview(input: Submission) {
     expectedProfileHash: data.expected.profileHash,
     expectedStateToken: data.expected.stateToken,
     expectedGroupToken: data.expected.groupToken,
+    expectedShapeEpochToken: data.expected.shapeEpochToken,
     note,
   };
   let body;
-  if (action === "assess_lot") {
+  if (action === "assess_lot" || action === "assess_project") {
     const selected = data.selected;
     const reason = input.reason.trim();
     if (!selected?.canAssess)
       return invalid(
-        "La fonte del lotto non consente una valutazione verificabile.",
+        "La fonte selezionata non consente una valutazione verificabile.",
+      );
+    if ((action === "assess_project") !== (selected.target.kind === "project"))
+      return invalid(
+        "Il tipo di valutazione non corrisponde al contenuto selezionato.",
       );
     if (!input.result || reason.length < 10 || reason.length > 4000)
       return invalid(
@@ -78,12 +83,16 @@ export async function submitLotMatchReview(input: Submission) {
       (!selected.allowsCertainty ||
         !input.references.some((ref) =>
           selected.texts.some(
-            (entry) => entry.path === ref.rawPath && entry.scope === "lot",
+            (entry) =>
+              entry.path === ref.rawPath &&
+              entry.documentary &&
+              entry.scope ===
+                (selected.target.kind === "project" ? "project" : "lot"),
           ),
         ))
     )
       return invalid(
-        "Un giudizio conclusivo richiede la fonte verificata e una citazione di questo lotto.",
+        "Un giudizio conclusivo richiede la fonte verificata e una citazione della prestazione selezionata.",
       );
     if (input.result === "direct" && !selected.eligible)
       return invalid(
@@ -151,10 +160,12 @@ export async function submitLotMatchReview(input: Submission) {
     stale: false,
     message:
       action === "reopen_project"
-        ? "Progetto riconsiderato. I lotti richiedono ancora giudizi correnti."
+        ? "Progetto riconsiderato. La pertinenza richiede ancora un giudizio corrente."
         : action === "veto_project"
           ? "Esclusione del progetto registrata."
-          : "Valutazione del lotto salvata.",
+          : action === "assess_project"
+            ? "Valutazione dell’intero progetto salvata."
+            : "Valutazione del lotto salvata.",
   };
 }
 
@@ -173,6 +184,7 @@ export function LotMatchEditor({ data }: { data: LotMatchEditorData }) {
   const [stale, setStale] = useState(false);
   const submitting = useRef(false);
   const selected = data.selected;
+  const projectTarget = selected?.target.kind === "project";
   const path = `/admin/valutazioni/${encodeURIComponent(data.company.id)}/${encodeURIComponent(data.publication.id)}`;
   const sourcePath = `/admin/fonti/${encodeURIComponent(data.publication.id)}/lotti`;
   let sourceUrl: string | null = null;
@@ -228,9 +240,11 @@ export function LotMatchEditor({ data }: { data: LotMatchEditorData }) {
       <h1>{data.publication.title}</h1>
       <h2>{data.company.profile.name}</h2>
       <p>
-        Una scheda per il progetto, con giudizi distinti per lotto. La
-        pertinenza descrive un interesse potenziale e non attesta l’idoneità a
-        partecipare.
+        {data.shape.kind === "project"
+          ? "Questa gara non è suddivisa in lotti: il giudizio riguarda l’intero progetto."
+          : "Una scheda per il progetto, con giudizi distinti per gli eventuali lotti."}{" "}
+        La pertinenza descrive un interesse potenziale e non attesta l’idoneità
+        a partecipare.
       </p>
       <details className="space-top" open>
         <summary>Profilo della ditta</summary>
@@ -254,15 +268,21 @@ export function LotMatchEditor({ data }: { data: LotMatchEditorData }) {
         </dl>
       </details>
       <nav className="lot-source-nav" aria-label="Progetto e lotti">
-        <Link href={path} aria-current={!selected ? "page" : undefined}>
-          Progetto
+        <Link
+          href={path}
+          aria-current={!selected || projectTarget ? "page" : undefined}
+        >
+          {data.shape.kind === "project" ? "Intero progetto" : "Progetto"}
         </Link>
         {data.lots.map((lot) => (
           <Link
             key={lot.id}
             href={`${path}?lot=${encodeURIComponent(lot.id)}`}
             aria-current={
-              selected?.target.lotId === lot.id ? "page" : undefined
+              selected?.target.kind === "lot" &&
+              selected.target.lotId === lot.id
+                ? "page"
+                : undefined
             }
           >
             {lot.state === "removed-or-unresolved"
@@ -276,8 +296,8 @@ export function LotMatchEditor({ data }: { data: LotMatchEditorData }) {
       <p>{data.project.reason}</p>
       {data.project.suppressed && (
         <p className="notice">
-          L’esclusione del progetto resta attiva anche salvando un giudizio sul
-          lotto. Per ritirarla usa Riconsidera progetto.
+          L’esclusione del progetto resta attiva anche salvando un giudizio di
+          pertinenza. Per ritirarla usa Riconsidera progetto.
         </p>
       )}
       {data.project.dismissed && (
@@ -290,6 +310,13 @@ export function LotMatchEditor({ data }: { data: LotMatchEditorData }) {
         <p className="notice">
           Il progetto richiede ancora una revisione della fonte.{" "}
           <Link href={sourcePath}>Esamina la fonte del progetto</Link>.
+        </p>
+      )}
+      {data.shape.kind === "unresolved" && (
+        <p className="notice">
+          La struttura della gara è da verificare. Non è possibile approvare
+          l’intero progetto o i lotti finché i dati sulla struttura non sono
+          verificati.
         </p>
       )}
       {!selected && (
@@ -310,25 +337,33 @@ export function LotMatchEditor({ data }: { data: LotMatchEditorData }) {
       {selected && (
         <>
           <h2>
-            {selected.number === null
-              ? "Lotto non disponibile"
-              : `Lotto ${selected.number}`}
+            {projectTarget
+              ? "Intero progetto — gara senza lotti"
+              : selected.number === null
+                ? "Lotto non disponibile"
+                : `Lotto ${selected.number}`}
           </h2>
           {!selected.canAssess && (
             <p className="notice">
-              Il contenuto corrente del lotto non è utilizzabile. I giudizi
+              Il contenuto corrente selezionato non è utilizzabile. I giudizi
               precedenti restano nello storico.
             </p>
           )}
           {!selected.allowsCertainty && (
             <p className="notice">
-              Per un giudizio conclusivo occorre prima verificare la fonte del
-              lotto e del progetto. Puoi registrare “Da approfondire” con
-              citazioni verificabili.{" "}
+              Per un giudizio conclusivo occorre prima verificare la fonte
+              {projectTarget ? " del progetto" : " del lotto e del progetto"}.
+              Puoi registrare “Da approfondire” con citazioni verificabili.{" "}
               <Link
-                href={`${sourcePath}?lot=${encodeURIComponent(selected.target.lotId)}`}
+                href={
+                  selected.target.kind === "project"
+                    ? sourcePath
+                    : `${sourcePath}?lot=${encodeURIComponent(selected.target.lotId)}`
+                }
               >
-                Esamina la fonte del lotto
+                {projectTarget
+                  ? "Esamina la fonte del progetto"
+                  : "Esamina la fonte del lotto"}
               </Link>
               .
             </p>
@@ -448,7 +483,8 @@ export function LotMatchEditor({ data }: { data: LotMatchEditorData }) {
           </label>
           <p>
             Descrivi il rapporto fra attività della ditta e prestazioni del
-            lotto. Mantieni le informazioni riservate nella nota privata.
+            {projectTarget ? "progetto" : "lotto"}. Mantieni le informazioni
+            riservate nella nota privata.
           </p>
           {!!selected.reviewReasons.length && (
             <fieldset className="space-top">
@@ -492,9 +528,13 @@ export function LotMatchEditor({ data }: { data: LotMatchEditorData }) {
             type="button"
             className="button primary"
             disabled={busy || stale || !selected.canAssess}
-            onClick={() => save("assess_lot")}
+            onClick={() =>
+              save(projectTarget ? "assess_project" : "assess_lot")
+            }
           >
-            Salva valutazione del lotto
+            {projectTarget
+              ? "Salva valutazione dell’intero progetto"
+              : "Salva valutazione del lotto"}
           </button>
         </div>
       )}
@@ -502,7 +542,7 @@ export function LotMatchEditor({ data }: { data: LotMatchEditorData }) {
         <h3>Decisione sull’intero progetto</h3>
         <p>
           La riconsiderazione ritira solo l’esclusione del fondatore. Non
-          approva lotti, non risolve dubbi sulla fonte e non modifica il
+          approva la pertinenza, non risolve dubbi sulla fonte e non modifica il
           feedback della ditta.
         </p>
         <label className="check-label">
@@ -551,9 +591,9 @@ export function LotMatchEditor({ data }: { data: LotMatchEditorData }) {
           <article key={item.id} className="space-top">
             <p>
               {item.at} ·{" "}
-              {item.lotId
-                ? `Lotto ${data.lots.find((lot) => lot.id === item.lotId)?.number ?? item.lotId}`
-                : "Progetto"}{" "}
+              {item.target?.kind === "lot"
+                ? `Lotto ${data.lots.find((lot) => item.target?.kind === "lot" && lot.id === item.target.lotId)?.number ?? "non più presente"}`
+                : "Intero progetto"}{" "}
               ·{" "}
               {item.result
                 ? results[item.result]

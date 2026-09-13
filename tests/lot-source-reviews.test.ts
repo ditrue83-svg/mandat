@@ -178,21 +178,19 @@ async function fixture(
     raw,
   );
   if (options.flag) p.sourceScopeReview = options.flag;
-  await db
-    .insert(schema.publications)
-    .values({
-      id: p.id,
-      canonicalId: p.id,
-      externalId: p.externalId,
-      projectId: p.projectId,
-      source: p.source,
-      title: p.title,
-      status: p.status,
-      visibleAt: new Date(p.visibleAt),
-      data: p,
-      revision: p.revision,
-      aiRevision: p.revision,
-    });
+  await db.insert(schema.publications).values({
+    id: p.id,
+    canonicalId: p.id,
+    externalId: p.externalId,
+    projectId: p.projectId,
+    source: p.source,
+    title: p.title,
+    status: p.status,
+    visibleAt: new Date(p.visibleAt),
+    data: p,
+    revision: p.revision,
+    aiRevision: p.revision,
+  });
   const body = JSON.stringify(raw);
   const result = (): SimapAcquisitionResult => ({
     publication: p,
@@ -260,6 +258,7 @@ function draft(
     expectedSelectionHash: loaded.expected.selectionHash,
     expectedTargetEventId: loaded.expected.targetEventId,
     expectedProjectBarrierHash: loaded.expected.projectBarrierHash,
+    expectedShapeEpochToken: loaded.expected.shapeEpochToken,
     action,
     form:
       action === "opened"
@@ -647,43 +646,37 @@ it("a real job insert failure rolls back source flag, audit and event; the same 
 it("source forms and durable reconciliation leave manual matches, customer feedback and prepared emails unchanged", async () => {
   const f = await fixture(),
     manualAt = new Date("2030-01-01T12:00:00.000Z");
-  await db
-    .insert(schema.matches)
-    .values({
-      id: f.p.id,
-      companyId,
-      publicationId: f.p.id,
-      revision: "manual-existing",
-      score: 87,
-      reason: "Giudizio manuale esistente",
-      eligible: true,
-      approved: true,
-      reviewedAt: manualAt,
-      reviewNotes: "Nota privata esistente",
-    });
-  await db
-    .insert(schema.feedback)
-    .values({
-      id: f.p.id,
-      companyId,
-      publicationId: f.p.id,
-      saved: true,
-      dismissed: true,
-      relevant: false,
-    });
-  await db
-    .insert(schema.notifications)
-    .values({
-      id: f.p.id,
-      companyId,
-      dedupeKey: f.p.id,
-      kind: "digest",
-      status: "pending",
-      subject: "Notifica esistente",
-      html: "<p>Notifica esistente</p>",
-      textBody: "Notifica esistente",
-      items: [{ id: f.p.id, revision: "manual-existing" }],
-    });
+  await db.insert(schema.matches).values({
+    id: f.p.id,
+    companyId,
+    publicationId: f.p.id,
+    revision: "manual-existing",
+    score: 87,
+    reason: "Giudizio manuale esistente",
+    eligible: true,
+    approved: true,
+    reviewedAt: manualAt,
+    reviewNotes: "Nota privata esistente",
+  });
+  await db.insert(schema.feedback).values({
+    id: f.p.id,
+    companyId,
+    publicationId: f.p.id,
+    saved: true,
+    dismissed: true,
+    relevant: false,
+  });
+  await db.insert(schema.notifications).values({
+    id: f.p.id,
+    companyId,
+    dedupeKey: f.p.id,
+    kind: "digest",
+    status: "pending",
+    subject: "Notifica esistente",
+    html: "<p>Notifica esistente</p>",
+    textBody: "Notifica esistente",
+    items: [{ id: f.p.id, revision: "manual-existing" }],
+  });
   const before = await businessState(),
     publication = await publicationRow(f.p.id);
   await appendLotSourceReview(

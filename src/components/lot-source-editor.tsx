@@ -45,6 +45,7 @@ export async function submitLotSourceReview(input: Submission) {
       expectedSelectionHash: data.expected.selectionHash,
       expectedTargetEventId: data.expected.targetEventId,
       expectedProjectBarrierHash: data.expected.projectBarrierHash,
+      expectedShapeEpochToken: data.expected.shapeEpochToken,
       action,
       form: action === "recorded" ? input.form : null,
       references: action === "recorded" ? input.references : [],
@@ -192,15 +193,16 @@ export function LotSourceEditor({ data }: { data: LotSourceEditorData }) {
       <p className="eyebrow">Revisione della fonte</p>
       <h1>{data.publication.title}</h1>
       <p>
-        Esamina il progetto e ogni lotto separatamente. Questo giudizio descrive
-        la fonte; la pertinenza per una ditta richiede una valutazione distinta.
+        Esamina il progetto e gli eventuali lotti separatamente. Questo giudizio
+        descrive la fonte; la pertinenza per una ditta richiede una valutazione
+        distinta.
       </p>
       <nav aria-label="Progetto e lotti" className="lot-source-nav">
         <Link
           href={path}
           aria-current={data.target.kind === "project" ? "page" : undefined}
         >
-          Progetto
+          {data.shape.kind === "project" ? "Intero progetto" : "Progetto"}
         </Link>
         {data.directory.map((lot) => (
           <Link
@@ -214,15 +216,24 @@ export function LotSourceEditor({ data }: { data: LotSourceEditorData }) {
       </nav>
       <h2>
         {data.target.kind === "project"
-          ? "Contesto del progetto"
+          ? data.shape.kind === "project"
+            ? "Intero progetto — gara senza lotti"
+            : "Contesto del progetto"
           : selectedLot
             ? `Lotto ${selectedLot.number}`
             : "Lotto non più presente"}
       </h2>
+      {data.shape.kind === "unresolved" && (
+        <p className="notice">
+          La struttura della gara non è verificata. Un giudizio sulla fonte non
+          risolve l’assenza o la discordanza dei dati sui lotti e non abilita
+          una valutazione certa per la ditta.
+        </p>
+      )}
       {data.projectBlocked && (
         <p className="notice">
-          Il progetto richiede una verifica. Finché resta aperta, i lotti non
-          possono sostenere una proposta positiva.
+          Il progetto richiede una verifica. Finché resta aperta, non può
+          sostenere una proposta positiva per la ditta.
         </p>
       )}
       {data.state === "input_refused" && (

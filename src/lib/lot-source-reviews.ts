@@ -12,6 +12,10 @@ import {
 import { lockCanonicalPublications } from "./canonical-lock";
 import { decodeDocumentarySnapshotRow } from "./documentary-store";
 import { stableDocumentaryJson } from "./documentary-observation";
+import {
+  resolveAssessmentShapeHistory,
+  resolveAssessmentSourceContext,
+} from "./assessment-shape";
 import { enqueueLotReconciliation } from "./lot-reconciliation";
 import {
   captureLotSourceSnapshot,
@@ -49,6 +53,7 @@ export const lotSourceReviewInputSchema = z
     expectedSelectionHash: hash.nullable(),
     expectedTargetEventId: z.string().min(1).max(200).nullable(),
     expectedProjectBarrierHash: hash,
+    expectedShapeEpochToken: hash.nullable(),
     action: z.enum(["opened", "recorded"]),
     form: z
       .enum(["defined_service", "broad_scope", "unclear", "conflicting"])
@@ -99,14 +104,23 @@ export async function readLotSourceState(
   publication: LotPublicationRow,
 ) {
   if (!publication.documentarySnapshotId) return null;
-  const [row] = await tx
+  // The immutable request parent pointers, not timestamps or completed jobs,
+  // determine which adopted shape epoch is current. Shadow rows are supplied
+  // to the resolver but are never treated as ancestry merely by existing.
+  const observations = await tx
     .select()
     .from(publicationDocumentarySnapshots)
-    .where(
-      eq(publicationDocumentarySnapshots.id, publication.documentarySnapshotId),
-    );
+    .where(eq(publicationDocumentarySnapshots.publicationId, publication.id));
+  const row = observations.find(
+    (item) => item.id === publication.documentarySnapshotId,
+  );
   if (!row) throw new Error("Archivio documentario adottato non disponibile.");
   const observation = decodeDocumentarySnapshotRow(row, publication.id);
+  const shapeState = resolveAssessmentShapeHistory({
+    publicationId: publication.id,
+    currentObservationId: publication.documentarySnapshotId,
+    observations,
+  });
   const acquisition = observation.acquisition;
   const snapshot = captureLotSourceSnapshot({
     publicationId: publication.id,
@@ -144,7 +158,7 @@ export async function readLotSourceState(
       } as MixedSourceReviewRecord;
     }),
   );
-  return { snapshot, history };
+  return { snapshot, history, shapeState };
 }
 async function loadReview(
   tx: SourceReviewExecutor,
@@ -154,10 +168,11 @@ async function loadReview(
   const state = await readLotSourceState(tx, publication);
   if (!state)
     throw new HttpError(409, "La fonte non usa ancora la revisione dei lotti.");
-  const context = resolveLotSourceContext(
+  const context = resolveAssessmentSourceContext(
     state.snapshot,
     target,
     state.history,
+    state.shapeState,
   );
   return {
     publication: {
@@ -176,6 +191,7 @@ async function loadReview(
       selectionHash: context.dependency.selectionHash,
       targetEventId: context.dependency.reviewEventId,
       projectBarrierHash: context.projectBarrier.barrierHash,
+      shapeEpochToken: state.shapeState.epochToken,
     },
   };
 }
@@ -215,13 +231,17 @@ export async function appendLotSourceReview(
     if (!locked) throw new HttpError(404, "Bando non trovato.");
     let publication = locked.publication;
     const loaded = await loadReview(tx, publication, draft.target);
-    if (draft.expectedObservationId !== loaded.snapshot.observationId)
+    if (
+      draft.expectedObservationId !== loaded.snapshot.observationId ||
+      draft.expectedShapeEpochToken !== loaded.shapeState.epochToken
+    )
       throw new HttpError(
         409,
         "L’archivio della fonte è cambiato. Aggiorna la pagina.",
       );
     const {
       expectedObservationId: _id,
+      expectedShapeEpochToken: _epoch,
       resolveLegacyScope,
       ...command
     } = draft;
@@ -293,25 +313,23 @@ export async function appendLotSourceReview(
             updatedAt: new Date(metadata.createdAt),
           })
           .where(eq(publications.id, publication.id));
-        await tx
-          .insert(issues)
-          .values({
-            id: randomUUID(),
-            key: `source-scope-audit:${state.token}`,
-            publicationId: publication.id,
-            severity: "info",
-            title: "Verifica dell’oggetto risolta",
-            detail: JSON.stringify({
-              action: "resolve-source-scope",
-              actorId: viewer.userId,
-              note: draft.note,
-              previousScopeToken: previous.token,
-              sourceReviewEventId: record.event.id,
-              ...state,
-            }),
-            createdAt: new Date(metadata.createdAt),
-            resolvedAt: new Date(metadata.createdAt),
-          });
+        await tx.insert(issues).values({
+          id: randomUUID(),
+          key: `source-scope-audit:${state.token}`,
+          publicationId: publication.id,
+          severity: "info",
+          title: "Verifica dell’oggetto risolta",
+          detail: JSON.stringify({
+            action: "resolve-source-scope",
+            actorId: viewer.userId,
+            note: draft.note,
+            previousScopeToken: previous.token,
+            sourceReviewEventId: record.event.id,
+            ...state,
+          }),
+          createdAt: new Date(metadata.createdAt),
+          resolvedAt: new Date(metadata.createdAt),
+        });
       }
     } catch (error) {
       if (error instanceof ReviewConflict)
@@ -325,15 +343,13 @@ export async function appendLotSourceReview(
         "Stato o riferimenti non validi per la fonte e il lotto selezionati.",
       );
     }
-    await tx
-      .insert(sourceReviewEvents)
-      .values({
-        id: record.event.id,
-        publicationId: publication.id,
-        sequence: record.event.sequence,
-        event: record.event,
-        snapshot: record.snapshot,
-      });
+    await tx.insert(sourceReviewEvents).values({
+      id: record.event.id,
+      publicationId: publication.id,
+      sequence: record.event.sequence,
+      event: record.event,
+      snapshot: record.snapshot,
+    });
     await enqueueLotReconciliation(tx, {
       publicationId: publication.id,
       canonicalId: locked.canonicalId,

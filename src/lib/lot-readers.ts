@@ -50,7 +50,7 @@ export function presentLotOpportunity(
 ): Opportunity {
   const project = loaded.project;
   const dto = projectLotAssessmentDto(project);
-  const operational = dto.lots.filter(
+  const operational = dto.targets.filter(
     (lot) => lot.state !== "removed-or-unresolved" && lot.operational,
   );
   const zones = [
@@ -59,11 +59,12 @@ export function presentLotOpportunity(
   return {
     ...loaded.publication.data,
     id: loaded.publication.id,
-    // Parent AI text, amounts and deadlines have no proved lot attribution.
+    // Only the current target's operational evidence is projected. Parent AI
+    // text never substitutes a human assessment, including without lots.
     summary: null,
     sectors: [
       ...new Set(
-        project.lots
+        project.targets
           .filter(
             (lot) =>
               lot.state !== "removed-or-unresolved" &&
@@ -81,9 +82,12 @@ export function presentLotOpportunity(
     zone: zones.length === 1 ? zones[0]! : null,
     requirements: [],
     evidence: [],
-    deadline: null,
+    deadline:
+      project.shape.kind === "project"
+        ? (project.projectAssessment?.preliminary?.operational.deadline ?? null)
+        : null,
     valueChf: null,
-    location: zones.join(" · ") || "Non indicato per i lotti",
+    location: zones.join(" · ") || "Non indicato",
     score: project.signalEligible ? 100 : 0,
     assessment:
       project.quality === "approved"
@@ -93,13 +97,22 @@ export function presentLotOpportunity(
           : "uncertain",
     reason: project.reason,
     reviewRequired:
-      dto.lots.some(
+      dto.targets.some(
         (lot) =>
           lot.state !== "current" ||
           lot.result === "review" ||
           lot.reviewReasons.length > 0,
-      ) || project.state === "input_refused",
-    reviewReasons: [...new Set(dto.lots.flatMap((lot) => lot.reviewReasons))],
+      ) ||
+      project.shape.kind === "unresolved" ||
+      project.state === "input_refused",
+    reviewReasons: [
+      ...new Set([
+        ...(project.shape.kind === "unresolved"
+          ? ["La struttura della gara richiede una verifica della fonte."]
+          : []),
+        ...dto.targets.flatMap((lot) => lot.reviewReasons),
+      ]),
+    ],
     saved: project.saved,
     dismissed: project.dismissed,
     feedback:
@@ -123,8 +136,8 @@ export function lotOpportunityVisible(
     !loaded.project.suppressed &&
     loaded.project.state !== "different" &&
     (loaded.project.state === "input_refused" ||
-      loaded.project.lots.length === 0 ||
-      loaded.project.lots.some(
+      loaded.project.shape.kind === "unresolved" ||
+      loaded.project.targets.some(
         (lot) =>
           lot.state !== "removed-or-unresolved" &&
           lot.preliminary?.eligible !== false,
@@ -143,10 +156,13 @@ export async function readCanonicalMatch(
   return getDb().transaction(async (tx) => {
     const group = await lockCanonicalPublications(tx, publicationId);
     if (!group) return null;
-    const available = group.publications.filter((p) => sourceAvailable(p.source));
-    const publication = options.legacyDetail && !available.some((p) => p.documentarySnapshotId)
-      ? available.find((p) => p.id === publicationId)
-      : available.sort(compareCanonicalPublications)[0];
+    const available = group.publications.filter((p) =>
+      sourceAvailable(p.source),
+    );
+    const publication =
+      options.legacyDetail && !available.some((p) => p.documentarySnapshotId)
+        ? available.find((p) => p.id === publicationId)
+        : available.sort(compareCanonicalPublications)[0];
     if (!publication) return null;
     const [company] = await tx
       .select()

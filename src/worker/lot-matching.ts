@@ -48,8 +48,9 @@ export async function matchAdoptedPublication({
           revision: `${LOT_WORKER_REVIEW_VERSION}:unresolved`,
           score: 0,
           eligible: false,
-          reason: "La fonte adottata richiede una valutazione umana dei lotti.",
-          reviewNotes: "Richiesta revisione umana dei lotti",
+          reason:
+            "La fonte adottata richiede una valutazione umana della pertinenza.",
+          reviewNotes: "Richiesta revisione umana della pertinenza",
         })
         .onConflictDoNothing();
       const [match] = await tx
@@ -78,15 +79,9 @@ export async function matchAdoptedPublication({
         match.approved !== null ||
         match.lotEvaluations !== null;
       if (!human) {
-        const currentLots = loaded.project.lots.some(
-          (lot) => lot.state !== "removed-or-unresolved",
-        );
-        const reason =
-          loaded.project.state === "input_refused"
-            ? loaded.project.reason
-            : !currentLots
-              ? "La fonte documentaria non contiene lotti valutabili: serve una revisione del progetto."
-              : loaded.project.reason;
+        // A ready row is not a positive verdict. The resolver also describes a
+        // real project target or an unresolved structure without synthetic lots.
+        const reason = loaded.project.reason;
         const revision = `${LOT_WORKER_REVIEW_VERSION}:${loaded.project.projectBindingHash}`;
         if (
           match.revision !== revision ||
@@ -101,7 +96,7 @@ export async function matchAdoptedPublication({
               score: 0,
               eligible: false,
               reason,
-              reviewNotes: "Richiesta revisione umana dei lotti",
+              reviewNotes: "Richiesta revisione umana della pertinenza",
               updatedAt: new Date(),
             })
             .where(eq(matches.id, match.id));

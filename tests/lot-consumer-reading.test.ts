@@ -42,6 +42,7 @@ import {
   appendLotMatchReview,
   loadLotMatchReview,
   lotMatchReviewTarget,
+  assessmentReviewTarget,
   type LoadedLotMatchReview,
   type LotMatchReviewInput,
 } from "../src/lib/lot-match-reviews";
@@ -114,18 +115,26 @@ function sourceDraft(loaded: LoadedLotSourceReview): LotSourceReviewInput {
       : `${selected!.path}/orderDescription/it`;
   const value =
     target.kind === "project"
-      ? commonText
+      ? (
+          loaded.context.targetContent!.projectSections.procurement as {
+            orderDescription: { it: string };
+          }
+        ).orderDescription.it
       : (selected!.record as { orderDescription: { it: string } })
           .orderDescription.it;
   return {
     target,
     expectedObservationId: loaded.expected.observationId,
     expectedSnapshotHash: loaded.expected.snapshotHash,
+    expectedShapeEpochToken: loaded.expected.shapeEpochToken,
     expectedSelectionHash: loaded.expected.selectionHash,
     expectedTargetEventId: loaded.expected.targetEventId,
     expectedProjectBarrierHash: loaded.expected.projectBarrierHash,
     action: "recorded",
-    form: target.kind === "project" ? "broad_scope" : "defined_service",
+    form:
+      target.kind === "project" && loaded.shapeState.shape.kind !== "project"
+        ? "broad_scope"
+        : "defined_service",
     references: [
       {
         selectionHash: loaded.expected.selectionHash!,
@@ -144,6 +153,8 @@ async function fixture(
     adopt?: boolean;
     canonicalId?: string;
     reuseCompanies?: { companyId: string; otherCompanyId: string };
+    withoutLots?: boolean;
+    unknownShape?: boolean;
   } = {},
 ) {
   const projectId = randomUUID(),
@@ -190,6 +201,19 @@ async function fixture(
       },
     ],
   };
+  if (options.withoutLots || options.unknownShape) {
+    raw.lots = [];
+    raw.base.lots = [];
+    raw.base.lotsType = options.withoutLots ? "without" : "unknown";
+    raw.procurement.orderDescription.it = aText;
+    Object.assign(raw.procurement, {
+      orderAddress: { countryId: "CH", cantonId: "TI", city: "Lugano" },
+      cpvCode: { code: "77310000" },
+      partialOffers: {
+        it: "CONDIZIONE_CONDIVISA: offerta per l'intero progetto.",
+      },
+    });
+  }
   const entry = {
     id: projectId,
     raw: {
@@ -321,7 +345,11 @@ async function fixture(
   const b: LotSourceTarget = { ...a, lotId: bId };
   if (options.adopt !== false) {
     await adopt();
-    for (const target of [project, a, b])
+    for (const target of options.unknownShape
+      ? []
+      : options.withoutLots
+        ? [project]
+        : [project, a, b])
       await appendLotSourceReview(
         sourceDraft(await loadLotSourceReview(target, viewer)),
         viewer,
@@ -361,8 +389,9 @@ function assessmentDraft(
     companyId: loaded.company.id,
     publicationId: loaded.publication.id,
     action: "assess_lot",
-    target: selected.target,
+    target: selected.target as Extract<LotSourceTarget, { kind: "lot" }>,
     expectedSnapshotHash: selected.expected.snapshotHash,
+    expectedShapeEpochToken: selected.expected.shapeEpochToken!,
     expectedProfileHash: selected.expected.profileHash,
     expectedStateToken: selected.expected.stateToken,
     expectedGroupToken: selected.expected.groupToken,
@@ -394,11 +423,52 @@ function projectDraft(
     publicationId: loaded.publication.id,
     action,
     expectedSnapshotHash: loaded.expected.snapshotHash,
+    expectedShapeEpochToken: loaded.expected.shapeEpochToken,
     expectedProfileHash: loaded.expected.profileHash,
     expectedStateToken: loaded.expected.stateToken,
     expectedGroupToken: loaded.expected.groupToken,
     expectedProjectBindingHash: loaded.expected.projectBindingHash,
     note: "Revisione esplicita inventata della soppressione del progetto.",
+  };
+}
+
+function wholeProjectDraft(loaded: LoadedLotMatchReview): LotMatchReviewInput {
+  const selected = assessmentReviewTarget(loaded, {
+    kind: "project",
+    publicationId: loaded.publication.id,
+  });
+  const text = (
+    selected.context.targetContent!.projectSections.procurement as {
+      orderDescription: { it: string };
+    }
+  ).orderDescription.it;
+  return {
+    companyId: loaded.company.id,
+    publicationId: loaded.publication.id,
+    action: "assess_project",
+    target: selected.target as Extract<LotSourceTarget, { kind: "project" }>,
+    expectedSnapshotHash: selected.expected.snapshotHash,
+    expectedShapeEpochToken: selected.expected.shapeEpochToken!,
+    expectedProfileHash: selected.expected.profileHash,
+    expectedStateToken: selected.expected.stateToken,
+    expectedGroupToken: selected.expected.groupToken,
+    expectedSourceDependency: selected.expected.sourceDependency,
+    expectedOperationalInputHash: selected.expected.operationalInputHash,
+    expectedEvaluationSetToken: selected.expected.evaluationSetToken,
+    expectedEntryHash: selected.expected.entryHash,
+    result: "direct",
+    reason:
+      "La potatura dell'intero progetto riguarda la ditta; interesse potenziale.",
+    references: [
+      {
+        selectionHash: selected.context.dependency.selectionHash!,
+        rawPath: "/procurement/orderDescription/it",
+        startUtf16: 0,
+        endUtf16: text.length,
+      },
+    ],
+    confirmedReviewReasons: [...selected.preliminary.reviewReasons],
+    note: "PRIVATE_PROJECT_NOTE: avvisi verificati, nessuna attestazione di idoneità.",
   };
 }
 
@@ -905,4 +975,114 @@ it("historical positive and negative judgments survive but cease to count as cur
   ).toEqual(audits);
   expect(await matchRows(f.p.id)).toEqual(rows);
   expect(await listOpportunities(await customer(f))).toEqual([]); // the veto remains active.
+});
+
+it("explicitly without lots supports a real whole-project assessment, a single Radar card and one current quality vote", async () => {
+  const f = await fixture({ withoutLots: true });
+  const who = await customer(f);
+  const before = await getOpportunity(who, f.p.id);
+  expect(before).toMatchObject({
+    score: 0,
+    assessment: "uncertain",
+    lotReview: { shape: "project", lots: [] },
+  });
+  expect(before!.lotReview!.targets).toHaveLength(1);
+  expect(before!.lotReview!.targets[0].target).toEqual(f.project);
+  expect(await getRadarStatus(who)).toEqual({
+    state: "ready",
+    pendingCount: 0,
+  });
+  await appendLotMatchReview(wholeProjectDraft(await f.load()), viewer);
+  const cards = await listOpportunities(who);
+  expect(cards).toHaveLength(1);
+  expect(cards[0]).toMatchObject({
+    score: 100,
+    assessment: "reviewed",
+    summary: null,
+    lotReview: {
+      shape: "project",
+      lots: [],
+      relevantLotIds: [],
+      targets: [{ target: f.project, result: "direct" }],
+    },
+  });
+  expect(cards[0].reason).toContain("progetto");
+  expect(cards[0].sectors).toContain("giardinaggio");
+  expect(JSON.stringify(cards)).not.toMatch(
+    /PRIVATE_PROJECT_NOTE|actorId|evidenceSnapshot|lotId/,
+  );
+  const admin = await adminSnapshot(false);
+  const item = admin.matches.find(
+    (m) => m.publicationId === f.p.id && m.company === f.profile.name,
+  );
+  expect(item).toMatchObject({
+    approved: true,
+    reviewed: true,
+    score: 100,
+    summary: null,
+  });
+  expect(await getGate()).toMatchObject({
+    reviewed: 1,
+    approved: 1,
+    rejected: 0,
+  });
+});
+
+it("unknown shape cannot revive legacy approval; returning project after a lots transition requires new source and company reviews", async () => {
+  const unknown = await fixture({ unknownShape: true });
+  const uncertain = await getOpportunity(await customer(unknown), unknown.p.id);
+  expect(uncertain).toMatchObject({
+    score: 0,
+    assessment: "uncertain",
+    lotReview: { shape: "unresolved", targets: [] },
+  });
+  const f = await fixture({ withoutLots: true });
+  const who = await customer(f);
+  await appendLotMatchReview(wholeProjectDraft(await f.load()), viewer);
+  const history = await db
+    .select()
+    .from(schema.matchLotReviewEvents)
+    .where(eq(schema.matchLotReviewEvents.publicationId, f.p.id));
+  const withLots = structuredClone(f.raw);
+  withLots.base.lotsType = "with";
+  withLots.base.lots = [{ id: f.aId, lotNumber: 1, title: { it: "Verde" } }];
+  withLots.lots = [
+    {
+      id: f.aId,
+      lotNumber: 1,
+      title: { it: "Verde" },
+      orderDescription: { it: aText },
+      orderAddress: { countryId: "CH", cantonId: "TI", city: "Lugano" },
+      cpvCode: { code: "77310000" },
+    },
+  ];
+  await f.adopt(await f.observe(withLots));
+  const lots = await getOpportunity(who, f.p.id);
+  expect(lots).toMatchObject({
+    score: 0,
+    assessment: "uncertain",
+    lotReview: { shape: "lots" },
+  });
+  expect(
+    lots!.lotReview!.targets.some(
+      (t) => t.target.kind === "project" && t.state === "removed-or-unresolved",
+    ),
+  ).toBe(true);
+  await f.adopt(await f.observe(f.raw));
+  const returned = await getOpportunity(who, f.p.id);
+  expect(returned).toMatchObject({
+    score: 0,
+    assessment: "uncertain",
+    lotReview: { shape: "project" },
+  });
+  expect(
+    returned!.lotReview!.targets.find((t) => t.target.kind === "project")!
+      .state,
+  ).not.toBe("current");
+  expect(
+    await db
+      .select()
+      .from(schema.matchLotReviewEvents)
+      .where(eq(schema.matchLotReviewEvents.publicationId, f.p.id)),
+  ).toEqual(history);
 });

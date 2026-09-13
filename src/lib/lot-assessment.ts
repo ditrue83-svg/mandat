@@ -9,7 +9,6 @@ import {
 import {
   captureLotSourceSnapshot,
   LOT_SOURCE_CONTEXT_VERSION,
-  resolveLotSourceContext,
   resolveLotSourceReferences,
   type LotDocumentaryReference,
   type LotResolvedReference,
@@ -22,25 +21,56 @@ import {
 import type { DeepReadonly } from "./source-input";
 import { ReviewConflict } from "./source-review-context";
 import { profileSchema } from "./validation";
+import {
+  assertAssessmentShapeHistory,
+  isObservationInCurrentAssessmentEpoch,
+  resolveAssessmentSourceContext,
+  type AssessmentShape,
+  type AssessmentShapeHistory,
+} from "./assessment-shape";
+import {
+  preliminaryProjectMatch,
+  PROJECT_PREFILTER_VERSION,
+} from "./project-matching";
 
-export const LOT_EVALUATIONS_VERSION = "lot-evaluations-v1";
-export const LOT_EVALUATION_DEPENDENCY_VERSION = "lot-evaluation-dependency-v1";
-export const LOT_COMPARISON_VERSION = "human-lot-assessment-v1";
+export const LEGACY_LOT_EVALUATIONS_VERSION = "lot-evaluations-v1";
+export const LEGACY_LOT_EVALUATION_DEPENDENCY_VERSION =
+  "lot-evaluation-dependency-v1";
+export const LEGACY_LOT_COMPARISON_VERSION = "human-lot-assessment-v1";
+export const LOT_EVALUATIONS_VERSION = "lot-evaluations-v2";
+export const LOT_EVALUATION_DEPENDENCY_VERSION = "lot-evaluation-dependency-v2";
+export const LOT_COMPARISON_VERSION = "human-target-assessment-v2";
 export type LotAssessmentTarget = Extract<LotSourceTarget, { kind: "lot" }>;
+export type AssessmentTarget = LotSourceTarget;
 export type LotAssessmentResult = "direct" | "different" | "review";
-export type LotEvaluationDependency = DeepReadonly<{
-  version: typeof LOT_EVALUATION_DEPENDENCY_VERSION;
+type DependencyFields = {
   source: LotSourceDependency;
   profileHash: string;
   comparisonVersion: string;
   prefilterVersion: string;
   operationalInputHash: string;
-}>;
-export type LotEvaluation = DeepReadonly<{
+};
+export type LegacyLotEvaluationDependency = DeepReadonly<
+  DependencyFields & {
+    version: typeof LEGACY_LOT_EVALUATION_DEPENDENCY_VERSION;
+  }
+>;
+export type TargetEvaluationDependency = DeepReadonly<
+  DependencyFields & {
+    version: typeof LOT_EVALUATION_DEPENDENCY_VERSION;
+    shapeEpochToken: string;
+  }
+>;
+export type LotEvaluationDependency =
+  LegacyLotEvaluationDependency | TargetEvaluationDependency;
+type EvaluationFields<
+  T extends AssessmentTarget,
+  D extends LotEvaluationDependency,
+> = {
   id: string;
-  target: LotAssessmentTarget;
+  target: T;
   immutableEvidenceSnapshotId: string;
-  dependency: LotEvaluationDependency;
+  dependency: D;
   result: LotAssessmentResult;
   reason: string;
   evidence: readonly LotResolvedReference[];
@@ -52,13 +82,43 @@ export type LotEvaluation = DeepReadonly<{
     confirmedReviewReasons: readonly string[];
   };
   entryHash: string;
-}>;
-export type LotEvaluationSet = DeepReadonly<{
-  version: typeof LOT_EVALUATIONS_VERSION;
+};
+export type LegacyLotEvaluation = DeepReadonly<
+  EvaluationFields<LotAssessmentTarget, LegacyLotEvaluationDependency>
+>;
+export type TargetEvaluation = DeepReadonly<
+  EvaluationFields<AssessmentTarget, TargetEvaluationDependency>
+>;
+export type LotEvaluation = LegacyLotEvaluation | TargetEvaluation;
+type EvaluationSetFields = {
   companyId: string;
   publicationId: string;
-  entries: readonly LotEvaluation[];
-}>;
+};
+export type LotEvaluationSet = DeepReadonly<
+  EvaluationSetFields &
+    (
+      | {
+          version: typeof LEGACY_LOT_EVALUATIONS_VERSION;
+          entries: readonly LegacyLotEvaluation[];
+        }
+      | {
+          version: typeof LOT_EVALUATIONS_VERSION;
+          entries: readonly LotEvaluation[];
+        }
+    )
+>;
+
+export function assessmentTargetKey(target: AssessmentTarget): string {
+  return target.kind === "project"
+    ? `project:${target.publicationId}`
+    : `lot:${target.publicationId}:${target.sourceProjectId}:${target.lotId}`;
+}
+export function sameAssessmentTarget(
+  a: AssessmentTarget,
+  b: AssessmentTarget,
+): boolean {
+  return assessmentTargetKey(a) === assessmentTargetKey(b);
+}
 
 // Checksums bind data for server CAS; they do not authenticate the author. The
 // repository must authorize the actor and lock/re-read inputs before calling us.
@@ -144,12 +204,20 @@ const time = z
   .refine(
     (s) => Number.isFinite(Date.parse(s)) && new Date(s).toISOString() === s,
   );
-const targetSchema = z.strictObject({
+const lotTargetSchema = z.strictObject({
   kind: z.literal("lot"),
   publicationId: text(),
   sourceProjectId: uuid,
   lotId: uuid,
 });
+const projectTargetSchema = z.strictObject({
+  kind: z.literal("project"),
+  publicationId: text(),
+});
+const targetSchema = z.discriminatedUnion("kind", [
+  projectTargetSchema,
+  lotTargetSchema,
+]);
 const sourceDependencySchema = z.strictObject({
   version: z.literal(LOT_SOURCE_CONTEXT_VERSION),
   publicationId: text(),
@@ -163,12 +231,19 @@ const sourceDependencySchema = z.strictObject({
 });
 const dependencySchema = z.strictObject({
   version: z.literal(LOT_EVALUATION_DEPENDENCY_VERSION),
+  shapeEpochToken: digest,
   source: sourceDependencySchema,
   profileHash: digest,
   comparisonVersion: text(),
   prefilterVersion: text(),
   operationalInputHash: digest,
 });
+const legacyDependencySchema = dependencySchema
+  .omit({ shapeEpochToken: true })
+  .extend({
+    version: z.literal(LEGACY_LOT_EVALUATION_DEPENDENCY_VERSION),
+    source: sourceDependencySchema.extend({ target: lotTargetSchema }),
+  });
 const referenceSchema = z.strictObject({
   selectionHash: digest,
   rawPath: text(4096),
@@ -203,12 +278,23 @@ const entrySchema = z.strictObject({
   }),
   entryHash: digest,
 });
-const setSchema = z.strictObject({
+const legacyEntrySchema = entrySchema.extend({
+  target: lotTargetSchema,
+  dependency: legacyDependencySchema,
+});
+const currentSetSchema = z.strictObject({
   version: z.literal(LOT_EVALUATIONS_VERSION),
   companyId: text(),
   publicationId: text(),
-  entries: z.array(entrySchema).max(1000),
+  entries: z.array(z.union([legacyEntrySchema, entrySchema])).max(1000),
 });
+const setSchema = z.discriminatedUnion("version", [
+  currentSetSchema,
+  currentSetSchema.extend({
+    version: z.literal(LEGACY_LOT_EVALUATIONS_VERSION),
+    entries: z.array(legacyEntrySchema).max(1000),
+  }),
+]);
 
 export function lotAssessmentProfileHash(profile: CompanyProfile): string {
   const clean = copy(profile);
@@ -232,12 +318,14 @@ export function validateLotEvaluationSet(
     if (entryHash !== hash(body)) throw new Error("Altered lot evaluation");
     if (
       entry.target.publicationId !== publicationId ||
-      publicationId !== `simap-${entry.target.sourceProjectId}` ||
+      (entry.target.kind === "lot" &&
+        publicationId !== `simap-${entry.target.sourceProjectId}`) ||
       entry.dependency.source.publicationId !== publicationId ||
       stable(entry.target) !== stable(entry.dependency.source.target)
     )
       throw new Error("Lot evaluation target mismatch");
-    if (targets.has(entry.target.lotId) || ids.has(entry.id))
+    const targetKey = assessmentTargetKey(entry.target);
+    if (targets.has(targetKey) || ids.has(entry.id))
       throw new Error("Duplicate lot evaluation target or id");
     if (
       entry.evidence.some(
@@ -250,7 +338,7 @@ export function validateLotEvaluationSet(
       entry.humanReview.confirmedReviewReasons.length
     )
       throw new Error("Repeated operational confirmation");
-    targets.add(entry.target.lotId);
+    targets.add(targetKey);
     ids.add(entry.id);
   }
   return freeze(set);
@@ -277,12 +365,14 @@ export type LotAssessmentInput = {
   profile: CompanyProfile;
   snapshot: LotSourceSnapshot;
   history: readonly MixedSourceReviewRecord[];
+  shapeState: AssessmentShapeHistory;
   evaluationSet: LotEvaluationSet | null;
   evidenceSnapshots?: readonly LotSourceSnapshot[];
   now?: Date;
 };
-export type HumanLotAssessmentCommand = {
-  target: LotAssessmentTarget;
+export type HumanTargetAssessmentCommand = {
+  target: AssessmentTarget;
+  expectedShapeEpochToken: string;
   expectedSnapshotHash: string;
   expectedSourceDependency: LotSourceDependency;
   expectedProfileHash: string;
@@ -295,6 +385,13 @@ export type HumanLotAssessmentCommand = {
   origin: "human";
   confirmedReviewReasons: readonly string[];
 };
+export type HumanLotAssessmentCommand = Omit<
+  HumanTargetAssessmentCommand,
+  "target" | "expectedShapeEpochToken"
+> & {
+  target: LotAssessmentTarget;
+  expectedShapeEpochToken?: string;
+};
 export type HumanLotAssessmentMetadata = {
   id: string;
   actorId: string;
@@ -303,6 +400,7 @@ export type HumanLotAssessmentMetadata = {
 };
 const commandSchema = z.strictObject({
   target: targetSchema,
+  expectedShapeEpochToken: digest,
   expectedSnapshotHash: digest,
   expectedSourceDependency: sourceDependencySchema,
   expectedProfileHash: digest,
@@ -331,10 +429,16 @@ function checkedInput(input: LotAssessmentInput) {
     throw new Error("Lot assessment publication identity mismatch");
   // This also checks the immutable archive, the complete event chain, and the
   // snapshot's binding to the source project before any projection is possible.
-  const project = resolveLotSourceContext(
+  assertAssessmentShapeHistory(
+    input.shapeState,
+    input.publication.id,
+    input.snapshot.observationId,
+  );
+  const project = resolveAssessmentSourceContext(
     input.snapshot,
     { kind: "project", publicationId: input.publication.id },
     input.history,
+    input.shapeState,
   );
   if (
     stable(input.snapshot.sourceScopeReview) !==
@@ -357,6 +461,23 @@ function checkedInput(input: LotAssessmentInput) {
     setToken: lotEvaluationSetToken(set, input.companyId, input.publication.id),
   };
 }
+export type PreliminaryTargetMatch =
+  PreliminaryLotMatch | ReturnType<typeof preliminaryProjectMatch>;
+export function preliminaryAssessmentMatch(input: {
+  publication: Publication;
+  profile: CompanyProfile;
+  context: LotSourceContext;
+  now?: Date;
+}): PreliminaryTargetMatch {
+  return input.context.target.kind === "project"
+    ? preliminaryProjectMatch(input)
+    : preliminaryLotMatch(input);
+}
+function targetPrefilterVersion(target: AssessmentTarget) {
+  return target.kind === "project"
+    ? PROJECT_PREFILTER_VERSION
+    : PREFILTER_VERSION;
+}
 function sourceAllowsCertainty(context: LotSourceContext): boolean {
   return (
     context.state === "manual_source" &&
@@ -364,8 +485,8 @@ function sourceAllowsCertainty(context: LotSourceContext): boolean {
     context.projectBarrier.state === "clear"
   );
 }
-export function createHumanLotAssessment(
-  commandInput: HumanLotAssessmentCommand,
+export function createHumanTargetAssessment(
+  commandInput: HumanTargetAssessmentCommand,
   input: LotAssessmentInput,
   metadataInput: HumanLotAssessmentMetadata,
 ): {
@@ -376,22 +497,34 @@ export function createHumanLotAssessment(
   const command = commandSchema.parse(copy(commandInput));
   const metadata = metadataSchema.parse(copy(metadataInput));
   const checked = checkedInput(input);
-  const context = resolveLotSourceContext(
+  if (
+    !input.shapeState.epochToken ||
+    !input.shapeState.shape.targets.some((target) =>
+      sameAssessmentTarget(target, command.target),
+    )
+  )
+    throw new Error(
+      "Cannot assess a target absent from the verified current structure",
+    );
+  const context = resolveAssessmentSourceContext(
     input.snapshot,
     command.target,
     input.history,
+    input.shapeState,
   );
-  const preliminary = preliminaryLotMatch({
+  const preliminary = preliminaryAssessmentMatch({
     publication: input.publication,
     profile: input.profile,
     context,
     now: input.now,
   });
   const previousEntry =
-    checked.set?.entries.find((e) => e.target.lotId === command.target.lotId) ??
-    null;
+    checked.set?.entries.find((e) =>
+      sameAssessmentTarget(e.target, command.target),
+    ) ?? null;
   if (
     command.expectedSnapshotHash !== input.snapshot.snapshotHash ||
+    command.expectedShapeEpochToken !== input.shapeState.epochToken ||
     stable(command.expectedSourceDependency) !== stable(context.dependency) ||
     command.expectedProfileHash !== checked.profileHash ||
     command.expectedOperationalInputHash !== preliminary.operationalInputHash ||
@@ -402,13 +535,14 @@ export function createHumanLotAssessment(
       "The lot, source, profile, operational filter or evaluation set changed",
     );
   if (
-    !context.targetContent?.selectedLot ||
+    !context.targetContent ||
+    (command.target.kind === "lot" && !context.targetContent.selectedLot) ||
     context.dependency.selectionHash === null
   )
-    throw new Error("Cannot assess a missing or refused lot input");
+    throw new Error("Cannot assess a missing or refused target input");
   if (command.result !== "review" && !sourceAllowsCertainty(context))
     throw new Error(
-      "A certain assessment requires a defined lot and a clear project source",
+      "A certain assessment requires a defined current target and a clear project source",
     );
   if (command.result === "direct" && !preliminary.eligible)
     throw new Error(
@@ -437,19 +571,26 @@ export function createHumanLotAssessment(
   );
   if (
     command.result !== "review" &&
-    !evidence.some((e) => e.origin.scope === "selected_lot")
+    !evidence.some(
+      (e) =>
+        e.origin.scope ===
+        (command.target.kind === "lot" ? "selected_lot" : "project_context"),
+    )
   )
-    throw new Error("A certain lot assessment needs evidence from that lot");
-  const body: Omit<LotEvaluation, "entryHash"> = {
+    throw new Error(
+      "A certain assessment needs evidence from the selected target",
+    );
+  const body: Omit<TargetEvaluation, "entryHash"> = {
     id: metadata.id,
     target: command.target,
     immutableEvidenceSnapshotId: input.snapshot.observationId,
     dependency: {
       version: LOT_EVALUATION_DEPENDENCY_VERSION,
+      shapeEpochToken: input.shapeState.epochToken,
       source: context.dependency,
       profileHash: checked.profileHash,
       comparisonVersion: LOT_COMPARISON_VERSION,
-      prefilterVersion: PREFILTER_VERSION,
+      prefilterVersion: targetPrefilterVersion(command.target),
       operationalInputHash: preliminary.operationalInputHash,
     },
     result: command.result,
@@ -471,7 +612,7 @@ export function createHumanLotAssessment(
       publicationId: input.publication.id,
       entries: [
         ...(checked.set?.entries.filter(
-          (e) => e.target.lotId !== command.target.lotId,
+          (e) => !sameAssessmentTarget(e.target, command.target),
         ) ?? []),
         entry,
       ],
@@ -480,6 +621,31 @@ export function createHumanLotAssessment(
     input.publication.id,
   );
   return freeze({ entry, evaluationSet, previousEntry });
+}
+
+// Compatibility for internal lot callers. The snapshot expectation still binds
+// the draft; the server-verified history is mandatory and never fabricated here.
+export function createHumanLotAssessment(
+  command: HumanLotAssessmentCommand,
+  input: LotAssessmentInput,
+  metadata: HumanLotAssessmentMetadata,
+) {
+  assertAssessmentShapeHistory(
+    input.shapeState,
+    input.publication.id,
+    input.snapshot.observationId,
+  );
+  if (!input.shapeState.epochToken)
+    throw new Error("Unresolved assessment structure");
+  return createHumanTargetAssessment(
+    {
+      ...command,
+      expectedShapeEpochToken:
+        command.expectedShapeEpochToken ?? input.shapeState.epochToken,
+    },
+    input,
+    metadata,
+  );
 }
 
 function snapshotIndex(
@@ -548,7 +714,11 @@ function evidenceIssue(
     if (
       stable(resolved) !== stable(entry.evidence) ||
       (entry.result !== "review" &&
-        !resolved.some((e) => e.origin.scope === "selected_lot"))
+        !resolved.some(
+          (e) =>
+            e.origin.scope ===
+            (entry.target.kind === "lot" ? "selected_lot" : "project_context"),
+        ))
     )
       return "evidence_mismatch";
   } catch {
@@ -556,16 +726,19 @@ function evidenceIssue(
   }
   return null;
 }
-export type ResolvedLotAssessment = DeepReadonly<{
-  target: LotAssessmentTarget;
+export type ResolvedTargetAssessment = DeepReadonly<{
+  target: AssessmentTarget;
   number: number | null;
   state: "current" | "stale" | "missing" | "removed-or-unresolved";
   issue: string | null;
   evaluation: LotEvaluation | null;
   context: LotSourceContext | null;
-  preliminary: PreliminaryLotMatch | null;
+  preliminary: PreliminaryTargetMatch | null;
   signalEligible: boolean;
 }>;
+export type ResolvedLotAssessment = ResolvedTargetAssessment & {
+  readonly target: LotAssessmentTarget;
+};
 export type ProjectLotSuppression = {
   active: boolean;
   reason: string;
@@ -583,7 +756,12 @@ export type ProjectLotAssessment = DeepReadonly<{
   state: "relevant" | "different" | "review" | "suppressed" | "input_refused";
   reason: string;
   projectBarrier: LotSourceContext["projectBarrier"];
+  shape: AssessmentShape;
+  shapeEpochToken: string | null;
+  targets: readonly ResolvedTargetAssessment[];
   lots: readonly ResolvedLotAssessment[];
+  projectAssessment: ResolvedTargetAssessment | null;
+  relevantTargets: readonly AssessmentTarget[];
   relevantLotIds: readonly string[];
   allDifferent: boolean;
   signalEligible: boolean;
@@ -623,108 +801,128 @@ export function resolveProjectLotAssessment(
   const feedback = feedbackSchema.parse(copy(input.feedback ?? {}));
   const snapshots = snapshotIndex(input);
   const directory = checked.project.targetContent?.directory ?? [];
-  const lots: ResolvedLotAssessment[] = directory.map((item) => {
-    const target: LotAssessmentTarget = {
-      kind: "lot",
-      publicationId: input.publication.id,
-      sourceProjectId: input.publication.externalId.toLowerCase(),
-      lotId: item.id.toLowerCase(),
-    };
-    const context = resolveLotSourceContext(
-      input.snapshot,
-      target,
-      input.history,
-    );
-    const preliminary = preliminaryLotMatch({
-      publication: input.publication,
-      profile: input.profile,
-      context,
-      now: input.now,
+  const targets: ResolvedTargetAssessment[] =
+    input.shapeState.shape.targets.map((target) => {
+      const number =
+        target.kind === "lot"
+          ? (directory.find((item) => item.id === target.lotId)?.number ?? null)
+          : null;
+      const context = resolveAssessmentSourceContext(
+        input.snapshot,
+        target,
+        input.history,
+        input.shapeState,
+      );
+      const preliminary = preliminaryAssessmentMatch({
+        publication: input.publication,
+        profile: input.profile,
+        context,
+        now: input.now,
+      });
+      const evaluation =
+        checked.set?.entries.find((e) =>
+          sameAssessmentTarget(e.target, target),
+        ) ?? null;
+      let issue: string | null = null;
+      if (evaluation) {
+        const dep = evaluation.dependency;
+        issue = evidenceIssue(evaluation, snapshots, input.history);
+        if (
+          !issue &&
+          (!isObservationInCurrentAssessmentEpoch(
+            input.shapeState,
+            evaluation.immutableEvidenceSnapshotId,
+          ) ||
+            (dep.version === LOT_EVALUATION_DEPENDENCY_VERSION &&
+              dep.shapeEpochToken !== input.shapeState.epochToken))
+        )
+          issue = "stale_structure";
+        if (!issue && stable(dep.source) !== stable(context.dependency))
+          issue = "stale_source";
+        if (!issue && dep.profileHash !== checked.profileHash)
+          issue = "stale_profile";
+        if (
+          !issue &&
+          (dep.comparisonVersion !==
+            (dep.version === LEGACY_LOT_EVALUATION_DEPENDENCY_VERSION
+              ? LEGACY_LOT_COMPARISON_VERSION
+              : LOT_COMPARISON_VERSION) ||
+            dep.prefilterVersion !== targetPrefilterVersion(target))
+        )
+          issue = "stale_version";
+        if (
+          !issue &&
+          dep.operationalInputHash !== preliminary.operationalInputHash
+        )
+          issue = "stale_operational_input";
+        if (
+          !issue &&
+          evaluation.result !== "review" &&
+          !sourceAllowsCertainty(context)
+        )
+          issue = "source_review_required";
+        if (
+          !issue &&
+          evaluation.result === "direct" &&
+          stable(evaluation.humanReview.confirmedReviewReasons) !==
+            stable(preliminary.reviewReasons)
+        )
+          issue = "operational_review_unconfirmed";
+      }
+      const state = evaluation
+        ? issue
+          ? ("stale" as const)
+          : ("current" as const)
+        : ("missing" as const);
+      return {
+        target,
+        number,
+        state,
+        issue: evaluation ? issue : "assessment_missing",
+        evaluation,
+        context,
+        preliminary,
+        signalEligible:
+          state === "current" &&
+          evaluation?.result === "direct" &&
+          preliminary.eligible &&
+          sourceAllowsCertainty(context),
+      };
     });
-    const evaluation =
-      checked.set?.entries.find((e) => e.target.lotId === target.lotId) ?? null;
-    let issue: string | null = null;
-    if (evaluation) {
-      const dep = evaluation.dependency;
-      issue = evidenceIssue(evaluation, snapshots, input.history);
-      if (!issue && stable(dep.source) !== stable(context.dependency))
-        issue = "stale_source";
-      if (!issue && dep.profileHash !== checked.profileHash)
-        issue = "stale_profile";
-      if (
-        !issue &&
-        (dep.comparisonVersion !== LOT_COMPARISON_VERSION ||
-          dep.prefilterVersion !== PREFILTER_VERSION)
-      )
-        issue = "stale_version";
-      if (
-        !issue &&
-        dep.operationalInputHash !== preliminary.operationalInputHash
-      )
-        issue = "stale_operational_input";
-      if (
-        !issue &&
-        evaluation.result !== "review" &&
-        !sourceAllowsCertainty(context)
-      )
-        issue = "source_review_required";
-      if (
-        !issue &&
-        evaluation.result === "direct" &&
-        stable(evaluation.humanReview.confirmedReviewReasons) !==
-          stable(preliminary.reviewReasons)
-      )
-        issue = "operational_review_unconfirmed";
-    }
-    const state = evaluation
-      ? issue
-        ? ("stale" as const)
-        : ("current" as const)
-      : ("missing" as const);
-    return {
-      target,
-      number: item.number,
-      state,
-      issue: evaluation ? issue : "assessment_missing",
-      evaluation,
-      context,
-      preliminary,
-      signalEligible:
-        state === "current" &&
-        evaluation?.result === "direct" &&
-        preliminary.eligible &&
-        sourceAllowsCertainty(context),
-    };
-  });
-  const present = new Set(lots.map((lot) => lot.target.lotId));
+  const present = new Set(
+    targets.map((item) => assessmentTargetKey(item.target)),
+  );
   for (const evaluation of checked.set?.entries ?? []) {
-    if (!present.has(evaluation.target.lotId))
-      lots.push({
+    if (!present.has(assessmentTargetKey(evaluation.target)))
+      targets.push({
         target: evaluation.target,
         number: null,
         state: "removed-or-unresolved",
-        issue: "lot_missing_or_unresolved",
+        issue:
+          evaluation.target.kind === "project"
+            ? "project_target_missing_or_unresolved"
+            : "lot_missing_or_unresolved",
         evaluation,
         context: null,
         preliminary: null,
         signalEligible: false,
       });
   }
-  const currentLots = lots.filter(
+  const currentTargets = targets.filter(
     (lot) => lot.state !== "removed-or-unresolved",
   );
   const clear = checked.project.projectBarrier.state === "clear";
   const allDifferent =
     clear &&
-    currentLots.length > 0 &&
-    currentLots.every(
+    currentTargets.length > 0 &&
+    currentTargets.every(
       (lot) =>
         lot.state === "current" &&
         lot.evaluation?.result === "different" &&
         lot.context &&
         sourceAllowsCertainty(lot.context),
     );
-  const relevant = currentLots.filter((lot) => lot.signalEligible);
+  const relevant = currentTargets.filter((item) => item.signalEligible);
   // Whole-project rejection is deliberately bound to the whole current set.
   // Unlike per-lot freshness, a concurrent change in B can invalidate this veto's
   // quality vote. The active veto still suppresses delivery until reconsidered.
@@ -734,18 +932,22 @@ export function resolveProjectLotAssessment(
     profileHash: checked.profileHash,
     project: checked.project.dependency,
     evaluationSetToken: checked.setToken,
-    lots: currentLots.map((lot) => ({
+    targets: currentTargets.map((lot) => ({
       target: lot.target,
       source: lot.context?.dependency,
       operationalInputHash: lot.preliminary?.operationalInputHash,
     })),
+    shapeEpochToken: input.shapeState.epochToken,
     comparisonVersion: LOT_COMPARISON_VERSION,
-    prefilterVersion: PREFILTER_VERSION,
+    prefilterVersions: {
+      lot: PREFILTER_VERSION,
+      project: PROJECT_PREFILTER_VERSION,
+    },
   });
   const rejected =
     clear &&
-    currentLots.length > 0 &&
-    currentLots.every((lot) => lot.context?.state !== "input_refused") &&
+    currentTargets.length > 0 &&
+    currentTargets.every((lot) => lot.context?.state !== "input_refused") &&
     !!suppression?.active &&
     suppression.rejection?.bindingHash === projectBindingHash;
   const suppressed = !!suppression?.active;
@@ -777,10 +979,19 @@ export function resolveProjectLotAssessment(
       : state === "input_refused"
         ? "Fonte corrente non utilizzabile: i giudizi precedenti restano storici."
         : relevant.length
-          ? `Interesse potenziale per ${relevant.map((lot) => `il lotto ${lot.number ?? lot.target.lotId}`).join(", ")}; non attesta l’idoneità a partecipare. Gli altri lotti mantengono la propria valutazione.`
+          ? relevant.some((item) => item.target.kind === "project")
+            ? "Interesse potenziale per il progetto intero; non attesta l’idoneità a partecipare."
+            : `Interesse potenziale per ${relevant.map((lot) => `il lotto ${lot.number ?? (lot.target.kind === "lot" ? lot.target.lotId : "")}`).join(", ")}; non attesta l’idoneità a partecipare. Gli altri lotti mantengono la propria valutazione.`
           : allDifferent
-            ? "Tutti i lotti correnti noti sono stati giudicati diversi dalle attività della ditta."
-            : "La pertinenza del progetto richiede ancora una valutazione dei lotti o della fonte.";
+            ? input.shapeState.shape.kind === "project"
+              ? "Il progetto è stato giudicato diverso dalle attività dichiarate dalla ditta."
+              : "Tutti i lotti correnti noti sono stati giudicati diversi dalle attività della ditta."
+            : input.shapeState.shape.kind === "unresolved"
+              ? "La struttura della pubblicazione richiede verifica: non è ancora disponibile un target aziendale valutabile."
+              : "La pertinenza del progetto richiede ancora una valutazione del target o della fonte.";
+  const lots = targets.filter(
+    (item): item is ResolvedLotAssessment => item.target.kind === "lot",
+  );
   return freeze({
     companyId: input.companyId,
     publicationId: input.publication.id,
@@ -788,8 +999,16 @@ export function resolveProjectLotAssessment(
     state,
     reason,
     projectBarrier: checked.project.projectBarrier,
+    shape: input.shapeState.shape,
+    shapeEpochToken: input.shapeState.epochToken,
+    targets,
     lots,
-    relevantLotIds: relevant.map((lot) => lot.target.lotId),
+    projectAssessment:
+      currentTargets.find((item) => item.target.kind === "project") ?? null,
+    relevantTargets: relevant.map((item) => item.target),
+    relevantLotIds: relevant.flatMap((item) =>
+      item.target.kind === "lot" ? [item.target.lotId] : [],
+    ),
     allDifferent,
     signalEligible,
     quality,
@@ -799,7 +1018,7 @@ export function resolveProjectLotAssessment(
         : quality === "rejected"
           ? rejected
             ? [suppression!.rejection!.eventId]
-            : currentLots.map((lot) => lot.evaluation!.id)
+            : currentTargets.map((lot) => lot.evaluation!.id)
           : [],
     saved: !!feedback.saved,
     dismissed: !!feedback.dismissed,
@@ -810,6 +1029,29 @@ export function resolveProjectLotAssessment(
 // Product boundary: deliberately omit actors, private notes, archive bodies and
 // past reasons that could appear current. Historical judgments stay server-side.
 export function projectLotAssessmentDto(value: ProjectLotAssessment) {
+  const targets = value.targets.map((item) => ({
+    target: { ...item.target },
+    number: item.number,
+    state: item.state,
+    issue: item.issue,
+    result: item.state === "current" ? (item.evaluation?.result ?? null) : null,
+    reason: item.state === "current" ? (item.evaluation?.reason ?? null) : null,
+    evidence:
+      item.state === "current"
+        ? (item.evaluation?.evidence ?? []).map((proof) => ({
+            quote: proof.quote,
+            url: proof.origin.url,
+            page: proof.origin.page,
+          }))
+        : [],
+    reviewReasons: [...(item.preliminary?.reviewReasons ?? [])],
+    operational: item.preliminary
+      ? {
+          ...item.preliminary.operational,
+          cpv: [...item.preliminary.operational.cpv],
+        }
+      : null,
+  }));
   return {
     publicationId: value.publicationId,
     state: value.state,
@@ -817,29 +1059,14 @@ export function projectLotAssessmentDto(value: ProjectLotAssessment) {
     signalEligible: value.signalEligible,
     saved: value.saved,
     dismissed: value.dismissed,
+    shape: value.shape.kind,
+    shapeReasons: [...value.shape.reasons],
+    relevantTargets: value.relevantTargets.map((target) => ({ ...target })),
     relevantLotIds: [...value.relevantLotIds],
-    lots: value.lots.map((lot) => ({
-      lotId: lot.target.lotId,
-      number: lot.number,
-      state: lot.state,
-      issue: lot.issue,
-      result: lot.state === "current" ? (lot.evaluation?.result ?? null) : null,
-      reason: lot.state === "current" ? (lot.evaluation?.reason ?? null) : null,
-      evidence:
-        lot.state === "current"
-          ? (lot.evaluation?.evidence ?? []).map((item) => ({
-              quote: item.quote,
-              url: item.origin.url,
-              page: item.origin.page,
-            }))
-          : [],
-      reviewReasons: [...(lot.preliminary?.reviewReasons ?? [])],
-      operational: lot.preliminary
-        ? {
-            ...lot.preliminary.operational,
-            cpv: [...lot.preliminary.operational.cpv],
-          }
-        : null,
-    })),
+    targets,
+    // Compatibility projection contains only actual source lots.
+    lots: targets.flatMap(({ target, ...item }) =>
+      target.kind === "lot" ? [{ ...item, lotId: target.lotId }] : [],
+    ),
   };
 }

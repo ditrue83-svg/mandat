@@ -7,6 +7,7 @@ import { lotMatchEditorData } from "@/lib/lot-match-editor-data";
 import {
   loadLotMatchReview,
   lotMatchReviewTarget,
+  assessmentReviewTarget,
 } from "@/lib/lot-match-reviews";
 import { HttpError, pageViewer } from "@/lib/viewer";
 
@@ -42,14 +43,32 @@ export default async function LotMatchReviewPage({
     if (error instanceof HttpError && error.status === 404) notFound();
     throw error;
   });
-  const selected = lot ? lotMatchReviewTarget(loaded, lot) : null;
+  let selected: ReturnType<typeof assessmentReviewTarget> | null = null;
+  let unavailable = false;
+  try {
+    selected = lot
+      ? lotMatchReviewTarget(loaded, lot)
+      : loaded.project.shape.kind === "project"
+        ? assessmentReviewTarget(loaded, { kind: "project", publicationId })
+        : null;
+  } catch (error) {
+    if (!(error instanceof HttpError) || error.status !== 409) throw error;
+    unavailable = true;
+  }
   return (
     <Shell viewer={viewer}>
       <Link href="/admin" className="back-link">
         Torna all’area fondatore
       </Link>
+      {unavailable && (
+        <p className="notice">
+          Questo target non è più valutabile nella struttura corrente. Seleziona
+          il progetto o un lotto corrente; i giudizi precedenti restano nello
+          storico.
+        </p>
+      )}
       <LotMatchEditor
-        key={`${loaded.expected.snapshotHash}:${loaded.expected.profileHash}:${loaded.expected.stateToken}:${loaded.expected.groupToken}:${loaded.expected.projectBindingHash}:${selected?.expected.operationalInputHash ?? "project"}:${lot ?? "project"}`}
+        key={`${loaded.expected.snapshotHash}:${loaded.expected.shapeEpochToken}:${loaded.expected.profileHash}:${loaded.expected.stateToken}:${loaded.expected.groupToken}:${loaded.expected.projectBindingHash}:${selected?.expected.operationalInputHash ?? "project"}:${lot ?? "project"}`}
         data={lotMatchEditorData(loaded, selected)}
       />
     </Shell>

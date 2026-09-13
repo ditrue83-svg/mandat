@@ -15,17 +15,18 @@ import { readCanonicalFeedback } from "./canonical-feedback";
 import { lockCanonicalPublications } from "./canonical-lock";
 import { stableDocumentaryJson } from "./documentary-observation";
 import {
-  createHumanLotAssessment,
+  createHumanTargetAssessment,
   lotAssessmentProfileHash,
   lotEvaluationSetToken,
   resolveProjectLotAssessment,
   validateLotEvaluationSet,
-  type HumanLotAssessmentCommand,
+  type HumanTargetAssessmentCommand,
   type LotAssessmentInput,
   type ProjectLotSuppression,
 } from "./lot-assessment";
 import {
-  resolveLotSourceContext,
+  captureLotSourceSnapshot,
+  type LotSourceTarget,
   type LotSourceSnapshot,
 } from "./lot-source-context";
 import {
@@ -33,6 +34,8 @@ import {
   lotSourceTargetSchema,
 } from "./lot-source-reviews";
 import { preliminaryLotMatch } from "./lot-matching";
+import { preliminaryProjectMatch } from "./project-matching";
+import { resolveAssessmentSourceContext } from "./assessment-shape";
 import { enqueueLotReconciliation } from "./lot-reconciliation";
 import {
   legacyLotReviewState,
@@ -75,6 +78,7 @@ const common = {
   expectedProfileHash: hash,
   expectedStateToken: hash,
   expectedGroupToken: hash,
+  expectedShapeEpochToken: hash.nullable(),
   note: z.string().trim().min(10).max(800),
 };
 export const lotMatchReviewInputSchema = z.discriminatedUnion("action", [
@@ -82,7 +86,36 @@ export const lotMatchReviewInputSchema = z.discriminatedUnion("action", [
     .object({
       ...common,
       action: z.literal("assess_lot"),
+      expectedShapeEpochToken: hash,
       target: lotSourceTargetSchema.refine((v) => v.kind === "lot"),
+      expectedSourceDependency: z.unknown(),
+      expectedOperationalInputHash: hash,
+      expectedEvaluationSetToken: hash,
+      expectedEntryHash: hash.nullable(),
+      result: z.enum(["direct", "different", "review"]),
+      reason: z.string().trim().min(10).max(4000),
+      references: z
+        .array(
+          z
+            .object({
+              selectionHash: hash,
+              rawPath: z.string().min(1).max(4096),
+              startUtf16: z.number().int().nonnegative(),
+              endUtf16: z.number().int().positive(),
+            })
+            .strict(),
+        )
+        .min(1)
+        .max(128),
+      confirmedReviewReasons: z.array(z.string().min(1).max(1000)).max(128),
+    })
+    .strict(),
+  z
+    .object({
+      ...common,
+      action: z.literal("assess_project"),
+      target: lotSourceTargetSchema.refine((v) => v.kind === "project"),
+      expectedShapeEpochToken: hash,
       expectedSourceDependency: z.unknown(),
       expectedOperationalInputHash: hash,
       expectedEvaluationSetToken: hash,
@@ -165,6 +198,171 @@ export function lotMatchStateToken(match: MatchRow) {
     .digest("hex");
 }
 
+const reviewStateSchema = z
+  .object({
+    evaluations: z.unknown().nullable(),
+    suppression: suppressionSchema.nullable(),
+  })
+  .strict();
+const canonicalSuppressionSchema = z
+  .object({
+    version: z.literal("canonical-lot-suppression-v1"),
+    companyId: identifier,
+    canonicalId: identifier,
+    eventId: identifier,
+    suppression: suppressionSchema,
+  })
+  .strict();
+const legacyReviewSchema = z
+  .object({
+    approved: z.boolean().nullable(),
+    reviewedAt: isoDate.nullable(),
+    reviewNotes: z.string().nullable(),
+    revision: z.string(),
+    score: z.number(),
+    reason: z.string(),
+    eligible: z.boolean(),
+    sourceReviewDependency: z.unknown().nullable(),
+  })
+  .strict();
+const auditBody = {
+  id: identifier,
+  matchId: identifier,
+  companyId: identifier,
+  publicationId: identifier,
+  sequence: z.number().int().positive(),
+  actorId: identifier,
+  at: isoDate,
+  note: z.string().min(10).max(800),
+  sourceSnapshotHash: hash,
+  evidenceSnapshot: z.unknown(),
+  profileHash: hash,
+  groupBefore: z
+    .object({
+      members: z.array(identifier),
+      legacy: z.array(
+        z
+          .object({
+            matchId: identifier,
+            publicationId: identifier,
+            legacy: legacyReviewSchema,
+            reviewedSql: z.string().nullable(),
+            updatedSql: z.string(),
+            localSuppression: suppressionSchema.nullable(),
+          })
+          .strict(),
+      ),
+      state: canonicalSuppressionSchema.nullable(),
+    })
+    .strict(),
+  groupAfter: canonicalSuppressionSchema.nullable(),
+  before: reviewStateSchema,
+  after: reviewStateSchema,
+  previousToken: hash,
+  nextToken: hash,
+};
+const auditSchema = z.discriminatedUnion("version", [
+  z
+    .object({
+      ...auditBody,
+      version: z.literal("human-lot-match-review-v1"),
+      action: z.enum(["assess_lot", "veto_project", "reopen_project"]),
+    })
+    .strict(),
+  z
+    .object({
+      ...auditBody,
+      version: z.literal("human-lot-match-review-v2"),
+      action: z.enum([
+        "assess_lot",
+        "assess_project",
+        "veto_project",
+        "reopen_project",
+      ]),
+      shapeEpochToken: hash.nullable(),
+    })
+    .strict(),
+]);
+
+// Decode both original formats. Tokens are checked with the legacy snapshot
+// actually stored in groupBefore, never with today's mutable match fields.
+export function decodeLotMatchReviewRecord(
+  value: unknown,
+): LotMatchReviewRecord {
+  const event = auditSchema.parse(structuredClone(value));
+  for (const state of [event.before, event.after]) {
+    if (state.evaluations !== null) {
+      const checked = validateLotEvaluationSet(
+        state.evaluations,
+        event.companyId,
+        event.publicationId,
+      );
+      if (
+        stableDocumentaryJson(checked) !==
+        stableDocumentaryJson(state.evaluations)
+      )
+        throw new Error("Insieme storico della valutazione alterato.");
+      if (
+        event.version === "human-lot-match-review-v1" &&
+        checked.version !== "lot-evaluations-v1"
+      )
+        throw new Error("Formato dell’insieme discordante dall’evento v1.");
+    }
+  }
+  const snapshot = event.evidenceSnapshot as LotSourceSnapshot;
+  const { snapshotHash, version, ...input } = snapshot;
+  const verified = captureLotSourceSnapshot(input);
+  if (
+    snapshot.publicationId !== event.publicationId ||
+    version !== verified.version ||
+    snapshotHash !== verified.snapshotHash ||
+    stableDocumentaryJson(snapshot) !== stableDocumentaryJson(verified) ||
+    snapshotHash !== event.sourceSnapshotHash
+  )
+    throw new Error("Snapshot storico della valutazione alterato.");
+  const members = event.groupBefore.members;
+  const legacy = event.groupBefore.legacy;
+  if (
+    new Set(members).size !== members.length ||
+    !members.includes(event.publicationId) ||
+    new Set(legacy.map((row) => row.matchId)).size !== legacy.length ||
+    legacy.some((row) => !members.includes(row.publicationId))
+  )
+    throw new Error("Gruppo storico della valutazione discordante.");
+  const original = legacy.find((row) => row.matchId === event.matchId);
+  if (!original || original.publicationId !== event.publicationId)
+    throw new Error("Stato legacy originale della valutazione mancante.");
+  for (const [state, expected] of [
+    [event.before, event.previousToken],
+    [event.after, event.nextToken],
+  ] as const) {
+    const token = createHash("sha256")
+      .update(
+        stableDocumentaryJson({
+          matchId: event.matchId,
+          companyId: event.companyId,
+          publicationId: event.publicationId,
+          state,
+          legacy: original.legacy,
+        }),
+      )
+      .digest("hex");
+    if (token !== expected)
+      throw new Error("Token storico della valutazione alterato.");
+  }
+  for (const group of [event.groupBefore.state, event.groupAfter]) {
+    if (group && group.companyId !== event.companyId)
+      throw new Error("Gruppo storico di un’altra ditta.");
+  }
+  if (
+    event.version === "human-lot-match-review-v2" &&
+    ["assess_project", "assess_lot"].includes(event.action) &&
+    !event.shapeEpochToken
+  )
+    throw new Error("Epoca della valutazione storica mancante.");
+  return event as LotMatchReviewRecord;
+}
+
 // Private server loader. Caller holds source/company/match locks in this order.
 // Historical snapshots come from the actual immutable review record, preserving
 // the editorial flag seen then as well as the source archive and observation ID.
@@ -189,18 +387,22 @@ export async function readLotMatchReview(
     .where(eq(matchLotReviewEvents.matchId, match.id))
     .orderBy(matchLotReviewEvents.sequence);
   const evidenceSnapshots: LotSourceSnapshot[] = [];
+  const history: LotMatchReviewRecord[] = [];
   for (const row of auditRows) {
-    const event = row.event;
+    const event = decodeLotMatchReviewRecord(row.event);
     if (
       event.id !== row.id ||
       event.matchId !== match.id ||
       event.companyId !== company.id ||
       event.publicationId !== publication.id ||
       event.sequence !== row.sequence ||
-      event.sourceSnapshotHash !== event.evidenceSnapshot.snapshotHash
+      event.sourceSnapshotHash !== event.evidenceSnapshot.snapshotHash ||
+      event.sequence !== history.length + 1 ||
+      (history.length > 0 && event.previousToken !== history.at(-1)!.nextToken)
     )
       throw new Error("Storico della valutazione discordante.");
     evidenceSnapshots.push(event.evidenceSnapshot);
+    history.push(event);
   }
   const [currentFeedback] = await tx
     .select()
@@ -245,10 +447,11 @@ export async function readLotMatchReview(
     company,
     publication,
     input,
+    shapeState: source.shapeState,
     project,
     state,
     group,
-    history: auditRows.map((row) => row.event),
+    history,
     feedback: {
       ...canonicalFeedback,
       relevant: currentFeedback?.relevant ?? null,
@@ -264,6 +467,7 @@ export async function readLotMatchReview(
       ),
       projectBindingHash: project.projectBindingHash,
       groupToken: group.token,
+      shapeEpochToken: source.shapeState.epochToken,
     },
   };
 }
@@ -345,7 +549,8 @@ export async function appendLotMatchReview(
       draft.expectedSnapshotHash !== loaded.expected.snapshotHash ||
       draft.expectedProfileHash !== loaded.expected.profileHash ||
       draft.expectedStateToken !== loaded.expected.stateToken ||
-      draft.expectedGroupToken !== loaded.expected.groupToken
+      draft.expectedGroupToken !== loaded.expected.groupToken ||
+      draft.expectedShapeEpochToken !== loaded.expected.shapeEpochToken
     )
       throw new HttpError(
         409,
@@ -356,12 +561,16 @@ export async function appendLotMatchReview(
     let nextState: LotMatchReviewState = loaded.state;
     let nextGroup: CanonicalLotSuppression | null = loaded.group.state;
     try {
-      if (draft.action === "assess_lot") {
+      if (draft.action === "assess_lot" || draft.action === "assess_project") {
         if (
-          draft.target.kind !== "lot" ||
+          draft.target.kind !==
+            (draft.action === "assess_lot" ? "lot" : "project") ||
           draft.target.publicationId !== draft.publicationId
         )
-          throw new HttpError(400, "Lotto di un’altra pubblicazione.");
+          throw new HttpError(
+            400,
+            "Target di un’altra pubblicazione o struttura.",
+          );
         const {
           companyId: _company,
           publicationId: _publication,
@@ -371,8 +580,8 @@ export async function appendLotMatchReview(
           note: _note,
           ...command
         } = draft;
-        const outcome = createHumanLotAssessment(
-          { ...command, origin: "human" } as HumanLotAssessmentCommand,
+        const outcome = createHumanTargetAssessment(
+          { ...command, origin: "human" } as HumanTargetAssessmentCommand,
           loaded.input,
           { id, actorId: viewer.userId, at, note: draft.note },
         );
@@ -433,7 +642,7 @@ export async function appendLotMatchReview(
       if (error instanceof HttpError) throw error;
       throw new HttpError(
         400,
-        "Il giudizio o i riferimenti non sono validi per il lotto corrente.",
+        "Il giudizio o i riferimenti non sono validi per il target corrente.",
       );
     }
     const nextMatch = {
@@ -442,7 +651,7 @@ export async function appendLotMatchReview(
       lotSuppression: nextState.suppression,
     };
     const event: LotMatchReviewRecord = {
-      version: "human-lot-match-review-v1",
+      version: "human-lot-match-review-v2",
       id,
       matchId: match.id,
       companyId: company.id,
@@ -455,6 +664,7 @@ export async function appendLotMatchReview(
       sourceSnapshotHash: loaded.expected.snapshotHash,
       evidenceSnapshot: loaded.input.snapshot,
       profileHash: loaded.expected.profileHash,
+      shapeEpochToken: loaded.expected.shapeEpochToken,
       groupBefore: loaded.group.before,
       groupAfter: nextGroup,
       before: loaded.state,
@@ -501,18 +711,40 @@ export function lotMatchReviewTarget(
   loaded: LoadedLotMatchReview,
   lotId: string,
 ) {
-  const target = {
+  return assessmentReviewTarget(loaded, {
     kind: "lot" as const,
     publicationId: loaded.publication.id,
     sourceProjectId: loaded.publication.data.externalId,
     lotId: lotId.toLowerCase(),
-  };
-  const context = resolveLotSourceContext(
+  });
+}
+
+// A real target is selected from the verified shape. Empty lot directories are
+// never interpreted here as an implicit project or a synthetic lot.
+export function assessmentReviewTarget(
+  loaded: LoadedLotMatchReview,
+  target: LotSourceTarget,
+) {
+  const key = (value: LotSourceTarget) =>
+    value.kind === "project"
+      ? `project:${value.publicationId}`
+      : `lot:${value.publicationId}:${value.sourceProjectId.toLowerCase()}:${value.lotId.toLowerCase()}`;
+  if (
+    !loaded.shapeState.shape.targets.some((item) => key(item) === key(target))
+  )
+    throw new HttpError(
+      409,
+      "Il target non appartiene alla struttura corrente.",
+    );
+  const context = resolveAssessmentSourceContext(
     loaded.input.snapshot,
     target,
     loaded.input.history,
+    loaded.shapeState,
   );
-  const preliminary = preliminaryLotMatch({
+  const preliminary = (
+    target.kind === "project" ? preliminaryProjectMatch : preliminaryLotMatch
+  )({
     publication: loaded.publication.data,
     profile: loaded.company.profile,
     context,
@@ -528,7 +760,7 @@ export function lotMatchReviewTarget(
       operationalInputHash: preliminary.operationalInputHash,
       entryHash:
         loaded.state.evaluations?.entries.find(
-          (entry) => entry.target.lotId === target.lotId,
+          (entry) => key(entry.target) === key(target),
         )?.entryHash ?? null,
     },
   };

@@ -16,7 +16,11 @@ import {
   session,
 } from "@/db/schema";
 import { readProjectQuality } from "./project-quality";
-import { readCurrentLotMatch, presentLotOpportunity, lotOpportunityVisible } from "./lot-readers";
+import {
+  readCurrentLotMatch,
+  presentLotOpportunity,
+  lotOpportunityVisible,
+} from "./lot-readers";
 import { automationGate, preliminaryMatch } from "./matching";
 import type { CompanyProfile } from "./domain";
 import { emailLayout, escapeHtml, sendMail } from "./mail";
@@ -275,6 +279,7 @@ export async function adminSnapshot(demo: boolean) {
       const sourceReview = sourceReviews.get(r.publicationId) ?? null;
       const loaded = lotReviews.get(r.id);
       const lot = loaded ? presentLotOpportunity(loaded) : null;
+      const documentary = !!r.documentarySnapshotId;
       return {
         id: r.id,
         lotReview: lot?.lotReview ?? null,
@@ -286,30 +291,42 @@ export async function adminSnapshot(demo: boolean) {
         company: r.company.name,
         companyActivities: r.company.activities,
         profileRevision: fingerprint(r.company),
-        score: lot?.score ?? r.score,
+        score: documentary ? (lot?.score ?? 0) : r.score,
         eligible: loaded
           ? lotOpportunityVisible(loaded, false, new Date())
-          : r.eligible,
+          : documentary
+            ? false
+            : r.eligible,
         ...(lot
           ? { assessment: lot.assessment, reason: lot.reason }
-          : presentMatch({
-              match: r,
-              publication: r.reviewRequired,
-              aiRevision: r.aiRevision,
-              profileRevision: fingerprint(r.company),
-              sourceReview,
-              preliminary: preliminaryMatch(r.reviewRequired, r.company),
-            })),
+          : documentary
+            ? {
+                assessment: "uncertain" as const,
+                reason:
+                  "La fonte adottata richiede una valutazione corrente della pertinenza.",
+              }
+            : presentMatch({
+                match: r,
+                publication: r.reviewRequired,
+                aiRevision: r.aiRevision,
+                profileRevision: fingerprint(r.company),
+                sourceReview,
+                preliminary: preliminaryMatch(r.reviewRequired, r.company),
+              })),
         approved: loaded
           ? loaded.project.quality === "approved"
             ? true
             : loaded.project.quality === "rejected"
               ? false
               : null
-          : r.approved,
+          : documentary
+            ? null
+            : r.approved,
         reviewed: loaded
           ? loaded.project.quality !== "unresolved"
-          : !!r.reviewedAt,
+          : documentary
+            ? false
+            : !!r.reviewedAt,
         evaluationRevision: r.revision,
         evaluationToken: matchReviewToken(r),
         sourceReviewState: sourceReviewBindingState(
@@ -327,11 +344,19 @@ export async function adminSnapshot(demo: boolean) {
         sourceScopeReview: r.reviewRequired.sourceScopeReview,
         sourceRevision: r.sourceRevision,
         contentRevision: r.reviewRequired.revision,
-        reviewReasons: lot?.reviewReasons ?? r.reviewRequired.reviewReasons,
-        summary: r.reviewRequired.summary,
-        deadline: r.reviewRequired.deadline,
-        valueChf: r.reviewRequired.valueChf,
-        location: r.reviewRequired.location,
+        reviewReasons: documentary
+          ? (lot?.reviewReasons ?? [])
+          : r.reviewRequired.reviewReasons,
+        summary: documentary ? null : r.reviewRequired.summary,
+        deadline: documentary
+          ? (lot?.deadline ?? null)
+          : r.reviewRequired.deadline,
+        valueChf: documentary
+          ? (lot?.valueChf ?? null)
+          : r.reviewRequired.valueChf,
+        location: documentary
+          ? (lot?.location ?? "Non indicato")
+          : r.reviewRequired.location,
         sourceUrl: r.reviewRequired.sourceUrl,
         sourceConditions: r.reviewRequired.sourceConditions ?? [],
         originalTitles: r.reviewRequired.originalTitles ?? [],

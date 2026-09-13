@@ -229,10 +229,11 @@ export function AdminDashboard({
           .filter((m) => {
             // Keep the stored eligibility for diagnostics; the source barrier
             // changes what is a candidate now, including cached AI negatives.
-            const candidate = m.lotReviewUrl ? m.eligible :
-              m.sourceScopeReview?.status === "required" ||
-              m.sourceReviewState === "blocked" ||
-              m.sourceReviewState === "stale"
+            const candidate = m.lotReviewUrl
+              ? m.eligible
+              : m.sourceScopeReview?.status === "required" ||
+                  m.sourceReviewState === "blocked" ||
+                  m.sourceReviewState === "stale"
                 ? m.assessment === "uncertain" && m.approved !== false
                 : m.eligible;
             return (
@@ -259,7 +260,7 @@ export function AdminDashboard({
               <div className="feedback-row">
                 {m.lotReviewUrl ? (
                   <a className="button primary" href={m.lotReviewUrl}>
-                    Valuta i lotti per questa ditta
+                    Valuta la pertinenza per questa ditta
                   </a>
                 ) : (
                   <>

@@ -21,6 +21,15 @@ import {
 } from "../src/lib/documentary-store";
 import type { LotSourceTarget } from "../src/lib/lot-source-context";
 import { LOT_RECONCILIATION_QUEUE } from "../src/lib/lot-reconciliation";
+import {
+  adoptDocumentaryObservation,
+  DOCUMENTARY_ADOPTION_CAPABILITY,
+  DOCUMENTARY_ADOPTION_CONSUMERS,
+  DOCUMENTARY_RELEASE_ATTESTATION_VERSION,
+  type DocumentaryAdoptionActivation,
+  type DocumentaryReleaseAttestation,
+} from "../src/lib/documentary-adoption";
+import { lotNoticeHash, validateLotNotice } from "../src/lib/lot-notice";
 
 const injected = vi.hoisted(() => ({
   db: undefined as unknown,
@@ -54,6 +63,7 @@ import {
   loadLotMatchReview,
   lotMatchReviewInputSchema,
   lotMatchReviewTarget,
+  assessmentReviewTarget,
   type LoadedLotMatchReview,
   type LotMatchReviewInput,
 } from "../src/lib/lot-match-reviews";
@@ -71,7 +81,8 @@ import {
 } from "../src/worker/notifications";
 
 // Invented source and company data, real local migrations + pg-boss producer.
-// No provider, SMTP, HTTP, live DB, runtime adoption or two-backend concurrency.
+// No provider, real SMTP, HTTP, live DB or two-backend concurrency.
+// New project fixtures exercise the real adopter only against local PGlite.
 const pg = new PGlite();
 const db = drizzle(pg, { schema });
 const boss = new PgBoss({
@@ -86,6 +97,27 @@ const commonText =
   "Progetto inventato suddiviso in due lotti indipendenti per il test.";
 const aText = "🌳 Potatura e cura del verde nel lotto A inventato.";
 const bText = "Installazione di quadri elettrici nel lotto B inventato.";
+function activation(): DocumentaryAdoptionActivation {
+  return {
+    enabled: true,
+    attestation: {
+      version: DOCUMENTARY_RELEASE_ATTESTATION_VERSION,
+      releaseId: "invented-no-lots-repository-release",
+      verifiedAt: new Date().toISOString(),
+      evidenceId: "invented-local-only-no-rollout",
+      previousProcessesDrained: true,
+      consumers: Object.fromEntries(
+        DOCUMENTARY_ADOPTION_CONSUMERS.map((name) => [
+          name,
+          {
+            capability: DOCUMENTARY_ADOPTION_CAPABILITY,
+            buildId: "a".repeat(40),
+          },
+        ]),
+      ) as DocumentaryReleaseAttestation["consumers"],
+    },
+  };
+}
 beforeAll(async () => {
   injected.db = db;
   vi.stubEnv("APP_URL", "https://mandat.test.invalid");
@@ -142,7 +174,11 @@ function sourceDraft(loaded: LoadedLotSourceReview): LotSourceReviewInput {
       : `${selected!.path}/orderDescription/it`;
   const value =
     target.kind === "project"
-      ? commonText
+      ? (
+          loaded.context.targetContent!.projectSections.procurement as {
+            orderDescription: { it: string };
+          }
+        ).orderDescription.it
       : (selected!.record as { orderDescription: { it: string } })
           .orderDescription.it;
   return {
@@ -152,8 +188,12 @@ function sourceDraft(loaded: LoadedLotSourceReview): LotSourceReviewInput {
     expectedSelectionHash: loaded.expected.selectionHash,
     expectedTargetEventId: loaded.expected.targetEventId,
     expectedProjectBarrierHash: loaded.expected.projectBarrierHash,
+    expectedShapeEpochToken: loaded.expected.shapeEpochToken,
     action: "recorded",
-    form: target.kind === "project" ? "broad_scope" : "defined_service",
+    form:
+      target.kind === "project" && loaded.shapeState.shape.kind === "lots"
+        ? "broad_scope"
+        : "defined_service",
     references: [
       {
         selectionHash: loaded.expected.selectionHash!,
@@ -172,6 +212,9 @@ async function fixture(
     adopt?: boolean;
     canonicalId?: string;
     reuseCompanies?: { companyId: string; otherCompanyId: string };
+    noLots?: boolean;
+    realAdoption?: boolean;
+    reviewSource?: boolean;
   } = {},
 ) {
   const projectId = randomUUID(),
@@ -189,11 +232,21 @@ async function fixture(
     id: noticeId,
     type: "tender",
     "project-info": { title: { it: "Progetto lotti inventato" } },
-    procurement: { orderDescription: { it: commonText } },
+    procurement: {
+      orderDescription: {
+        it: options.noLots
+          ? "Potatura e cura del verde per il progetto inventato senza lotti."
+          : commonText,
+      },
+      orderAddress: { countryId: "CH", cantonId: "TI", city: "Lugano" },
+      cpvCode: { code: "77310000" },
+    },
+    dates: { processType: "open", offerDeadline: "2030-11-04T12:00:00+01:00" },
     base: {
       id: noticeId,
       projectId,
       lotsType: "with",
+      processType: "open",
       lots: [
         { id: aId, lotNumber: 1, title: { it: "Verde" } },
         { id: bId, lotNumber: 2, title: { it: "Impianti" } },
@@ -218,6 +271,11 @@ async function fixture(
       },
     ],
   };
+  if (options.noLots) {
+    raw.lots = [];
+    raw.base.lots = [];
+    raw.base.lotsType = "without";
+  }
   const entry = {
     id: projectId,
     raw: {
@@ -334,10 +392,16 @@ async function fixture(
           },
         };
     const stored = await storeDocumentaryObservation(request, result);
-    return { stored, publication };
+    return { stored, publication, request, result };
   }
   const observation = await observe();
   const adopt = async (value = observation) => {
+    if (options.realAdoption)
+      return adoptDocumentaryObservation(
+        value.request,
+        value.result,
+        activation(),
+      );
     // Test-only setup; the app's separate adoption path is not exercised here.
     await db
       .update(schema.publications)
@@ -359,7 +423,11 @@ async function fixture(
   const b: LotSourceTarget = { ...a, lotId: bId };
   if (options.adopt !== false) {
     await adopt();
-    for (const target of [project, a, b])
+    for (const target of options.reviewSource === false
+      ? []
+      : options.noLots
+        ? [project]
+        : [project, a, b])
       await appendLotSourceReview(
         sourceDraft(await loadLotSourceReview(target, viewer)),
         viewer,
@@ -388,22 +456,32 @@ async function fixture(
 }
 function assessmentDraft(
   loaded: LoadedLotMatchReview,
-  lotId: string,
+  lotId: string | null,
   result: "direct" | "different" | "review" = "direct",
 ): LotMatchReviewInput {
-  const selected = lotMatchReviewTarget(loaded, lotId),
-    target = selected.context.targetContent!.selectedLot!;
-  const value = (target.record as { orderDescription: { it: string } })
-    .orderDescription.it;
-  return {
+  const selected =
+    lotId === null
+      ? assessmentReviewTarget(loaded, {
+          kind: "project",
+          publicationId: loaded.publication.id,
+        })
+      : lotMatchReviewTarget(loaded, lotId);
+  const content = selected.context.targetContent!;
+  const value = (
+    (selected.target.kind === "project"
+      ? content.projectSections.procurement
+      : content.selectedLot!.record) as { orderDescription: { it: string } }
+  ).orderDescription.it;
+  return lotMatchReviewInputSchema.parse({
     companyId: loaded.company.id,
     publicationId: loaded.publication.id,
-    action: "assess_lot",
+    action: lotId === null ? "assess_project" : "assess_lot",
     target: selected.target,
     expectedSnapshotHash: selected.expected.snapshotHash,
     expectedProfileHash: selected.expected.profileHash,
     expectedStateToken: selected.expected.stateToken,
     expectedGroupToken: selected.expected.groupToken,
+    expectedShapeEpochToken: selected.expected.shapeEpochToken!,
     expectedSourceDependency: selected.expected.sourceDependency,
     expectedOperationalInputHash: selected.expected.operationalInputHash,
     expectedEvaluationSetToken: selected.expected.evaluationSetToken,
@@ -413,7 +491,10 @@ function assessmentDraft(
     references: [
       {
         selectionHash: selected.context.dependency.selectionHash!,
-        rawPath: `${target.path}/orderDescription/it`,
+        rawPath:
+          selected.target.kind === "project"
+            ? "/procurement/orderDescription/it"
+            : `${content.selectedLot!.path}/orderDescription/it`,
         startUtf16: 0,
         endUtf16: value.length,
       },
@@ -421,7 +502,7 @@ function assessmentDraft(
     confirmedReviewReasons:
       result === "direct" ? [...selected.preliminary.reviewReasons] : [],
     note: "PRIVATE_MATCH_NOTE: verificati i limiti operativi senza attestare idoneità.",
-  };
+  });
 }
 function projectDraft(
   loaded: LoadedLotMatchReview,
@@ -435,6 +516,7 @@ function projectDraft(
     expectedProfileHash: loaded.expected.profileHash,
     expectedStateToken: loaded.expected.stateToken,
     expectedGroupToken: loaded.expected.groupToken,
+    expectedShapeEpochToken: loaded.expected.shapeEpochToken,
     expectedProjectBindingHash: loaded.expected.projectBindingHash,
     note: "Revisione esplicita inventata della soppressione del progetto.",
   };
@@ -481,7 +563,7 @@ async function rows(companyId: string) {
 }
 async function approve(
   f: Awaited<ReturnType<typeof fixture>>,
-  id = f.aId,
+  id: string | null = f.aId,
   result: "direct" | "different" | "review" = "direct",
 ) {
   return appendLotMatchReview(
@@ -526,9 +608,11 @@ it("adopted lots enter the real digest despite legacy eligible=false, and a lega
   const [notice] = await rows(f.companyId);
   expect(notice.kind).toBe("digest");
   expect(notice.items).toHaveLength(1);
-  expect(notice.items[0].lotNotice?.scope.map((s) => s.target.lotId)).toEqual([
-    f.aId,
-  ]);
+  expect(
+    notice.items[0].lotNotice?.scope.map((s) =>
+      s.target.kind === "lot" ? s.target.lotId : null,
+    ),
+  ).toEqual([f.aId]);
   expect(notice.textBody).toContain("Interesse potenziale");
   expect(notice.textBody).toContain("Lotto 1");
   expect(notice.textBody).not.toContain("PRIVATE_MATCH_NOTE");
@@ -617,9 +701,11 @@ it("sent A then a new approval of B in the same notice produces one B update, in
   let noticeRows = await rows(f.companyId);
   expect(noticeRows).toHaveLength(2);
   const change = noticeRows.find((r) => r.kind === "change")!;
-  expect(change.items[0].lotNotice?.scope.map((s) => s.target.lotId)).toEqual([
-    f.bId,
-  ]);
+  expect(
+    change.items[0].lotNotice?.scope.map((s) =>
+      s.target.kind === "lot" ? s.target.lotId : null,
+    ),
+  ).toEqual([f.bId]);
   expect(change.dedupeKey).toMatch(/^lot-change-v1:/);
   await approve(f, f.bId);
   await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
@@ -760,15 +846,13 @@ it("communicated transitions X → Y → X are distinct despite reversed UUID or
   // Same source/profile/render as the successful Y, but this delayed copy still
   // claims X as predecessor. Only the delivery-chain check makes it stale.
   const staleId = randomUUID();
-  await db
-    .insert(schema.notifications)
-    .values({
-      ...y,
-      id: staleId,
-      dedupeKey: `stale-predecessor:${staleId}`,
-      status: "pending",
-      sentAt: null,
-    });
+  await db.insert(schema.notifications).values({
+    ...y,
+    id: staleId,
+    dedupeKey: `stale-predecessor:${staleId}`,
+    status: "pending",
+    sentAt: null,
+  });
   expect(await claimLotNotification(staleId, digestNow)).toBeNull();
   expect(
     (await rows(f.companyId)).find((row) => row.id === staleId)?.status,
@@ -887,7 +971,9 @@ it("claim rereads current profile, manual veto, canonical dismissal and automati
   const cancelled = (await rows(f.companyId))[0];
   expect(cancelled.status).toBe("cancelled");
   expect(
-    cancelled.items[0].lotNotice?.scope.map((s) => s.target.lotId),
+    cancelled.items[0].lotNotice?.scope.map((s) =>
+      s.target.kind === "lot" ? s.target.lotId : null,
+    ),
   ).toEqual([f.aId]);
   const [second] = await prepare(f);
   await db
@@ -1074,4 +1160,276 @@ it("SMTP uncertainty is reserved, never blindly retried, and explicit reconcilia
   expect((await rows(f.companyId))[0].status).toBe("uncertain");
   await sendPending();
   expect(injected.sendMail).toHaveBeenCalledTimes(2);
+});
+
+function lotShape(f: Awaited<ReturnType<typeof fixture>>) {
+  const raw = structuredClone(f.raw);
+  raw.base.lotsType = "with";
+  raw.base.lots = [{ id: f.aId, lotNumber: 1, title: { it: "Verde" } }];
+  raw.lots = [
+    {
+      id: f.aId,
+      lotNumber: 1,
+      title: { it: "Verde" },
+      orderDescription: { it: aText },
+      orderAddress: { countryId: "CH", cantonId: "TI", city: "Lugano" },
+      cpvCode: { code: "77310000" },
+    },
+  ];
+  return raw;
+}
+async function reviewCurrentProject(f: Awaited<ReturnType<typeof fixture>>) {
+  await appendLotSourceReview(
+    sourceDraft(await loadLotSourceReview(f.project, viewer)),
+    viewer,
+  );
+}
+
+it("an explicitly lot-free project reaches digest and claim through sendPending with only mocked SMTP", async () => {
+  const f = await fixture({ noLots: true, realAdoption: true });
+  await freshSources();
+  await queueDigests(digestNow);
+  expect(await rows(f.companyId)).toHaveLength(0);
+  await approve(f, null);
+  await queueDigests(digestNow);
+  const [notice] = await rows(f.companyId);
+  expect(notice.kind).toBe("digest");
+  expect(notice.items).toHaveLength(1);
+  expect(notice.items[0].lotNotice?.version).toBe("lot-notice-v2");
+  expect(notice.items[0].lotNotice?.scope.map((s) => s.target)).toEqual([
+    f.project,
+  ]);
+  expect(notice.items[0].lotNotice?.scope[0].render.lotId).toBeNull();
+  expect(notice.items[0].lotNotice?.scope[0].render.operational.deadline).toBe(
+    "2030-11-04T11:00:00.000Z",
+  );
+  expect(notice.textBody).not.toContain("Lotto 0");
+  expect(notice.textBody).not.toContain("PRIVATE_MATCH_NOTE");
+  expect(notice.textBody).not.toContain(viewer.userId);
+  await sendPending();
+  expect(injected.sendMail).toHaveBeenCalledTimes(1);
+  expect((await rows(f.companyId))[0].status).toBe("sent");
+  await queueDigests(digestNow);
+  await sendPending();
+  expect(injected.sendMail).toHaveBeenCalledTimes(1);
+});
+
+it("project different/review/source doubt prevent first alerts and a new source doubt invalidates a pending positive claim", async () => {
+  const f = await fixture({ noLots: true, realAdoption: true });
+  await approve(f, null, "different");
+  expect(await prepare(f)).toHaveLength(0);
+  await approve(f, null, "review");
+  expect(await prepare(f)).toHaveLength(0);
+  await approve(f, null);
+  const [pending] = await prepare(f);
+  const source = await loadLotSourceReview(f.project, viewer);
+  await appendLotSourceReview(
+    { ...sourceDraft(source), action: "opened", form: null, references: [] },
+    viewer,
+  );
+  expect(await claimLotNotification(pending.id, digestNow)).toBeNull();
+  expect(
+    (await rows(f.companyId)).find((r) => r.id === pending.id)?.status,
+  ).toBe("cancelled");
+  await sendPending();
+  expect(injected.sendMail).not.toHaveBeenCalled();
+});
+
+it("a pending project positive is cancelled on adoption of lots and cannot become an update before any communication", async () => {
+  const f = await fixture({ noLots: true, realAdoption: true });
+  await approve(f, null);
+  const [pending] = await prepare(f);
+  await f.adopt(await f.observe(lotShape(f)));
+  expect((await f.load()).project.signalEligible).toBe(false);
+  expect(await claimLotNotification(pending.id, digestNow)).toBeNull();
+  await reconcileLotNotices({
+    companyId: f.companyId,
+    now: digestNow,
+    includeFirstDigest: true,
+  });
+  expect(
+    (await rows(f.companyId)).filter((r) => r.status === "pending"),
+  ).toHaveLength(0);
+  expect(
+    (await rows(f.companyId)).filter((r) => r.kind === "change"),
+  ).toHaveLength(0);
+});
+
+it("sent project to lots to project gives one structure update per communicated transition and a distinct new positive only after review", async () => {
+  const f = await fixture({ noLots: true, realAdoption: true });
+  await approve(f, null);
+  const [first] = await prepare(f);
+  await markSent(first.id);
+  await f.adopt(await f.observe(lotShape(f)));
+  await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
+  const firstChange = (await rows(f.companyId)).find(
+    (r) => r.kind === "change",
+  )!;
+  expect(firstChange.items[0].lotNotice?.scope).toHaveLength(1);
+  expect(firstChange.items[0].lotNotice?.scope[0].kind).toBe(
+    "structure_changed",
+  );
+  expect(firstChange.items[0].lotNotice?.scope[0].target).toEqual(f.project);
+  expect(firstChange.textBody).not.toContain("annullato");
+  expect(firstChange.items[0].lotNotice?.scope[0].evaluationId).toBeNull();
+  await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
+  expect(
+    (await rows(f.companyId)).filter((r) => r.kind === "change"),
+  ).toHaveLength(1);
+  expect(await claimLotNotification(firstChange.id, digestNow)).not.toBeNull();
+  await markSent(firstChange.id);
+  await f.adopt(await f.observe(f.raw));
+  expect((await f.load()).project.signalEligible).toBe(false);
+  await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
+  const returnChange = (await rows(f.companyId)).find(
+    (r) => r.kind === "change" && r.id !== firstChange.id,
+  )!;
+  expect(returnChange.items[0].lotNotice?.scope[0].kind).toBe(
+    "structure_changed",
+  );
+  expect(returnChange.items[0].lotNotice?.scope[0].evaluationId).toBeNull();
+  expect(await claimLotNotification(returnChange.id, digestNow)).not.toBeNull();
+  await markSent(returnChange.id);
+  await reviewCurrentProject(f);
+  await approve(f, null);
+  await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
+  const positive = (await rows(f.companyId)).filter(
+    (r) => r.status === "pending",
+  );
+  expect(positive).toHaveLength(1);
+  expect(positive[0].items[0].lotNotice?.scope[0].kind).toBe("positive");
+  await markSent(positive[0].id);
+  await approve(f, null);
+  await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
+  expect(
+    (await rows(f.companyId)).filter((r) => r.status === "pending"),
+  ).toHaveLength(0);
+});
+
+it("an uncommunicated shape roundtrip and fresh approval do not resend identical project facts for epoch alone", async () => {
+  const f = await fixture({ noLots: true, realAdoption: true });
+  await approve(f, null);
+  const before = await f.load();
+  const [first] = await prepare(f);
+  await markSent(first.id);
+  await f.adopt(await f.observe(lotShape(f)));
+  await f.adopt(await f.observe(f.raw));
+  expect((await f.load()).shapeState.epochToken).not.toBe(
+    before.shapeState.epochToken,
+  );
+  expect((await f.load()).project.signalEligible).toBe(false);
+  await reviewCurrentProject(f);
+  await approve(f, null);
+  await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
+  expect(await rows(f.companyId)).toHaveLength(1);
+});
+
+it("an invented stored v1 lot-change notice retains its original hash and is not rewritten by current reconciliation", async () => {
+  const f = await fixture();
+  await approve(f);
+  const [first] = await prepare(f);
+  await markSent(first.id);
+  const changed = structuredClone(f.raw);
+  changed.lots[0].orderDescription.it +=
+    " Modifica della prestazione inventata.";
+  await f.adopt(await f.observe(changed));
+  await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
+  const update = (await rows(f.companyId)).find((r) => r.kind === "change")!;
+  const legacy = structuredClone(update.items[0].lotNotice!);
+  legacy.version = "lot-notice-v1";
+  delete legacy.binding.shapeEpochToken;
+  legacy.noveltyHash = lotNoticeHash({
+    version: "lot-notice-novelty-v1",
+    targets: legacy.scope.map((s) => ({
+      target: s.target,
+      kind: s.kind === "positive" ? "positive" : "source_change",
+      factHash: s.factHash,
+      transitionHash: s.transition.hash,
+    })),
+  });
+  // The unchanged lot-only change scope has no v2 assessment dependency; the
+  // original v1 envelope/novelty algorithm is an explicit invented fixture.
+  expect(
+    legacy.scope.every(
+      (s) => s.target.kind === "lot" && s.assessmentDependency === null,
+    ),
+  ).toBe(true);
+  const before = JSON.stringify(legacy),
+    hash = lotNoticeHash(legacy);
+  expect(validateLotNotice(legacy)).toEqual(legacy);
+  await db
+    .update(schema.notifications)
+    .set({
+      items: [{ ...update.items[0], lotNotice: legacy }],
+      status: "sent",
+      sentAt: new Date(),
+      dedupeKey: `lot-change-v1:${f.companyId}:${f.p.id}:${legacy.noveltyHash}`,
+    })
+    .where(eq(schema.notifications.id, update.id));
+  await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
+  const restored = (await rows(f.companyId)).find((r) => r.id === update.id)!
+    .items[0].lotNotice!;
+  expect(JSON.stringify(restored)).toBe(before);
+  expect(lotNoticeHash(validateLotNotice(restored))).toBe(hash);
+  expect(await rows(f.companyId)).toHaveLength(2);
+});
+
+it("a sent project source-change notice can be followed by one newly approved positive in the same current revision", async () => {
+  const f = await fixture({ noLots: true, realAdoption: true });
+  await approve(f, null);
+  const [first] = await prepare(f);
+  await markSent(first.id);
+  const changed = structuredClone(f.raw);
+  changed.procurement.orderDescription.it +=
+    " Aggiunta esplicita della cura delle aiuole.";
+  await f.adopt(await f.observe(changed));
+  await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
+  const change = (await rows(f.companyId)).find((r) => r.kind === "change")!;
+  expect(change.items[0].lotNotice?.scope[0].kind).toBe("changed");
+  await markSent(change.id);
+  const revision = (await f.load()).publication.revision;
+  await reviewCurrentProject(f);
+  await approve(f, null);
+  expect((await f.load()).publication.revision).toBe(revision);
+  await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
+  const [positive] = (await rows(f.companyId)).filter(
+    (r) => r.status === "pending",
+  );
+  expect(positive.items[0].lotNotice?.scope[0].kind).toBe("positive");
+  expect(positive.items[0].lotNotice?.scope[0].factHash).toBe(
+    change.items[0].lotNotice?.scope[0].factHash,
+  );
+  await markSent(positive.id);
+  await approve(f, null);
+  await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
+  expect(
+    (await rows(f.companyId)).filter((r) => r.status === "pending"),
+  ).toHaveLength(0);
+  expect(await rows(f.companyId)).toHaveLength(3);
+});
+
+it("changing project keywords and sectors with identical source facts creates no source-change alert or duplicate after rereview", async () => {
+  const f = await fixture({ noLots: true, realAdoption: true });
+  await approve(f, null);
+  const [first] = await prepare(f);
+  await markSent(first.id);
+  const before = await f.load();
+  const profile = {
+    ...before.company.profile,
+    keywords: ["potatura"],
+    sectors: ["giardinaggio", "manutenzioni"] as CompanyProfile["sectors"],
+  };
+  await db
+    .update(schema.companies)
+    .set({ profile })
+    .where(eq(schema.companies.id, f.companyId));
+  const changed = await f.load();
+  expect(changed.expected.profileHash).not.toBe(before.expected.profileHash);
+  expect(changed.publication.revision).toBe(before.publication.revision);
+  expect(changed.project.signalEligible).toBe(false);
+  await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
+  expect(await rows(f.companyId)).toHaveLength(1);
+  await approve(f, null);
+  await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
+  expect(await rows(f.companyId)).toHaveLength(1);
 });

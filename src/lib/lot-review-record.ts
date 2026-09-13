@@ -9,14 +9,12 @@ export type LotMatchReviewState = {
   evaluations: LotEvaluationSet | null;
   suppression: ProjectLotSuppression | null;
 };
-export type LotMatchReviewRecord = {
-  version: "human-lot-match-review-v1";
+type ReviewRecordFields = {
   id: string;
   matchId: string;
   companyId: string;
   publicationId: string;
   sequence: number;
-  action: "assess_lot" | "veto_project" | "reopen_project";
   actorId: string;
   at: string;
   note: string;
@@ -30,3 +28,14 @@ export type LotMatchReviewRecord = {
   previousToken: string;
   nextToken: string;
 };
+export type LegacyLotMatchReviewRecord = ReviewRecordFields & {
+  version: "human-lot-match-review-v1";
+  action: "assess_lot" | "veto_project" | "reopen_project";
+};
+export type TargetMatchReviewRecord = ReviewRecordFields & {
+  version: "human-lot-match-review-v2";
+  action: "assess_lot" | "assess_project" | "veto_project" | "reopen_project";
+  shapeEpochToken: string | null;
+};
+export type LotMatchReviewRecord =
+  LegacyLotMatchReviewRecord | TargetMatchReviewRecord;

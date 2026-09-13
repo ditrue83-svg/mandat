@@ -1,5 +1,5 @@
 // Static compatibility declaration, not evidence of a drained deployment.
-export const DOCUMENTARY_ADOPTION_CAPABILITY = "documentary-consumers-v1";
+export const DOCUMENTARY_ADOPTION_CAPABILITY = "documentary-consumers-v2";
 export const DOCUMENTARY_RELEASE_ATTESTATION_VERSION =
   "documentary-release-attestation-v1";
 export const DOCUMENTARY_ADOPTION_CONSUMERS = [

@@ -17,11 +17,16 @@ import {
   type LoadedLotMatchReview,
 } from "@/lib/lot-match-reviews";
 import { captureLotSourceSnapshot } from "@/lib/lot-source-context";
+import {
+  assessmentTargetKey,
+  sameAssessmentTarget,
+} from "@/lib/lot-assessment";
 import { decodeDocumentarySnapshotRow } from "@/lib/documentary-store";
 import {
   buildLotNotice,
   lotNoticeHash,
   lotNoticeScope,
+  lotNoticeScopeShape,
   requireLotNoticeHistory,
   validateLotNotice,
   type LotNotice,
@@ -64,8 +69,7 @@ const reserved = new Set([
   "failed",
   "discarded",
 ]);
-const targetKey = (scope: LotNoticeScope) =>
-  `${scope.target.publicationId}:${scope.target.lotId}`;
+const targetKey = (scope: LotNoticeScope) => assessmentTargetKey(scope.target);
 const inFlight = new Set(["pending", "sending", "uncertain", "failed"]);
 // Delivery order is metadata used to locate the last communicated state; it
 // never enters factHash or the content transition chain. UUID is only a final
@@ -227,7 +231,12 @@ async function attachHistory(
 ) {
   const ids = [
     ...new Set(
-      notices.flatMap((n) => n.scope.map((s) => s.immutableEvidenceSnapshotId)),
+      notices.flatMap((n) =>
+        n.scope.flatMap((s) => [
+          s.immutableEvidenceSnapshotId,
+          ...(s.structure ? [s.structure.previousEvidenceSnapshotId] : []),
+        ]),
+      ),
     ),
   ];
   const rows = ids.length
@@ -298,6 +307,7 @@ async function recordHistoryIssue(
 function canNotify(loaded: LoadedLotMatchReview, context: Context, now: Date) {
   return (
     loaded.input.snapshot.acquisition.state === "accepted" &&
+    !loaded.input.shapeState.error &&
     !loaded.project.suppressed &&
     !dismissed(context, loaded.publication.canonicalId) &&
     new Date(loaded.publication.visibleAt) <= now
@@ -317,7 +327,13 @@ function rebuildNotice(
   return buildLotNotice(
     loaded,
     original.scope.map((s) =>
-      lotNoticeScope(loaded, s.target, s.kind, s.transition.predecessor),
+      lotNoticeScope(
+        loaded,
+        s.target,
+        s.kind,
+        s.transition.predecessor,
+        s.structure?.previousEvidenceSnapshotId ?? null,
+      ),
     ),
     original.kind,
     automatic,
@@ -621,8 +637,10 @@ export async function reconcileLotNotices(
             if (!(await legacyCurrent(tx, context, item, now))) current = false;
             continue;
           }
-          const loaded = all.get(item.id);
+          let loaded = all.get(item.id);
           try {
+            if (loaded)
+              loaded = await attachHistory(tx, loaded, [item.lotNotice]);
             const communicated = lastCommunicatedTargets(
               previous,
               item.lotNotice.canonicalId,
@@ -676,7 +694,7 @@ export async function reconcileLotNotices(
             (p) => p.canonicalId === canonicalId && sourceAvailable(p.source),
           )
           .sort(compareCanonicalPublications)[0];
-        const representative = representativeSource
+        let representative = representativeSource
           ? all.get(representativeSource.id)
           : null;
         if (!representative || !canNotify(representative, context, now))
@@ -696,15 +714,20 @@ export async function reconcileLotNotices(
         const related = relatedItems(previous, context.sources, canonicalId);
         let previouslySentTargets: Map<string, LotNoticeScope>;
         try {
-          for (const loaded of all.values()) {
+          for (const loaded of [...all.values()]) {
             const old = related
               .filter(
                 ({ item }) =>
                   item.id === loaded.publication.id && item.lotNotice,
               )
               .map(({ item }) => item.lotNotice!);
-            if (old.length) await attachHistory(tx, loaded, old);
+            if (old.length)
+              all.set(
+                loaded.publication.id,
+                await attachHistory(tx, loaded, old),
+              );
           }
+          representative = all.get(representative.publication.id)!;
           previouslySentTargets = lastCommunicatedTargets(
             previous,
             canonicalId,
@@ -734,24 +757,25 @@ export async function reconcileLotNotices(
         const alreadyProject = related.some(({ row }) =>
           reserved.has(row.status),
         );
-        const newScopes = representative.project.lots
+        const newScopes = representative.project.targets
           .filter((l) => l.signalEligible)
           .map((l) =>
             lotNoticeScope(
               representative,
               l.target,
               "positive",
-              previouslySentTargets.get(
-                `${l.target.publicationId}:${l.target.lotId}`,
-              )?.transition.hash ?? null,
+              previouslySentTargets.get(assessmentTargetKey(l.target))
+                ?.transition.hash ?? null,
             ),
           )
           .filter(
             (scope) =>
               !reservedTargets.has(targetKey(scope)) &&
               !discardedTransitions.has(scope.transition.hash) &&
-              previouslySentTargets.get(targetKey(scope))?.factHash !==
-                scope.factHash,
+              (previouslySentTargets.get(targetKey(scope))?.factHash !==
+                scope.factHash ||
+                previouslySentTargets.get(targetKey(scope))?.kind !==
+                  "positive"),
           );
         // Only previously sent targets receive source-change alerts. A v1 sent
         // item establishes the project, never an invented list of reported lots.
@@ -761,16 +785,32 @@ export async function reconcileLotNotices(
             newScopes.some((s) => targetKey(s) === targetKey(prior))
           )
             continue;
-          const existing = representative.project.lots.find(
+          const existing = representative.project.targets.find(
             (l) =>
-              l.target.lotId === prior.target.lotId &&
+              sameAssessmentTarget(l.target, prior.target) &&
               l.state !== "removed-or-unresolved",
           );
+          const structureChanged =
+            representative.project.shape.kind !==
+            lotNoticeScopeShape(representative, prior);
+          // The earlier target has already been reported as replaced by this
+          // structure. Unrelated edits do not create a second removal notice.
+          if (
+            !structureChanged &&
+            !existing &&
+            prior.kind === "structure_changed"
+          )
+            continue;
           const current = lotNoticeScope(
             representative,
             prior.target,
-            existing ? "changed" : "removed",
+            structureChanged
+              ? "structure_changed"
+              : existing
+                ? "changed"
+                : "removed",
             prior.transition.hash,
+            structureChanged ? prior.immutableEvidenceSnapshotId : null,
           );
           if (
             current.factHash !== prior.factHash &&
@@ -968,7 +1008,7 @@ export async function claimLotNotification(id: string, now = new Date()) {
             valid = false;
           continue;
         }
-        const loaded = all.get(item.id);
+        let loaded = all.get(item.id);
         if (!item.lotNotice || !loaded || !canNotify(loaded, context, now)) {
           valid = false;
           break;
@@ -976,7 +1016,7 @@ export async function claimLotNotification(id: string, now = new Date()) {
         const representative = context.sources
           .filter(
             (p) =>
-              p.canonicalId === loaded.publication.canonicalId &&
+              p.canonicalId === item.lotNotice!.canonicalId &&
               sourceAvailable(p.source),
           )
           .sort(compareCanonicalPublications)[0];
@@ -984,7 +1024,7 @@ export async function claimLotNotification(id: string, now = new Date()) {
           valid = false;
           break;
         }
-        await attachHistory(tx, loaded, [item.lotNotice]);
+        loaded = await attachHistory(tx, loaded, [item.lotNotice]);
         const communicated = lastCommunicatedTargets(
           companyNotices,
           item.lotNotice.canonicalId,

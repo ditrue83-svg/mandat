@@ -19,6 +19,14 @@ import {
 } from "../src/lib/documentary-store";
 import type { LotSourceTarget } from "../src/lib/lot-source-context";
 import { LOT_RECONCILIATION_QUEUE } from "../src/lib/lot-reconciliation";
+import {
+  adoptDocumentaryObservation,
+  DOCUMENTARY_ADOPTION_CAPABILITY,
+  DOCUMENTARY_ADOPTION_CONSUMERS,
+  DOCUMENTARY_RELEASE_ATTESTATION_VERSION,
+  type DocumentaryAdoptionActivation,
+  type DocumentaryReleaseAttestation,
+} from "../src/lib/documentary-adoption";
 
 const injected = vi.hoisted(() => ({ db: undefined as unknown }));
 vi.mock("@/db", () => ({ getDb: () => injected.db }));
@@ -43,6 +51,8 @@ import {
   loadLotMatchReview,
   lotMatchReviewInputSchema,
   lotMatchReviewTarget,
+  assessmentReviewTarget,
+  decodeLotMatchReviewRecord,
   type LoadedLotMatchReview,
   type LotMatchReviewInput,
 } from "../src/lib/lot-match-reviews";
@@ -63,6 +73,27 @@ const commonText =
   "Progetto inventato suddiviso in due lotti indipendenti per il test.";
 const aText = "🌳 Potatura e cura del verde nel lotto A inventato.";
 const bText = "Installazione di quadri elettrici nel lotto B inventato.";
+function activation(): DocumentaryAdoptionActivation {
+  return {
+    enabled: true,
+    attestation: {
+      version: DOCUMENTARY_RELEASE_ATTESTATION_VERSION,
+      releaseId: "invented-no-lots-repository-release",
+      verifiedAt: new Date().toISOString(),
+      evidenceId: "invented-local-only-no-rollout",
+      previousProcessesDrained: true,
+      consumers: Object.fromEntries(
+        DOCUMENTARY_ADOPTION_CONSUMERS.map((name) => [
+          name,
+          {
+            capability: DOCUMENTARY_ADOPTION_CAPABILITY,
+            buildId: "a".repeat(40),
+          },
+        ]),
+      ) as DocumentaryReleaseAttestation["consumers"],
+    },
+  };
+}
 beforeAll(async () => {
   injected.db = db;
   await pg.exec(
@@ -100,7 +131,11 @@ function sourceDraft(loaded: LoadedLotSourceReview): LotSourceReviewInput {
       : `${selected!.path}/orderDescription/it`;
   const value =
     target.kind === "project"
-      ? commonText
+      ? (
+          loaded.context.targetContent!.projectSections.procurement as {
+            orderDescription: { it: string };
+          }
+        ).orderDescription.it
       : (selected!.record as { orderDescription: { it: string } })
           .orderDescription.it;
   return {
@@ -110,8 +145,12 @@ function sourceDraft(loaded: LoadedLotSourceReview): LotSourceReviewInput {
     expectedSelectionHash: loaded.expected.selectionHash,
     expectedTargetEventId: loaded.expected.targetEventId,
     expectedProjectBarrierHash: loaded.expected.projectBarrierHash,
+    expectedShapeEpochToken: loaded.expected.shapeEpochToken,
     action: "recorded",
-    form: target.kind === "project" ? "broad_scope" : "defined_service",
+    form:
+      target.kind === "project" && loaded.shapeState.shape.kind === "lots"
+        ? "broad_scope"
+        : "defined_service",
     references: [
       {
         selectionHash: loaded.expected.selectionHash!,
@@ -130,6 +169,9 @@ async function fixture(
     adopt?: boolean;
     canonicalId?: string;
     reuseCompanies?: { companyId: string; otherCompanyId: string };
+    noLots?: boolean;
+    realAdoption?: boolean;
+    reviewSource?: boolean;
   } = {},
 ) {
   const projectId = randomUUID(),
@@ -147,11 +189,21 @@ async function fixture(
     id: noticeId,
     type: "tender",
     "project-info": { title: { it: "Progetto lotti inventato" } },
-    procurement: { orderDescription: { it: commonText } },
+    procurement: {
+      orderDescription: {
+        it: options.noLots
+          ? "Potatura e cura del verde per il progetto inventato senza lotti."
+          : commonText,
+      },
+      orderAddress: { countryId: "CH", cantonId: "TI", city: "Lugano" },
+      cpvCode: { code: "77310000" },
+    },
+    dates: { processType: "open", offerDeadline: "2030-11-04T12:00:00+01:00" },
     base: {
       id: noticeId,
       projectId,
       lotsType: "with",
+      processType: "open",
       lots: [
         { id: aId, lotNumber: 1, title: { it: "Verde" } },
         { id: bId, lotNumber: 2, title: { it: "Impianti" } },
@@ -176,6 +228,11 @@ async function fixture(
       },
     ],
   };
+  if (options.noLots) {
+    raw.lots = [];
+    raw.base.lots = [];
+    raw.base.lotsType = "without";
+  }
   const entry = {
     id: projectId,
     raw: {
@@ -282,10 +339,19 @@ async function fixture(
           },
         };
     const stored = await storeDocumentaryObservation(request, result);
-    return { stored, publication };
+    return { stored, publication, request, result };
   }
   const observation = await observe();
   const adopt = async (value = observation) => {
+    if (options.realAdoption) {
+      // New shape/epoch regressions exercise the real transactional adopter.
+      // The request was captured before the result; no caller constructs epoch.
+      return adoptDocumentaryObservation(
+        value.request,
+        value.result,
+        activation(),
+      );
+    }
     // Test-only setup; the app's separate adoption path is not exercised here.
     await db
       .update(schema.publications)
@@ -307,7 +373,11 @@ async function fixture(
   const b: LotSourceTarget = { ...a, lotId: bId };
   if (options.adopt !== false) {
     await adopt();
-    for (const target of [project, a, b])
+    for (const target of options.reviewSource === false
+      ? []
+      : options.noLots
+        ? [project]
+        : [project, a, b])
       await appendLotSourceReview(
         sourceDraft(await loadLotSourceReview(target, viewer)),
         viewer,
@@ -336,22 +406,32 @@ async function fixture(
 }
 function assessmentDraft(
   loaded: LoadedLotMatchReview,
-  lotId: string,
+  lotId: string | null,
   result: "direct" | "different" | "review" = "direct",
 ): LotMatchReviewInput {
-  const selected = lotMatchReviewTarget(loaded, lotId),
-    target = selected.context.targetContent!.selectedLot!;
-  const value = (target.record as { orderDescription: { it: string } })
-    .orderDescription.it;
-  return {
+  const selected =
+    lotId === null
+      ? assessmentReviewTarget(loaded, {
+          kind: "project",
+          publicationId: loaded.publication.id,
+        })
+      : lotMatchReviewTarget(loaded, lotId);
+  const content = selected.context.targetContent!;
+  const value = (
+    (selected.target.kind === "project"
+      ? content.projectSections.procurement
+      : content.selectedLot!.record) as { orderDescription: { it: string } }
+  ).orderDescription.it;
+  return lotMatchReviewInputSchema.parse({
     companyId: loaded.company.id,
     publicationId: loaded.publication.id,
-    action: "assess_lot",
+    action: lotId === null ? "assess_project" : "assess_lot",
     target: selected.target,
     expectedSnapshotHash: selected.expected.snapshotHash,
     expectedProfileHash: selected.expected.profileHash,
     expectedStateToken: selected.expected.stateToken,
     expectedGroupToken: selected.expected.groupToken,
+    expectedShapeEpochToken: selected.expected.shapeEpochToken!,
     expectedSourceDependency: selected.expected.sourceDependency,
     expectedOperationalInputHash: selected.expected.operationalInputHash,
     expectedEvaluationSetToken: selected.expected.evaluationSetToken,
@@ -361,7 +441,10 @@ function assessmentDraft(
     references: [
       {
         selectionHash: selected.context.dependency.selectionHash!,
-        rawPath: `${target.path}/orderDescription/it`,
+        rawPath:
+          selected.target.kind === "project"
+            ? "/procurement/orderDescription/it"
+            : `${content.selectedLot!.path}/orderDescription/it`,
         startUtf16: 0,
         endUtf16: value.length,
       },
@@ -369,7 +452,7 @@ function assessmentDraft(
     confirmedReviewReasons:
       result === "direct" ? [...selected.preliminary.reviewReasons] : [],
     note: "PRIVATE_MATCH_NOTE: verificati i limiti operativi senza attestare idoneità.",
-  };
+  });
 }
 function projectDraft(
   loaded: LoadedLotMatchReview,
@@ -383,6 +466,7 @@ function projectDraft(
     expectedProfileHash: loaded.expected.profileHash,
     expectedStateToken: loaded.expected.stateToken,
     expectedGroupToken: loaded.expected.groupToken,
+    expectedShapeEpochToken: loaded.expected.shapeEpochToken,
     expectedProjectBindingHash: loaded.expected.projectBindingHash,
     note: "Revisione esplicita inventata della soppressione del progetto.",
   };
@@ -949,4 +1033,323 @@ it("SQL audit is append-only, checks owner and JSON identity, and all 20 public 
       "RESET ROLE; REVOKE SELECT ON public.match_lot_review_events FROM anon",
     );
   }
+});
+
+it("adopts an explicitly lot-free source and records a real project assessment with one atomic audit and job", async () => {
+  const f = await fixture({ noLots: true, realAdoption: true });
+  const loaded = await f.load();
+  expect(loaded.shapeState.shape.kind).toBe("project");
+  expect(loaded.shapeState.epochToken).toMatch(/^[a-f0-9]{64}$/);
+  expect(loaded.project.lots).toHaveLength(0);
+  expect(loaded.project.targets).toHaveLength(1);
+  const before = await matchRow(f.companyId, f.p.id);
+  const jobsBefore = await jobs(f.p.id);
+  const result = await appendLotMatchReview(
+    assessmentDraft(loaded, null),
+    viewer,
+  );
+  expect(result.project.quality).toBe("approved");
+  expect(result.project.signalEligible).toBe(true);
+  expect(result.project.projectAssessment?.target).toEqual(f.project);
+  expect(result.project.lots).toHaveLength(0);
+  expect(result.project.relevantTargets).toHaveLength(1);
+  const rows = await auditRows(loaded.match.id);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].event).toMatchObject({
+    version: "human-lot-match-review-v2",
+    action: "assess_project",
+    shapeEpochToken: loaded.shapeState.epochToken,
+    actorId: viewer.userId,
+  });
+  expect(decodeLotMatchReviewRecord(rows[0].event)).toEqual(rows[0].event);
+  expect((await jobs(f.p.id)).length).toBe(jobsBefore.length + 1);
+  const after = await matchRow(f.companyId, f.p.id);
+  for (const field of [
+    "approved",
+    "reviewedAt",
+    "reviewNotes",
+    "score",
+    "eligible",
+    "revision",
+  ] as const)
+    expect(after[field]).toEqual(before[field]);
+  expect((await f.load(f.otherCompanyId)).project.quality).toBe("unresolved");
+  const different = await appendLotMatchReview(
+    assessmentDraft(await f.load(f.otherCompanyId), null, "different"),
+    viewer,
+  );
+  expect(different.project.quality).toBe("rejected");
+  expect(different.project.signalEligible).toBe(false);
+});
+
+it("a project source needs its own current defined review and cannot bypass shape or epoch through API JSON", async () => {
+  const f = await fixture({
+    noLots: true,
+    realAdoption: true,
+    reviewSource: false,
+  });
+  await expect(
+    appendLotMatchReview(assessmentDraft(await f.load(), null), viewer),
+  ).rejects.toMatchObject({ status: 400 });
+  const source = await loadLotSourceReview(f.project, viewer);
+  await appendLotSourceReview(
+    { ...sourceDraft(source), form: "broad_scope" },
+    viewer,
+  );
+  await expect(
+    appendLotMatchReview(assessmentDraft(await f.load(), null), viewer),
+  ).rejects.toMatchObject({ status: 400 });
+  await appendLotSourceReview(
+    sourceDraft(await loadLotSourceReview(f.project, viewer)),
+    viewer,
+  );
+  const loaded = await f.load(),
+    draft = assessmentDraft(loaded, null);
+  expect(
+    lotMatchReviewInputSchema.safeParse({ ...draft, actorId: "browser-actor" })
+      .success,
+  ).toBe(false);
+  const missing = { ...draft } as Record<string, unknown>;
+  delete missing.expectedShapeEpochToken;
+  expect(lotMatchReviewInputSchema.safeParse(missing).success).toBe(false);
+  await expect(
+    appendLotMatchReview(
+      { ...draft, expectedShapeEpochToken: "0".repeat(64) },
+      viewer,
+    ),
+  ).rejects.toMatchObject({ status: 409 });
+  expect(
+    lotMatchReviewInputSchema.safeParse({ ...draft, action: "assess_lot" })
+      .success,
+  ).toBe(false);
+  const lots = await fixture({ realAdoption: true });
+  const lotsLoaded = await lots.load();
+  expect(() => assessmentReviewTarget(lotsLoaded, lots.project)).toThrow();
+  await expect(
+    appendLotMatchReview(
+      {
+        ...draft,
+        companyId: lots.companyId,
+        publicationId: lots.p.id,
+        target: lots.project,
+        expectedSnapshotHash: lotsLoaded.expected.snapshotHash,
+        expectedProfileHash: lotsLoaded.expected.profileHash,
+        expectedStateToken: lotsLoaded.expected.stateToken,
+        expectedGroupToken: lotsLoaded.expected.groupToken,
+        expectedShapeEpochToken: lotsLoaded.expected.shapeEpochToken,
+      },
+      viewer,
+    ),
+  ).rejects.toMatchObject({ status: 400 });
+});
+
+it("persisted project to lots to identical project adoption cannot resurrect source review or company judgment", async () => {
+  const f = await fixture({ noLots: true, realAdoption: true });
+  const initial = await appendLotMatchReview(
+    assessmentDraft(await f.load(), null),
+    viewer,
+  );
+  const oldEpoch = initial.shapeState.epochToken;
+  const initialSet = initial.state.evaluations;
+  const sourceBefore = await loadLotSourceReview(f.project, viewer);
+  const lots = structuredClone(f.raw);
+  lots.base.lotsType = "with";
+  lots.base.lots = [{ id: f.aId, lotNumber: 1, title: { it: "Verde" } }];
+  lots.lots = [
+    {
+      id: f.aId,
+      lotNumber: 1,
+      title: { it: "Verde" },
+      orderDescription: { it: aText },
+      orderAddress: { countryId: "CH", cantonId: "TI", city: "Lugano" },
+      cpvCode: { code: "77310000" },
+    },
+  ];
+  await f.adopt(await f.observe(lots));
+  const middle = await f.load();
+  expect(middle.shapeState.shape.kind).toBe("lots");
+  expect(middle.project.signalEligible).toBe(false);
+  await f.adopt(await f.observe(f.raw));
+  const returned = await f.load();
+  expect(returned.shapeState.shape.kind).toBe("project");
+  expect(returned.shapeState.epochToken).not.toBe(oldEpoch);
+  expect(returned.state.evaluations).toEqual(initialSet);
+  expect(returned.project.signalEligible).toBe(false);
+  expect(returned.project.quality).toBe("unresolved");
+  const sourceReturned = await loadLotSourceReview(f.project, viewer);
+  expect(sourceReturned.context.state).not.toBe("manual_source");
+  await expect(
+    appendLotSourceReview(
+      {
+        ...sourceDraft(sourceReturned),
+        expectedShapeEpochToken: sourceBefore.expected.shapeEpochToken,
+      },
+      viewer,
+    ),
+  ).rejects.toMatchObject({ status: 409 });
+  await expect(
+    appendLotMatchReview(assessmentDraft(returned, null), viewer),
+  ).rejects.toMatchObject({ status: 400 });
+  await appendLotSourceReview(sourceDraft(sourceReturned), viewer);
+  const newDraft = assessmentDraft(await f.load(), null);
+  await expect(
+    appendLotMatchReview(
+      { ...newDraft, expectedShapeEpochToken: oldEpoch },
+      viewer,
+    ),
+  ).rejects.toMatchObject({ status: 409 });
+  const rereviewed = await appendLotMatchReview(newDraft, viewer);
+  expect(rereviewed.project.signalEligible).toBe(true);
+  expect(rereviewed.history).toHaveLength(2);
+});
+
+it("shadow and same-shape adoption preserve the epoch but unresolved and refused interrupt it", async () => {
+  const f = await fixture({ noLots: true, realAdoption: true });
+  const initial = await f.load();
+  const shadowRaw = structuredClone(f.raw);
+  shadowRaw.base.lotsType = "unspecified";
+  const shadow = await f.observe(shadowRaw);
+  expect((await f.load()).shapeState.epochToken).toBe(
+    initial.shapeState.epochToken,
+  );
+  await f.adopt(shadow);
+  const unknown = await f.load();
+  expect(unknown.shapeState.shape.kind).toBe("unresolved");
+  expect(unknown.project.signalEligible).toBe(false);
+  expect(() => assessmentReviewTarget(unknown, f.project)).toThrow();
+  await f.adopt(await f.observe(f.raw, true));
+  const refused = await f.load();
+  expect(refused.shapeState.shape.kind).toBe("unresolved");
+  expect(refused.project.signalEligible).toBe(false);
+  await f.adopt(await f.observe(f.raw));
+  const current = await f.load();
+  const textChange = structuredClone(f.raw);
+  textChange.procurement.orderDescription.it += " Nuovo dettaglio inventato.";
+  await f.adopt(await f.observe(textChange));
+  expect((await f.load()).shapeState.epochToken).toBe(
+    current.shapeState.epochToken,
+  );
+});
+
+it("a failed project reconciliation job rolls back its judgment and audit, and audit tampering is rejected", async () => {
+  const f = await fixture({ noLots: true, realAdoption: true });
+  const loaded = await f.load(),
+    draft = assessmentDraft(loaded, null);
+  const before = {
+    match: await matchRow(f.companyId, f.p.id),
+    audit: await auditRows(loaded.match.id),
+    jobs: await jobs(f.p.id),
+  };
+  await pg.exec(
+    "ALTER TABLE pgboss.job ADD CONSTRAINT test_reject_project_reconciliation CHECK (name <> 'lot-notice-reconcile') NOT VALID",
+  );
+  try {
+    await expect(appendLotMatchReview(draft, viewer)).rejects.toThrow();
+  } finally {
+    await pg.exec(
+      "ALTER TABLE pgboss.job DROP CONSTRAINT test_reject_project_reconciliation",
+    );
+  }
+  expect({
+    match: await matchRow(f.companyId, f.p.id),
+    audit: await auditRows(loaded.match.id),
+    jobs: await jobs(f.p.id),
+  }).toEqual(before);
+  const saved = await appendLotMatchReview(draft, viewer),
+    event = saved.history[0];
+  expect(() =>
+    decodeLotMatchReviewRecord({ ...event, nextToken: "f".repeat(64) }),
+  ).toThrow();
+  expect(() => decodeLotMatchReviewRecord({ ...event, extra: true })).toThrow();
+  expect(() =>
+    decodeLotMatchReviewRecord({
+      ...event,
+      groupBefore: { ...event.groupBefore, legacy: [] },
+    }),
+  ).toThrow();
+  await expect(appendLotMatchReview(draft, viewer)).rejects.toMatchObject({
+    status: 409,
+  });
+});
+
+it("reads an original v1 project-veto reopening followed by a v2 project judgment without rewriting the stored v1 record", async () => {
+  const f = await fixture({
+    noLots: true,
+    realAdoption: true,
+    legacyVeto: true,
+  });
+  const loaded = await f.load();
+  expect(loaded.project.suppressed).toBe(true);
+  const eventId = randomUUID(),
+    at = new Date().toISOString();
+  const groupAfter = {
+    version: "canonical-lot-suppression-v1" as const,
+    companyId: f.companyId,
+    canonicalId: f.p.id,
+    eventId,
+    suppression: {
+      active: false,
+      reason: "Esclusione storica ritirata dal fondatore.",
+      rejection: null,
+    },
+  };
+  // Invented legacy-format fixture. Its source/parent chain and state tokens
+  // come from actual persisted rows; v1 had no shapeEpochToken to fabricate.
+  const event = {
+    version: "human-lot-match-review-v1" as const,
+    id: eventId,
+    matchId: loaded.match.id,
+    companyId: f.companyId,
+    publicationId: f.p.id,
+    sequence: 1,
+    action: "reopen_project" as const,
+    actorId: viewer.userId,
+    at,
+    note: "Riconsiderazione storica inventata del progetto.",
+    sourceSnapshotHash: loaded.expected.snapshotHash,
+    evidenceSnapshot: loaded.input.snapshot,
+    profileHash: loaded.expected.profileHash,
+    groupBefore: loaded.group.before,
+    groupAfter,
+    before: loaded.state,
+    after: loaded.state,
+    previousToken: loaded.expected.stateToken,
+    nextToken: loaded.expected.stateToken,
+  };
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(schema.settings)
+      .values({ key: loaded.group.key, value: groupAfter });
+    await tx
+      .insert(schema.matchLotReviewEvents)
+      .values({
+        id: eventId,
+        matchId: loaded.match.id,
+        companyId: f.companyId,
+        publicationId: f.p.id,
+        sequence: 1,
+        event,
+      });
+  });
+  const restored = await f.load();
+  expect(restored.history[0]).toEqual(event);
+  expect(restored.project.suppressed).toBe(false);
+  expect(restored.project.signalEligible).toBe(false);
+  const saved = await appendLotMatchReview(
+    assessmentDraft(restored, null),
+    viewer,
+  );
+  expect(saved.project.signalEligible).toBe(true);
+  expect(saved.history.map((e) => e.version)).toEqual([
+    "human-lot-match-review-v1",
+    "human-lot-match-review-v2",
+  ]);
+  expect(saved.history[1].previousToken).toBe(event.nextToken);
+  expect((await auditRows(loaded.match.id))[0].event).toEqual(event);
+  expect(() =>
+    decodeLotMatchReviewRecord({
+      ...event,
+      shapeEpochToken: loaded.expected.shapeEpochToken,
+    }),
+  ).toThrow();
 });

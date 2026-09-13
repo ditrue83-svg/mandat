@@ -166,22 +166,20 @@ function refused(f: Fixture): SimapAcquisitionResult {
 }
 async function insert(f: Fixture, canonicalId = f.publication.canonicalKey!) {
   const p = f.publication;
-  await db
-    .insert(schema.publications)
-    .values({
-      id: p.id,
-      canonicalId,
-      source: p.source,
-      externalId: p.externalId,
-      projectId: p.projectId,
-      title: p.title,
-      status: p.status,
-      visibleAt: new Date(p.visibleAt),
-      deadline: p.deadline ? new Date(p.deadline) : null,
-      data: p,
-      revision: p.revision,
-      aiRevision: p.revision,
-    });
+  await db.insert(schema.publications).values({
+    id: p.id,
+    canonicalId,
+    source: p.source,
+    externalId: p.externalId,
+    projectId: p.projectId,
+    title: p.title,
+    status: p.status,
+    visibleAt: new Date(p.visibleAt),
+    deadline: p.deadline ? new Date(p.deadline) : null,
+    data: p,
+    revision: p.revision,
+    aiRevision: p.revision,
+  });
 }
 async function row(id: string) {
   return (
@@ -284,39 +282,35 @@ async function predecessorWithHumanHistory(f: Fixture) {
     },
   ]);
   await db.insert(schema.administrators).values({ userId: founder.userId });
-  await db
-    .insert(schema.companies)
-    .values({
-      id: "creation-company",
-      ownerId: "creation-owner",
-      onboardedAt: new Date(),
-      profile: {
-        name: "Ditta inventata",
-        activities: "Potatura e cura del verde",
-        employees: 2,
-        sectors: ["giardinaggio"],
-        zones: ["Tutto il Ticino"],
-        keywords: [],
-        exclusions: [],
-        minValue: null,
-        maxValue: null,
-        emailEnabled: true,
-      },
-    });
-  await db
-    .insert(schema.matches)
-    .values({
-      id: "legacy-positive",
-      companyId: "creation-company",
-      publicationId: f.publication.id,
-      revision: "legacy-reviewed",
-      score: 93,
-      eligible: true,
-      approved: true,
-      reviewedAt: new Date("2026-09-01T10:00:00Z"),
-      reason: "Giudizio da conservare",
-      reviewNotes: "Nota privata storica",
-    });
+  await db.insert(schema.companies).values({
+    id: "creation-company",
+    ownerId: "creation-owner",
+    onboardedAt: new Date(),
+    profile: {
+      name: "Ditta inventata",
+      activities: "Potatura e cura del verde",
+      employees: 2,
+      sectors: ["giardinaggio"],
+      zones: ["Tutto il Ticino"],
+      keywords: [],
+      exclusions: [],
+      minValue: null,
+      maxValue: null,
+      emailEnabled: true,
+    },
+  });
+  await db.insert(schema.matches).values({
+    id: "legacy-positive",
+    companyId: "creation-company",
+    publicationId: f.publication.id,
+    revision: "legacy-reviewed",
+    score: 93,
+    eligible: true,
+    approved: true,
+    reviewedAt: new Date("2026-09-01T10:00:00Z"),
+    reason: "Giudizio da conservare",
+    reviewNotes: "Nota privata storica",
+  });
   await adoptDocumentaryObservation(
     await beginDocumentaryRequest(f.identity),
     accepted(f),
@@ -332,6 +326,7 @@ async function predecessorWithHumanHistory(f: Fixture) {
       expectedSelectionHash: loaded.expected.selectionHash,
       expectedTargetEventId: loaded.expected.targetEventId,
       expectedProjectBarrierHash: loaded.expected.projectBarrierHash,
+      expectedShapeEpochToken: loaded.expected.shapeEpochToken,
       action: "recorded",
       form: "broad_scope",
       references: [
@@ -365,24 +360,23 @@ async function predecessorWithHumanHistory(f: Fixture) {
       expectedProfileHash: match.expected.profileHash,
       expectedStateToken: match.expected.stateToken,
       expectedGroupToken: match.expected.groupToken,
+      expectedShapeEpochToken: match.expected.shapeEpochToken,
       expectedProjectBindingHash: match.expected.projectBindingHash,
       note: "Veto inventato del progetto precedente.",
     },
     founder,
   );
-  await db
-    .insert(schema.notifications)
-    .values({
-      id: "old-pending",
-      companyId: "creation-company",
-      dedupeKey: "old-pending",
-      kind: "digest",
-      status: "pending",
-      subject: "Storico",
-      html: "<p>Storico</p>",
-      textBody: "Storico",
-      items: [{ id: f.publication.id, revision: "legacy-reviewed" }],
-    });
+  await db.insert(schema.notifications).values({
+    id: "old-pending",
+    companyId: "creation-company",
+    dedupeKey: "old-pending",
+    kind: "digest",
+    status: "pending",
+    subject: "Storico",
+    html: "<p>Storico</p>",
+    textBody: "Storico",
+    items: [{ id: f.publication.id, revision: "legacy-reviewed" }],
+  });
   await db
     .insert(schema.settings)
     .values({ key: "automation_enabled", value: false });

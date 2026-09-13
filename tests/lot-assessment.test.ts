@@ -1,12 +1,27 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { test } from "vitest";
+import { beforeEach, test } from "vitest";
 import type {
   CompanyProfile,
   Publication,
   SourceScopeReview,
 } from "../src/lib/domain";
-import { preserveSimapLots, type Identity } from "../src/lib/source-lots";
+import {
+  preserveSimapLots,
+  restoreSimapDetail,
+  type Identity,
+} from "../src/lib/source-lots";
+import { normalizeSimap } from "../src/sources/simap";
+import { SIMAP_ACQUISITION_VERSION } from "../src/sources/simap-documentary";
+import {
+  createDocumentaryRequest,
+  stableDocumentaryJson,
+} from "../src/lib/documentary-observation";
+import {
+  resolveAssessmentShapeHistory,
+  resolveAssessmentSourceContext,
+  type DocumentarySnapshotRow,
+} from "../src/lib/assessment-shape";
 import {
   ReviewConflict,
   type HumanSourceForm,
@@ -19,15 +34,17 @@ import {
   type LotSourceTarget,
   type MixedSourceReviewRecord,
 } from "../src/lib/lot-source-context";
-import { preliminaryLotMatch } from "../src/lib/lot-matching";
 import {
-  createHumanLotAssessment,
+  createHumanTargetAssessment as createAssessment,
+  preliminaryAssessmentMatch,
+  sameAssessmentTarget,
   lotAssessmentProfileHash,
   lotEvaluationSetToken,
   projectLotAssessmentDto,
-  resolveProjectLotAssessment,
+  resolveProjectLotAssessment as resolveAssessment,
   validateLotEvaluationSet,
-  type HumanLotAssessmentCommand,
+  type HumanTargetAssessmentCommand,
+  type AssessmentTarget,
   type LotAssessmentInput,
   type LotAssessmentResult,
   type LotAssessmentTarget,
@@ -62,6 +79,7 @@ const now = new Date("2030-01-02T10:00:00.000Z");
 function raw() {
   return {
     id: sourcePublicationId,
+    type: "tender",
     procurement: { orderDescription: { it: commonText } },
     base: {
       id: sourcePublicationId,
@@ -92,20 +110,118 @@ function raw() {
     ],
   };
 }
+const observationRows = new Map<string, DocumentarySnapshotRow>();
+beforeEach(() => observationRows.clear());
+const observationIdFor = (label: string) => {
+  if (
+    /^[a-f\d]{8}-[a-f\d]{4}-4[a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/.test(
+      label,
+    )
+  )
+    return label;
+  const digest = createHash("sha256").update(label).digest("hex");
+  return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
+};
+function registerSnapshot(snap: LotSourceSnapshot, parent = "observation-1") {
+  if (observationRows.has(snap.observationId)) return snap;
+  const acq = snap.acquisition;
+  if (acq.state !== "accepted")
+    throw new Error("Refused fixture requires its original receipt row");
+  const identity = acq.archive.identity,
+    detail = restoreSimapDetail(acq.archive);
+  const publication = normalizeSimap(
+    {
+      id: identity.projectId,
+      raw: {
+        id: identity.projectId,
+        publicationId: identity.publicationId,
+        projectNumber: "INVENTED-ASSESSMENT-HISTORY",
+        publicationDate: "2030-01-01",
+        pubType: "tender",
+        processType: "open",
+        title: { it: "Progetto inventato" },
+        procOfficeName: { it: "Ente inventato" },
+      },
+    },
+    detail,
+  );
+  const body = Buffer.from(JSON.stringify(detail)),
+    at = "2030-01-01T00:00:00.000Z";
+  observationRows.set(snap.observationId, {
+    id: snap.observationId,
+    publicationId: snap.publicationId,
+    sourceProjectId: identity.projectId,
+    sourcePublicationId: identity.publicationId,
+    state: "accepted",
+    createdAt: new Date(at),
+    request: createDocumentaryRequest({
+      id: snap.observationId,
+      identity,
+      startedAt: at,
+      observedPublication:
+        snap.observationId === observationIdFor("observation-1")
+          ? null
+          : {
+              revision: "editorial-revision-retained",
+              documentarySnapshotId: observationIdFor(parent),
+            },
+    }),
+    acquisition: {
+      version: SIMAP_ACQUISITION_VERSION,
+      state: "accepted",
+      identity,
+      sourceRevision: publication.revision,
+      archive: acq.archive,
+      receipt: {
+        url: identity.detailUrl,
+        receivedAt: at,
+        bodyByteLength: body.length,
+        bodySha256: createHash("sha256").update(body).digest("hex"),
+      },
+    },
+  });
+  return snap;
+}
 function snapshot(
   detail = raw(),
   observationId = "observation-1",
   sourceScopeReview: SourceScopeReview | null = null,
+  parent = "observation-1",
 ) {
-  return captureLotSourceSnapshot({
-    publicationId,
-    observationId,
-    acquisition: {
-      state: "accepted",
-      archive: preserveSimapLots(detail, identity),
-    },
-    sourceScopeReview,
-  });
+  return registerSnapshot(
+    captureLotSourceSnapshot({
+      publicationId,
+      observationId: observationIdFor(observationId),
+      acquisition: {
+        state: "accepted",
+        archive: preserveSimapLots(detail, identity),
+      },
+      sourceScopeReview,
+    }),
+    parent,
+  );
+}
+function withShape<T extends Omit<LotAssessmentInput, "shapeState">>(i: T) {
+  return {
+    ...i,
+    shapeState: resolveAssessmentShapeHistory({
+      publicationId: i.snapshot.publicationId,
+      currentObservationId: i.snapshot.observationId,
+      observations: [...observationRows.values()],
+    }),
+  };
+}
+function resolveProjectLotAssessment(
+  i: Parameters<typeof resolveAssessment>[0],
+) {
+  return resolveAssessment(withShape(i));
+}
+function createHumanLotAssessment(
+  c: HumanTargetAssessmentCommand,
+  i: LotAssessmentInput,
+  m: Parameters<typeof createAssessment>[2],
+) {
+  return createAssessment(c, withShape(i), m);
 }
 let sequence = 0;
 function metadata() {
@@ -213,7 +329,7 @@ function input(
     reviewReasons: [],
     revision: "global-revision-1",
   };
-  return {
+  return withShape({
     companyId: "company-invented",
     publication,
     profile,
@@ -221,15 +337,21 @@ function input(
     history: [p, ar, br],
     evaluationSet: null,
     now,
-  };
+  });
 }
 function command(
   i: LotAssessmentInput,
-  target = a,
+  target: AssessmentTarget = a,
   result: LotAssessmentResult = "direct",
-): HumanLotAssessmentCommand {
-  const context = resolveLotSourceContext(i.snapshot, target, i.history);
-  const preliminary = preliminaryLotMatch({
+): HumanTargetAssessmentCommand {
+  i = withShape(i);
+  const context = resolveAssessmentSourceContext(
+    i.snapshot,
+    target,
+    i.history,
+    i.shapeState,
+  );
+  const preliminary = preliminaryAssessmentMatch({
     publication: i.publication,
     profile: i.profile,
     context,
@@ -237,6 +359,7 @@ function command(
   });
   return {
     target,
+    expectedShapeEpochToken: i.shapeState.epochToken!,
     expectedSnapshotHash: i.snapshot.snapshotHash,
     expectedSourceDependency: context.dependency,
     expectedProfileHash: lotAssessmentProfileHash(i.profile),
@@ -247,19 +370,27 @@ function command(
       i.publication.id,
     ),
     expectedEntryHash:
-      i.evaluationSet?.entries.find((e) => e.target.lotId === target.lotId)
-        ?.entryHash ?? null,
+      i.evaluationSet?.entries.find((e) =>
+        sameAssessmentTarget(e.target, target),
+      )?.entryHash ?? null,
     result,
-    reason: `${target.lotId === aId ? "Lotto A" : "Lotto B"}: giudizio umano inventato ${result}.`,
+    reason: `${target.kind === "project" ? "Intero progetto" : target.lotId === aId ? "Lotto A" : "Lotto B"}: giudizio umano inventato ${result}.`,
     references: [
       {
         selectionHash: context.dependency.selectionHash!,
         rawPath:
-          target.lotId === aId
-            ? "/lots/0/orderDescription/it"
-            : "/lots/1/orderDescription/it",
+          target.kind === "project"
+            ? "/procurement/orderDescription/it"
+            : target.lotId === aId
+              ? "/lots/0/orderDescription/it"
+              : "/lots/1/orderDescription/it",
         startUtf16: 0,
-        endUtf16: target.lotId === aId ? aText.length : bText.length,
+        endUtf16:
+          target.kind === "project"
+            ? commonText.length
+            : target.lotId === aId
+              ? aText.length
+              : bText.length,
       },
     ],
     origin: "human",
@@ -269,7 +400,7 @@ function command(
 }
 function assess(
   i: LotAssessmentInput,
-  target = a,
+  target: AssessmentTarget = a,
   result: LotAssessmentResult = "direct",
 ) {
   const created = createHumanLotAssessment(
@@ -300,7 +431,14 @@ function withEntry(
   i: LotAssessmentInput,
   entry: LotEvaluation,
 ): LotAssessmentInput {
-  return { ...i, evaluationSet: { ...i.evaluationSet!, entries: [entry] } };
+  return {
+    ...i,
+    evaluationSet: validateLotEvaluationSet(
+      { ...i.evaluationSet!, entries: [entry] },
+      i.companyId,
+      i.publication.id,
+    ),
+  };
 }
 
 test("One project card preserves partial scope, operational unknowns and private human metadata", () => {
@@ -455,7 +593,9 @@ test("Whole-set and entry CAS reject concurrent writes, target changes, profile/
   );
   const committed = createHumanLotAssessment(current, updated, m);
   assert.deepEqual(
-    committed.evaluationSet.entries.map((e) => e.target.lotId),
+    committed.evaluationSet.entries.map((e) =>
+      e.target.kind === "lot" ? e.target.lotId : "project",
+    ),
     [bId, aId],
   );
   assert.equal(committed.previousEntry, null);
@@ -473,7 +613,7 @@ test("Editing only B preserves A and its original evidence while invalidating B;
   let i = assess(input());
   i = assess(i, b, "review");
   const original = i.evaluationSet!.entries.find(
-    (e) => e.target.lotId === aId,
+    (e) => e.target.kind === "lot" && e.target.lotId === aId,
   )!;
   const changed = raw();
   changed.lots[1].orderDescription.it += " Ulteriore corpo esclusivo B.";
@@ -490,7 +630,7 @@ test("Editing only B preserves A and its original evidence while invalidating B;
   assert.equal(result.lots[0].evaluation?.entryHash, original.entryHash);
   assert.equal(
     result.lots[0].evaluation?.immutableEvidenceSnapshotId,
-    "observation-1",
+    observationIdFor("observation-1"),
   );
   assert.equal(result.signalEligible, true);
   const repeated = resolveProjectLotAssessment({
@@ -510,7 +650,15 @@ test("Historical evidence must be present under the exact immutable ID, with exa
   const i = assess({ ...initial, snapshot: evidenceSnapshot });
   const changed = raw();
   changed.lots[1].orderDescription.it += " changed B";
-  const next = { ...i, snapshot: snapshot(changed, "observation-next") };
+  const next = {
+    ...i,
+    snapshot: snapshot(
+      changed,
+      "observation-next",
+      null,
+      "evidence-only-observation",
+    ),
+  };
   const absent = resolveProjectLotAssessment(next);
   assert.equal(absent.lots[0].issue, "evidence_snapshot_missing");
   assert.equal(absent.signalEligible, false);
@@ -611,7 +759,7 @@ test("One immutable acquisition can retain required and resolved editorial snaps
   assert.equal(renewed.signalEligible, true);
   assert.equal(
     renewed.lots[0].evaluation?.immutableEvidenceSnapshotId,
-    "observation-1",
+    observationIdFor("observation-1"),
   );
 
   const changedArchive = raw();
@@ -671,15 +819,17 @@ test("Shared content, provenance, index, profile and operational changes cannot 
   const changed = raw();
   changed.id = nextIdentity.publicationId;
   changed.base.id = nextIdentity.publicationId;
-  const provenance = captureLotSourceSnapshot({
-    publicationId,
-    observationId: "obs-provenance",
-    acquisition: {
-      state: "accepted",
-      archive: preserveSimapLots(changed, nextIdentity),
-    },
-    sourceScopeReview: null,
-  });
+  const provenance = registerSnapshot(
+    captureLotSourceSnapshot({
+      publicationId,
+      observationId: observationIdFor("obs-provenance"),
+      acquisition: {
+        state: "accepted",
+        archive: preserveSimapLots(changed, nextIdentity),
+      },
+      sourceScopeReview: null,
+    }),
+  );
   assert.equal(
     resolveProjectLotAssessment({ ...i, snapshot: provenance }).lots[0].state,
     "stale",
@@ -712,11 +862,11 @@ test("Project source barriers, broad or unclear lots, and operational vetoes can
     const i = input({ aForm: form });
     assert.throws(
       () => createHumanLotAssessment(command(i), i, metadata()),
-      /defined lot/,
+      /defined current target/,
     );
     assert.throws(
       () => createHumanLotAssessment(command(i, a, "different"), i, metadata()),
-      /defined lot/,
+      /defined current target/,
     );
     assert.equal(
       resolveProjectLotAssessment(assess(i, a, "review")).quality,
@@ -759,7 +909,7 @@ test("Project source barriers, broad or unclear lots, and operational vetoes can
   assert.equal(blockedRejection.signalEligible, false);
   assert.throws(
     () => createHumanLotAssessment(command(blocked), blocked, metadata()),
-    /defined lot/,
+    /defined current target/,
   );
   const cancelled = {
     ...input(),
@@ -866,14 +1016,48 @@ test("Removed UUIDs remain historical and are never transferred to a replacement
 
 test("Refused, absent, null and empty lot observations stay unresolved without legacy positives or fake cancellations", () => {
   const i = assess(input());
+  const receipt = {
+    url: identity.detailUrl,
+    receivedAt: "2030-01-01T00:00:00.000Z",
+    bodyByteLength: 1,
+    bodySha256: createHash("sha256").update(Uint8Array.of(0xff)).digest("hex"),
+  };
+  const refusedId = observationIdFor("refused-observation");
+  observationRows.set(refusedId, {
+    id: refusedId,
+    publicationId,
+    sourceProjectId: projectId,
+    sourcePublicationId,
+    state: "refused",
+    createdAt: new Date(receipt.receivedAt),
+    request: createDocumentaryRequest({
+      id: refusedId,
+      identity,
+      startedAt: receipt.receivedAt,
+      observedPublication: {
+        revision: "editorial-retained",
+        documentarySnapshotId: i.snapshot.observationId,
+      },
+    }),
+    acquisition: {
+      version: SIMAP_ACQUISITION_VERSION,
+      identity,
+      receipt,
+      state: "refused",
+      sourceRevision: null,
+      refusal: { stage: "decode", code: "invalid_utf8" },
+    },
+  });
   const refused = captureLotSourceSnapshot({
     publicationId,
-    observationId: "refused-observation",
+    observationId: refusedId,
     acquisition: {
       state: "refused",
       identity,
-      reason: "invalid_utf8",
-      receiptHash: "e".repeat(64),
+      reason: "decode:invalid_utf8",
+      receiptHash: createHash("sha256")
+        .update(stableDocumentaryJson(receipt))
+        .digest("hex"),
     },
     sourceScopeReview: null,
   });
@@ -985,7 +1169,7 @@ test("References require the selected lot, exact UTF16 boundaries and current se
         i,
         metadata(),
       ),
-    /from that lot/,
+    /from the selected target/,
   );
   assert.throws(() =>
     createHumanLotAssessment(
@@ -1080,4 +1264,182 @@ test("Identity, entry checksums and malformed JSON are fail-closed; object key o
       }),
     /identity mismatch/,
   );
+});
+
+function withoutLots() {
+  const detail = raw();
+  detail.base.lotsType = "without";
+  detail.base.lots = [];
+  detail.lots = [];
+  detail.procurement.orderDescription.it =
+    "Cura dei giardini: potatura e manutenzione del parco inventato, affidamento senza lotti.";
+  Object.assign(detail.base, { processType: "open" });
+  Object.assign(detail, {
+    dates: { processType: "open", offerDeadline: "2030-02-01T13:00:00+01:00" },
+  });
+  Object.assign(detail.procurement, {
+    cpvCode: { code: "77310000" },
+    orderAddress: { countryId: "CH", cantonId: "TI", city: "Lugano" },
+  });
+  return detail;
+}
+function projectInput(): LotAssessmentInput {
+  const initial = input();
+  const current = snapshot(withoutLots(), "project-first");
+  const reviewed = sourceRecord(
+    current,
+    project,
+    initial.history,
+    "defined_service",
+  );
+  return withShape({
+    ...initial,
+    snapshot: current,
+    history: [...initial.history, reviewed],
+  });
+}
+
+test("An explicitly without project has a current project judgment and operational confirmation, without fake lots", () => {
+  const i = projectInput(),
+    pending = resolveProjectLotAssessment(i);
+  assert.equal(pending.shape.kind, "project");
+  assert.equal(pending.targets.length, 1);
+  assert.equal(pending.lots.length, 0);
+  assert.equal(pending.targets[0].target.kind, "project");
+  assert.equal(pending.signalEligible, false);
+  const c = command(i, project);
+  assert.ok(c.confirmedReviewReasons.some((x) => x.includes("Importo")));
+  assert.throws(
+    () =>
+      createHumanLotAssessment(
+        { ...c, confirmedReviewReasons: [] },
+        i,
+        metadata(),
+      ),
+    ReviewConflict,
+  );
+  const positive = assess(i, project),
+    result = resolveProjectLotAssessment(positive);
+  assert.equal(result.quality, "approved");
+  assert.equal(result.signalEligible, true);
+  assert.deepEqual(result.relevantLotIds, []);
+  assert.deepEqual(result.relevantTargets, [project]);
+  assert.equal(result.projectAssessment?.state, "current");
+  assert.equal(
+    result.projectAssessment?.preliminary?.operational.deadline,
+    "2030-02-01T12:00:00.000Z",
+  );
+  assert.match(result.reason, /progetto/i);
+  const dto = projectLotAssessmentDto(result);
+  assert.ok(!JSON.stringify(dto).includes("PRIVATE_NOTE"));
+  assert.ok(!JSON.stringify(dto).includes("private-actor"));
+  const rejected = resolveProjectLotAssessment(assess(i, project, "different"));
+  assert.equal(rejected.allDifferent, true);
+  assert.equal(rejected.quality, "rejected");
+  assert.equal(rejected.signalEligible, false);
+  assert.throws(
+    () =>
+      createAssessment(
+        c,
+        { ...i, shapeState: structuredClone(i.shapeState) },
+        metadata(),
+      ),
+    /Unverified/,
+  );
+  const originalLotInput = input();
+  assert.throws(
+    () =>
+      createHumanLotAssessment(
+        command(originalLotInput, project),
+        originalLotInput,
+        metadata(),
+      ),
+    /absent.*structure/,
+  );
+});
+
+test("Project→lots→identical project does not revive old company or source certainty, and preserves canonical suppression", () => {
+  const i = assess(projectInput(), project),
+    originalEntry = stable(i.evaluationSet!.entries[0]);
+  const lots = snapshot(raw(), "lots-middle", null, "project-first");
+  const middle = { ...i, snapshot: lots, evidenceSnapshots: [i.snapshot] };
+  const m = resolveProjectLotAssessment(middle);
+  assert.equal(m.shape.kind, "lots");
+  assert.equal(m.signalEligible, false);
+  assert.equal(
+    m.targets.find((t) => t.target.kind === "project")?.state,
+    "removed-or-unresolved",
+  );
+  const back = snapshot(withoutLots(), "project-back", null, "lots-middle");
+  const returned = { ...i, snapshot: back, evidenceSnapshots: [i.snapshot] };
+  const old = resolveProjectLotAssessment(returned);
+  assert.equal(old.projectAssessment?.issue, "stale_structure");
+  assert.equal(old.projectBarrier.state, "blocked");
+  assert.equal(old.quality, "unresolved");
+  assert.equal(old.signalEligible, false);
+  assert.equal(stable(i.evaluationSet!.entries[0]), originalEntry);
+  assert.throws(
+    () =>
+      createHumanLotAssessment(
+        command(returned, project),
+        returned,
+        metadata(),
+      ),
+    /defined current target/,
+  );
+  const freshSource = sourceRecord(back, project, i.history);
+  const refreshed = { ...returned, history: [...i.history, freshSource] };
+  const fresh = assess(refreshed, project);
+  assert.equal(resolveProjectLotAssessment(fresh).quality, "approved");
+  const suppressed = resolveProjectLotAssessment({
+    ...fresh,
+    suppression: {
+      active: true,
+      reason: "Veto progetto conservato attraverso il cambio struttura",
+    },
+    feedback: { saved: true, dismissed: true },
+  });
+  assert.equal(suppressed.signalEligible, false);
+  assert.equal(suppressed.saved, true);
+  assert.equal(suppressed.projectAssessment?.evaluation?.result, "direct");
+});
+
+test("A genuine v1 fixture stays byte-identical through decoding and a mixed v2 write, but cannot survive an intervening shape", () => {
+  const i = assess(input());
+  // Construct the invented legacy fixture once under its original algorithm;
+  // the decoder/consumer must never rewrite its body or checksum afterwards.
+  const entry = signed(i.evaluationSet!.entries[0], (body) => {
+    delete body.dependency.shapeEpochToken;
+    body.dependency.version = "lot-evaluation-dependency-v1";
+    body.dependency.comparisonVersion = "human-lot-assessment-v1";
+  });
+  const fixture = {
+    version: "lot-evaluations-v1",
+    companyId: i.companyId,
+    publicationId,
+    entries: [entry],
+  };
+  const bytes = stable(fixture),
+    entryBytes = stable(entry);
+  const decoded = validateLotEvaluationSet(fixture, i.companyId, publicationId);
+  assert.equal(stable(decoded), bytes);
+  const legacy = { ...i, evaluationSet: decoded };
+  assert.equal(resolveProjectLotAssessment(legacy).lots[0].state, "current");
+  const mixed = assess(legacy, b, "review");
+  assert.equal(mixed.evaluationSet.version, "lot-evaluations-v2");
+  assert.equal(
+    stable(
+      mixed.evaluationSet.entries.find((e) =>
+        sameAssessmentTarget(e.target, a),
+      ),
+    ),
+    entryBytes,
+  );
+  assert.equal(stable(fixture), bytes);
+  snapshot(withoutLots(), "v1-project-middle");
+  const back = snapshot(raw(), "v1-lots-back", null, "v1-project-middle");
+  const stale = resolveProjectLotAssessment({ ...legacy, snapshot: back });
+  assert.equal(stale.lots[0].issue, "stale_structure");
+  assert.equal(stale.signalEligible, false);
+  assert.equal(stable(decoded), bytes);
 });

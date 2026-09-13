@@ -289,7 +289,8 @@ export const matchLotReviewEvents = pgTable(
     check(
       "match_lot_review_identity",
       sql`${t.sequence} > 0
-      AND ${t.event}->>'version' IS NOT DISTINCT FROM 'human-lot-match-review-v1'
+      AND (${t.event}->>'version' IS NOT DISTINCT FROM 'human-lot-match-review-v1'
+        OR ${t.event}->>'version' IS NOT DISTINCT FROM 'human-lot-match-review-v2')
       AND ${t.event}->>'id' IS NOT DISTINCT FROM ${t.id}
       AND ${t.event}->>'matchId' IS NOT DISTINCT FROM ${t.matchId}
       AND ${t.event}->>'companyId' IS NOT DISTINCT FROM ${t.companyId}

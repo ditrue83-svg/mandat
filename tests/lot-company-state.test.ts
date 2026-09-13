@@ -223,6 +223,7 @@ async function veto(companyId: string, publicationId: string) {
       expectedProfileHash: loaded.expected.profileHash,
       expectedStateToken: loaded.expected.stateToken,
       expectedGroupToken: loaded.expected.groupToken,
+      expectedShapeEpochToken: loaded.expected.shapeEpochToken,
       expectedProjectBindingHash: loaded.expected.projectBindingHash,
       note: "Rifiuto inventato da conservare dopo modifica profilo.",
     },

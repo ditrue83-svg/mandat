@@ -50,14 +50,12 @@ test("a proven legacy fingerprint migration preserves every current data field a
   const legacy = legacySimapRevision(f.publication)!;
   expect(legacy).toMatch(/^[a-f0-9]{64}$/);
   const legacyData = { ...f.publication, revision: legacy };
-  await db
-    .insert(schema.publicationVersions)
-    .values({
-      id: randomUUID(),
-      publicationId: f.publication.id,
-      revision: legacy,
-      data: legacyData,
-    });
+  await db.insert(schema.publicationVersions).values({
+    id: randomUUID(),
+    publicationId: f.publication.id,
+    revision: legacy,
+    data: legacyData,
+  });
   const current = {
     ...legacyData,
     title: "Titolo corretto del dato legacy",
@@ -646,6 +644,7 @@ async function recordHumanState(f: Fixture) {
         expectedSelectionHash: loaded.expected.selectionHash,
         expectedTargetEventId: loaded.expected.targetEventId,
         expectedProjectBarrierHash: loaded.expected.projectBarrierHash,
+        expectedShapeEpochToken: loaded.expected.shapeEpochToken,
         action: "recorded",
         form: target.kind === "project" ? "broad_scope" : "defined_service",
         references: [
@@ -674,6 +673,7 @@ async function recordHumanState(f: Fixture) {
       expectedProfileHash: loaded.expected.profileHash,
       expectedStateToken: loaded.expected.stateToken,
       expectedGroupToken: loaded.expected.groupToken,
+      expectedShapeEpochToken: loaded.expected.shapeEpochToken,
       expectedSourceDependency: selected.expected.sourceDependency,
       expectedOperationalInputHash: selected.expected.operationalInputHash,
       expectedEvaluationSetToken: selected.expected.evaluationSetToken,
@@ -707,6 +707,7 @@ async function recordHumanState(f: Fixture) {
       expectedProfileHash: current.expected.profileHash,
       expectedStateToken: current.expected.stateToken,
       expectedGroupToken: current.expected.groupToken,
+      expectedShapeEpochToken: current.expected.shapeEpochToken,
       expectedProjectBindingHash: current.expected.projectBindingHash,
       note: "Veto manuale inventato da conservare.",
     },

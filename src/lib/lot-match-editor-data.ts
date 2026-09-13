@@ -1,16 +1,17 @@
 import type { CompanyProfile } from "./domain";
-import type { LotAssessmentResult } from "./lot-assessment";
+import type { LotAssessmentResult, AssessmentTarget } from "./lot-assessment";
 import type {
   LoadedLotMatchReview,
-  lotMatchReviewTarget,
+  assessmentReviewTarget,
 } from "./lot-match-reviews";
 import type { LotSourceEditorData } from "./lot-source-editor-data";
 
-type SelectedTarget = ReturnType<typeof lotMatchReviewTarget>;
+type SelectedTarget = ReturnType<typeof assessmentReviewTarget>;
 export type LotMatchEditorData = {
   company: { id: string; profile: Omit<CompanyProfile, "emailEnabled"> };
   publication: { id: string; title: string; sourceUrl: string };
   expected: LoadedLotMatchReview["expected"];
+  shape: { kind: "project" | "lots" | "unresolved"; reasons: string[] };
   project: {
     reason: string;
     blocked: boolean;
@@ -40,7 +41,7 @@ export type LotMatchEditorData = {
     id: string;
     at: string;
     action: string;
-    lotId: string | null;
+    target: AssessmentTarget | null;
     result: LotAssessmentResult | null;
     reason: string | null;
     note: string;
@@ -56,6 +57,13 @@ export function lotMatchEditorData(
 ): LotMatchEditorData {
   const profile = loaded.company.profile;
   const content = selected?.context.targetContent;
+  const shape = loaded.project.shape;
+  const currentTarget =
+    !!selected &&
+    loaded.input.shapeState.epochToken !== null &&
+    (selected.target.kind === "project"
+      ? shape.kind === "project"
+      : shape.kind === "lots");
   const texts: LotSourceEditorData["texts"] = [];
   function walk(value: unknown, path: string, scope: "project" | "lot") {
     if (typeof value === "string" && value.trim())
@@ -63,9 +71,10 @@ export function lotMatchEditorData(
         path,
         text: value,
         scope,
-        documentary: /\/(?:title|orderDescription)\/(?:it|de|fr|en)$/.test(
-          path,
-        ),
+        documentary: (scope === "project"
+          ? /^\/(?:project-info|procurement|base)\/(?:title|orderDescription)(?:\/(?:it|de|fr|en))?$/
+          : /^\/(?:lots|base\/lots)\/\d+\/(?:title|orderDescription)(?:\/(?:it|de|fr|en))?$/
+        ).test(path),
       });
     else if (value && typeof value === "object")
       for (const [key, child] of Object.entries(value))
@@ -104,6 +113,10 @@ export function lotMatchEditorData(
       sourceUrl: loaded.publication.data.sourceUrl,
     },
     expected: { ...loaded.expected },
+    shape: {
+      kind: shape.kind,
+      reasons: shape.kind === "unresolved" ? [...shape.reasons] : [],
+    },
     project: {
       reason: loaded.project.reason,
       blocked: loaded.project.projectBarrier.state === "blocked",
@@ -128,13 +141,20 @@ export function lotMatchEditorData(
             },
           },
           number:
-            content?.directory.find(
-              (lot) => lot.id.toLowerCase() === selected.target.lotId,
-            )?.number ?? null,
+            selected.target.kind === "lot"
+              ? (content?.directory.find(
+                  (lot) =>
+                    selected.target.kind === "lot" &&
+                    lot.id.toLowerCase() === selected.target.lotId,
+                )?.number ?? null)
+              : null,
           canAssess:
-            !!content?.selectedLot &&
+            currentTarget &&
+            !!content &&
+            (selected.target.kind === "project" || !!content.selectedLot) &&
             !!selected.context.dependency.selectionHash,
           allowsCertainty:
+            currentTarget &&
             selected.context.state === "manual_source" &&
             selected.context.form === "defined_service" &&
             selected.context.projectBarrier.state === "clear",
@@ -144,11 +164,13 @@ export function lotMatchEditorData(
           texts,
           original: content
             ? JSON.stringify(
-                {
-                  project: content.projectSections,
-                  lot: content.selectedLot?.record ?? null,
-                  lotHeader: content.selectedLot?.header ?? null,
-                },
+                selected.target.kind === "project"
+                  ? { project: content.projectSections }
+                  : {
+                      project: content.projectSections,
+                      lot: content.selectedLot?.record ?? null,
+                      lotHeader: content.selectedLot?.header ?? null,
+                    },
                 null,
                 2,
               )
@@ -157,17 +179,24 @@ export function lotMatchEditorData(
       : null,
     history: loaded.history.flatMap((event) => {
       const entry =
-        event.action === "assess_lot"
+        event.action === "assess_lot" || event.action === "assess_project"
           ? event.after.evaluations?.entries.find((e) => e.id === event.id)
           : null;
-      if (selected && entry && entry.target.lotId !== selected.target.lotId)
+      if (
+        selected &&
+        entry &&
+        (entry.target.kind !== selected.target.kind ||
+          (entry.target.kind === "lot" &&
+            selected.target.kind === "lot" &&
+            entry.target.lotId !== selected.target.lotId))
+      )
         return [];
       return [
         {
           id: event.id,
           at: event.at,
           action: event.action,
-          lotId: entry?.target.lotId ?? null,
+          target: entry ? { ...entry.target } : null,
           result: entry?.result ?? null,
           reason: entry?.reason ?? null,
           note: event.note,

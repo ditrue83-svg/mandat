@@ -1,4 +1,8 @@
 import {
+  shapeFixture,
+  refusedUiAcquisition,
+} from "./helpers/assessment-shape-fixture";
+import {
   Children,
   createElement,
   isValidElement,
@@ -101,6 +105,7 @@ vi.mock("@/lib/lot-match-reviews", async (importOriginal) => ({
 }));
 import {
   lotMatchReviewTarget,
+  assessmentReviewTarget,
   type LoadedLotMatchReview,
 } from "../src/lib/lot-match-reviews";
 import {
@@ -144,7 +149,12 @@ const viewer = {
 const origin = "https://mandat.example.invalid";
 const h = (character: string) => character.repeat(64);
 function fixture(
-  options: { blocked?: boolean; refused?: boolean } = {},
+  options: {
+    blocked?: boolean;
+    refused?: boolean;
+    withoutLots?: boolean;
+    unknownShape?: boolean;
+  } = {},
 ): LoadedLotMatchReview {
   const flag: SourceScopeReview | null = options.blocked
     ? {
@@ -155,22 +165,18 @@ function fixture(
         updatedAt: now.toISOString(),
       }
     : null;
-  const snap = captureLotSourceSnapshot({
+  let snap = captureLotSourceSnapshot({
     publicationId,
-    observationId: "observation-invented",
+    observationId: "55000000-0000-4000-8000-000000000005",
     sourceScopeReview: flag,
     acquisition: options.refused
-      ? {
-          state: "refused",
-          identity,
-          reason: "archive-refused",
-          receiptHash: h("c"),
-        }
+      ? refusedUiAcquisition(identity)
       : {
           state: "accepted",
           archive: preserveSimapLots(
             {
               id: noticeId,
+              type: "tender",
               base: { id: noticeId, projectId, lotsType: "with" },
               procurement: {
                 orderDescription: { it: commonText },
@@ -203,9 +209,51 @@ function fixture(
           ),
         },
   });
+  const withoutSnapshot =
+    options.withoutLots || options.unknownShape
+      ? captureLotSourceSnapshot({
+          publicationId,
+          observationId: snap.observationId,
+          sourceScopeReview: snap.sourceScopeReview,
+          acquisition: {
+            state: "accepted",
+            archive: preserveSimapLots(
+              {
+                id: noticeId,
+                type: "tender",
+                base: {
+                  id: noticeId,
+                  projectId,
+                  lotsType: options.withoutLots ? "without" : "unknown",
+                  lots: [],
+                },
+                lots: [],
+                procurement: {
+                  orderDescription: { it: aText, fr: "Taille des arbres." },
+                  orderAddress: {
+                    countryId: "CH",
+                    cantonId: "TI",
+                    city: "Lugano",
+                  },
+                  partialOffers: {
+                    it: "CONDIZIONE_INTERA: tutte le prestazioni.",
+                  },
+                  nested: { title: "NON È UNA PRESTAZIONE DOCUMENTARIA" },
+                },
+              },
+              identity,
+            ),
+          },
+        })
+      : snap;
+  snap = withoutSnapshot;
   const history: MixedSourceReviewRecord[] = [];
   if (!options.blocked && !options.refused)
-    for (const target of [project, a, b]) {
+    for (const target of options.unknownShape
+      ? []
+      : options.withoutLots
+        ? [project]
+        : [project, a, b]) {
       const context = resolveLotSourceContext(snap, target, history);
       const path =
         target.kind === "project"
@@ -213,7 +261,9 @@ function fixture(
           : `/lots/${target.lotId === aId ? 0 : 1}/orderDescription/it`;
       const quote =
         target.kind === "project"
-          ? commonText
+          ? options.withoutLots
+            ? aText
+            : commonText
           : target.lotId === aId
             ? aText
             : bText;
@@ -226,7 +276,10 @@ function fixture(
             expectedTargetEventId: context.dependency.reviewEventId,
             expectedProjectBarrierHash: context.projectBarrier.barrierHash,
             action: "recorded",
-            form: target.kind === "project" ? "broad_scope" : "defined_service",
+            form:
+              target.kind === "project" && !options.withoutLots
+                ? "broad_scope"
+                : "defined_service",
             references: [
               {
                 selectionHash: context.dependency.selectionHash!,
@@ -297,6 +350,7 @@ function fixture(
     publication,
     profile,
     snapshot: snap,
+    shapeState: shapeFixture(snap),
     history,
     evaluationSet: null,
     now,
@@ -325,6 +379,7 @@ function fixture(
       canonicalId: "canonical-invented",
     },
     input,
+    shapeState: input.shapeState,
     project: resolved,
     state: { evaluations: null, suppression: null },
     history: [],
@@ -337,6 +392,7 @@ function fixture(
     },
     expected: {
       snapshotHash: snap.snapshotHash,
+      shapeEpochToken: input.shapeState.epochToken,
       profileHash: lotAssessmentProfileHash(profile),
       stateToken: h("a"),
       groupToken: h("e"),
@@ -364,6 +420,7 @@ function addHistory(
     {
       target,
       expectedSnapshotHash: input.expected.snapshotHash,
+      expectedShapeEpochToken: input.expected.shapeEpochToken!,
       expectedSourceDependency: selected.context.dependency,
       expectedProfileHash: input.expected.profileHash,
       expectedOperationalInputHash: preliminaryLotMatch({
@@ -409,7 +466,8 @@ function addHistory(
     publicationId,
   );
   input.history.push({
-    version: "human-lot-match-review-v1",
+    version: "human-lot-match-review-v2",
+    shapeEpochToken: input.expected.shapeEpochToken,
     id,
     matchId: input.match.id,
     companyId,
@@ -606,20 +664,20 @@ describe("DTO e rendering della valutazione umana", () => {
     expect(html).toContain("Esamina la fonte del lotto");
     expect(html).toContain("Riconsidera progetto");
     expect(html).toContain("non cambia questa scelta");
-    expect(html).toContain("Non approva lotti");
+    expect(html).toContain("non risolve dubbi sulla fonte");
   });
-  it("refused archive and removed lot have no assessment content or active assessment button", () => {
-    for (const data of [
-      dto(fixture({ refused: true })),
-      dto(fixture(), "66000000-0000-4000-8000-000000000006"),
-    ]) {
-      expect(data.selected!.canAssess).toBe(false);
-      expect(data.selected!.texts).toEqual([]);
-      expect(data.selected!.original).toBeNull();
-      const html = renderToStaticMarkup(
-        createElement(LotMatchEditor, { data }),
+  it("refused archive and removed lot cannot select an assessment form; an old URL keeps the page available", async () => {
+    for (const input of [fixture({ refused: true }), fixture()]) {
+      expect(() =>
+        lotMatchReviewTarget(input, "66000000-0000-4000-8000-000000000006"),
+      ).toThrow();
+      mocks.load.mockResolvedValueOnce(input);
+      const rendered = await Page(
+        pageProps("66000000-0000-4000-8000-000000000006"),
       );
-      expect(html).toContain('disabled="">Salva valutazione del lotto');
+      const editor = elements(rendered).find((e) => e.type === LotMatchEditor)!;
+      expect(editor.props.data.selected).toBeNull();
+      expect(renderToStaticMarkup(rendered)).toContain("non è più valutabile");
     }
   });
   it.each([
@@ -655,6 +713,7 @@ describe("invii e conferme del giudizio", () => {
       action: "assess_lot",
       target: a,
       expectedSnapshotHash: data.expected.snapshotHash,
+      expectedShapeEpochToken: data.expected.shapeEpochToken,
       expectedProfileHash: data.expected.profileHash,
       expectedStateToken: data.expected.stateToken,
       expectedGroupToken: data.expected.groupToken,
@@ -753,6 +812,7 @@ describe("invii e conferme del giudizio", () => {
         publicationId,
         action,
         expectedSnapshotHash: input.data.expected.snapshotHash,
+        expectedShapeEpochToken: input.data.expected.shapeEpochToken,
         expectedProfileHash: input.data.expected.profileHash,
         expectedStateToken: input.data.expected.stateToken,
         expectedGroupToken: input.data.expected.groupToken,
@@ -933,4 +993,78 @@ describe("pagina e route riservate", () => {
     expect(mocks.append).toHaveBeenCalledOnce();
     expect(mocks.append).toHaveBeenCalledWith(draft, viewer);
   });
+});
+
+it("defaults an explicit without-lots page to the real project target and submits its exact epoch/proofs", async () => {
+  const input = fixture({ withoutLots: true });
+  mocks.load.mockResolvedValueOnce(input);
+  const page = await Page(pageProps());
+  const editor = elements(page).find((e) => e.type === LotMatchEditor)!;
+  const data = editor.props.data as LotMatchEditorData;
+  assertPlain(data);
+  expect(data.selected).toMatchObject({
+    target: project,
+    number: null,
+    canAssess: true,
+    allowsCertainty: true,
+  });
+  expect(data.lots).toEqual([]);
+  expect(
+    data.selected!.texts.some((t) => t.text.includes("CONDIZIONE_INTERA")),
+  ).toBe(true);
+  expect(
+    data.selected!.texts.find((t) => t.path === "/procurement/nested/title")!
+      .documentary,
+  ).toBe(false);
+  const html = renderToStaticMarkup(page);
+  expect(html).toContain("Intero progetto — gara senza lotti");
+  expect(html).toContain("Salva valutazione dell’intero progetto");
+  expect(html).not.toContain("Lotto null");
+  const fetcher = vi
+    .fn()
+    .mockResolvedValue(new Response(null, { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  const command = {
+    ...submission(),
+    data,
+    action: "assess_project" as const,
+    references: [
+      {
+        selectionHash: data.selected!.expected.sourceDependency.selectionHash!,
+        rawPath: "/procurement/orderDescription/it",
+        startUtf16: 2,
+        endUtf16: aText.length - 2,
+      },
+    ],
+    confirmedReviewReasons: [...data.selected!.reviewReasons],
+  };
+  expect(await submitLotMatchReview(command)).toMatchObject({ ok: true });
+  const sent = JSON.parse(fetcher.mock.calls[0][1].body);
+  expect(sent).toMatchObject({
+    action: "assess_project",
+    target: project,
+    expectedShapeEpochToken: input.expected.shapeEpochToken,
+  });
+  expect(sent.target).not.toHaveProperty("lotId");
+  expect(
+    await submitLotMatchReview({ ...command, action: "assess_lot" }),
+  ).toMatchObject({ ok: false });
+  expect(fetcher).toHaveBeenCalledOnce();
+});
+
+it("an unknown empty structure shows the unresolved notice and no certainty form", async () => {
+  const input = fixture({ unknownShape: true });
+  mocks.load.mockResolvedValueOnce(input);
+  const page = await Page(pageProps());
+  const editor = elements(page).find((e) => e.type === LotMatchEditor)!;
+  expect(editor.props.data).toMatchObject({
+    shape: { kind: "unresolved" },
+    selected: null,
+    lots: [],
+  });
+  const html = renderToStaticMarkup(page);
+  expect(html).toContain("La struttura della gara");
+  expect(html).not.toContain('value="direct"');
+  expect(html).not.toContain('value="different"');
+  expect(html).not.toContain("Salva valutazione");
 });

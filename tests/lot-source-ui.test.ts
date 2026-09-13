@@ -1,4 +1,8 @@
 import {
+  shapeFixture,
+  refusedUiAcquisition,
+} from "./helpers/assessment-shape-fixture";
+import {
   Children,
   createElement,
   isValidElement,
@@ -158,6 +162,7 @@ function snapshot(
       archive: preserveSimapLots(
         {
           id: noticeId,
+          type: "tender",
           procurement: {
             orderDescription: { it: commonText },
             future: { "a/b~c": ["meta inventato"] },
@@ -199,11 +204,13 @@ function loaded(
       sourceScopeReview: current.sourceScopeReview,
     },
     snapshot: current,
+    shapeState: shapeFixture(current),
     history,
     context,
     expected: {
       observationId: current.observationId,
       snapshotHash: current.snapshotHash,
+      shapeEpochToken: shapeFixture(current).epochToken,
       selectionHash: context.dependency.selectionHash,
       targetEventId: context.dependency.reviewEventId,
       projectBarrierHash: context.projectBarrier.barrierHash,
@@ -329,6 +336,7 @@ function routeBody() {
     target: data.target,
     expectedObservationId: data.expected.observationId,
     expectedSnapshotHash: data.expected.snapshotHash,
+    expectedShapeEpochToken: data.expected.shapeEpochToken,
     expectedSelectionHash: data.expected.selectionHash,
     expectedTargetEventId: data.expected.targetEventId,
     expectedProjectBarrierHash: data.expected.projectBarrierHash,
@@ -448,12 +456,7 @@ describe("DTO e markup della fonte selezionata", () => {
       publicationId,
       observationId,
       sourceScopeReview: null,
-      acquisition: {
-        state: "refused",
-        identity,
-        reason: "parse:invalid_json",
-        receiptHash: "f".repeat(64),
-      },
+      acquisition: refusedUiAcquisition(identity),
     });
     const data = lotSourceEditorData(loaded(refused, project)),
       html = render(data);
@@ -694,4 +697,48 @@ describe("pagina e route autenticate", () => {
     expect(mocks.append).toHaveBeenCalledOnce();
     expect(mocks.append).toHaveBeenCalledWith(routeBody(), viewer);
   });
+});
+
+it("shows the real whole project and its shared conditions without inventing a lot", () => {
+  const snap = captureLotSourceSnapshot({
+    publicationId,
+    observationId,
+    sourceScopeReview: null,
+    acquisition: {
+      state: "accepted",
+      archive: preserveSimapLots(
+        {
+          id: noticeId,
+          type: "tender",
+          base: { id: noticeId, projectId, lotsType: "without", lots: [] },
+          lots: [],
+          procurement: {
+            orderDescription: {
+              it: "Potatura inventata per l'intero progetto.",
+            },
+            partialOffers: { it: "CONDIZIONE_SENZA_LOTTI: offerta intera." },
+          },
+        },
+        identity,
+      ),
+    },
+  });
+  const data = lotSourceEditorData(loaded(snap, project));
+  const html = render(data);
+  expect(data.shape).toMatchObject({
+    kind: "project",
+    epochToken: expect.any(String),
+  });
+  expect(data.directory).toEqual([]);
+  expect(
+    data.texts.some(
+      (t) =>
+        t.path === "/procurement/partialOffers/it" &&
+        t.text.includes("CONDIZIONE_SENZA_LOTTI"),
+    ),
+  ).toBe(true);
+  expect(html).toContain("Intero progetto — gara senza lotti");
+  expect(html).toContain("CONDIZIONE_SENZA_LOTTI");
+  expect(html).not.toContain("Lotto null");
+  expect(data.expected.shapeEpochToken).toBe(data.shape.epochToken);
 });

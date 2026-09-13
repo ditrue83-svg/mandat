@@ -58,12 +58,20 @@ export function renderChangeContent(
 function lotNoticeBlocks(notices: readonly LotNotice[], appUrl: string) {
   const blocks = notices.map((notice) => {
     const p = notice.renderSnapshot;
-    const lots = notice.scope.map(({ kind, render: lot }) => {
+    const lots = notice.scope.map(({ kind, target, render: lot }) => {
       const label =
-        lot.number === null ? lot.title : `Lotto ${lot.number}: ${lot.title}`;
+        target.kind === "project"
+          ? `Progetto intero: ${lot.title}`
+          : lot.number === null
+            ? lot.title
+            : `Lotto ${lot.number}: ${lot.title}`;
+      const deadline =
+        target.kind === "project"
+          ? `Scadenza: ${formatDeadline(lot.operational.deadline)}`
+          : "Termine applicabile al lotto: da verificare nella fonte.";
       return {
         label,
-        text: `${label}\n${kind === "positive" ? "Interesse potenziale; non attesta l’idoneità a partecipare." : "Aggiornamento della fonte già segnalata."}\n${lot.reason}\n${lot.description}\n${lot.sharedTexts.map((s) => `${s.label}: ${s.text}`).join("\n")}\nLuogo: ${[lot.operational.country, lot.operational.canton, lot.operational.zone].filter(Boolean).join(" · ") || "Non indicato"}\nTermine applicabile al lotto: da verificare nella fonte.\n${lot.reviewReasons.join("\n")}\nFonte: ${lot.sourceUrl}`,
+        text: `${label}\n${kind === "positive" ? "Interesse potenziale; non attesta l’idoneità a partecipare." : "Aggiornamento della fonte già segnalata."}\n${lot.reason}\n${lot.description}\n${lot.sharedTexts.map((s) => `${s.label}: ${s.text}`).join("\n")}\nLuogo: ${[lot.operational.country, lot.operational.canton, lot.operational.zone].filter(Boolean).join(" · ") || "Non indicato"}\n${deadline}\n${lot.reviewReasons.join("\n")}\nFonte: ${lot.sourceUrl}`,
       };
     });
     const status =
@@ -75,7 +83,7 @@ function lotNoticeBlocks(notices: readonly LotNotice[], appUrl: string) {
       }[p.status] ?? "da verificare";
     return {
       text: `${p.title}\nStato della pubblicazione: ${status}\n${lots.map((l) => l.text).join("\n\n")}\n${appUrl}/bandi/${p.publicationId}`,
-      html: `<section><h3>${escapeHtml(p.title)}</h3><p>Stato della pubblicazione: ${escapeHtml(status)}</p>${lots.map((l) => `<h4>${escapeHtml(l.label)}</h4><p style="white-space:pre-line">${escapeHtml(l.text)}</p>`).join("")}<p><a href="${escapeHtml(`${appUrl}/bandi/${p.publicationId}`)}">Apri il progetto e i suoi lotti</a></p></section>`,
+      html: `<section><h3>${escapeHtml(p.title)}</h3><p>Stato della pubblicazione: ${escapeHtml(status)}</p>${lots.map((l) => `<h4>${escapeHtml(l.label)}</h4><p style="white-space:pre-line">${escapeHtml(l.text)}</p>`).join("")}<p><a href="${escapeHtml(`${appUrl}/bandi/${p.publicationId}`)}">Apri il bando</a></p></section>`,
     };
   });
   return blocks;

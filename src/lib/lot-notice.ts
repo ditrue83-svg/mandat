@@ -2,8 +2,14 @@ import { createHash } from "node:crypto";
 import type { LoadedLotMatchReview } from "./lot-match-reviews";
 import type {
   LotEvaluationDependency,
-  LotAssessmentTarget,
+  AssessmentTarget,
 } from "./lot-assessment";
+import { assessmentTargetKey, sameAssessmentTarget } from "./lot-assessment";
+import {
+  deriveAssessmentShape,
+  resolveAssessmentSourceContext,
+  type AssessmentShapeKind,
+} from "./assessment-shape";
 import {
   captureLotSourceSnapshot,
   resolveLotSourceContext,
@@ -14,8 +20,8 @@ import { stableDocumentaryJson } from "./documentary-observation";
 import { plainText } from "@/sources/common";
 
 export type LotNoticeScope = {
-  kind: "positive" | "changed" | "removed";
-  target: LotAssessmentTarget;
+  kind: "positive" | "changed" | "removed" | "structure_changed";
+  target: AssessmentTarget;
   immutableEvidenceSnapshotId: string;
   sourceDependency: LotSourceDependency;
   evaluationId: string | null;
@@ -23,8 +29,13 @@ export type LotNoticeScope = {
   assessmentDependency: LotEvaluationDependency | null;
   factHash: string;
   transition: { predecessor: string | null; hash: string };
+  structure?: {
+    previousEvidenceSnapshotId: string;
+    previousKind: AssessmentShapeKind;
+    currentKind: AssessmentShapeKind;
+  };
   render: {
-    lotId: string;
+    lotId: string | null;
     number: number | null;
     title: string;
     description: string;
@@ -42,14 +53,14 @@ export type LotNoticeScope = {
       country: string | null;
       canton: string | null;
       zone: string | null;
-      deadline: null;
+      deadline: string | null;
       valueChf: null;
     };
     origins: { rawPath: string; url: string; value: unknown }[];
   };
 };
 export type LotNotice = {
-  version: "lot-notice-v1";
+  version: "lot-notice-v1" | "lot-notice-v2";
   canonicalId: string;
   kind: "opportunity" | "update";
   noveltyHash: string;
@@ -69,12 +80,13 @@ export type LotNotice = {
     sourceSnapshotHash: string;
     groupToken: string;
     automation: boolean;
+    shapeEpochToken?: string | null;
   };
 };
 export const lotNoticeHash = (v: unknown) =>
   createHash("sha256").update(stableDocumentaryJson(v)).digest("hex");
 export const lotNoticeTransitionHash = (
-  target: LotAssessmentTarget,
+  target: AssessmentTarget,
   factHash: string,
   predecessor: string | null,
 ) =>
@@ -118,6 +130,15 @@ function snapshots(loaded: LoadedLotMatchReview) {
   ];
   return new Map(values.map((v) => [v.observationId, v]));
 }
+export function lotNoticeScopeShape(
+  loaded: LoadedLotMatchReview,
+  scope: LotNoticeScope,
+): AssessmentShapeKind {
+  const original = snapshots(loaded).get(scope.immutableEvidenceSnapshotId);
+  if (!original)
+    throw new Error("Missing immutable archive for communicated structure");
+  return deriveAssessmentShape(original).kind;
+}
 export function requireLotNoticeHistory(
   loaded: LoadedLotMatchReview,
   notice: LotNotice,
@@ -143,24 +164,37 @@ export function requireLotNoticeHistory(
     );
     if (
       scope.kind !== "removed" &&
+      scope.kind !== "structure_changed" &&
       context.dependency.selectionHash !== scope.sourceDependency.selectionHash
     )
       throw new Error("Historical lot selection mismatch");
+    if (scope.structure) {
+      const before = available.get(scope.structure.previousEvidenceSnapshotId);
+      if (!before || before.publicationId !== scope.target.publicationId)
+        throw new Error("Missing immutable archive for previous structure");
+      if (
+        deriveAssessmentShape(before).kind !== scope.structure.previousKind ||
+        deriveAssessmentShape(rebuilt).kind !== scope.structure.currentKind
+      )
+        throw new Error("Altered historical structure transition");
+    }
   }
 }
 export function lotNoticeScope(
   loaded: LoadedLotMatchReview,
-  target: LotAssessmentTarget,
+  target: AssessmentTarget,
   kind: LotNoticeScope["kind"],
   predecessor: string | null = null,
+  previousEvidenceSnapshotId: string | null = null,
 ): LotNoticeScope {
-  const context = resolveLotSourceContext(
+  const context = resolveAssessmentSourceContext(
     loaded.input.snapshot,
     target,
     loaded.input.history,
+    loaded.input.shapeState,
   );
-  const resolved = loaded.project.lots.find(
-    (l) => l.target.lotId === target.lotId,
+  const resolved = loaded.project.targets.find((l) =>
+    sameAssessmentTarget(l.target, target),
   );
   if (loaded.input.snapshot.acquisition.state !== "accepted")
     throw new Error("Refused source cannot produce notice content");
@@ -171,69 +205,133 @@ export function lotNoticeScope(
       !loaded.project.signalEligible)
   )
     throw new Error("The rendered lot is not currently approved");
-  if (kind !== "removed" && !context.targetContent?.selectedLot)
-    throw new Error("Missing lot content");
+  if (
+    kind !== "removed" &&
+    kind !== "structure_changed" &&
+    (!context.targetContent ||
+      (target.kind === "lot" && !context.targetContent.selectedLot))
+  )
+    throw new Error("Missing assessment target content");
+  let structure: LotNoticeScope["structure"];
+  if (kind === "structure_changed") {
+    const before = previousEvidenceSnapshotId
+      ? snapshots(loaded).get(previousEvidenceSnapshotId)
+      : null;
+    if (
+      !before ||
+      before.publicationId !== target.publicationId ||
+      !predecessor
+    )
+      throw new Error("Missing immutable archive for structure transition");
+    const previousKind = deriveAssessmentShape(before).kind;
+    if (previousKind === loaded.project.shape.kind)
+      throw new Error("The assessment structure has not changed");
+    structure = {
+      previousEvidenceSnapshotId: before.observationId,
+      previousKind,
+      currentKind: loaded.project.shape.kind,
+    };
+  }
   const selected = context.targetContent?.selectedLot;
   const record = object(selected?.record);
   const number = resolved?.number ?? null;
-  const title = selected
-    ? translated(record.title)
-    : "Lotto precedentemente segnalato";
-  const description = selected
-    ? translated(record.orderDescription)
-    : "Lotto non più individuato nella pubblicazione corrente: stato da verificare.";
+  const title =
+    kind === "structure_changed"
+      ? loaded.project.shape.kind === "unresolved"
+        ? "Struttura non verificabile"
+        : "Struttura della gara modificata"
+      : target.kind === "project"
+        ? loaded.publication.title
+        : selected
+          ? translated(record.title)
+          : "Lotto precedentemente segnalato";
+  const description =
+    kind === "structure_changed"
+      ? loaded.project.shape.kind === "project"
+        ? "La pubblicazione corrente indica una gara senza lotti. Occorre una nuova valutazione del progetto intero."
+        : loaded.project.shape.kind === "lots"
+          ? "La pubblicazione corrente presenta singoli lotti. Occorre una nuova valutazione dei lotti pertinenti."
+          : "La struttura corrente della gara non è determinabile: verificare la fonte originale."
+      : target.kind === "project"
+        ? "Oggetto del progetto riportato nei testi originali sottostanti."
+        : selected
+          ? translated(record.orderDescription)
+          : "Lotto non più individuato nella pubblicazione corrente: stato da verificare.";
   const sourceUrl =
     loaded.input.snapshot.acquisition.archive.identity.detailUrl;
   const sections = object(
     loaded.input.snapshot.acquisition.archive.projectSections,
   );
-  const sharedTexts = ["project-info", "procurement", "base"].flatMap(
-    (section) => {
-      const record = object(sections[section]);
-      return ["title", "orderDescription"].flatMap((field) => {
-        const value = record[field];
-        if (value === undefined || value === null) return [];
-        const variants =
-          typeof value === "string"
-            ? [["", value]]
-            : Object.entries(object(value));
-        return variants
-          .filter(([, value]) => typeof value === "string" && value)
-          .map(([language, value]) => ({
-            label: `${field === "title" ? "Titolo" : "Descrizione"} condivis${field === "title" ? "o" : "a"}${language ? ` (${language.toUpperCase()})` : ""}`,
-            text: plainText(value as string),
-            rawPath: `/${section}/${field}${language ? `/${language}` : ""}`,
-            url: sourceUrl,
-            value,
-          }));
-      });
-    },
-  );
-  const origins = selected
-    ? [
-        textOrigin(record.title, `${selected.path}/title`, sourceUrl),
-        textOrigin(
-          record.orderDescription,
-          `${selected.path}/orderDescription`,
-          sourceUrl,
-        ),
-        {
-          rawPath: `${selected.path}/lotNumber`,
+  const sharedTexts = (
+    kind === "structure_changed" ? [] : ["project-info", "procurement", "base"]
+  ).flatMap((section) => {
+    const record = object(sections[section]);
+    return ["title", "orderDescription"].flatMap((field) => {
+      const value = record[field];
+      if (value === undefined || value === null) return [];
+      const variants =
+        typeof value === "string"
+          ? [["", value]]
+          : Object.entries(object(value));
+      return variants
+        .filter(([, value]) => typeof value === "string" && value)
+        .map(([language, value]) => ({
+          label: `${field === "title" ? "Titolo" : "Descrizione"} condivis${field === "title" ? "o" : "a"}${language ? ` (${language.toUpperCase()})` : ""}`,
+          text: plainText(value as string),
+          rawPath: `/${section}/${field}${language ? `/${language}` : ""}`,
           url: sourceUrl,
-          value: number,
-        },
-        ...["countryId", "cantonId", "city"].map((key) => ({
-          rawPath: `${selected.path}/orderAddress/${key}`,
-          url: sourceUrl,
-          value: object(record.orderAddress)[key] ?? null,
-        })),
-        ...(resolved?.preliminary?.evidence ?? [])
-          .filter(
-            (e) => e.purpose === "availability" && e.rawPath === "/status",
-          )
-          .map((e) => ({ rawPath: e.rawPath, url: e.url, value: e.value })),
-      ]
-    : [];
+          value,
+        }));
+    });
+  });
+  const origins =
+    kind === "structure_changed"
+      ? loaded.project.shape.evidence
+          .filter((e) => e.rawPath === "/base/lotsType")
+          .map((e) => ({ rawPath: e.rawPath, url: sourceUrl, value: e.value }))
+      : target.kind === "project"
+        ? (resolved?.preliminary?.evidence ?? [])
+            .filter(
+              (e) =>
+                e.purpose === "location" ||
+                e.purpose === "deadline" ||
+                (e.purpose === "availability" && e.rawPath === "/status"),
+            )
+            .map((e) => ({
+              rawPath: e.rawPath,
+              url: e.url,
+              value: e.value,
+            }))
+        : selected
+          ? [
+              textOrigin(record.title, `${selected.path}/title`, sourceUrl),
+              textOrigin(
+                record.orderDescription,
+                `${selected.path}/orderDescription`,
+                sourceUrl,
+              ),
+              {
+                rawPath: `${selected.path}/lotNumber`,
+                url: sourceUrl,
+                value: number,
+              },
+              ...["countryId", "cantonId", "city"].map((key) => ({
+                rawPath: `${selected.path}/orderAddress/${key}`,
+                url: sourceUrl,
+                value: object(record.orderAddress)[key] ?? null,
+              })),
+              ...(resolved?.preliminary?.evidence ?? [])
+                .filter(
+                  (e) =>
+                    e.purpose === "availability" && e.rawPath === "/status",
+                )
+                .map((e) => ({
+                  rawPath: e.rawPath,
+                  url: e.url,
+                  value: e.value,
+                })),
+            ]
+          : [];
   const factHash = lotNoticeHash({
     target,
     sourceIdentity: loaded.input.snapshot.acquisition.archive.identity,
@@ -248,9 +346,14 @@ export function lotNoticeScope(
       country: resolved?.preliminary?.operational.country ?? null,
       canton: resolved?.preliminary?.operational.canton ?? null,
       zone: resolved?.preliminary?.operational.zone ?? null,
-      deadline: null,
+      deadline: resolved?.preliminary?.operational.deadline ?? null,
       valueChf: null,
     },
+    ...(target.kind === "project" || kind === "structure_changed"
+      ? {
+          structure: { kind: loaded.project.shape.kind },
+        }
+      : {}),
   });
   return {
     kind,
@@ -270,17 +373,20 @@ export function lotNoticeScope(
       predecessor,
       hash: lotNoticeTransitionHash(target, factHash, predecessor),
     },
+    ...(structure ? { structure } : {}),
     render: {
-      lotId: target.lotId,
+      lotId: target.kind === "lot" ? target.lotId : null,
       number,
       title,
       description,
       reason:
         kind === "positive"
           ? resolved!.evaluation!.reason
-          : kind === "removed"
-            ? "Il lotto precedentemente segnalato non è più individuato: verificare la fonte, senza dedurne un annullamento."
-            : "La fonte del lotto precedentemente segnalato è cambiata. La precedente valutazione non ne attesta la pertinenza attuale.",
+          : kind === "structure_changed"
+            ? "La struttura della gara già segnalata è cambiata. Questo avviso non attesta una nuova pertinenza né un annullamento."
+            : kind === "removed"
+              ? "Il lotto precedentemente segnalato non è più individuato: verificare la fonte, senza dedurne un annullamento."
+              : `La fonte del ${target.kind === "project" ? "progetto" : "lotto"} precedentemente segnalato è cambiata. La precedente valutazione non ne attesta la pertinenza attuale.`,
       sourceUrl,
       reviewReasons: [...(resolved?.preliminary?.reviewReasons ?? [])],
       sharedTexts,
@@ -288,7 +394,7 @@ export function lotNoticeScope(
         country: resolved?.preliminary?.operational.country ?? null,
         canton: resolved?.preliminary?.operational.canton ?? null,
         zone: resolved?.preliminary?.operational.zone ?? null,
-        deadline: null,
+        deadline: resolved?.preliminary?.operational.deadline ?? null,
         valueChf: null,
       },
       origins,
@@ -303,11 +409,12 @@ export function buildLotNotice(
 ): LotNotice {
   if (
     !scope.length ||
-    new Set(scope.map((s) => s.target.lotId)).size !== scope.length
+    new Set(scope.map((s) => assessmentTargetKey(s.target))).size !==
+      scope.length
   )
-    throw new Error("A project notice needs distinct lots");
+    throw new Error("A project notice needs distinct assessment targets");
   const ordered = [...scope].sort((a, b) =>
-    a.target.lotId.localeCompare(b.target.lotId),
+    assessmentTargetKey(a.target).localeCompare(assessmentTargetKey(b.target)),
   );
   const renderSnapshot = {
     publicationId: loaded.publication.id,
@@ -316,13 +423,13 @@ export function buildLotNotice(
     status: loaded.publication.data.status,
   };
   return {
-    version: "lot-notice-v1",
+    version: "lot-notice-v2",
     canonicalId: loaded.publication.canonicalId,
     kind,
     scope: ordered,
     renderSnapshot,
     noveltyHash: lotNoticeHash({
-      version: "lot-notice-novelty-v1",
+      version: "lot-notice-novelty-v2",
       targets: ordered.map((s) => ({
         target: s.target,
         kind: s.kind === "positive" ? "positive" : "source_change",
@@ -342,29 +449,91 @@ export function buildLotNotice(
       sourceSnapshotHash: loaded.expected.snapshotHash,
       groupToken: loaded.expected.groupToken,
       automation,
+      shapeEpochToken: loaded.project.shapeEpochToken,
     },
   };
 }
 export function validateLotNotice(notice: LotNotice): LotNotice {
   if (
     !notice ||
-    notice.version !== "lot-notice-v1" ||
+    !["lot-notice-v1", "lot-notice-v2"].includes(notice.version) ||
     !["opportunity", "update"].includes(notice.kind) ||
     !Array.isArray(notice.scope) ||
     !notice.scope.length ||
     notice.scope.length > 1000
   )
     throw new Error("Invalid lot notice");
+  const exactTarget = (target: AssessmentTarget) => {
+    const keys = Object.keys(target).sort().join(",");
+    return target.kind === "project"
+      ? keys === "kind,publicationId" &&
+          typeof target.publicationId === "string"
+      : target.kind === "lot" &&
+          keys === "kind,lotId,publicationId,sourceProjectId" &&
+          [target.publicationId, target.lotId, target.sourceProjectId].every(
+            (v) => typeof v === "string" && v.length > 0,
+          );
+  };
   if (
-    new Set(notice.scope.map((s) => s.target.lotId)).size !==
+    new Set(notice.scope.map((s) => assessmentTargetKey(s.target))).size !==
       notice.scope.length ||
     notice.scope.some(
       (s) =>
+        !s.target ||
+        !exactTarget(s.target) ||
+        (notice.version === "lot-notice-v1" &&
+          (s.target.kind !== "lot" || s.kind === "structure_changed")) ||
+        !["positive", "changed", "removed", "structure_changed"].includes(
+          s.kind,
+        ) ||
+        (s.target.kind === "lot" &&
+          (!s.target.lotId ||
+            !s.target.sourceProjectId ||
+            s.render.lotId !== s.target.lotId)) ||
+        (s.target.kind === "project" &&
+          ("lotId" in s.target ||
+            "sourceProjectId" in s.target ||
+            s.render.lotId !== null)) ||
+        !sameAssessmentTarget(s.sourceDependency.target, s.target) ||
+        (notice.version === "lot-notice-v1" &&
+          s.render.operational.deadline !== null) ||
+        (notice.kind === "opportunity" && s.kind !== "positive") ||
+        (s.kind === "structure_changed"
+          ? !s.structure ||
+            typeof s.structure.previousEvidenceSnapshotId !== "string" ||
+            !["project", "lots", "unresolved"].includes(
+              s.structure.previousKind,
+            ) ||
+            !["project", "lots", "unresolved"].includes(
+              s.structure.currentKind,
+            ) ||
+            s.structure.previousKind === s.structure.currentKind
+          : Object.hasOwn(s, "structure")) ||
         s.target.publicationId !== notice.renderSnapshot.publicationId ||
         !/^[a-f0-9]{64}$/.test(s.factHash),
     )
   )
     throw new Error("Invalid lot notice target");
+  if (
+    notice.version === "lot-notice-v2" &&
+    (!Object.hasOwn(notice.binding, "shapeEpochToken") ||
+      (notice.binding.shapeEpochToken !== null &&
+        !/^[a-f0-9]{64}$/.test(notice.binding.shapeEpochToken ?? "")))
+  )
+    throw new Error("Invalid notice structure binding");
+  if (
+    notice.version === "lot-notice-v2" &&
+    notice.scope.some(
+      (s) =>
+        s.kind === "positive" &&
+        (!notice.binding.shapeEpochToken ||
+          !s.assessmentDependency ||
+          (s.assessmentDependency.version === "lot-evaluation-dependency-v2" &&
+            s.assessmentDependency.shapeEpochToken !==
+              notice.binding.shapeEpochToken)),
+    )
+  )
+    throw new Error("Invalid positive assessment structure binding");
   if (
     notice.scope.some(
       (s) =>
@@ -383,7 +552,10 @@ export function validateLotNotice(notice: LotNotice): LotNotice {
   if (
     notice.noveltyHash !==
       lotNoticeHash({
-        version: "lot-notice-novelty-v1",
+        version:
+          notice.version === "lot-notice-v1"
+            ? "lot-notice-novelty-v1"
+            : "lot-notice-novelty-v2",
         targets: notice.scope.map((s) => ({
           target: s.target,
           kind: s.kind === "positive" ? "positive" : "source_change",

@@ -281,6 +281,7 @@ async function reviewSource(f: Awaited<ReturnType<typeof fixture>>) {
         target,
         expectedObservationId: loaded.expected.observationId,
         expectedSnapshotHash: loaded.expected.snapshotHash,
+        expectedShapeEpochToken: loaded.expected.shapeEpochToken,
         expectedSelectionHash: loaded.expected.selectionHash,
         expectedTargetEventId: loaded.expected.targetEventId,
         expectedProjectBarrierHash: loaded.expected.projectBarrierHash,
@@ -315,6 +316,7 @@ async function reviewLot(
       action: "assess_lot",
       target: selected.target,
       expectedSnapshotHash: selected.expected.snapshotHash,
+      expectedShapeEpochToken: selected.expected.shapeEpochToken,
       expectedProfileHash: selected.expected.profileHash,
       expectedStateToken: selected.expected.stateToken,
       expectedGroupToken: selected.expected.groupToken,
@@ -420,6 +422,7 @@ it("Preserves human lot decisions, immutable audit and canonical veto; a changed
       publicationId: f.p.id,
       action: "veto_project",
       expectedSnapshotHash: loaded.expected.snapshotHash,
+      expectedShapeEpochToken: loaded.expected.shapeEpochToken,
       expectedProfileHash: loaded.expected.profileHash,
       expectedStateToken: loaded.expected.stateToken,
       expectedGroupToken: loaded.expected.groupToken,
@@ -502,9 +505,19 @@ it("Refused or empty-lot observations and closed adopted sources finish in revie
   );
   const empty = await fixture({ empty: true });
   await enrichAndMatch({ publicationId: empty.p.id, now });
-  expect((await rows(empty.p.id))[0].reason).toContain(
-    "non contiene lotti valutabili",
-  );
+  expect((await rows(empty.p.id))[0]).toMatchObject({
+    score: 0,
+    eligible: false,
+  });
+  const wholeProject = (await loadLotMatchReview(id, empty.p.id, viewer))
+    .project;
+  expect(wholeProject.shape.kind).toBe("project");
+  expect(wholeProject.targets).toHaveLength(1);
+  expect(wholeProject.targets[0].target).toEqual({
+    kind: "project",
+    publicationId: empty.p.id,
+  });
+  expect(wholeProject.targets[0].evaluation).toBeNull();
   expect(
     (await loadLotMatchReview(id, empty.p.id, viewer)).project.lots,
   ).toEqual([]);
