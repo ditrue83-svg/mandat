@@ -20,6 +20,11 @@ import { fingerprint, zoneFromCity } from "@/sources/common";
 import { queueChangeNotices, reconcileDelivery } from "@/worker/notifications";
 import { materialChange, preliminaryMatch } from "@/lib/matching";
 import {
+  CPV_ACTIVITY_REVIEW_MARKER,
+  CPV_ACTIVITY_REVIEW_VERSION,
+  hasActivityReviewRevision,
+} from "@/lib/cpv-service-signals";
+import {
   hasSourceScopeReview,
   sourceScopeReviewSuffix,
 } from "@/lib/source-scope-review";
@@ -199,16 +204,19 @@ export async function POST(request: Request) {
               "La valutazione è cambiata. Aggiorna la pagina.",
             );
           const sourceReview = await readSourceReviewContext(tx, p);
-          const [firm] =
-            sourceReview && body.approved
-              ? await tx
-                  .select()
-                  .from(companies)
-                  .where(eq(companies.id, match.companyId))
-              : [];
+          const [firm] = body.approved
+            ? await tx
+                .select()
+                .from(companies)
+                .where(eq(companies.id, match.companyId))
+            : [];
+          const requiresBoundReview =
+            sourceReview ||
+            hasActivityReviewRevision(match.revision) ||
+            (firm && preliminaryMatch(p.data, firm.profile).activityReview);
           if (
             body.approved &&
-            sourceReview &&
+            requiresBoundReview &&
             (body.expectedEvaluationRevision !== match.revision ||
               body.expectedEvaluationToken !== matchReviewToken(match) ||
               body.expectedContentRevision !== p.data.revision ||
@@ -216,7 +224,7 @@ export async function POST(request: Request) {
               fingerprint(firm.profile) !== body.expectedProfileRevision ||
               !sameSourceReviewDependency(
                 body.expectedSourceReviewDependency,
-                sourceReview.dependency,
+                sourceReview?.dependency ?? null,
               ))
           )
             throw new HttpError(
@@ -245,7 +253,7 @@ export async function POST(request: Request) {
             );
           if (
             body.approved &&
-            sourceReview &&
+            requiresBoundReview &&
             firm &&
             !preliminaryMatch(p.data, firm.profile).eligible
           )
@@ -264,9 +272,9 @@ export async function POST(request: Request) {
               sourceReviewDependency: body.approved
                 ? (sourceReview?.dependency ?? null)
                 : match.sourceReviewDependency,
-              ...(body.approved && sourceReview && firm
+              ...(body.approved && requiresBoundReview && firm
                 ? {
-                    revision: `${p.data.revision}:${fingerprint(firm.profile)}:ready:manual-source-review:true${sourceScopeReviewSuffix(p.data)}`,
+                    revision: `${p.data.revision}:${fingerprint(firm.profile)}:ready:${sourceReview ? "manual-source-review" : "manual-activity-review"}:true${sourceReview ? "" : `${CPV_ACTIVITY_REVIEW_MARKER}${CPV_ACTIVITY_REVIEW_VERSION}:manual`}${sourceScopeReviewSuffix(p.data)}`,
                   }
                 : {}),
             })

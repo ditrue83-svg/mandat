@@ -13,6 +13,11 @@ import type { Opportunity, RadarStatus, Viewer } from "./domain";
 import { presentMatch } from "./match-presentation";
 import { preliminaryMatch } from "./matching";
 import {
+  CPV_ACTIVITY_REVIEW_MARKER,
+  CPV_ACTIVITY_REVIEW_VERSION,
+  hasActivityReviewRevision,
+} from "./cpv-service-signals";
+import {
   readSourceReviewContexts,
   readSourceReviewContext,
 } from "./source-reviews";
@@ -73,6 +78,19 @@ export async function getRadarStatus(
     const context = sourceReviews.get(row.publication.id) ?? null;
     const manual =
       row.approved === false || (row.approved === true && !!row.reviewedAt);
+    const activityReview = preliminaryMatch(
+      row.publication,
+      viewer.profile,
+      now,
+    ).activityReview;
+    if (
+      !manual &&
+      activityReview &&
+      !row.matchRevision?.includes(
+        `${CPV_ACTIVITY_REVIEW_MARKER}${CPV_ACTIVITY_REVIEW_VERSION}:`,
+      )
+    )
+      return true;
     // A preserved manual decision waits for a person, never for a worker job.
     // Presentation suspends an old positive until it is explicitly reviewed.
     if (manual && (context || row.sourceReviewDependency)) return false;
@@ -168,15 +186,20 @@ export async function listOpportunities(
       )
         return [];
       const sourceReview = sourceReviews.get(r.publication.id) ?? null;
-      const preliminary =
+      const enforceFilters =
         hasSourceScopeReview(r.publication.data) ||
         sourceReview ||
-        r.match.sourceReviewDependency
-          ? preliminaryMatch(r.publication.data, viewer.profile, now)
-          : undefined;
+        r.match.sourceReviewDependency ||
+        hasActivityReviewRevision(r.match.revision);
+      const preliminary = preliminaryMatch(
+        r.publication.data,
+        viewer.profile,
+        now,
+      );
       if (
         !options.includeInactive &&
-        (r.match.approved === false || (preliminary && !preliminary.eligible))
+        (r.match.approved === false ||
+          (enforceFilters && !preliminary.eligible))
       )
         return [];
       const bindingState = sourceReviewBindingState(
@@ -261,12 +284,7 @@ export async function getOpportunity(
       aiRevision: row.p.aiRevision,
       profileRevision: fingerprint(viewer.profile),
       sourceReview,
-      preliminary:
-        hasSourceScopeReview(row.p.data) ||
-        sourceReview ||
-        row.m.sourceReviewDependency
-          ? preliminaryMatch(row.p.data, viewer.profile)
-          : undefined,
+      preliminary: preliminaryMatch(row.p.data, viewer.profile),
     }),
     saved: row.f?.saved ?? false,
     dismissed: row.f?.dismissed ?? false,

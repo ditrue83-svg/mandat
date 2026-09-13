@@ -282,12 +282,7 @@ export async function adminSnapshot(demo: boolean) {
           aiRevision: r.aiRevision,
           profileRevision: fingerprint(r.company),
           sourceReview,
-          preliminary:
-            hasSourceScopeReview(r.reviewRequired) ||
-            sourceReview ||
-            r.sourceReviewDependency
-              ? preliminaryMatch(r.reviewRequired, r.company)
-              : undefined,
+          preliminary: preliminaryMatch(r.reviewRequired, r.company),
         }),
         approved: r.approved,
         reviewed: !!r.reviewedAt,

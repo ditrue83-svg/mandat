@@ -18,6 +18,10 @@ import {
   possibleDuplicate,
 } from "@/lib/matching";
 import { AiUnavailable, classify, summarize } from "./ai";
+import {
+  activityReviewForMatch,
+  CPV_ACTIVITY_REVIEW_MARKER,
+} from "@/lib/cpv-service-signals";
 import { queueChangeNotices } from "./notifications";
 import { attachFoglioPdf } from "@/sources/foglio";
 import { legacySimapRevision } from "@/sources/simap";
@@ -493,6 +497,14 @@ export async function enrichAndMatch(
     )
       continue;
     let p = row.data;
+    const initialActivityReviews = new Map(
+      firms
+        .filter((firm) => firm.onboardedAt)
+        .map((firm) => [
+          firm.id,
+          preliminaryMatch(p, firm.profile, options.now).activityReview,
+        ]),
+    );
     const sourceContext = await readSourceReviewContext(db, row);
     const sourceDependency = sourceContext?.dependency ?? null;
     let aiReady = Boolean(p.summary && row.aiRevision === p.revision);
@@ -567,8 +579,7 @@ export async function enrichAndMatch(
       if (!firm.onboardedAt) continue;
       const profileRevision = fingerprint(firm.profile);
       options.signal?.throwIfAborted();
-      const preliminary = preliminaryMatch(p, firm.profile, options.now);
-      const revision = `${p.revision}:${profileRevision}:${aiReady ? "ready" : "pending"}:${sourceContext ? HUMAN_SOURCE_REVIEW_VERSION : (process.env.LLM_MODEL ?? "default")}:${preliminary.eligible}${sourceScopeReviewSuffix(p)}`;
+      let preliminary = preliminaryMatch(p, firm.profile, options.now);
       const [existing] = await db
         .select({
           ...getTableColumns(matches),
@@ -580,6 +591,28 @@ export async function enrichAndMatch(
           and(eq(matches.companyId, firm.id), eq(matches.publicationId, p.id)),
         )
         .limit(1);
+      const activityReview = preliminary.eligible
+        ? (initialActivityReviews.get(firm.id) ??
+          activityReviewForMatch({
+            publication: p,
+            sectors: firm.profile.sectors,
+            preliminary,
+            revision: existing?.revision,
+            profileRevision,
+          }))
+        : undefined;
+      if (activityReview)
+        preliminary = {
+          eligible: true,
+          score: 0,
+          uncertain: true,
+          reason: activityReview.reason,
+          activityReview,
+        };
+      const activitySuffix = activityReview
+        ? `${CPV_ACTIVITY_REVIEW_MARKER}${activityReview.version}:${fingerprint(activityReview.signals)}`
+        : "";
+      const revision = `${p.revision}:${profileRevision}:${aiReady ? "ready" : "pending"}:${sourceContext ? HUMAN_SOURCE_REVIEW_VERSION : (process.env.LLM_MODEL ?? "default")}:${preliminary.eligible}${activitySuffix}${sourceScopeReviewSuffix(p)}`;
       if (
         (existing?.revision === revision &&
           sameSourceReviewDependency(
@@ -619,6 +652,11 @@ export async function enrichAndMatch(
       } else if (preliminary.eligible && hasSourceScopeReview(p)) {
         score = 0;
         reason = sourceScopeReviewReason;
+        uncertain = true;
+        needsReview = true;
+      } else if (preliminary.eligible && activityReview) {
+        score = 0;
+        reason = activityReview.reason;
         uncertain = true;
         needsReview = true;
       } else if (preliminary.eligible && aiReady) {

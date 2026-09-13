@@ -1,6 +1,10 @@
 import type { MatchAssessment, Opportunity, Publication } from "./domain";
 import type { SourceContext, SourceDependency } from "./source-review-context";
 import {
+  hasActivityReviewRevision,
+  type ActivityReview,
+} from "./cpv-service-signals";
+import {
   sourceReviewBindingState,
   sourceReviewReason,
   manualSourceComparisonReason,
@@ -44,7 +48,11 @@ export function presentMatch({
   publication: Pick<Publication, "revision" | "summary" | "sourceScopeReview">;
   aiRevision: string | null;
   profileRevision: string;
-  preliminary?: { eligible: boolean; reason: string };
+  preliminary?: {
+    eligible: boolean;
+    reason: string;
+    activityReview?: ActivityReview;
+  };
   sourceReview?: SourceContext | null;
 }): Pick<Opportunity, "assessment" | "reason"> &
   Partial<Pick<Opportunity, "score">> {
@@ -62,6 +70,12 @@ export function presentMatch({
       reason:
         "La revisione manuale ha ritenuto questa proposta non pertinente per la tua ditta.",
     };
+  if (
+    hasActivityReviewRevision(match.revision) &&
+    preliminary &&
+    !preliminary.eligible
+  )
+    return { assessment: "excluded", reason: preliminary.reason, score: 0 };
   const sourceState = sourceReviewBindingState(
     sourceReview,
     match.sourceReviewDependency,
@@ -104,6 +118,16 @@ export function presentMatch({
       assessment: "reviewed",
       reason:
         "La proposta è stata ritenuta pertinente in una revisione manuale. Verifica comunque i requisiti nella fonte originale.",
+    };
+  if (preliminary?.activityReview || hasActivityReviewRevision(match.revision))
+    return {
+      assessment: "uncertain",
+      score: 0,
+      reason:
+        preliminary?.activityReview?.reason ??
+        (current
+          ? match.reason
+          : "Il bando o il profilo sono cambiati. Le attività citate nella fonte richiedono una nuova verifica."),
     };
 
   const prefix = `${publication.revision}:${profileRevision}:`;

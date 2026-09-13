@@ -1,10 +1,18 @@
 import { DateTime } from "luxon";
 import type { CompanyProfile, Publication } from "./domain";
+import { findActivityReview, type ActivityReview } from "./cpv-service-signals";
+export type PreliminaryMatch = {
+  eligible: boolean;
+  score: number;
+  reason: string;
+  uncertain: boolean;
+  activityReview?: ActivityReview;
+};
 export function preliminaryMatch(
   p: Publication,
   profile: CompanyProfile,
   now = new Date(),
-) {
+): PreliminaryMatch {
   const text = `${p.title} ${p.originalText}`.toLowerCase();
   let reason = "";
   if (p.status !== "open") reason = "La pubblicazione non è un bando aperto.";
@@ -30,8 +38,18 @@ export function preliminaryMatch(
     reason = "Importo fuori dalla fascia selezionata.";
   const sectorMatch = p.sectors.some((s) => profile.sectors.includes(s));
   const keyword = profile.keywords.some((x) => text.includes(x.toLowerCase()));
-  if (!reason && !sectorMatch && !keyword)
+  if (!reason && !sectorMatch && !keyword) {
+    const activityReview = findActivityReview(p, profile.sectors);
+    if (activityReview)
+      return {
+        eligible: true,
+        score: 0,
+        reason: activityReview.reason,
+        uncertain: true,
+        activityReview,
+      };
     reason = "Attività non corrispondente al profilo.";
+  }
   if (reason) return { eligible: false, score: 0, reason, uncertain: false };
   const uncertain =
     !p.canton || (!p.zone && !profile.zones.includes("Tutto il Ticino"));

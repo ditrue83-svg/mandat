@@ -29,6 +29,7 @@ import {
   preliminaryMatch,
 } from "@/lib/matching";
 import { HttpError } from "@/lib/viewer";
+import { activityReviewBlocksAutomatic } from "@/lib/cpv-service-signals";
 import { fingerprint } from "@/sources/common";
 import { readSourceReviewContexts } from "@/lib/source-reviews";
 import {
@@ -306,6 +307,14 @@ export async function queueDigests(now = new Date()) {
       all.map((r) => r.p),
     );
     const selected = all.filter((r) => {
+      if (
+        activityReviewBlocksAutomatic(
+          r.m,
+          preliminaryMatch(r.p.data, firm.profile, now),
+          { publication: r.p.data, profileRevision: fingerprint(firm.profile) },
+        )
+      )
+        return false;
       const sourceReview = sourceReviews.get(r.p.id) ?? null;
       const sourceState = sourceReviewBindingState(
         sourceReview,
@@ -537,6 +546,18 @@ export async function sendPending() {
               ),
             ) ||
             !m.eligible ||
+            referenced.some(
+              (p) =>
+                p.id === m.publicationId &&
+                activityReviewBlocksAutomatic(
+                  m,
+                  preliminaryMatch(p.data, owner.company.profile),
+                  {
+                    publication: p.data,
+                    profileRevision: fingerprint(owner.company.profile),
+                  },
+                ),
+            ) ||
             (!!referencedReviews.get(m.publicationId) &&
               (m.approved !== true || !m.reviewedAt)) ||
             referenced.some(
@@ -675,6 +696,18 @@ export async function sendPending() {
                 ),
               ) ||
               !m.eligible ||
+              currentSources.some(
+                (p) =>
+                  p.id === m.publicationId &&
+                  activityReviewBlocksAutomatic(
+                    m,
+                    preliminaryMatch(p.data, owner.company.profile),
+                    {
+                      publication: p.data,
+                      profileRevision: fingerprint(owner.company.profile),
+                    },
+                  ),
+              ) ||
               (!!currentReviews.get(m.publicationId) &&
                 (m.approved !== true || !m.reviewedAt)) ||
               currentSources.some(

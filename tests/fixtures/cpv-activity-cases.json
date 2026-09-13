@@ -1,0 +1,515 @@
+[
+  {
+    "id": "new-pulizie-multilingual",
+    "inventedProfile": {
+      "sectors": ["pulizie"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "title": "Servizi secondo capitolato",
+    "selectedDescription": "Prestazioni descritte negli allegati.",
+    "sourceCpv": [],
+    "originalDescriptions": [
+      {
+        "language": "it",
+        "text": "Prestazioni descritte negli allegati."
+      },
+      {
+        "language": "fr",
+        "text": "Services de nettoyage de bâtiments."
+      }
+    ],
+    "expectedSupplementalLiteralHit": true,
+    "expectedMaximumEffect": "manual_review_score_zero"
+  },
+  {
+    "id": "new-pulizie-no-specific-label",
+    "inventedProfile": {
+      "sectors": ["pulizie"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "title": "Servizi secondo capitolato",
+    "selectedDescription": "Prestazioni descritte negli allegati.",
+    "sourceCpv": [],
+    "originalDescriptions": [
+      {
+        "language": null,
+        "text": "Impianto per la separazione meccanica dei liquidi."
+      }
+    ],
+    "expectedSupplementalLiteralHitForTargetSector": false,
+    "expectedMaximumEffect": "no_new_recovery_from_this_feature"
+  },
+  {
+    "id": "new-giardinaggio-multilingual",
+    "inventedProfile": {
+      "sectors": ["giardinaggio"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "title": "Servizi secondo capitolato",
+    "selectedDescription": "Prestazioni descritte negli allegati.",
+    "sourceCpv": [],
+    "originalDescriptions": [
+      {
+        "language": "it",
+        "text": "Prestazioni descritte negli allegati."
+      },
+      {
+        "language": "de",
+        "text": "Grundstückspflege."
+      }
+    ],
+    "expectedSupplementalLiteralHit": true,
+    "expectedMaximumEffect": "manual_review_score_zero"
+  },
+  {
+    "id": "new-giardinaggio-no-specific-label",
+    "inventedProfile": {
+      "sectors": ["giardinaggio"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "title": "Servizi secondo capitolato",
+    "selectedDescription": "Prestazioni descritte negli allegati.",
+    "sourceCpv": [],
+    "originalDescriptions": [
+      {
+        "language": null,
+        "text": "Die Ausführung erfordert eine Pfahlgründung."
+      }
+    ],
+    "expectedSupplementalLiteralHitForTargetSector": false,
+    "expectedMaximumEffect": "no_new_recovery_from_this_feature"
+  },
+  {
+    "id": "new-manutenzioni-multilingual",
+    "inventedProfile": {
+      "sectors": ["manutenzioni"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "title": "Servizi secondo capitolato",
+    "selectedDescription": "Prestazioni descritte negli allegati.",
+    "sourceCpv": [],
+    "originalDescriptions": [
+      {
+        "language": "it",
+        "text": "Prestazioni descritte negli allegati."
+      },
+      {
+        "language": "de",
+        "text": "Reparatur und Wartung von mechanischen Einrichtungen in Gebäuden."
+      }
+    ],
+    "expectedSupplementalLiteralHit": true,
+    "expectedMaximumEffect": "manual_review_score_zero"
+  },
+  {
+    "id": "new-manutenzioni-no-specific-label",
+    "inventedProfile": {
+      "sectors": ["manutenzioni"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "title": "Servizi secondo capitolato",
+    "selectedDescription": "Prestazioni descritte negli allegati.",
+    "sourceCpv": [],
+    "originalDescriptions": [
+      {
+        "language": null,
+        "text": "La precedente manutenzione è terminata; ora si acquista un prodotto."
+      }
+    ],
+    "expectedSupplementalLiteralHitForTargetSector": false,
+    "expectedMaximumEffect": "no_new_recovery_from_this_feature"
+  },
+  {
+    "id": "new-edilizia-multilingual",
+    "inventedProfile": {
+      "sectors": ["edilizia"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "title": "Servizi secondo capitolato",
+    "selectedDescription": "Prestazioni descritte negli allegati.",
+    "sourceCpv": [],
+    "originalDescriptions": [
+      {
+        "language": "it",
+        "text": "Prestazioni descritte negli allegati."
+      },
+      {
+        "language": "en",
+        "text": "Roof-framing work."
+      }
+    ],
+    "expectedSupplementalLiteralHit": true,
+    "expectedMaximumEffect": "manual_review_score_zero"
+  },
+  {
+    "id": "new-edilizia-no-specific-label",
+    "inventedProfile": {
+      "sectors": ["edilizia"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "title": "Servizi secondo capitolato",
+    "selectedDescription": "Prestazioni descritte negli allegati.",
+    "sourceCpv": [],
+    "originalDescriptions": [
+      {
+        "language": null,
+        "text": "Acquisto di tavoli da ufficio."
+      }
+    ],
+    "expectedSupplementalLiteralHitForTargetSector": false,
+    "expectedMaximumEffect": "no_new_recovery_from_this_feature"
+  },
+  {
+    "id": "new-impianti-multilingual",
+    "inventedProfile": {
+      "sectors": ["impianti"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "title": "Servizi secondo capitolato",
+    "selectedDescription": "Prestazioni descritte negli allegati.",
+    "sourceCpv": [],
+    "originalDescriptions": [
+      {
+        "language": "it",
+        "text": "Prestazioni descritte negli allegati."
+      },
+      {
+        "language": "fr",
+        "text": "Travaux d'installation de ventilation."
+      }
+    ],
+    "expectedSupplementalLiteralHit": true,
+    "expectedMaximumEffect": "manual_review_score_zero"
+  },
+  {
+    "id": "new-impianti-no-specific-label",
+    "inventedProfile": {
+      "sectors": ["impianti"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "title": "Servizi secondo capitolato",
+    "selectedDescription": "Prestazioni descritte negli allegati.",
+    "sourceCpv": [],
+    "originalDescriptions": [
+      {
+        "language": null,
+        "text": "Fornitura di apparecchiature imballate, senza installazione."
+      }
+    ],
+    "expectedSupplementalLiteralHitForTargetSector": false,
+    "expectedMaximumEffect": "no_new_recovery_from_this_feature"
+  },
+  {
+    "id": "new-sicurezza-multilingual",
+    "inventedProfile": {
+      "sectors": ["sicurezza"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "title": "Servizi secondo capitolato",
+    "selectedDescription": "Prestazioni descritte negli allegati.",
+    "sourceCpv": [],
+    "originalDescriptions": [
+      {
+        "language": "it",
+        "text": "Prestazioni descritte negli allegati."
+      },
+      {
+        "language": "fr",
+        "text": "Services de gardiennage."
+      }
+    ],
+    "expectedSupplementalLiteralHit": true,
+    "expectedMaximumEffect": "manual_review_score_zero"
+  },
+  {
+    "id": "new-sicurezza-no-specific-label",
+    "inventedProfile": {
+      "sectors": ["sicurezza"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "title": "Servizi secondo capitolato",
+    "selectedDescription": "Prestazioni descritte negli allegati.",
+    "sourceCpv": [],
+    "originalDescriptions": [
+      {
+        "language": null,
+        "text": "Rispettare le norme sulla sicurezza sul lavoro."
+      }
+    ],
+    "expectedSupplementalLiteralHitForTargetSector": false,
+    "expectedMaximumEffect": "no_new_recovery_from_this_feature"
+  },
+  {
+    "id": "new-catering-multilingual",
+    "inventedProfile": {
+      "sectors": ["catering"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "title": "Servizi secondo capitolato",
+    "selectedDescription": "Prestazioni descritte negli allegati.",
+    "sourceCpv": [],
+    "originalDescriptions": [
+      {
+        "language": "it",
+        "text": "Prestazioni descritte negli allegati."
+      },
+      {
+        "language": "fr",
+        "text": "Services traiteur."
+      }
+    ],
+    "expectedSupplementalLiteralHit": true,
+    "expectedMaximumEffect": "manual_review_score_zero"
+  },
+  {
+    "id": "new-catering-no-specific-label",
+    "inventedProfile": {
+      "sectors": ["catering"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "title": "Servizi secondo capitolato",
+    "selectedDescription": "Prestazioni descritte negli allegati.",
+    "sourceCpv": [],
+    "originalDescriptions": [
+      {
+        "language": null,
+        "text": "Restauration de la façade en pierre."
+      }
+    ],
+    "expectedSupplementalLiteralHitForTargetSector": false,
+    "expectedMaximumEffect": "no_new_recovery_from_this_feature"
+  },
+  {
+    "id": "new-trasporti-multilingual",
+    "inventedProfile": {
+      "sectors": ["trasporti"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "title": "Servizi secondo capitolato",
+    "selectedDescription": "Prestazioni descritte negli allegati.",
+    "sourceCpv": [],
+    "originalDescriptions": [
+      {
+        "language": "it",
+        "text": "Prestazioni descritte negli allegati."
+      },
+      {
+        "language": "de",
+        "text": "Bedarfspersonenbeförderung."
+      }
+    ],
+    "expectedSupplementalLiteralHit": true,
+    "expectedMaximumEffect": "manual_review_score_zero"
+  },
+  {
+    "id": "new-trasporti-no-specific-label",
+    "inventedProfile": {
+      "sectors": ["trasporti"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "title": "Servizi secondo capitolato",
+    "selectedDescription": "Prestazioni descritte negli allegati.",
+    "sourceCpv": [],
+    "originalDescriptions": [
+      {
+        "language": null,
+        "text": "La stazione appaltante si chiama Transports publics; si acquistano cavi."
+      }
+    ],
+    "expectedSupplementalLiteralHitForTargetSector": false,
+    "expectedMaximumEffect": "no_new_recovery_from_this_feature"
+  },
+  {
+    "id": "new-negated",
+    "inventedProfile": {
+      "sectors": ["sicurezza"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "channel": "originalDescription",
+    "text": "Les services de gardiennage sont exclus du présent marché.",
+    "expectedSupplementalSignal": true,
+    "expectedMaximumEffect": "manual_review_score_zero"
+  },
+  {
+    "id": "new-other-contract",
+    "inventedProfile": {
+      "sectors": ["catering"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "channel": "originalDescription",
+    "text": "Les services traiteur relèvent d’un autre marché.",
+    "expectedSupplementalSignal": true,
+    "expectedMaximumEffect": "manual_review_score_zero"
+  },
+  {
+    "id": "new-past-scope",
+    "inventedProfile": {
+      "sectors": ["edilizia"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "channel": "originalDescription",
+    "text": "The previous contract included roof-framing work; this purchase is for office supplies.",
+    "expectedSupplementalSignal": true,
+    "expectedMaximumEffect": "manual_review_score_zero"
+  },
+  {
+    "id": "new-buyer-only",
+    "inventedProfile": {
+      "sectors": ["sicurezza"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "channel": "buyer",
+    "text": "Services de gardiennage SA",
+    "expectedSupplementalSignal": false,
+    "expectedMaximumEffect": "no_new_recovery_from_this_feature"
+  },
+  {
+    "id": "new-cpv-secondary-meals",
+    "inventedProfile": {
+      "sectors": ["catering"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "mainCpv": "15000000",
+    "additionalCpvCodes": ["55523100"],
+    "text": "Descrizione da verificare.",
+    "expectedExistingCpvSectorMatch": true,
+    "expectedMaximumEffect": "existing_path_unchanged"
+  },
+  {
+    "id": "new-cpv-secondary-switchgear",
+    "inventedProfile": {
+      "sectors": ["impianti"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "mainCpv": "31200000",
+    "additionalCpvCodes": ["45315700"],
+    "text": "Descrizione da verificare.",
+    "expectedExistingCpvSectorMatch": true,
+    "expectedMaximumEffect": "existing_path_unchanged"
+  },
+  {
+    "id": "new-cpv-product-only",
+    "inventedProfile": {
+      "sectors": ["impianti"],
+      "keywords": [],
+      "exclusions": []
+    },
+    "mainCpv": "42512300",
+    "additionalCpvCodes": [],
+    "text": "Descrizione da verificare.",
+    "expectedExistingCpvSectorMatch": false,
+    "expectedMaximumEffect": "existing_path_unchanged"
+  },
+  {
+    "id": "new-hard-gate-canton",
+    "copySyntheticCase": "new-sicurezza-multilingual",
+    "fixedNow": "2026-09-13T12:00:00Z",
+    "baselineFixture": {
+      "status": "open",
+      "canton": "TI",
+      "zone": "Luganese",
+      "profileZones": ["Tutto il Ticino"],
+      "visibleAt": "2026-09-10T06:00:00Z",
+      "deadline": "2026-10-31T12:00:00Z",
+      "valueChf": null,
+      "profileMinValue": null,
+      "profileMaxValue": null,
+      "profileExclusions": []
+    },
+    "explicitFixtureChanges": {
+      "canton": "ZH"
+    },
+    "expectedSupplementalLiteralHit": true,
+    "expectedFullResult": "ineligible"
+  },
+  {
+    "id": "new-hard-gate-expired",
+    "copySyntheticCase": "new-sicurezza-multilingual",
+    "fixedNow": "2026-09-13T12:00:00Z",
+    "baselineFixture": {
+      "status": "open",
+      "canton": "TI",
+      "zone": "Luganese",
+      "profileZones": ["Tutto il Ticino"],
+      "visibleAt": "2026-09-10T06:00:00Z",
+      "deadline": "2026-10-31T12:00:00Z",
+      "valueChf": null,
+      "profileMinValue": null,
+      "profileMaxValue": null,
+      "profileExclusions": []
+    },
+    "explicitFixtureChanges": {
+      "deadline": "2026-09-12T12:00:00Z"
+    },
+    "expectedSupplementalLiteralHit": true,
+    "expectedFullResult": "ineligible"
+  },
+  {
+    "id": "new-hard-gate-explicit-exclusion",
+    "copySyntheticCase": "new-sicurezza-multilingual",
+    "fixedNow": "2026-09-13T12:00:00Z",
+    "baselineFixture": {
+      "status": "open",
+      "canton": "TI",
+      "zone": "Luganese",
+      "profileZones": ["Tutto il Ticino"],
+      "visibleAt": "2026-09-10T06:00:00Z",
+      "deadline": "2026-10-31T12:00:00Z",
+      "valueChf": null,
+      "profileMinValue": null,
+      "profileMaxValue": null,
+      "profileExclusions": []
+    },
+    "explicitFixtureChanges": {
+      "profileExclusions": ["amianto"],
+      "descriptionSuffix": " Presenza di amianto."
+    },
+    "expectedSupplementalLiteralHit": true,
+    "expectedFullResult": "ineligible"
+  },
+  {
+    "id": "new-hard-gate-value",
+    "copySyntheticCase": "new-sicurezza-multilingual",
+    "fixedNow": "2026-09-13T12:00:00Z",
+    "baselineFixture": {
+      "status": "open",
+      "canton": "TI",
+      "zone": "Luganese",
+      "profileZones": ["Tutto il Ticino"],
+      "visibleAt": "2026-09-10T06:00:00Z",
+      "deadline": "2026-10-31T12:00:00Z",
+      "valueChf": null,
+      "profileMinValue": null,
+      "profileMaxValue": null,
+      "profileExclusions": []
+    },
+    "explicitFixtureChanges": {
+      "valueChf": 5000,
+      "profileMaxValue": 1000
+    },
+    "expectedSupplementalLiteralHit": true,
+    "expectedFullResult": "ineligible"
+  }
+]
