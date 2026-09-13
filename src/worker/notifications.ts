@@ -1,10 +1,8 @@
 import { DateTime } from "luxon";
-import { and, eq, isNull, lte, sql, desc, inArray, or } from "drizzle-orm";
+import { and, eq, isNull, lte, sql, desc, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   companies,
-  invitations,
-  user,
   publications,
   publicationVersions,
   matches,
@@ -32,15 +30,17 @@ import { HttpError } from "@/lib/viewer";
 import { activityReviewBlocksAutomatic } from "@/lib/cpv-service-signals";
 import { fingerprint } from "@/sources/common";
 import { readSourceReviewContexts } from "@/lib/source-reviews";
-import {
-  sameSourceReviewDependency,
-  sourceReviewBindingState,
-  sourceReviewBlocksComparison,
-} from "@/lib/source-review-policy";
+import { sourceReviewBindingState } from "@/lib/source-review-policy";
 import {
   hasSourceScopeReview,
   isMatchRevisionCurrent,
 } from "@/lib/source-scope-review";
+import { claimLotNotification, reconcileLotNotices } from "./lot-notifications";
+import { readCanonicalFeedback } from "@/lib/canonical-feedback";
+import {
+  compareCanonicalPublications,
+  sourceAvailable,
+} from "@/lib/canonical-publication";
 export function deliveryFailureKind(error: unknown): "failed" | "uncertain" {
   const e = error as { code?: string; command?: string; responseCode?: number };
   if (e.responseCode && e.responseCode >= 400) return "failed";
@@ -51,12 +51,94 @@ export function deliveryFailureKind(error: unknown): "failed" | "uncertain" {
     return "failed";
   return "uncertain";
 }
+async function deliverLotNotification(
+  claimed: typeof notifications.$inferSelect,
+  to: string,
+) {
+  const db = getDb();
+  try {
+    const result = await sendMail({
+      to,
+      subject: claimed.subject,
+      html: claimed.html,
+      text: claimed.textBody,
+      messageId: claimed.messageId!,
+    });
+    if (!result.accepted.length)
+      throw Object.assign(
+        new Error("Il server SMTP ha rifiutato il destinatario"),
+        { responseCode: 550 },
+      );
+    await db
+      .update(notifications)
+      .set({ status: "sent", sentAt: new Date(), error: null })
+      .where(
+        and(
+          eq(notifications.id, claimed.id),
+          eq(notifications.status, "sending"),
+        ),
+      );
+  } catch (error) {
+    const state = deliveryFailureKind(error);
+    const permanent =
+      (error as { responseCode?: number }).responseCode! >= 500 ||
+      (error as { code?: string }).code === "EAUTH";
+    const retry = state === "failed" && !permanent && claimed.attempts < 3;
+    await db
+      .update(notifications)
+      .set({
+        status: retry ? "pending" : state,
+        error:
+          error instanceof Error ? error.message.slice(0, 300) : "Errore SMTP",
+      })
+      .where(
+        and(
+          eq(notifications.id, claimed.id),
+          eq(notifications.status, "sending"),
+        ),
+      );
+    if (!retry)
+      await db
+        .insert(issues)
+        .values({
+          id: crypto.randomUUID(),
+          key: `email:${claimed.id}`,
+          title:
+            state === "uncertain" ? "Esito email incerto" : "Email non inviata",
+          detail:
+            "Controllare il registro SMTP prima di autorizzare un nuovo invio.",
+          severity: "critical",
+        })
+        .onConflictDoNothing();
+  }
+}
 export async function queueChangeNotices(
   before: Publication,
   after: Publication,
   onlyCompanyId?: string,
 ) {
   const db = getDb();
+  const [currentSource] = await db
+    .select()
+    .from(publications)
+    .where(eq(publications.id, after.id));
+  const currentGroup = currentSource
+    ? await db
+        .select()
+        .from(publications)
+        .where(eq(publications.canonicalId, currentSource.canonicalId))
+    : [];
+  const representative = currentGroup
+    .filter((p) => sourceAvailable(p.source))
+    .sort(compareCanonicalPublications)[0];
+  if (representative?.documentarySnapshotId) {
+    await reconcileLotNotices({
+      companyId: onlyCompanyId,
+      canonicalId: representative.canonicalId,
+    });
+    return;
+  }
+  if (representative && representative.id !== after.id) return;
   const previously = await db
     .select()
     .from(notifications)
@@ -112,6 +194,7 @@ export async function queueChangeNotices(
 // Rebuild missed change notices from committed history, including after a restart
 // between saving a publication and inserting its outbox record.
 export async function queueOutstandingChanges(companyId?: string) {
+  await reconcileLotNotices({ companyId });
   const db = getDb();
   const sent = await db
     .select()
@@ -130,22 +213,24 @@ export async function queueOutstandingChanges(companyId?: string) {
     for (const item of notification.items) {
       const publication = byId.get(item.id);
       if (!publication) continue;
+      if (item.lotNotice || publication.documentarySnapshotId) continue;
       const key = `${notification.companyId}:${publication.canonicalId}`;
       if (seen.has(key)) continue;
       seen.add(key);
       const current = all
         .filter(
           (p) =>
-            p.canonicalId === publication.canonicalId && p.status !== "closed",
+            p.canonicalId === publication.canonicalId &&
+            sourceAvailable(p.source),
         )
-        .sort(
-          (a, b) =>
-            Number(a.source !== "simap") - Number(b.source !== "simap") ||
-            new Date(b.data.publishedAt).getTime() -
-              new Date(a.data.publishedAt).getTime() ||
-            b.updatedAt.getTime() - a.updatedAt.getTime(),
-        )[0];
-      if (!current || current.data.revision === item.revision) continue;
+        .sort(compareCanonicalPublications)[0];
+      if (
+        !current ||
+        current.status === "closed" ||
+        current.data.revision === item.revision
+      )
+        continue;
+      if (current.documentarySnapshotId) continue;
       const [prior] = await db
         .select()
         .from(publicationVersions)
@@ -218,6 +303,7 @@ export async function reconcileDelivery(
     return updated.companyId;
   });
   if (outcome === "sent") await queueOutstandingChanges(companyId);
+  else await reconcileLotNotices({ companyId });
 }
 export async function queueDigests(now = new Date()) {
   if (!digestDue(now)) return;
@@ -255,6 +341,13 @@ export async function queueDigests(now = new Date()) {
     .select()
     .from(companies)
     .where(isNull(companies.disabledAt));
+  const representativeSources = (await db.select().from(publications))
+    .filter((p) => sourceAvailable(p.source))
+    .sort(compareCanonicalPublications);
+  const representatives = new Map<string, string>();
+  for (const source of representativeSources)
+    if (!representatives.has(source.canonicalId))
+      representatives.set(source.canonicalId, source.id);
   for (const firm of firms) {
     if (!firm.profile.emailEnabled || !firm.onboardedAt) continue;
     const all = await db
@@ -271,6 +364,8 @@ export async function queueDigests(now = new Date()) {
       .where(
         and(
           eq(matches.companyId, firm.id),
+          isNull(publications.documentarySnapshotId),
+          sql`not exists (select 1 from publications adopted where adopted.canonical_id=${publications.canonicalId} and adopted.documentary_snapshot_id is not null)`,
           eq(matches.eligible, true),
           eq(publications.status, "open"),
           lte(publications.visibleAt, now),
@@ -306,7 +401,14 @@ export async function queueDigests(now = new Date()) {
       db,
       all.map((r) => r.p),
     );
+    const canonicalFeedback = new Map<
+      string,
+      { saved: boolean; dismissed: boolean }
+    >();
+    for (const key of new Set(all.map((r) => r.p.canonicalId)))
+      canonicalFeedback.set(key, await readCanonicalFeedback(db, firm.id, key));
     const selected = all.filter((r) => {
+      if (representatives.get(r.p.canonicalId) !== r.p.id) return false;
       if (
         activityReviewBlocksAutomatic(
           r.m,
@@ -328,7 +430,11 @@ export async function queueDigests(now = new Date()) {
         !preliminaryMatch(r.p.data, firm.profile, now).eligible
       )
         return false;
-      if (sent.has(r.p.id) || seen.has(r.p.canonicalId) || r.f?.dismissed)
+      if (
+        sent.has(r.p.id) ||
+        seen.has(r.p.canonicalId) ||
+        canonicalFeedback.get(r.p.canonicalId)?.dismissed
+      )
         return false;
       if (r.p.deadline && r.p.deadline <= now) return false;
       if (
@@ -412,6 +518,7 @@ export async function queueDigests(now = new Date()) {
         setWhere: eq(notifications.status, "cancelled"),
       });
   }
+  await reconcileLotNotices({ now, includeFirstDigest: true });
 }
 export async function sendPending() {
   await queueOutstandingChanges();
@@ -420,382 +527,21 @@ export async function sendPending() {
     .select()
     .from(notifications)
     .where(eq(notifications.status, "pending"));
-  for (const n of pending) {
-    if (!n.items.length) {
+  for (const notification of pending) {
+    if (!notification.items.length) {
       await db
         .update(notifications)
         .set({ status: "cancelled", error: "Riepilogo privo di pubblicazioni" })
-        .where(eq(notifications.id, n.id));
-      continue;
-    }
-    const [owner] = await db
-      .select({ company: companies, user, invite: invitations })
-      .from(companies)
-      .innerJoin(user, eq(user.id, companies.ownerId))
-      .innerJoin(invitations, eq(invitations.companyId, companies.id))
-      .where(eq(companies.id, n.companyId));
-    if (
-      !owner ||
-      owner.company.disabledAt ||
-      owner.invite.revokedAt ||
-      !owner.company.profile.emailEnabled
-    ) {
-      await db
-        .update(notifications)
-        .set({ status: "cancelled" })
-        .where(eq(notifications.id, n.id));
-      continue;
-    }
-    const referenced = await db
-      .select()
-      .from(publications)
-      .where(
-        sql`${publications.id} in (${sql.join(
-          n.items.map((i) => sql`${i.id}`),
-          sql`,`,
-        )})`,
-      );
-    const referencedReviews = await readSourceReviewContexts(db, referenced);
-    if (n.kind === "change") {
-      const relatedIssue = await db
-        .select({ id: issues.id })
-        .from(issues)
         .where(
           and(
-            isNull(issues.resolvedAt),
-            eq(issues.severity, "critical"),
-            or(
-              inArray(
-                issues.publicationId,
-                n.items.map((i) => i.id),
-              ),
-              inArray(
-                issues.key,
-                referenced.map((p) => `conflict:${p.canonicalId}`),
-              ),
-            ),
-          ),
-        )
-        .limit(1);
-      if (
-        referenced.some(
-          (p) =>
-            p.data.reviewRequired ||
-            hasSourceScopeReview(p.data) ||
-            sourceReviewBlocksComparison(referencedReviews.get(p.id) ?? null),
-        ) ||
-        relatedIssue.length
-      )
-        continue;
-    }
-    if (n.kind === "digest") {
-      const dismissed = await db
-        .select({ id: feedback.id })
-        .from(feedback)
-        .where(
-          and(
-            eq(feedback.companyId, n.companyId),
-            eq(feedback.dismissed, true),
-            sql`${feedback.publicationId} in (${sql.join(
-              n.items.map((i) => sql`${i.id}`),
-              sql`,`,
-            )})`,
-          ),
-        )
-        .limit(1);
-      if (dismissed.length) {
-        await db
-          .update(notifications)
-          .set({
-            status: "cancelled",
-            error: "Opportunità esclusa prima dell’invio",
-          })
-          .where(eq(notifications.id, n.id));
-        continue;
-      }
-      const blocking = await db
-        .select({ id: issues.id })
-        .from(issues)
-        .where(and(eq(issues.severity, "critical"), isNull(issues.resolvedAt)))
-        .limit(1);
-      if (blocking.length) continue;
-      const [auto] = await db
-        .select()
-        .from(settings)
-        .where(eq(settings.key, "automation_enabled"));
-      const currentMatches = await db
-        .select()
-        .from(matches)
-        .where(
-          and(
-            eq(matches.companyId, n.companyId),
-            sql`${matches.publicationId} in (${sql.join(
-              n.items.map((i) => sql`${i.id}`),
-              sql`,`,
-            )})`,
+            eq(notifications.id, notification.id),
+            eq(notifications.status, "pending"),
           ),
         );
-      const withdrawn =
-        currentMatches.length !== n.items.length ||
-        currentMatches.some(
-          (m) =>
-            ["blocked", "stale"].includes(
-              sourceReviewBindingState(
-                referencedReviews.get(m.publicationId) ?? null,
-                m.sourceReviewDependency,
-              ),
-            ) ||
-            !m.eligible ||
-            referenced.some(
-              (p) =>
-                p.id === m.publicationId &&
-                activityReviewBlocksAutomatic(
-                  m,
-                  preliminaryMatch(p.data, owner.company.profile),
-                  {
-                    publication: p.data,
-                    profileRevision: fingerprint(owner.company.profile),
-                  },
-                ),
-            ) ||
-            (!!referencedReviews.get(m.publicationId) &&
-              (m.approved !== true || !m.reviewedAt)) ||
-            referenced.some(
-              (p) =>
-                p.id === m.publicationId &&
-                referencedReviews.get(p.id) &&
-                !preliminaryMatch(p.data, owner.company.profile).eligible,
-            ) ||
-            m.approved === false ||
-            (m.approved !== true &&
-              (!auto?.value || m.score < 80 || m.reviewNotes)) ||
-            referenced.some(
-              (p) =>
-                p.id === m.publicationId &&
-                (p.data.sourceScopeReview || referencedReviews.get(p.id)) &&
-                !isMatchRevisionCurrent({
-                  revision: m.revision,
-                  publication: p.data,
-                  profileRevision: fingerprint(owner.company.profile),
-                  manuallyReviewed: Boolean(m.reviewedAt),
-                }),
-            ),
-        );
-      if (withdrawn) {
-        await db
-          .update(notifications)
-          .set({
-            status: "cancelled",
-            error: "Approvazione ritirata prima dell’invio",
-          })
-          .where(eq(notifications.id, n.id));
-        continue;
-      }
-    }
-    if (referenced.some((p) => new Date(p.visibleAt) > new Date())) continue;
-    if (
-      referenced.length !== n.items.length ||
-      referenced.some(
-        (p) =>
-          (p.source === "foglio-ti" &&
-            process.env.FOGLIO_REUSE_CONFIRMED !== "true") ||
-          p.status === "closed" ||
-          (n.kind === "digest" &&
-            (p.status !== "open" ||
-              (p.deadline && p.deadline <= new Date()) ||
-              p.data.reviewRequired ||
-              hasSourceScopeReview(p.data) ||
-              sourceReviewBlocksComparison(
-                referencedReviews.get(p.id) ?? null,
-              ) ||
-              !sameSourceReviewDependency(
-                n.items.find((i) => i.id === p.id)?.sourceReviewDependency,
-                referencedReviews.get(p.id)?.dependency,
-              ) ||
-              n.items.find((i) => i.id === p.id)?.sourceScopeToken !==
-                p.data.sourceScopeReview?.token)) ||
-          !n.items.some((i) => i.id === p.id && i.revision === p.data.revision),
-      )
-    ) {
-      await db
-        .update(notifications)
-        .set({
-          status: "cancelled",
-          error: "Bando modificato prima dell’invio: riepilogo da ricalcolare",
-        })
-        .where(eq(notifications.id, n.id));
       continue;
     }
-    const claimed = await db.transaction(async (tx) => {
-      // Marking a source review takes an update lock on these same rows.
-      // Recheck under the lock: the preliminary reads above may be stale.
-      // Once this transaction claims an email, its SMTP delivery has started
-      // and a later review cannot recall it.
-      const currentSources = await tx
-        .select()
-        .from(publications)
-        .where(
-          inArray(
-            publications.id,
-            n.items.map((i) => i.id),
-          ),
-        )
-        .orderBy(publications.id)
-        .for("share");
-      const currentReviews = await readSourceReviewContexts(tx, currentSources);
-      if (
-        currentSources.length !== n.items.length ||
-        currentSources.some((p) => {
-          const item = n.items.find((i) => i.id === p.id);
-          return (
-            !item ||
-            p.data.revision !== item.revision ||
-            p.data.reviewRequired ||
-            hasSourceScopeReview(p.data) ||
-            sourceReviewBlocksComparison(currentReviews.get(p.id) ?? null) ||
-            (n.kind === "digest" &&
-              (item.sourceScopeToken !== p.data.sourceScopeReview?.token ||
-                !sameSourceReviewDependency(
-                  item.sourceReviewDependency,
-                  currentReviews.get(p.id)?.dependency,
-                )))
-          );
-        })
-      )
-        return null;
-      if (n.kind === "digest") {
-        // Manual review uses the same source → match lock order. A rejection
-        // committed before this claim must also stop the prepared digest.
-        const finalMatches = await tx
-          .select()
-          .from(matches)
-          .where(
-            and(
-              eq(matches.companyId, n.companyId),
-              inArray(
-                matches.publicationId,
-                n.items.map((i) => i.id),
-              ),
-            ),
-          )
-          .orderBy(matches.id)
-          .for("share");
-        const [finalAutomation] = await tx
-          .select()
-          .from(settings)
-          .where(eq(settings.key, "automation_enabled"))
-          .for("share");
-        if (
-          finalMatches.length !== n.items.length ||
-          finalMatches.some(
-            (m) =>
-              ["blocked", "stale"].includes(
-                sourceReviewBindingState(
-                  currentReviews.get(m.publicationId) ?? null,
-                  m.sourceReviewDependency,
-                ),
-              ) ||
-              !m.eligible ||
-              currentSources.some(
-                (p) =>
-                  p.id === m.publicationId &&
-                  activityReviewBlocksAutomatic(
-                    m,
-                    preliminaryMatch(p.data, owner.company.profile),
-                    {
-                      publication: p.data,
-                      profileRevision: fingerprint(owner.company.profile),
-                    },
-                  ),
-              ) ||
-              (!!currentReviews.get(m.publicationId) &&
-                (m.approved !== true || !m.reviewedAt)) ||
-              currentSources.some(
-                (p) =>
-                  p.id === m.publicationId &&
-                  currentReviews.get(p.id) &&
-                  !preliminaryMatch(p.data, owner.company.profile).eligible,
-              ) ||
-              m.approved === false ||
-              (m.approved !== true &&
-                (finalAutomation?.value !== true ||
-                  m.score < 80 ||
-                  m.reviewNotes)) ||
-              currentSources.some(
-                (p) =>
-                  p.id === m.publicationId &&
-                  (p.data.sourceScopeReview || currentReviews.get(p.id)) &&
-                  !isMatchRevisionCurrent({
-                    revision: m.revision,
-                    publication: p.data,
-                    profileRevision: fingerprint(owner.company.profile),
-                    manuallyReviewed: Boolean(m.reviewedAt),
-                  }),
-              ),
-          )
-        )
-          return null;
-      }
-      const [claimed] = await tx
-        .update(notifications)
-        .set({
-          status: "sending",
-          attempts: sql`${notifications.attempts}+1`,
-          messageId: `<${n.id}@${new URL(appUrl()).hostname}>`,
-        })
-        .where(
-          and(eq(notifications.id, n.id), eq(notifications.status, "pending")),
-        )
-        .returning();
-      return claimed ?? null;
-    });
-    if (!claimed) continue;
-    try {
-      const result = await sendMail({
-        to: owner.user.email,
-        subject: n.subject,
-        html: n.html,
-        text: n.textBody,
-        messageId: claimed.messageId!,
-      });
-      if (!result.accepted.length)
-        throw Object.assign(
-          new Error("Il server SMTP ha rifiutato il destinatario"),
-          { responseCode: 550 },
-        );
-      await db
-        .update(notifications)
-        .set({ status: "sent", sentAt: new Date(), error: null })
-        .where(eq(notifications.id, n.id));
-    } catch (e) {
-      const state = deliveryFailureKind(e);
-      const permanent =
-        (e as { responseCode?: number }).responseCode! >= 500 ||
-        (e as { code?: string }).code === "EAUTH";
-      const retry = state === "failed" && !permanent && claimed.attempts < 3;
-      await db
-        .update(notifications)
-        .set({
-          status: retry ? "pending" : state,
-          error: e instanceof Error ? e.message.slice(0, 300) : "Errore SMTP",
-        })
-        .where(eq(notifications.id, n.id));
-      if (!retry)
-        await db
-          .insert(issues)
-          .values({
-            id: crypto.randomUUID(),
-            key: `email:${n.id}`,
-            title:
-              state === "uncertain"
-                ? "Esito email incerto"
-                : "Email non inviata",
-            detail:
-              "Controllare il registro SMTP prima di autorizzare un nuovo invio.",
-            severity: "critical",
-          })
-          .onConflictDoNothing();
-    }
+    const claim = await claimLotNotification(notification.id);
+    if (claim) await deliverLotNotification(claim.notification, claim.to);
   }
 }
 export async function recoverUncertainDeliveries() {

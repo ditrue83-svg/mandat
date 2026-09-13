@@ -1,12 +1,11 @@
-import { and, eq, lte, gt, isNull, or, desc, inArray, sql } from "drizzle-orm";
+import { and, eq, lte, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
+import { matches, publications, settings } from "@/db/schema";
 import {
-  matches,
-  publications,
-  feedback,
-  settings,
-  sourceReviewEvents,
-} from "@/db/schema";
+  readCanonicalMatch,
+  presentLotOpportunity,
+  lotOpportunityVisible,
+} from "./lot-readers";
 import { fingerprint } from "@/sources/common";
 import { getDemoOpportunities } from "./demo";
 import type { Opportunity, RadarStatus, Viewer } from "./domain";
@@ -17,10 +16,6 @@ import {
   CPV_ACTIVITY_REVIEW_VERSION,
   hasActivityReviewRevision,
 } from "./cpv-service-signals";
-import {
-  readSourceReviewContexts,
-  readSourceReviewContext,
-} from "./source-reviews";
 import {
   sourceReviewBindingState,
   sourceReviewBlocksComparison,
@@ -38,27 +33,12 @@ export async function getRadarStatus(
   if (viewer.demo) return { state: "ready", pendingCount: 0 };
   const db = getDb();
   const rows = await db
-    .select({
-      // Matches follow corrected content; the column retains the source revision.
-      publication: publications.data,
-      matchRevision: matches.revision,
-      approved: matches.approved,
-      reviewedAt: matches.reviewedAt,
-      sourceReviewDependency: matches.sourceReviewDependency,
-    })
+    .select({ id: publications.id })
     .from(publications)
-    .leftJoin(
-      matches,
-      and(
-        eq(matches.publicationId, publications.id),
-        eq(matches.companyId, viewer.companyId),
-      ),
-    )
     .where(
       and(
         eq(publications.status, "open"),
         lte(publications.visibleAt, now),
-        or(isNull(publications.deadline), gt(publications.deadline, now)),
         inArray(
           publications.source,
           process.env.FOGLIO_REUSE_CONFIRMED === "true"
@@ -67,52 +47,64 @@ export async function getRadarStatus(
         ),
       ),
     );
-  const profileRevision = fingerprint(viewer.profile);
-  const sourceReviews = await readSourceReviewContexts(
-    db,
-    rows.map((row) => row.publication),
-  );
-  // A pending/retry AI result has been assessed, even though it still needs
-  // review. Only missing or invalidated assessments count as waiting here.
-  const pendingCount = rows.filter((row) => {
-    const context = sourceReviews.get(row.publication.id) ?? null;
+  const seen = new Set<string>();
+  let pendingCount = 0;
+  for (const item of rows) {
+    const row = await readCanonicalMatch(viewer.companyId, item.id, now);
+    if (!row || seen.has(row.publication.canonicalId)) continue;
+    seen.add(row.publication.canonicalId);
+    if (row.publication.visibleAt > now || row.publication.status !== "open")
+      continue;
+    if (row.publication.documentarySnapshotId) {
+      if (!row.match) pendingCount++;
+      continue;
+    }
+    if (row.publication.deadline && row.publication.deadline <= now) continue;
+    const publication = row.publication.data;
+    const match = row.match;
+    const profileRevision = fingerprint(row.company.profile);
+    const context = row.sourceReview;
     const manual =
-      row.approved === false || (row.approved === true && !!row.reviewedAt);
+      match?.approved === false ||
+      (match?.approved === true && !!match.reviewedAt);
     const activityReview = preliminaryMatch(
-      row.publication,
-      viewer.profile,
+      publication,
+      row.company.profile,
       now,
     ).activityReview;
+    let pending = false;
     if (
       !manual &&
       activityReview &&
-      !row.matchRevision?.includes(
+      !match?.revision.includes(
         `${CPV_ACTIVITY_REVIEW_MARKER}${CPV_ACTIVITY_REVIEW_VERSION}:`,
       )
     )
-      return true;
-    // A preserved manual decision waits for a person, never for a worker job.
-    // Presentation suspends an old positive until it is explicitly reviewed.
-    if (manual && (context || row.sourceReviewDependency)) return false;
-    if (
+      pending = true;
+    else if (manual && (context || match?.sourceReviewDependency))
+      pending = false;
+    else if (
       !manual &&
       !sourceReviewBlocksComparison(context) &&
-      sourceReviewBindingState(context, row.sourceReviewDependency) === "stale"
+      sourceReviewBindingState(context, match?.sourceReviewDependency) ===
+        "stale"
     )
-      return true;
-    return !(
-      hasSourceScopeReview(row.publication) ||
-        sourceReviewBlocksComparison(context) ||
-        (manual && context)
-        ? isMatchContentCurrent
-        : isMatchRevisionCurrent
-    )({
-      revision: row.matchRevision,
-      publication: row.publication,
-      profileRevision,
-      manuallyReviewed: manual,
-    });
-  }).length;
+      pending = true;
+    else
+      pending = !(
+        hasSourceScopeReview(publication) ||
+          sourceReviewBlocksComparison(context) ||
+          (manual && context)
+          ? isMatchContentCurrent
+          : isMatchRevisionCurrent
+      )({
+        revision: match?.revision,
+        publication,
+        profileRevision,
+        manuallyReviewed: manual,
+      });
+    if (pending) pendingCount++;
+  }
   if (!pendingCount) return { state: "ready", pendingCount };
   const [heartbeat] = await db
     .select({ value: settings.value })
@@ -136,111 +128,96 @@ export async function listOpportunities(
 ): Promise<Opportunity[]> {
   if (viewer.demo) return getDemoOpportunities();
   const now = new Date();
-  const profileRevision = fingerprint(viewer.profile);
-  const rows = await getDb()
-    .select({ publication: publications, match: matches, feedback })
+  const groups = await getDb()
+    .select({ id: publications.id, canonicalId: publications.canonicalId })
     .from(matches)
     .innerJoin(publications, eq(matches.publicationId, publications.id))
-    .leftJoin(
-      feedback,
-      and(
-        eq(feedback.companyId, viewer.companyId),
-        eq(feedback.publicationId, publications.id),
-      ),
-    )
-    .where(
-      and(
-        eq(matches.companyId, viewer.companyId),
-        options.includeInactive
-          ? eq(feedback.saved, true)
-          : or(
-              eq(matches.eligible, true),
-              sql`${publications.data}->'sourceScopeReview'->>'status' = 'required'`,
-              sql`exists (select 1 from ${sourceReviewEvents} where ${sourceReviewEvents.publicationId} = ${publications.id})`,
-            ),
-        options.includeInactive ? undefined : eq(publications.status, "open"),
-        lte(publications.visibleAt, now),
-        options.includeInactive
-          ? undefined
-          : or(isNull(publications.deadline), gt(publications.deadline, now)),
-      ),
-    )
-    .orderBy(desc(matches.score));
+    .where(eq(matches.companyId, viewer.companyId));
   const seen = new Set<string>();
-  const sourceReviews = await readSourceReviewContexts(
-    getDb(),
-    rows.map((row) => row.publication),
-  );
-  return rows
-    .sort(
-      (a, b) =>
-        Number(a.publication.source !== "simap") -
-          Number(b.publication.source !== "simap") ||
-        b.publication.updatedAt.getTime() - a.publication.updatedAt.getTime(),
+  const result: Opportunity[] = [];
+  for (const group of groups) {
+    if (seen.has(group.canonicalId)) continue;
+    const row = await readCanonicalMatch(viewer.companyId, group.id, now);
+    if (!row) continue;
+    seen.add(row.publication.canonicalId);
+    const item = canonicalOpportunity(
+      row,
+      now,
+      !!options.includeInactive,
+      true,
+    );
+    if (item) result.push(item);
+  }
+  return result.sort((a, b) => b.score - a.score);
+}
+function canonicalOpportunity(
+  row: NonNullable<Awaited<ReturnType<typeof readCanonicalMatch>>>,
+  now: Date,
+  includeInactive: boolean,
+  filterRadar: boolean,
+): Opportunity | null {
+  const { publication, match, feedback: f, loaded, sourceReview } = row;
+  if (!match || publication.visibleAt > now) return null;
+  if (publication.documentarySnapshotId) {
+    if (
+      !loaded ||
+      (filterRadar && !lotOpportunityVisible(loaded, includeInactive, now))
     )
-    .flatMap((r) => {
-      if (seen.has(r.publication.canonicalId)) return [];
+      return null;
+    return presentLotOpportunity(loaded);
+  }
+  const preliminary = preliminaryMatch(
+    publication.data,
+    row.company.profile,
+    now,
+  );
+  if (filterRadar) {
+    if (includeInactive) {
+      if (!f?.saved) return null;
+    } else {
       if (
-        r.publication.source === "foglio-ti" &&
-        process.env.FOGLIO_REUSE_CONFIRMED !== "true"
+        publication.status !== "open" ||
+        (publication.deadline && publication.deadline <= now) ||
+        match.approved === false
       )
-        return [];
-      const sourceReview = sourceReviews.get(r.publication.id) ?? null;
-      const enforceFilters =
-        hasSourceScopeReview(r.publication.data) ||
+        return null;
+      const enforce =
+        hasSourceScopeReview(publication.data) ||
         sourceReview ||
-        r.match.sourceReviewDependency ||
-        hasActivityReviewRevision(r.match.revision);
-      const preliminary = preliminaryMatch(
-        r.publication.data,
-        viewer.profile,
-        now,
-      );
-      if (
-        !options.includeInactive &&
-        (r.match.approved === false ||
-          (enforceFilters && !preliminary.eligible))
-      )
-        return [];
-      const bindingState = sourceReviewBindingState(
+        match.sourceReviewDependency ||
+        hasActivityReviewRevision(match.revision);
+      if (enforce && !preliminary.eligible) return null;
+      const binding = sourceReviewBindingState(
         sourceReview,
-        r.match.sourceReviewDependency,
+        match.sourceReviewDependency,
       );
       if (
-        !options.includeInactive &&
         !sourceReview &&
-        !r.match.eligible &&
-        !hasSourceScopeReview(r.publication.data) &&
-        bindingState !== "blocked" &&
-        bindingState !== "stale"
+        !match.eligible &&
+        !hasSourceScopeReview(publication.data) &&
+        binding !== "blocked" &&
+        binding !== "stale"
       )
-        return [];
-      seen.add(r.publication.canonicalId);
-      return [
-        {
-          ...r.publication.data,
-          id: r.publication.id,
-          score: r.match.score,
-          ...presentMatch({
-            match: r.match,
-            publication: r.publication.data,
-            aiRevision: r.publication.aiRevision,
-            profileRevision,
-            preliminary,
-            sourceReview,
-          }),
-          saved: r.feedback?.saved ?? false,
-          dismissed: r.feedback?.dismissed ?? false,
-          feedback:
-            r.feedback?.relevant === null || r.feedback?.relevant === undefined
-              ? null
-              : r.feedback.relevant
-                ? ("relevant" as const)
-                : ("irrelevant" as const),
-        },
-      ];
-    })
-    .sort((a, b) => b.score - a.score);
+        return null;
+    }
+  }
+  return {
+    ...publication.data,
+    id: publication.id,
+    score: match.score,
+    ...presentMatch({
+      match,
+      publication: publication.data,
+      aiRevision: publication.aiRevision,
+      profileRevision: fingerprint(row.company.profile),
+      sourceReview,
+      preliminary,
+    }),
+    saved: f?.saved ?? false,
+    dismissed: f?.dismissed ?? false,
+    feedback:
+      f?.relevant == null ? null : f.relevant ? "relevant" : "irrelevant",
+  };
 }
 export async function getOpportunity(
   viewer: Viewer,
@@ -248,51 +225,9 @@ export async function getOpportunity(
 ): Promise<Opportunity | null> {
   if (viewer.demo)
     return getDemoOpportunities().find((o) => o.id === id) ?? null;
-  const [row] = await getDb()
-    .select({ p: publications, m: matches, f: feedback })
-    .from(matches)
-    .innerJoin(publications, eq(matches.publicationId, publications.id))
-    .leftJoin(
-      feedback,
-      and(
-        eq(feedback.companyId, viewer.companyId),
-        eq(feedback.publicationId, publications.id),
-      ),
-    )
-    .where(
-      and(
-        eq(matches.companyId, viewer.companyId),
-        eq(publications.id, id),
-        lte(publications.visibleAt, new Date()),
-      ),
-    )
-    .limit(1);
-  if (
-    !row ||
-    (row.p.source === "foglio-ti" &&
-      process.env.FOGLIO_REUSE_CONFIRMED !== "true")
-  )
-    return null;
-  const sourceReview = await readSourceReviewContext(getDb(), row.p);
-  return {
-    ...row.p.data,
-    id: row.p.id,
-    score: row.m.score,
-    ...presentMatch({
-      match: row.m,
-      publication: row.p.data,
-      aiRevision: row.p.aiRevision,
-      profileRevision: fingerprint(viewer.profile),
-      sourceReview,
-      preliminary: preliminaryMatch(row.p.data, viewer.profile),
-    }),
-    saved: row.f?.saved ?? false,
-    dismissed: row.f?.dismissed ?? false,
-    feedback:
-      row.f?.relevant == null
-        ? null
-        : row.f.relevant
-          ? "relevant"
-          : "irrelevant",
-  };
+  // An old saved URL may resolve to a newer official copy, but never to another
+  // tenant's match. The canonical reader independently verifies the selected row.
+  const now = new Date();
+  const row = await readCanonicalMatch(viewer.companyId, id, now, { legacyDetail: true });
+  return row ? canonicalOpportunity(row, now, true, false) : null;
 }

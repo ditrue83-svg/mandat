@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { HttpError, pageViewer } from "@/lib/viewer";
 import { loadSourceReviewContext } from "@/lib/source-reviews";
 import { sourceReviewEditorData } from "@/lib/source-review-editor-data";
@@ -29,9 +29,12 @@ export default async function SourceReviewPage({
         </section>
       </Shell>
     );
-  const data = await loadSourceReviewContext((await params).id, viewer).catch(
+  const { id } = await params;
+  const data = await loadSourceReviewContext(id, viewer).catch(
     (error: unknown) => {
       if (error instanceof HttpError && error.status === 404) notFound();
+      if (error instanceof HttpError && error.status === 409)
+        redirect(`/admin/fonti/${encodeURIComponent(id)}/lotti`);
       throw error;
     },
   );

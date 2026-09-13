@@ -159,6 +159,8 @@ export function Dashboard({
         ...current,
         [id]: { ...current[id], [kind]: value },
       }));
+      if (!viewer.demo && opportunities.some((item) => item.id === id && item.lotReview))
+        startRefresh(() => router.refresh());
       if (viewer.demo) {
         setDemoItems((current) =>
           current.map((o) => (o.id === id ? { ...o, [kind]: value } : o)),

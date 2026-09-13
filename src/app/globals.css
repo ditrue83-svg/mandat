@@ -1146,6 +1146,25 @@ h1 {
   line-height: 1.85;
   overflow-wrap: anywhere;
 }
+.lot-source-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 20px 0;
+}
+.lot-source-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.lot-source-nav a[aria-current="page"] {
+  background: var(--green);
+  border-color: var(--green);
+  color: white;
+}
 .detail-list {
   padding-left: 20px;
   color: #78866c;

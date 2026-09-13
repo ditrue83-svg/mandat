@@ -121,11 +121,19 @@ export function safeOfficialUrl(value: string, hosts: string[]) {
     throw new Error("URL della fonte non consentito");
   return u;
 }
-export async function fetchOfficial(
+export type OfficialResponseReceipt = {
+  url: string;
+  receivedAt: string;
+  bodySha256: string;
+  bodyByteLength: number;
+  body: Uint8Array;
+};
+
+export async function fetchOfficialResponse(
   url: string,
   hosts: string[],
   maxBytes = 12_000_000,
-) {
+): Promise<OfficialResponseReceipt> {
   safeOfficialUrl(url, hosts);
   const r = await fetch(url, {
     headers: {
@@ -138,21 +146,45 @@ export async function fetchOfficial(
   });
   if (!r.ok)
     throw new Error(`Fonte ${new URL(url).hostname}: HTTP ${r.status}`);
-  if (Number(r.headers.get("content-length") ?? 0) > maxBytes)
+  if (Number(r.headers.get("content-length") ?? 0) > maxBytes) {
+    await r.body?.cancel();
     throw new Error("Risposta della fonte troppo grande");
+  }
   if (!r.body) throw new Error("Risposta vuota");
   const reader = r.body.getReader();
   const parts: Uint8Array[] = [];
   let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.length;
-    if (size > maxBytes) {
-      await reader.cancel();
-      throw new Error("Risposta della fonte troppo grande");
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        throw new Error("Risposta della fonte troppo grande");
+      }
+      parts.push(value);
     }
-    parts.push(value);
+  } finally {
+    reader.releaseLock();
   }
-  return Buffer.concat(parts).toString("utf8");
+  // These are the bytes exposed by Fetch after any client decompression, not
+  // wire bytes. Hash them before decoding, including invalid UTF-8 sequences.
+  const body = Buffer.concat(parts, size);
+  return {
+    url,
+    receivedAt: new Date().toISOString(),
+    bodySha256: createHash("sha256").update(body).digest("hex"),
+    bodyByteLength: body.byteLength,
+    body,
+  };
+}
+
+export async function fetchOfficial(
+  url: string,
+  hosts: string[],
+  maxBytes = 12_000_000,
+) {
+  const response = await fetchOfficialResponse(url, hosts, maxBytes);
+  return Buffer.from(response.body).toString("utf8");
 }

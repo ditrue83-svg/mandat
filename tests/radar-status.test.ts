@@ -35,6 +35,13 @@ beforeAll(async () => {
       .insert(schema.companies)
       .values({ id, ownerId: id, profile: demoProfile, onboardedAt: now });
   }
+  // Runtime workers fingerprint the stored JSONB profile; the server reader now
+  // reloads the same authoritative profile instead of trusting a stale viewer.
+  const [company] = await db
+    .select()
+    .from(schema.companies)
+    .where(eq(schema.companies.id, viewer.companyId));
+  viewer.profile = company.profile;
 });
 beforeEach(async () => {
   vi.stubEnv("FOGLIO_REUSE_CONFIRMED", "false");
@@ -61,20 +68,18 @@ async function publication(id = "p", input: Partial<Publication> = {}) {
     revision: "v1",
     ...input,
   };
-  await db
-    .insert(schema.publications)
-    .values({
-      id,
-      externalId: id,
-      canonicalId: id,
-      source: p.source,
-      title: p.title,
-      status: p.status,
-      visibleAt: new Date(p.visibleAt),
-      deadline: p.deadline ? new Date(p.deadline) : null,
-      data: p,
-      revision: p.revision,
-    });
+  await db.insert(schema.publications).values({
+    id,
+    externalId: id,
+    canonicalId: id,
+    source: p.source,
+    title: p.title,
+    status: p.status,
+    visibleAt: new Date(p.visibleAt),
+    deadline: p.deadline ? new Date(p.deadline) : null,
+    data: p,
+    revision: p.revision,
+  });
   return p;
 }
 async function match(
@@ -83,17 +88,15 @@ async function match(
   eligible = false,
   publicationId = "p",
 ) {
-  await db
-    .insert(schema.matches)
-    .values({
-      id: `${companyId}-${publicationId}`,
-      companyId,
-      publicationId,
-      revision,
-      score: eligible ? 80 : 0,
-      reason: "Esito di prova",
-      eligible,
-    });
+  await db.insert(schema.matches).values({
+    id: `${companyId}-${publicationId}`,
+    companyId,
+    publicationId,
+    revision,
+    score: eligible ? 80 : 0,
+    reason: "Esito di prova",
+    eligible,
+  });
 }
 
 it("mostra elaborazione quando il profilo non ha ancora valutazioni", async () => {

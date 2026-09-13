@@ -7,6 +7,7 @@ import type { Publication, Viewer } from "./domain";
 import { HttpError } from "./viewer";
 import {
   captureSourceSnapshot,
+  CONTEXT_VERSION,
   createSourceReviewRecord,
   resolveSourceContext,
   ReviewConflict,
@@ -49,6 +50,22 @@ type PublicationRow = Pick<
 >;
 type SourceRow = Publication | { id: string; data: Publication };
 
+// A legacy reader must never quietly filter out targeted events and recover an
+// older positive review. Documentary consumers select their own branch first.
+export function legacySourceReviewRecord(
+  row: Pick<typeof sourceReviewEvents.$inferSelect, "event" | "snapshot">,
+): ReviewRecord {
+  if (
+    row.event.version !== CONTEXT_VERSION ||
+    row.snapshot.version !== CONTEXT_VERSION
+  )
+    throw new HttpError(
+      409,
+      "Questa fonte richiede la revisione dei lotti. Aggiorna la pagina.",
+    );
+  return { event: row.event, snapshot: row.snapshot };
+}
+
 // Internal server reader: callers that consume this result during a write or
 // claim must already hold the publication lock in this SAME executor/transaction.
 // Never serialize its history, actor or notes into a company-facing response.
@@ -58,6 +75,22 @@ export async function readSourceReviewContexts(
 ): Promise<Map<string, SourceContext | null>> {
   const result = new Map<string, SourceContext | null>();
   if (!rows.length) return result;
+  // Some callers carry only Publication.data, which has no adoption pointer.
+  // Read it from the authoritative row before even considering legacy history.
+  const current = await executor
+    .select({ documentarySnapshotId: publications.documentarySnapshotId })
+    .from(publications)
+    .where(
+      inArray(
+        publications.id,
+        rows.map((row) => row.id),
+      ),
+    );
+  if (current.some((row) => row.documentarySnapshotId))
+    throw new HttpError(
+      409,
+      "Questa fonte richiede la revisione dei lotti. Aggiorna la pagina.",
+    );
   const stored = await executor
     .select()
     .from(sourceReviewEvents)
@@ -71,7 +104,7 @@ export async function readSourceReviewContexts(
   const histories = new Map<string, ReviewRecord[]>();
   for (const record of stored) {
     const history = histories.get(record.publicationId) ?? [];
-    history.push({ event: record.event, snapshot: record.snapshot });
+    history.push(legacySourceReviewRecord(record));
     histories.set(record.publicationId, history);
   }
   for (const row of rows) {
@@ -119,10 +152,7 @@ async function loadReview(
     .from(sourceReviewEvents)
     .where(eq(sourceReviewEvents.publicationId, publication.id))
     .orderBy(sourceReviewEvents.sequence);
-  const history: readonly ReviewRecord[] = stored.map((row) => ({
-    event: row.event,
-    snapshot: row.snapshot,
-  }));
+  const history: readonly ReviewRecord[] = stored.map(legacySourceReviewRecord);
   const snapshot = captureSourceSnapshot(publication.id, publication.data);
   const context = resolveSourceContext(snapshot, history);
   return {
@@ -162,6 +192,11 @@ export async function loadSourceReviewContext(
       .where(eq(publications.id, publicationId))
       .for("share");
     if (!publication) throw new HttpError(404, "Bando non trovato.");
+    if (publication.documentarySnapshotId)
+      throw new HttpError(
+        409,
+        "Questa fonte richiede la revisione dei lotti. Aggiorna la pagina.",
+      );
     return loadReview(tx, publication);
   });
 }
@@ -181,6 +216,11 @@ export async function appendSourceReview(
       .where(eq(publications.id, draft.publicationId))
       .for("update");
     if (!publication) throw new HttpError(404, "Bando non trovato.");
+    if (publication.documentarySnapshotId)
+      throw new HttpError(
+        409,
+        "Questa fonte richiede la revisione dei lotti. Aggiorna la pagina.",
+      );
     const loaded = await loadReview(tx, publication);
     let record: ReviewRecord;
     try {

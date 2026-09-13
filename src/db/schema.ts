@@ -10,14 +10,21 @@ import {
   numeric,
   bigint,
   check,
+  foreignKey,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { CompanyProfile, Publication } from "@/lib/domain";
+import type { DocumentaryRequest } from "@/lib/documentary-observation";
+import type { SimapDocumentaryAcquisition } from "@/sources/simap-documentary";
+import type { SourceDependency } from "@/lib/source-review-context";
+import type { MixedSourceReviewRecord } from "@/lib/lot-source-context";
 import type {
-  SourceDependency,
-  SourceReviewEvent,
-  SourceSnapshot,
-} from "@/lib/source-review-context";
+  LotEvaluationSet,
+  ProjectLotSuppression,
+} from "@/lib/lot-assessment";
+import type { LotNotice } from "@/lib/lot-notice";
+import type { LotMatchReviewRecord } from "@/lib/lot-review-record";
 const time = (name: string) => timestamp(name, { withTimezone: true });
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -121,12 +128,66 @@ export const publications = pgTable(
     data: jsonb("data").$type<Publication>().notNull(),
     revision: text("revision").notNull(),
     aiRevision: text("ai_revision"),
+    // Populated only after every source/review/Radar/email consumer understands
+    // the documentary branch. Shadow observations never write this pointer.
+    documentarySnapshotId: text("documentary_snapshot_id"),
     updatedAt: time("updated_at").notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("publication_source_external_idx").on(t.source, t.externalId),
     index("publication_canonical_idx").on(t.canonicalId),
     index("publication_project_idx").on(t.source, t.projectId),
+    foreignKey({
+      name: "publication_documentary_pointer_fk",
+      columns: [t.id, t.documentarySnapshotId],
+      foreignColumns: [
+        publicationDocumentarySnapshots.publicationId,
+        publicationDocumentarySnapshots.id,
+      ],
+    }).onDelete("restrict"),
+  ],
+).enableRLS();
+export const publicationDocumentarySnapshots = pgTable(
+  "publication_documentary_snapshots",
+  {
+    // One immutable outcome per request. Replaying a request cannot replace it.
+    id: text("id").primaryKey(),
+    publicationId: text("publication_id").references(
+      (): AnyPgColumn => publications.id,
+      { onDelete: "restrict" },
+    ),
+    sourceProjectId: text("source_project_id").notNull(),
+    sourcePublicationId: text("source_publication_id").notNull(),
+    state: text("state").$type<"accepted" | "refused">().notNull(),
+    request: jsonb("request").$type<DocumentaryRequest>().notNull(),
+    acquisition: jsonb("acquisition")
+      .$type<SimapDocumentaryAcquisition>()
+      .notNull(),
+    createdAt: time("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("documentary_publication_snapshot_idx").on(
+      t.publicationId,
+      t.id,
+    ),
+    index("documentary_source_observation_idx").on(
+      t.sourceProjectId,
+      t.sourcePublicationId,
+    ),
+    check(
+      "documentary_snapshot_identity",
+      sql`${t.state} IN ('accepted', 'refused')
+      AND ${t.request}->>'version' IS NOT DISTINCT FROM 'documentary-request-v1'
+      AND ${t.request}->>'id' IS NOT DISTINCT FROM ${t.id}
+      AND ${t.request}->'identity'->>'projectId' IS NOT DISTINCT FROM ${t.sourceProjectId}
+      AND ${t.request}->'identity'->>'publicationId' IS NOT DISTINCT FROM ${t.sourcePublicationId}
+      AND ${t.acquisition}->>'version' IS NOT DISTINCT FROM 'simap-documentary-acquisition-v1'
+      AND ${t.acquisition}->>'state' IS NOT DISTINCT FROM ${t.state}
+      AND ${t.request}->'identity' IS NOT DISTINCT FROM ${t.acquisition}->'identity'
+      AND ${t.acquisition}->'receipt'->>'url' IS NOT DISTINCT FROM ${t.request}->'identity'->>'detailUrl'
+      AND (${t.publicationId} IS NULL OR ${t.publicationId} = 'simap-' || ${t.sourceProjectId})
+      AND (${t.state} = 'refused' OR ${t.publicationId} IS NOT NULL)`,
+    ),
   ],
 ).enableRLS();
 export const publicationVersions = pgTable(
@@ -154,8 +215,10 @@ export const sourceReviewEvents = pgTable(
       .notNull()
       .references(() => publications.id, { onDelete: "restrict" }),
     sequence: integer("sequence").notNull(),
-    event: jsonb("event").$type<SourceReviewEvent>().notNull(),
-    snapshot: jsonb("snapshot").$type<SourceSnapshot>().notNull(),
+    event: jsonb("event").$type<MixedSourceReviewRecord["event"]>().notNull(),
+    snapshot: jsonb("snapshot")
+      .$type<MixedSourceReviewRecord["snapshot"]>()
+      .notNull(),
   },
   (t) => [
     uniqueIndex("source_review_event_sequence_idx").on(
@@ -188,6 +251,8 @@ export const matches = pgTable(
     sourceReviewDependency: jsonb(
       "source_review_dependency",
     ).$type<SourceDependency>(),
+    lotEvaluations: jsonb("lot_evaluations").$type<LotEvaluationSet>(),
+    lotSuppression: jsonb("lot_suppression").$type<ProjectLotSuppression>(),
     score: integer("score").notNull(),
     reason: text("reason").notNull(),
     eligible: boolean("eligible").notNull().default(false),
@@ -200,6 +265,36 @@ export const matches = pgTable(
     uniqueIndex("match_company_publication_idx").on(
       t.companyId,
       t.publicationId,
+    ),
+  ],
+).enableRLS();
+export const matchLotReviewEvents = pgTable(
+  "match_lot_review_events",
+  {
+    id: text("id").primaryKey(),
+    matchId: text("match_id")
+      .notNull()
+      .references(() => matches.id, { onDelete: "restrict" }),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    publicationId: text("publication_id")
+      .notNull()
+      .references(() => publications.id, { onDelete: "restrict" }),
+    sequence: integer("sequence").notNull(),
+    event: jsonb("event").$type<LotMatchReviewRecord>().notNull(),
+  },
+  (t) => [
+    uniqueIndex("match_lot_review_sequence_idx").on(t.matchId, t.sequence),
+    check(
+      "match_lot_review_identity",
+      sql`${t.sequence} > 0
+      AND ${t.event}->>'version' IS NOT DISTINCT FROM 'human-lot-match-review-v1'
+      AND ${t.event}->>'id' IS NOT DISTINCT FROM ${t.id}
+      AND ${t.event}->>'matchId' IS NOT DISTINCT FROM ${t.matchId}
+      AND ${t.event}->>'companyId' IS NOT DISTINCT FROM ${t.companyId}
+      AND ${t.event}->>'publicationId' IS NOT DISTINCT FROM ${t.publicationId}
+      AND ${t.event}->>'sequence' IS NOT DISTINCT FROM ${t.sequence}::text`,
     ),
   ],
 ).enableRLS();
@@ -244,6 +339,7 @@ export const notifications = pgTable("notifications", {
         // Binds a rendered digest to the source review state used to prepare it.
         sourceScopeToken?: string;
         sourceReviewDependency?: SourceDependency;
+        lotNotice?: LotNotice;
       }[]
     >()
     .notNull(),

@@ -13,8 +13,19 @@ import { closeDb, getDb } from "@/db";
 import { settings, sourceRuns, publications } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { databaseOptions } from "@/lib/database-config";
+import {
+  LOT_RECONCILIATION_QUEUE,
+  type LotReconciliationJob,
+} from "@/lib/lot-reconciliation";
+import { reconcileLotNotices } from "./lot-notifications";
+import { matchAdoptedPublication } from "./lot-matching";
+import { DOCUMENTARY_ADOPTION_CAPABILITY } from "@/lib/documentary-capability";
+import { loadDocumentaryRuntimeActivation } from "@/lib/documentary-runtime-config";
 async function main() {
   assertProductionConfig();
+  // Read once before registering consumers. A malformed release file stops
+  // startup instead of silently reverting adopted records to legacy processing.
+  const documentaryActivation = loadDocumentaryRuntimeActivation();
   const boss = new PgBoss({
     ...databaseOptions(process.env, "queue"),
     schema: "pgboss",
@@ -37,6 +48,26 @@ async function main() {
       expireInSeconds: name === "ingest" ? 7200 : 1800,
     });
   await recoverUncertainDeliveries();
+  await boss.createQueue(LOT_RECONCILIATION_QUEUE, {
+    retryLimit: 2,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 1800,
+  });
+  await boss.work<LotReconciliationJob>(
+    LOT_RECONCILIATION_QUEUE,
+    { batchSize: 1 },
+    async ([job]) => {
+      await matchAdoptedPublication({
+        publicationId: job.data.publicationId,
+        signal: job.signal,
+      });
+      await reconcileLotNotices({ canonicalId: job.data.canonicalId });
+      await boss.send("digest", {}, { singletonKey: "all" });
+      await boss.send("send", {}, { singletonKey: "all" });
+    },
+  );
+  await reconcileLotNotices();
   await boss.work("ingest", { batchSize: 1 }, async ([job]) => {
     const adapters = [
       simap,
@@ -55,7 +86,7 @@ async function main() {
         .minus({ days: !last || now.hour === 8 ? 90 : 7 })
         .toJSDate();
       try {
-        await ingest(adapter, since, job.signal);
+        await ingest(adapter, since, job.signal, { documentaryActivation });
       } catch (e) {
         errors.push(
           e instanceof Error ? e.message : "Importazione non riuscita",
@@ -84,6 +115,7 @@ async function main() {
       await enrichAndMatch({
         publicationId: job.data.publicationId,
         signal: job.signal,
+        documentaryActivation,
       });
       await boss.send("digest", {}, { singletonKey: "all" });
     },
@@ -103,6 +135,16 @@ async function main() {
         target: settings.key,
         set: { value: new Date().toISOString() },
       });
+    const capability = {
+      capability: DOCUMENTARY_ADOPTION_CAPABILITY,
+      role: "worker",
+      buildId: process.env.MANDAT_BUILD_ID ?? "development",
+      reportedAt: new Date().toISOString(),
+    };
+    await getDb()
+      .insert(settings)
+      .values({ key: "worker_documentary_capability", value: capability })
+      .onConflictDoUpdate({ target: settings.key, set: { value: capability } });
   };
   await boss.work("heartbeat", { batchSize: 1 }, heartbeat);
   await heartbeat();

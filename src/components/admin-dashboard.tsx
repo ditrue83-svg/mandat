@@ -97,6 +97,15 @@ export function AdminDashboard({
             {data.gate.criticalIssues} problemi critici
           </strong>
         </p>
+        {data.gate.historical && (
+          <p className="meta">
+            Giudizi correnti: {data.gate.approved} positivi e{" "}
+            {data.gate.rejected} negativi. Da verificare: {data.gate.unresolved}
+            . Lo storico contiene {data.gate.historical.approved} progetti con
+            giudizi positivi e {data.gate.historical.rejected} con giudizi
+            negativi; non sostituisce le verifiche correnti.
+          </p>
+        )}
         <button
           className="button secondary space-top"
           disabled={disabled || (!data.automatic && !data.gate.allowed)}
@@ -220,7 +229,7 @@ export function AdminDashboard({
           .filter((m) => {
             // Keep the stored eligibility for diagnostics; the source barrier
             // changes what is a candidate now, including cached AI negatives.
-            const candidate =
+            const candidate = m.lotReviewUrl ? m.eligible :
               m.sourceScopeReview?.status === "required" ||
               m.sourceReviewState === "blocked" ||
               m.sourceReviewState === "stale"
@@ -248,37 +257,46 @@ export function AdminDashboard({
                 <div className="notice">{m.reviewReasons.join("; ")}</div>
               )}
               <div className="feedback-row">
-                <button
-                  disabled={
-                    disabled ||
-                    m.reviewRequired ||
-                    m.sourceScopeReview?.status === "required"
-                  }
-                  className={`button ${m.approved === true ? "primary" : "secondary"}`}
-                  onClick={() =>
-                    act({
-                      action: "review",
-                      id: m.id,
-                      approved: true,
-                      expectedEvaluationRevision: m.evaluationRevision,
-                      expectedEvaluationToken: m.evaluationToken,
-                      expectedContentRevision: m.contentRevision,
-                      expectedProfileRevision: m.profileRevision,
-                      expectedSourceReviewDependency: m.sourceReviewDependency,
-                    })
-                  }
-                >
-                  Pertinente · Approva
-                </button>
-                <button
-                  disabled={disabled}
-                  className={`button ${m.approved === false ? "primary" : "secondary"}`}
-                  onClick={() =>
-                    act({ action: "review", id: m.id, approved: false })
-                  }
-                >
-                  Non pertinente
-                </button>
+                {m.lotReviewUrl ? (
+                  <a className="button primary" href={m.lotReviewUrl}>
+                    Valuta i lotti per questa ditta
+                  </a>
+                ) : (
+                  <>
+                    <button
+                      disabled={
+                        disabled ||
+                        m.reviewRequired ||
+                        m.sourceScopeReview?.status === "required"
+                      }
+                      className={`button ${m.approved === true ? "primary" : "secondary"}`}
+                      onClick={() =>
+                        act({
+                          action: "review",
+                          id: m.id,
+                          approved: true,
+                          expectedEvaluationRevision: m.evaluationRevision,
+                          expectedEvaluationToken: m.evaluationToken,
+                          expectedContentRevision: m.contentRevision,
+                          expectedProfileRevision: m.profileRevision,
+                          expectedSourceReviewDependency:
+                            m.sourceReviewDependency,
+                        })
+                      }
+                    >
+                      Pertinente · Approva
+                    </button>
+                    <button
+                      disabled={disabled}
+                      className={`button ${m.approved === false ? "primary" : "secondary"}`}
+                      onClick={() =>
+                        act({ action: "review", id: m.id, approved: false })
+                      }
+                    >
+                      Non pertinente
+                    </button>
+                  </>
+                )}
                 <button
                   className="button secondary"
                   onClick={() => setEditing(editing === m.id ? null : m.id)}

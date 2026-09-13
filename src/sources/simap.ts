@@ -335,7 +335,9 @@ export const simap: SourceAdapter = {
 };
 
 // Recheck tracked open projects even when their publication is outside the search window.
-simap.refresh = async (previous) => {
+export async function readSimapRefreshEntry(
+  previous: Publication,
+): Promise<SourceEntry> {
   const parsed = projectHeaderSchema.safeParse(
     JSON.parse(
       await fetchOfficial(
@@ -369,7 +371,7 @@ simap.refresh = async (previous) => {
       );
     latest = first;
   }
-  return simap.detail({
+  return {
     id: previous.externalId,
     raw: {
       id: previous.externalId,
@@ -381,5 +383,7 @@ simap.refresh = async (previous) => {
       title: latest.title,
       procOfficeName: previous.buyer,
     },
-  });
-};
+  };
+}
+simap.refresh = async (previous) =>
+  simap.detail(await readSimapRefreshEntry(previous));

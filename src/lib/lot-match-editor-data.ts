@@ -1,0 +1,179 @@
+import type { CompanyProfile } from "./domain";
+import type { LotAssessmentResult } from "./lot-assessment";
+import type {
+  LoadedLotMatchReview,
+  lotMatchReviewTarget,
+} from "./lot-match-reviews";
+import type { LotSourceEditorData } from "./lot-source-editor-data";
+
+type SelectedTarget = ReturnType<typeof lotMatchReviewTarget>;
+export type LotMatchEditorData = {
+  company: { id: string; profile: Omit<CompanyProfile, "emailEnabled"> };
+  publication: { id: string; title: string; sourceUrl: string };
+  expected: LoadedLotMatchReview["expected"];
+  project: {
+    reason: string;
+    blocked: boolean;
+    suppressed: boolean;
+    dismissed: boolean;
+  };
+  lots: {
+    id: string;
+    number: number | null;
+    state: string;
+    result: LotAssessmentResult | null;
+    reason: string | null;
+  }[];
+  selected: null | {
+    target: SelectedTarget["target"];
+    expected: SelectedTarget["expected"];
+    number: number | null;
+    canAssess: boolean;
+    allowsCertainty: boolean;
+    eligible: boolean;
+    filterReason: string;
+    reviewReasons: string[];
+    texts: LotSourceEditorData["texts"];
+    original: string | null;
+  };
+  history: {
+    id: string;
+    at: string;
+    action: string;
+    lotId: string | null;
+    result: LotAssessmentResult | null;
+    reason: string | null;
+    note: string;
+    quotes: string[];
+  }[];
+};
+
+// Explicit display projection: no database rows, actors, user records, or full
+// archives of other lots cross the server/client boundary. Hashes stay unchanged.
+export function lotMatchEditorData(
+  loaded: LoadedLotMatchReview,
+  selected: SelectedTarget | null,
+): LotMatchEditorData {
+  const profile = loaded.company.profile;
+  const content = selected?.context.targetContent;
+  const texts: LotSourceEditorData["texts"] = [];
+  function walk(value: unknown, path: string, scope: "project" | "lot") {
+    if (typeof value === "string" && value.trim())
+      texts.push({
+        path,
+        text: value,
+        scope,
+        documentary: /\/(?:title|orderDescription)\/(?:it|de|fr|en)$/.test(
+          path,
+        ),
+      });
+    else if (value && typeof value === "object")
+      for (const [key, child] of Object.entries(value))
+        walk(
+          child,
+          `${path}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`,
+          scope,
+        );
+  }
+  if (content) {
+    walk(content.projectSections, "", "project");
+    if (content.selectedLot) {
+      walk(content.selectedLot.record, content.selectedLot.path, "lot");
+      if (content.selectedLot.basePath)
+        walk(content.selectedLot.header, content.selectedLot.basePath, "lot");
+    }
+  }
+  return {
+    company: {
+      id: loaded.company.id,
+      profile: {
+        name: profile.name,
+        activities: profile.activities,
+        employees: profile.employees,
+        sectors: [...profile.sectors],
+        zones: [...profile.zones],
+        keywords: [...profile.keywords],
+        exclusions: [...profile.exclusions],
+        minValue: profile.minValue,
+        maxValue: profile.maxValue,
+      },
+    },
+    publication: {
+      id: loaded.publication.id,
+      title: loaded.publication.data.title,
+      sourceUrl: loaded.publication.data.sourceUrl,
+    },
+    expected: { ...loaded.expected },
+    project: {
+      reason: loaded.project.reason,
+      blocked: loaded.project.projectBarrier.state === "blocked",
+      suppressed: !!loaded.group.suppression?.active,
+      dismissed: loaded.project.dismissed,
+    },
+    lots: loaded.project.lots.map((lot) => ({
+      id: lot.target.lotId,
+      number: lot.number,
+      state: lot.state,
+      result: lot.state === "current" ? (lot.evaluation?.result ?? null) : null,
+      reason: lot.state === "current" ? (lot.evaluation?.reason ?? null) : null,
+    })),
+    selected: selected
+      ? {
+          target: { ...selected.target },
+          expected: {
+            ...selected.expected,
+            sourceDependency: {
+              ...selected.expected.sourceDependency,
+              target: { ...selected.expected.sourceDependency.target },
+            },
+          },
+          number:
+            content?.directory.find(
+              (lot) => lot.id.toLowerCase() === selected.target.lotId,
+            )?.number ?? null,
+          canAssess:
+            !!content?.selectedLot &&
+            !!selected.context.dependency.selectionHash,
+          allowsCertainty:
+            selected.context.state === "manual_source" &&
+            selected.context.form === "defined_service" &&
+            selected.context.projectBarrier.state === "clear",
+          eligible: selected.preliminary.eligible,
+          filterReason: selected.preliminary.reason,
+          reviewReasons: [...selected.preliminary.reviewReasons],
+          texts,
+          original: content
+            ? JSON.stringify(
+                {
+                  project: content.projectSections,
+                  lot: content.selectedLot?.record ?? null,
+                  lotHeader: content.selectedLot?.header ?? null,
+                },
+                null,
+                2,
+              )
+            : null,
+        }
+      : null,
+    history: loaded.history.flatMap((event) => {
+      const entry =
+        event.action === "assess_lot"
+          ? event.after.evaluations?.entries.find((e) => e.id === event.id)
+          : null;
+      if (selected && entry && entry.target.lotId !== selected.target.lotId)
+        return [];
+      return [
+        {
+          id: event.id,
+          at: event.at,
+          action: event.action,
+          lotId: entry?.target.lotId ?? null,
+          result: entry?.result ?? null,
+          reason: entry?.reason ?? null,
+          note: event.note,
+          quotes: entry?.evidence.map((e) => e.quote) ?? [],
+        },
+      ];
+    }),
+  };
+}

@@ -57,6 +57,12 @@ export default async function Detail({
         <div>
           <section className="panel">
             <h2>Le informazioni essenziali</h2>
+            {item.lotReview && (
+              <p className="meta">
+                Scadenza, importo e luogo devono essere verificati per ciascun
+                lotto nella fonte ufficiale.
+              </p>
+            )}
             <dl className="detail-facts">
               <div>
                 <dt>Scadenza</dt>
@@ -96,54 +102,117 @@ export default async function Detail({
               </a>
             )}
           </section>
-          <section className="panel">
-            <div className="eyebrow">
-              RIASSUNTO ASSISTITO DALL’AI · DA VERIFICARE
-            </div>
-            <h2>Di che lavoro si tratta?</h2>
-            <p>
-              {item.summary ||
-                "Il riassunto non è ancora disponibile. Puoi leggere la pubblicazione originale qui sotto."}
-            </p>
-            <MatchNote assessment={item.assessment} reason={item.reason} />
-            {item.requirements.length > 0 && (
-              <>
-                <h3>Da controllare prima di partecipare</h3>
-                <ul className="detail-list">
-                  {item.requirements.map((r, i) => (
-                    <li key={i}>{r}</li>
-                  ))}
-                </ul>
-              </>
-            )}
-            {item.reviewRequired && (
-              <div className="notice">
-                Alcune informazioni richiedono un controllo:{" "}
-                {item.reviewReasons.join("; ")}. La fonte originale prevale.
+          {item.lotReview ? (
+            <section className="panel">
+              <h2>I lotti e la tua ditta</h2>
+              <MatchNote assessment={item.assessment} reason={item.reason} />
+              {!item.lotReview.lots.length && (
+                <p>
+                  Non sono disponibili lotti documentati da valutare. La fonte
+                  richiede una verifica.
+                </p>
+              )}
+              {item.lotReview.lots.map((lot) => (
+                <article key={lot.lotId} className="space-top">
+                  <h3>
+                    {lot.number === null
+                      ? "Lotto senza numero indicato"
+                      : `Lotto ${lot.number}`}
+                  </h3>
+                  <p>
+                    {lot.state === "current"
+                      ? lot.result === "direct"
+                        ? "Interesse potenziale verificato"
+                        : lot.result === "different"
+                          ? "Attività diverse da quelle della ditta"
+                          : "Pertinenza da verificare"
+                      : "Valutazione da aggiornare"}
+                  </p>
+                  {lot.reason && <p>{lot.reason}</p>}
+                  {lot.issue && <p className="notice">{lot.issue}</p>}
+                  <p className="meta">
+                    Luogo:{" "}
+                    {lot.operational?.zone ||
+                      lot.operational?.canton ||
+                      "Non indicato"}{" "}
+                    · Scadenza: Non indicata · Importo: Non indicato
+                  </p>
+                  {!!lot.reviewReasons.length && (
+                    <p className="notice">{lot.reviewReasons.join("; ")}</p>
+                  )}
+                  {!!lot.evidence.length && (
+                    <details>
+                      <summary>
+                        Passaggi della fonte usati nella revisione
+                      </summary>
+                      {lot.evidence.map((e, i) => (
+                        <blockquote key={i}>
+                          {e.quote}{" "}
+                          <a
+                            className="source-link"
+                            href={e.url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Fonte ufficiale{e.page ? ` · pagina ${e.page}` : ""}
+                          </a>
+                        </blockquote>
+                      ))}
+                    </details>
+                  )}
+                </article>
+              ))}
+            </section>
+          ) : (
+            <section className="panel">
+              <div className="eyebrow">
+                RIASSUNTO ASSISTITO DALL’AI · DA VERIFICARE
               </div>
-            )}
-            {item.evidence.length > 0 && (
-              <details className="space-top">
-                <summary>Fonti delle informazioni estratte</summary>
-                <ul className="detail-list">
-                  {item.evidence.map((e, i) => (
-                    <li key={i}>
-                      <a
-                        className="source-link"
-                        href={e.url}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {e.field}
-                        {e.page ? ` · pagina ${e.page}` : ""}
-                      </a>
-                      <br />“{e.quote}”
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
-          </section>
+              <h2>Di che lavoro si tratta?</h2>
+              <p>
+                {item.summary ||
+                  "Il riassunto non è ancora disponibile. Puoi leggere la pubblicazione originale qui sotto."}
+              </p>
+              <MatchNote assessment={item.assessment} reason={item.reason} />
+              {item.requirements.length > 0 && (
+                <>
+                  <h3>Da controllare prima di partecipare</h3>
+                  <ul className="detail-list">
+                    {item.requirements.map((r, i) => (
+                      <li key={i}>{r}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {item.reviewRequired && (
+                <div className="notice">
+                  Alcune informazioni richiedono un controllo:{" "}
+                  {item.reviewReasons.join("; ")}. La fonte originale prevale.
+                </div>
+              )}
+              {item.evidence.length > 0 && (
+                <details className="space-top">
+                  <summary>Fonti delle informazioni estratte</summary>
+                  <ul className="detail-list">
+                    {item.evidence.map((e, i) => (
+                      <li key={i}>
+                        <a
+                          className="source-link"
+                          href={e.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {e.field}
+                          {e.page ? ` · pagina ${e.page}` : ""}
+                        </a>
+                        <br />“{e.quote}”
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </section>
+          )}
           <section className="panel">
             <h2>Pubblicazione originale</h2>
             {!viewer.demo && item.sourceUrls.length > 1 && (

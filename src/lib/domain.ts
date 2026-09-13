@@ -1,3 +1,4 @@
+import type { projectLotAssessmentDto } from "./lot-assessment";
 // Text signals are complete tokens, including explicitly supported inflections
 // and German compounds. Do not add stems that match inside unrelated words.
 export const SECTORS = [
@@ -258,6 +259,7 @@ export type MatchAssessment =
   | "excluded"
   | "demo";
 export type Opportunity = Publication & {
+  lotReview?: ReturnType<typeof projectLotAssessmentDto>;
   score: number;
   reason: string;
   assessment: MatchAssessment;

@@ -1,4 +1,14 @@
-import { and, eq, ne, isNull, sql, desc, getTableColumns } from "drizzle-orm";
+import {
+  and,
+  or,
+  eq,
+  ne,
+  isNull,
+  isNotNull,
+  sql,
+  desc,
+  getTableColumns,
+} from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   publications,
@@ -24,7 +34,18 @@ import {
 } from "@/lib/cpv-service-signals";
 import { queueChangeNotices } from "./notifications";
 import { attachFoglioPdf } from "@/sources/foglio";
-import { legacySimapRevision } from "@/sources/simap";
+import { legacySimapRevision, readSimapRefreshEntry } from "@/sources/simap";
+import {
+  collectSimapDocumentary,
+  collectAndAdoptSimapDocumentary,
+} from "./documentary-ingestion";
+import {
+  assertDocumentaryAdoptionActivation,
+  type DocumentaryAdoptionActivation,
+} from "@/lib/documentary-adoption";
+import type { DocumentaryRefreshExpectation } from "@/lib/documentary-store";
+import { matchAdoptedPublication } from "./lot-matching";
+import { CanonicalMembershipConflict } from "@/lib/canonical-lock";
 import {
   hasSourceScopeReview,
   isMatchRevisionCurrent,
@@ -84,6 +105,12 @@ export async function storePublication(
     )
     .limit(1);
   if (previous?.revision === p.revision) return false;
+  // A legacy detail response cannot advance an adopted documentary source:
+  // it has no matching immutable observation to install with the new content.
+  if (previous?.documentarySnapshotId)
+    throw new Error(
+      "La fonte adottata richiede un aggiornamento documentario completo.",
+    );
   if (
     previous &&
     p.source === "simap" &&
@@ -100,6 +127,7 @@ export async function storePublication(
           and(
             eq(publications.id, previous.id),
             eq(publications.revision, previous.revision),
+            isNull(publications.documentarySnapshotId),
           ),
         )
         .returning({ id: publications.id });
@@ -201,6 +229,16 @@ export async function storePublication(
     );
   }
   await db.transaction(async (tx) => {
+    // New publications have no row to lock yet. Serialize their membership and
+    // inherited feedback with canonical veto/reopen/claim, including the first
+    // member. If an existing publication moves, acquire both groups in order.
+    const groups = [
+      ...new Set([canonicalId, ...(previous ? [previous.canonicalId] : [])]),
+    ].sort();
+    for (const group of groups)
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`mandat-canonical:${group}`}, 0))`,
+      );
     const currentCousins = await tx
       .select()
       .from(publications)
@@ -222,6 +260,14 @@ export async function storePublication(
         ),
       )
       .for("update");
+    if (currentPublication && !groups.includes(currentPublication.canonicalId))
+      throw new CanonicalMembershipConflict(
+        "Il gruppo della pubblicazione è cambiato durante l'importazione.",
+      );
+    if (currentPublication?.documentarySnapshotId)
+      throw new Error(
+        "La fonte adottata richiede un aggiornamento documentario completo.",
+      );
     // A source update does not prove that a recorded scope doubt is resolved.
     // Read under the lock so a concurrent founder action is not overwritten.
     // Carry it to a newer notice of the same source/project as well. The
@@ -307,11 +353,11 @@ export async function storePublication(
           updatedAt: new Date(),
         },
       });
-    if (!previous && predecessor) {
+    if (!currentPublication && currentPredecessor) {
       const oldMatches = await tx
         .select()
         .from(matches)
-        .where(eq(matches.publicationId, predecessor.id));
+        .where(eq(matches.publicationId, currentPredecessor.id));
       for (const match of oldMatches)
         await tx
           .insert(matches)
@@ -324,13 +370,26 @@ export async function storePublication(
             approved: null,
             reviewedAt: null,
             sourceReviewDependency: null,
+            ...(currentPredecessor.documentarySnapshotId ||
+            match.lotEvaluations !== null
+              ? {
+                  score: 0,
+                  reason:
+                    "La nuova pubblicazione richiede una valutazione propria: i giudizi dei lotti precedenti restano storici.",
+                  reviewNotes: "Richiesta revisione della nuova pubblicazione",
+                }
+              : {}),
+            // A new publication is not the target of an earlier lot judgment.
+            // The project veto is resolved centrally for the canonical group.
+            lotEvaluations: null,
+            lotSuppression: null,
             updatedAt: new Date(),
           })
           .onConflictDoNothing();
       const oldFeedback = await tx
         .select()
         .from(feedback)
-        .where(eq(feedback.publicationId, predecessor.id));
+        .where(eq(feedback.publicationId, currentPredecessor.id));
       for (const f of oldFeedback)
         await tx
           .insert(feedback)
@@ -354,7 +413,13 @@ export async function storePublication(
     await tx
       .update(matches)
       .set({ approved: null, reviewedAt: null, revision: p.revision })
-      .where(eq(matches.publicationId, p.id));
+      .where(
+        and(
+          eq(matches.publicationId, p.id),
+          isNull(matches.lotEvaluations),
+          isNull(matches.lotSuppression),
+        ),
+      );
   });
   if (p.reviewRequired)
     await recordIssue(
@@ -373,14 +438,84 @@ export async function ingest(
   adapter: SourceAdapter,
   since: Date,
   signal?: AbortSignal,
+  options: {
+    documentaryMode?: "shadow";
+    documentaryActivation?: DocumentaryAdoptionActivation;
+  } = {},
 ) {
+  const activation = options.documentaryActivation?.enabled
+    ? assertDocumentaryAdoptionActivation(options.documentaryActivation)
+    : null;
+  if (activation && options.documentaryMode === "shadow")
+    throw new Error("Raccolta shadow e adozione sono modalità distinte.");
   const id = crypto.randomUUID();
   await getDb()
     .insert(sourceRuns)
     .values({ id, source: adapter.id, status: "running" });
   let imported = 0,
     errors = 0;
+  // Activation comes only from protected server configuration. Job payloads and
+  // source content never select a rollout; missing configuration stays legacy.
+  const documentaryShadow =
+    adapter.id === "simap" && options.documentaryMode === "shadow";
+  const documentaryEnabled = adapter.id === "simap" && activation !== null;
+  const collect = async (
+    entry: Parameters<SourceAdapter["detail"]>[0],
+    expectedRefresh?: DocumentaryRefreshExpectation | null,
+  ) => {
+    if (documentaryEnabled) {
+      const result = await collectAndAdoptSimapDocumentary(entry, activation!, {
+        expectedRefresh,
+        signal,
+      });
+      if (result.requiresReview)
+        throw new Error(`Dettaglio simap da verificare: ${result.refusalCode}`);
+      return result.imported;
+    }
+    const [adopted] = await getDb()
+      .select({ pointer: publications.documentarySnapshotId })
+      .from(publications)
+      .where(
+        and(
+          eq(publications.source, adapter.id),
+          eq(publications.externalId, entry.id),
+          isNotNull(publications.documentarySnapshotId),
+        ),
+      );
+    if (adopted)
+      throw new Error(
+        "Aggiornamento documentario sospeso: configurazione di adozione assente.",
+      );
+    if (!documentaryShadow)
+      return storePublication(await adapter.detail(entry), {
+        extractDocuments: true,
+      });
+    const result = await collectSimapDocumentary(entry, (p) =>
+      storePublication(p, { extractDocuments: true }),
+    );
+    if (result.requiresReview)
+      throw new Error(`Dettaglio simap da verificare: ${result.refusalCode}`);
+    return result.imported;
+  };
   try {
+    // Bind list results to database state captured BEFORE the list request.
+    // Otherwise an older publication UUID returned by a slow list could be
+    // rebased onto a newer concurrent import by beginDocumentaryRequest.
+    const observedForList = documentaryEnabled
+      ? new Map(
+          (
+            await getDb()
+              .select({
+                externalId: publications.externalId,
+                revision: publications.revision,
+                documentarySnapshotId: publications.documentarySnapshotId,
+                buyer: sql<string>`${publications.data}->>'buyer'`,
+              })
+              .from(publications)
+              .where(eq(publications.source, "simap"))
+          ).map(({ externalId, ...expected }) => [externalId, expected]),
+        )
+      : null;
     const entries = await adapter.list(since);
     const fetched = new Set(entries.map((e) => e.id));
     if (adapter.refresh) {
@@ -390,19 +525,33 @@ export async function ingest(
         .where(
           and(
             eq(publications.source, adapter.id),
-            eq(publications.status, "open"),
+            or(
+              eq(publications.status, "open"),
+              documentaryEnabled
+                ? isNotNull(publications.documentarySnapshotId)
+                : undefined,
+            ),
           ),
         );
       for (const old of tracked) {
         signal?.throwIfAborted();
         if (fetched.has(old.externalId)) continue;
         try {
-          if (
-            await storePublication(await adapter.refresh(old.data), {
-              extractDocuments: true,
-            })
-          )
-            imported++;
+          if (old.documentarySnapshotId && !documentaryEnabled)
+            throw new Error(
+              "Aggiornamento documentario sospeso: configurazione di adozione assente.",
+            );
+          const updated =
+            documentaryShadow || documentaryEnabled
+              ? await collect(await readSimapRefreshEntry(old.data), {
+                  revision: old.revision,
+                  documentarySnapshotId: old.documentarySnapshotId,
+                  buyer: old.data.buyer,
+                })
+              : await storePublication(await adapter.refresh(old.data), {
+                  extractDocuments: true,
+                });
+          if (updated) imported++;
           await resolveIssue(`source-item:${adapter.id}:${old.externalId}`);
         } catch (error) {
           errors++;
@@ -418,8 +567,13 @@ export async function ingest(
     for (const e of entries) {
       signal?.throwIfAborted();
       try {
-        const p = await adapter.detail(e);
-        if (await storePublication(p, { extractDocuments: true })) imported++;
+        if (
+          await collect(
+            e,
+            observedForList ? (observedForList.get(e.id) ?? null) : undefined,
+          )
+        )
+          imported++;
         await resolveIssue(`source-item:${adapter.id}:${e.id}`);
       } catch (err) {
         errors++;
@@ -465,8 +619,18 @@ export async function ingest(
   return imported;
 }
 export async function enrichAndMatch(
-  options: { publicationId?: string; signal?: AbortSignal; now?: Date } = {},
+  options: {
+    publicationId?: string;
+    signal?: AbortSignal;
+    now?: Date;
+    documentaryActivation?: DocumentaryAdoptionActivation;
+  } = {},
 ) {
+  const documentaryEnabled = options.documentaryActivation?.enabled
+    ? Boolean(
+        assertDocumentaryAdoptionActivation(options.documentaryActivation),
+      )
+    : false;
   const db = getDb();
   const rows = await db
     .select({
@@ -478,7 +642,10 @@ export async function enrichAndMatch(
     .from(publications)
     .where(
       and(
-        eq(publications.status, "open"),
+        or(
+          eq(publications.status, "open"),
+          isNotNull(publications.documentarySnapshotId),
+        ),
         options.publicationId
           ? eq(publications.id, options.publicationId)
           : undefined,
@@ -491,6 +658,26 @@ export async function enrichAndMatch(
   let failedAnalyses = 0;
   for (const row of rows) {
     options.signal?.throwIfAborted();
+    // Check the current pointer before legacy processing, without introducing
+    // a legacy transaction before its own source/CAS read. Adoption drains old
+    // requests; the write guards below still reject every in-flight AI result.
+    const [currentPointer] = await db
+      .select({ adopted: publications.documentarySnapshotId })
+      .from(publications)
+      .where(eq(publications.id, row.id));
+    if (currentPointer?.adopted) {
+      await matchAdoptedPublication({
+        publicationId: row.id,
+        now: options.now,
+        signal: options.signal,
+      });
+      continue;
+    }
+    // During a coordinated adoption rollout, a simap row still awaiting its
+    // immutable acquisition must not start a new legacy AI request. Existing
+    // judgments remain historical until the pointer is adopted; no ready match
+    // or positive decision is manufactured here.
+    if (documentaryEnabled && row.source === "simap") continue;
     if (
       row.source === "foglio-ti" &&
       process.env.FOGLIO_REUSE_CONFIRMED !== "true"
@@ -540,6 +727,7 @@ export async function enrichAndMatch(
             .for("update");
           if (
             !current ||
+            current.documentarySnapshotId ||
             !sameSourceReviewDependency(
               sourceDependency,
               (await readSourceReviewContext(tx, current))?.dependency,
@@ -560,7 +748,14 @@ export async function enrichAndMatch(
             )
             .returning({ id: publications.id });
         });
-        if (!updated.length) continue;
+        if (!updated.length) {
+          await matchAdoptedPublication({
+            publicationId: p.id,
+            now: options.now,
+            signal: options.signal,
+          });
+          continue;
+        }
         aiReady = true;
         await resolveIssue(`ai:${p.id}`);
       } catch (e) {
@@ -577,6 +772,18 @@ export async function enrichAndMatch(
     }
     for (const firm of firms) {
       if (!firm.onboardedAt) continue;
+      const [sourceState] = await db
+        .select({ adopted: publications.documentarySnapshotId })
+        .from(publications)
+        .where(eq(publications.id, p.id));
+      if (sourceState?.adopted) {
+        await matchAdoptedPublication({
+          publicationId: p.id,
+          now: options.now,
+          signal: options.signal,
+        });
+        break;
+      }
       const profileRevision = fingerprint(firm.profile);
       options.signal?.throwIfAborted();
       let preliminary = preliminaryMatch(p, firm.profile, options.now);
@@ -710,6 +917,7 @@ export async function enrichAndMatch(
           .for("share");
         if (
           !current ||
+          current.documentarySnapshotId ||
           current.data.revision !== p.revision ||
           current.data.sourceScopeReview?.token !==
             p.sourceScopeReview?.token ||
@@ -763,7 +971,14 @@ export async function enrichAndMatch(
       });
       // Once a changed source is observed, later companies must not start
       // another request from this already invalidated source snapshot.
-      if (sourceChangedDuringAssessment) break;
+      if (sourceChangedDuringAssessment) {
+        await matchAdoptedPublication({
+          publicationId: p.id,
+          now: options.now,
+          signal: options.signal,
+        });
+        break;
+      }
     }
   }
   // Persist successful assessments and review states before failing the job.

@@ -15,6 +15,8 @@ import {
   feedback,
   session,
 } from "@/db/schema";
+import { readProjectQuality } from "./project-quality";
+import { readCurrentLotMatch, presentLotOpportunity, lotOpportunityVisible } from "./lot-readers";
 import { automationGate, preliminaryMatch } from "./matching";
 import type { CompanyProfile } from "./domain";
 import { emailLayout, escapeHtml, sendMail } from "./mail";
@@ -92,21 +94,7 @@ export async function notifyInvitation(email: string, name: string) {
 }
 export async function getGate() {
   const db = getDb();
-  const reviewed = await db
-    .select({
-      companyId: matches.companyId,
-      canonicalId: publications.canonicalId,
-      approved: matches.approved,
-    })
-    .from(matches)
-    .innerJoin(publications, eq(publications.id, matches.publicationId))
-    .where(sql`${matches.reviewedAt} is not null`)
-    .orderBy(desc(matches.reviewedAt));
-  const uniqueReviews = new Map<string, boolean | null>();
-  for (const r of reviewed) {
-    const key = `${r.companyId}:${r.canonicalId}`;
-    if (!uniqueReviews.has(key)) uniqueReviews.set(key, r.approved);
-  }
+  const quality = await readProjectQuality();
   const [critical] = await db
     .select({ total: sql<number>`count(*)::int` })
     .from(issues)
@@ -115,13 +103,16 @@ export async function getGate() {
     .select()
     .from(settings)
     .where(eq(settings.key, "pilot_started_at"));
-  return automationGate({
-    reviewed: uniqueReviews.size,
-    approved: [...uniqueReviews.values()].filter(Boolean).length,
-    criticalIssues: critical.total,
-    startedAt:
-      typeof started?.value === "string" ? new Date(started.value) : null,
-  });
+  return {
+    ...quality,
+    ...automationGate({
+      reviewed: quality.reviewed,
+      approved: quality.approved,
+      criticalIssues: critical.total,
+      startedAt:
+        typeof started?.value === "string" ? new Date(started.value) : null,
+    }),
+  };
 }
 export async function adminSnapshot(demo: boolean) {
   if (demo)
@@ -174,6 +165,8 @@ export async function adminSnapshot(demo: boolean) {
     db
       .select({
         id: matches.id,
+        companyId: companies.id,
+        documentarySnapshotId: publications.documentarySnapshotId,
         publicationId: publications.id,
         title: publications.title,
         company: companies.profile,
@@ -240,8 +233,17 @@ export async function adminSnapshot(demo: boolean) {
   ]);
   const sourceReviews = await readSourceReviewContexts(
     db,
-    review.map((r) => r.reviewRequired),
+    review.filter((r) => !r.documentarySnapshotId).map((r) => r.reviewRequired),
   );
+  const lotReviews = new Map<
+    string,
+    NonNullable<Awaited<ReturnType<typeof readCurrentLotMatch>>>
+  >();
+  for (const r of review) {
+    if (!r.documentarySnapshotId) continue;
+    const loaded = await readCurrentLotMatch(r.companyId, r.publicationId);
+    if (loaded) lotReviews.set(r.id, loaded);
+  }
   return {
     demo: false,
     gate: {
@@ -251,6 +253,10 @@ export async function adminSnapshot(demo: boolean) {
       criticalIssues: gate.criticalIssues,
       elapsedDays: gate.elapsedDays,
       precision: gate.precision,
+      rejected: gate.rejected,
+      unresolved: gate.unresolved,
+      historical: gate.historical,
+      version: gate.version,
     },
     automatic: auto[0]?.value === true,
     spend: Number(usage[0].total),
@@ -267,25 +273,43 @@ export async function adminSnapshot(demo: boolean) {
     })),
     matches: review.map((r) => {
       const sourceReview = sourceReviews.get(r.publicationId) ?? null;
+      const loaded = lotReviews.get(r.id);
+      const lot = loaded ? presentLotOpportunity(loaded) : null;
       return {
         id: r.id,
+        lotReview: lot?.lotReview ?? null,
+        lotReviewUrl: r.documentarySnapshotId
+          ? `/admin/valutazioni/${encodeURIComponent(r.companyId)}/${encodeURIComponent(r.publicationId)}`
+          : null,
         publicationId: r.publicationId,
         title: r.title,
         company: r.company.name,
         companyActivities: r.company.activities,
         profileRevision: fingerprint(r.company),
-        score: r.score,
-        eligible: r.eligible,
-        ...presentMatch({
-          match: r,
-          publication: r.reviewRequired,
-          aiRevision: r.aiRevision,
-          profileRevision: fingerprint(r.company),
-          sourceReview,
-          preliminary: preliminaryMatch(r.reviewRequired, r.company),
-        }),
-        approved: r.approved,
-        reviewed: !!r.reviewedAt,
+        score: lot?.score ?? r.score,
+        eligible: loaded
+          ? lotOpportunityVisible(loaded, false, new Date())
+          : r.eligible,
+        ...(lot
+          ? { assessment: lot.assessment, reason: lot.reason }
+          : presentMatch({
+              match: r,
+              publication: r.reviewRequired,
+              aiRevision: r.aiRevision,
+              profileRevision: fingerprint(r.company),
+              sourceReview,
+              preliminary: preliminaryMatch(r.reviewRequired, r.company),
+            })),
+        approved: loaded
+          ? loaded.project.quality === "approved"
+            ? true
+            : loaded.project.quality === "rejected"
+              ? false
+              : null
+          : r.approved,
+        reviewed: loaded
+          ? loaded.project.quality !== "unresolved"
+          : !!r.reviewedAt,
         evaluationRevision: r.revision,
         evaluationToken: matchReviewToken(r),
         sourceReviewState: sourceReviewBindingState(
@@ -294,6 +318,7 @@ export async function adminSnapshot(demo: boolean) {
         ),
         sourceReviewDependency: sourceReview?.dependency ?? null,
         reviewRequired:
+          !!r.documentarySnapshotId ||
           r.reviewRequired.reviewRequired ||
           hasSourceScopeReview(r.reviewRequired) ||
           sourceReviewBlocksComparison(sourceReview) ||
@@ -302,7 +327,7 @@ export async function adminSnapshot(demo: boolean) {
         sourceScopeReview: r.reviewRequired.sourceScopeReview,
         sourceRevision: r.sourceRevision,
         contentRevision: r.reviewRequired.revision,
-        reviewReasons: r.reviewRequired.reviewReasons,
+        reviewReasons: lot?.reviewReasons ?? r.reviewRequired.reviewReasons,
         summary: r.reviewRequired.summary,
         deadline: r.reviewRequired.deadline,
         valueChf: r.reviewRequired.valueChf,
