@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { HttpError, pageViewer } from "@/lib/viewer";
 import { loadSourceReviewContext } from "@/lib/source-reviews";
+import { sourceReviewEditorData } from "@/lib/source-review-editor-data";
 import { Shell } from "@/components/shell";
 import { SourceReviewEditor } from "@/components/source-review-editor";
 
@@ -41,7 +42,7 @@ export default async function SourceReviewPage({
       </Link>
       <SourceReviewEditor
         key={`${data.expected.eventId ?? "none"}:${data.expected.sourceSnapshotHash}`}
-        data={data}
+        data={sourceReviewEditorData(data)}
         demo={viewer.demo}
       />
     </Shell>

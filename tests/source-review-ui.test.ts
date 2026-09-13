@@ -1,4 +1,9 @@
-import { createElement } from "react";
+import {
+  Children,
+  createElement,
+  isValidElement,
+  type ReactElement,
+} from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -159,6 +164,25 @@ function render(input = data(), demo = false) {
   return renderToStaticMarkup(
     createElement(SourceReviewEditor, { data: input, demo }),
   );
+}
+function expectPlainClientData(value: unknown) {
+  if (value === null || typeof value !== "object") return;
+  expect(Object.getPrototypeOf(value)).toBe(
+    Array.isArray(value) ? Array.prototype : Object.prototype,
+  );
+  Object.values(value).forEach(expectPlainClientData);
+}
+async function pageEditorData(input: SourceReviewEditorData) {
+  mocks.pageViewer.mockResolvedValue({ ...demoViewer, demo: false });
+  mocks.load.mockResolvedValue(input);
+  const page = await SourceReviewPage({
+    params: Promise.resolve({ id: input.publication.id }),
+  });
+  const editor = Children.toArray(page.props.children).find(
+    (child) => isValidElement(child) && child.type === SourceReviewEditor,
+  ) as ReactElement<{ data: SourceReviewEditorData }>;
+  expect(editor).toBeDefined();
+  return editor.props.data;
 }
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => vi.unstubAllGlobals());
@@ -424,6 +448,77 @@ describe("salvataggio della revisione", () => {
 });
 
 describe("pagina riservata alla revisione della fonte", () => {
+  it("passa al client solo oggetti ordinari, preservando corpus, storico e aspettative della fonte", async () => {
+    const current = snapshot();
+    const input = data(current, [record(current)]);
+    input.publication.sourceScopeReview = undefined;
+    const documents = current.documentaryInput.documents as readonly object[];
+    expect(Object.getPrototypeOf(documents[0])).toBeNull();
+    expect(Object.isFrozen(documents[0])).toBe(true);
+
+    // Static markup alone does not exercise the Server Component boundary.
+    // Inspect the actual props supplied by the page to its Client Component.
+    const dto = await pageEditorData(input);
+    expectPlainClientData(dto);
+    expect(dto).toEqual(input);
+    expect(dto).not.toBe(input);
+    expect(dto.snapshot).not.toBe(current);
+    expect(Object.hasOwn(dto.publication, "sourceScopeReview")).toBe(true);
+    expect(dto.publication.sourceScopeReview).toBeUndefined();
+    expect(dto.expected).toEqual(input.expected);
+    expect(dto.history[0].event.eventHash).toBe(
+      input.history[0].event.eventHash,
+    );
+    expect(
+      captureSourceSnapshot(
+        current.publicationId,
+        dto.snapshot.documentaryInput,
+      ),
+    ).toEqual(current);
+    expect(resolveSourceContext(dto.snapshot, dto.history)).toEqual(
+      input.context,
+    );
+    expect(Object.getPrototypeOf(documents[0])).toBeNull();
+    expect(Object.isFrozen(current)).toBe(true);
+  });
+  it("preserva null, dati marcati e la proprietà __proto__ nella vista di un input rifiutato", async () => {
+    const metadata = Object.fromEntries([
+      ["__proto__", { marker: "dato inventato", nullable: null }],
+      ["tagged", { type: "invented-tag", value: null }],
+    ]);
+    const current = snapshot({
+      documents: [
+        {
+          url: documentUrl,
+          title: "Documento inventato",
+          requiresLogin: false,
+          metadata,
+        },
+      ],
+    });
+    expect(current.source.accepted).toBe(false);
+    const input = data(current);
+    const dto = await pageEditorData(input);
+    expectPlainClientData(dto);
+    expect(dto).toEqual(input);
+    const copied = (
+      dto.snapshot.documentaryInput.documents as { metadata: typeof metadata }[]
+    )[0].metadata;
+    expect(Object.hasOwn(copied, "__proto__")).toBe(true);
+    expect(Object.getPrototypeOf(copied)).toBe(Object.prototype);
+    expect(copied.__proto__).toEqual({
+      marker: "dato inventato",
+      nullable: null,
+    });
+    expect(copied.tagged).toEqual({ type: "invented-tag", value: null });
+    expect(
+      captureSourceSnapshot(
+        current.publicationId,
+        dto.snapshot.documentaryInput,
+      ).sourceSnapshotHash,
+    ).toBe(current.sourceSnapshotHash);
+    expect(dto.expected).toEqual(input.expected);
+  });
   it("richiede il fondatore prima di caricare la fonte", async () => {
     mocks.pageViewer.mockRejectedValue(new Error("redirect to access"));
     await expect(
