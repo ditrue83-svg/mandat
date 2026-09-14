@@ -270,6 +270,30 @@ function record(
 function render(data = lotSourceEditorData(loaded())) {
   return renderToStaticMarkup(createElement(LotSourceEditor, { data }));
 }
+
+it("shows title-code differences for the selected source without adding references or changing the CAS data", () => {
+  const input = lotSourceEditorData(loaded());
+  input.texts.push(
+    {
+      scope: "lot",
+      path: "/lots/a/title/de",
+      text: "BKP 241.1 A inventato",
+      documentary: true,
+    },
+    {
+      scope: "lot",
+      path: "/lots/a/title/fr",
+      text: "CFC 281.6 B inventato",
+      documentary: true,
+    },
+  );
+  const before = JSON.stringify(input),
+    html = render(input);
+  expect(html).toContain("Codici diversi nei titoli originali");
+  expect(html).toContain("Passaggi selezionati (0)");
+  expect(html).toContain('<option value="" selected="">');
+  expect(JSON.stringify(input)).toBe(before);
+});
 function assertPlain(value: unknown) {
   if (value === null || typeof value !== "object") return;
   expect(Object.getPrototypeOf(value)).toBe(

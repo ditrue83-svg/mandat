@@ -11,6 +11,8 @@ import type {
   SourceSnapshot,
 } from "@/lib/source-review-context";
 import type { DeepReadonly, SourceOrigin } from "@/lib/source-input";
+import { legacyTitleTranslations } from "@/lib/source-title-differences";
+import { SourceTitleNotices } from "./source-title-notices";
 
 export type SourceReviewEditorData = {
   publication: Pick<
@@ -412,6 +414,11 @@ export function SourceReviewEditor({
       )}
       <section className="panel">
         <h2>Testi originali e riferimenti</h2>
+        <SourceTitleNotices
+          titles={legacyTitleTranslations(
+            data.snapshot.documentaryInput.originalTitles,
+          )}
+        />
         <p>
           Scegli i testi e le rispettive origini che sostengono il giudizio.
           Ogni selezione cita il testo intero, senza modificarlo.

@@ -1146,6 +1146,29 @@ h1 {
   line-height: 1.85;
   overflow-wrap: anywhere;
 }
+.source-title-notice,
+.source-title-notice .original-text {
+  color: var(--ink);
+}
+.source-title-notice blockquote {
+  margin: 8px 0;
+}
+.source-title-notice code {
+  overflow-wrap: anywhere;
+}
+.source-title-notice mark {
+  background: #ffe7a0;
+  color: var(--ink);
+}
+.source-title-pair {
+  display: grid;
+  gap: 16px;
+}
+@media (min-width: 720px) {
+  .source-title-pair {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 .lot-source-nav {
   display: flex;
   flex-wrap: wrap;

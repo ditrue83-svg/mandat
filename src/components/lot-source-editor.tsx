@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import type { LotSourceEditorData } from "@/lib/lot-source-editor-data";
 import type { LotDocumentaryReference } from "@/lib/lot-source-context";
 import type { HumanSourceForm } from "@/lib/source-review-context";
+import { documentaryTitleTranslations } from "@/lib/source-title-differences";
+import { SourceTitleNotices } from "./source-title-notices";
 
 const forms: Record<HumanSourceForm, string> = {
   defined_service: "Prestazione concreta identificata",
@@ -258,6 +260,7 @@ export function LotSourceEditor({ data }: { data: LotSourceEditorData }) {
         Seleziona nel testo i passaggi che sostengono il giudizio. Il testo
         originale può contenere marcatori HTML, mostrati come testo.
       </p>
+      <SourceTitleNotices titles={documentaryTitleTranslations(data.texts)} />
       {data.expected.selectionHash && (
         <>
           {data.texts

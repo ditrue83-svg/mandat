@@ -165,6 +165,32 @@ function render(input = data(), demo = false) {
     createElement(SourceReviewEditor, { data: input, demo }),
   );
 }
+
+it("shows differing title codes without preselecting a source judgment or changing its snapshot", () => {
+  const current = snapshot({
+    originalTitles: [
+      {
+        language: "de",
+        path: "project-info.title.de",
+        text: "BKP 241.1 Lavoro inventato A",
+        url,
+      },
+      {
+        language: "fr",
+        path: "project-info.title.fr",
+        text: "CFC 281.6 Lavoro inventato B",
+        url,
+      },
+    ],
+  });
+  const input = data(current),
+    before = JSON.stringify(input),
+    html = render(input);
+  expect(html).toContain("Codici diversi nei titoli originali");
+  expect(html).toContain('<option value="" selected="">');
+  expect(html).toContain("0 riferimenti selezionati");
+  expect(JSON.stringify(input)).toBe(before);
+});
 function expectPlainClientData(value: unknown) {
   if (value === null || typeof value !== "object") return;
   expect(Object.getPrototypeOf(value)).toBe(
