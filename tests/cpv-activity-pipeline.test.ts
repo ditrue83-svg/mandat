@@ -205,6 +205,7 @@ beforeAll(async () => {
 }, 20000);
 beforeEach(async () => {
   context.db = db;
+  context.viewer = { ...viewer, admin: true };
   await db.update(schema.companies).set({ profile });
   await db.delete(schema.notifications);
   await db.delete(schema.issues);
@@ -255,6 +256,76 @@ afterAll(async () => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   await pg.close();
+});
+
+async function useDoorProfile() {
+  await db.update(schema.companies).set({
+    profile: {
+      ...profile,
+      sectors: ["manutenzioni"],
+      activities: "Ripariamo porte e cancelli negli edifici.",
+    },
+  });
+  const [firm] = await db.select().from(schema.companies);
+  const localViewer = { ...viewer, profile: firm.profile };
+  context.viewer = { ...localViewer, admin: true };
+  await amend({
+    sectors: ["edilizia"],
+    cpv: ["45421100"],
+    originalDescriptions: [],
+  });
+  return localViewer;
+}
+
+it("recupera il CPV delle porte senza confronto AI e resiste all’arricchimento della sintesi", async () => {
+  const localViewer = await useDoorProfile();
+  await amend({ summary: null });
+  await db.update(schema.publications).set({ aiRevision: null });
+  vi.mocked(summarize).mockResolvedValue({
+    summary: "Sintesi inventata",
+    sectors: ["manutenzioni"],
+    evidence: [],
+    requirements: [],
+  });
+  await run();
+  const [first] = await rows();
+  expect(first).toMatchObject({ eligible: true, score: 0, approved: null });
+  expect(first.revision).toContain(
+    ":activity-review:published-building-object-review-v1:",
+  );
+  expect(classify).not.toHaveBeenCalled();
+  expect((await listOpportunities(localViewer))[0]).toMatchObject({
+    assessment: "uncertain",
+    score: 0,
+  });
+  await run();
+  expect(await rows()).toEqual([first]);
+  expect(classify).not.toHaveBeenCalled();
+});
+
+it("il recupero di componenti blocca vecchi invii e richiede l’approvazione manuale corrente", async () => {
+  const localViewer = await useDoorProfile();
+  await insertMatch({
+    revision: `${publication.revision}:${fingerprint(localViewer.profile)}:ready:test-model:true`,
+  });
+  await queueDigests(now);
+  expect(await mailRows()).toHaveLength(0);
+  await pending();
+  await sendPending();
+  expect(sendMail).not.toHaveBeenCalled();
+  expect((await mailRows())[0]).toMatchObject({
+    status: "cancelled",
+    attempts: 0,
+  });
+  await db.delete(schema.notifications);
+  await run();
+  expect(classify).not.toHaveBeenCalled();
+  const command = await reviewCommand();
+  expect((await review(command)).status).toBe(200);
+  await queueDigests(now);
+  await sendPending();
+  expect(sendMail).toHaveBeenCalledTimes(1);
+  expect((await mailRows())[0].status).toBe("sent");
 });
 
 it("recupera una vecchia esclusione senza classificatore, completa il Radar e conserva la cache", async () => {
@@ -375,14 +446,12 @@ it("richiede una vista corrente prima di approvare un recupero senza eventi font
 it("rifiuta l'approvazione precedente a una modifica del profilo e lega quella nuova al contenuto corrente", async () => {
   await run();
   const stale = await reviewCommand();
-  await db
-    .update(schema.companies)
-    .set({
-      profile: {
-        ...profile,
-        activities: "Nuova descrizione inventata della ditta",
-      },
-    });
+  await db.update(schema.companies).set({
+    profile: {
+      ...profile,
+      activities: "Nuova descrizione inventata della ditta",
+    },
+  });
   expect((await review(stale)).status).toBe(409);
   await amend({ revision: "cpv-content-v2" });
   const fresh = await reviewCommand();
@@ -396,11 +465,9 @@ it("rifiuta l'approvazione precedente a una modifica del profilo e lega quella n
 it("non seleziona l'approvazione di un recupero relativa a un vecchio profilo", async () => {
   await run();
   expect((await review(await reviewCommand())).status).toBe(200);
-  await db
-    .update(schema.companies)
-    .set({
-      profile: { ...profile, activities: "Profilo inventato aggiornato" },
-    });
+  await db.update(schema.companies).set({
+    profile: { ...profile, activities: "Profilo inventato aggiornato" },
+  });
   await queueDigests(now);
   expect(await mailRows()).toHaveLength(0);
   expect(sendMail).not.toHaveBeenCalled();

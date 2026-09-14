@@ -46,7 +46,7 @@ const profile = {
   maxValue: null,
 };
 const publication = {
-  ...getDemoOpportunities()[1],
+  ...getDemoOpportunities(now)[1],
   id: "local-ai-retry",
   externalId: "local-ai-retry",
   canonicalKey: "local-ai-retry",

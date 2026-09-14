@@ -1,6 +1,7 @@
 import type { Publication, Sector } from "./domain";
 import vocabulary from "./cpv-service-labels.json";
 import { isMatchContentCurrent } from "./source-scope-review";
+import { findPublishedObjectReview } from "./cpv-object-review";
 
 export const CPV_ACTIVITY_REVIEW_VERSION = "cpv-labels-v1";
 export const CPV_ACTIVITY_REVIEW_MARKER = ":activity-review:";
@@ -17,6 +18,13 @@ export type CpvSignal = {
   page?: number;
   start: number;
   end: number;
+  basis?: "published_cpv_component";
+  profileEvidence?: {
+    field: string;
+    quote: string;
+    start: number;
+    end: number;
+  };
 };
 type Token = { text: string; start: number; end: number };
 type Term = {
@@ -152,13 +160,43 @@ export type ActivityReview = {
 export function findActivityReview(
   p: Publication,
   sectors: readonly Sector[],
+  activities?: string,
 ): ActivityReview | undefined {
   const signals = findCpvServiceSignals(p, sectors);
-  if (!signals.length) return undefined;
+  if (signals.length)
+    return {
+      version: CPV_ACTIVITY_REVIEW_VERSION,
+      signals,
+      reason: `La fonte cita «${signals[0].quote}». Attività e ruolo della ditta da verificare nel contesto dell’incarico.`,
+    };
+  if (!activities) return undefined;
+  const related = findPublishedObjectReview(p, {
+    activities,
+    sectors: [...sectors],
+  });
+  if (!related) return undefined;
   return {
-    version: CPV_ACTIVITY_REVIEW_VERSION,
-    signals,
-    reason: `La fonte cita «${signals[0].quote}». Attività e ruolo della ditta da verificare nel contesto dell’incarico.`,
+    version: related.version,
+    reason: related.reason,
+    signals: related.signals.map((signal): CpvSignal => ({
+      sector: "manutenzioni",
+      cpv: signal.vocabulary.code,
+      lexiconLanguage: signal.vocabulary.language,
+      language: null,
+      label: signal.vocabulary.label,
+      field: signal.source.field,
+      quote: signal.source.value,
+      url: signal.source.url,
+      start: 0,
+      end: signal.source.value.length,
+      basis: "published_cpv_component",
+      profileEvidence: {
+        field: signal.profile.field,
+        quote: signal.profile.quote,
+        start: signal.profile.start,
+        end: signal.profile.end,
+      },
+    })),
   };
 }
 
@@ -171,6 +209,7 @@ export function hasActivityReviewRevision(
 export function activityReviewForMatch(input: {
   publication: Publication;
   sectors: readonly Sector[];
+  activities?: string;
   preliminary: { eligible: boolean; activityReview?: ActivityReview };
   revision: string | null | undefined;
   profileRevision: string;
@@ -187,7 +226,11 @@ export function activityReviewForMatch(input: {
       profileRevision: input.profileRevision,
     })
   )
-    return findActivityReview(input.publication, input.sectors);
+    return findActivityReview(
+      input.publication,
+      input.sectors,
+      input.activities,
+    );
   return undefined;
 }
 

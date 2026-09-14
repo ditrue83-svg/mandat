@@ -803,6 +803,7 @@ export async function enrichAndMatch(
           activityReviewForMatch({
             publication: p,
             sectors: firm.profile.sectors,
+            activities: firm.profile.activities,
             preliminary,
             revision: existing?.revision,
             profileRevision,

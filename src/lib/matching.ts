@@ -39,7 +39,11 @@ export function preliminaryMatch(
   const sectorMatch = p.sectors.some((s) => profile.sectors.includes(s));
   const keyword = profile.keywords.some((x) => text.includes(x.toLowerCase()));
   if (!reason && !sectorMatch && !keyword) {
-    const activityReview = findActivityReview(p, profile.sectors);
+    const activityReview = findActivityReview(
+      p,
+      profile.sectors,
+      profile.activities,
+    );
     if (activityReview)
       return {
         eligible: true,
@@ -48,7 +52,7 @@ export function preliminaryMatch(
         uncertain: true,
         activityReview,
       };
-    reason = "Attività non corrispondente al profilo.";
+    reason = "Nessun segnale di attività riconosciuto dal filtro.";
   }
   if (reason) return { eligible: false, score: 0, reason, uncertain: false };
   const uncertain =

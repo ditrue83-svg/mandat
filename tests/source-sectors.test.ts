@@ -127,7 +127,7 @@ describe("segnali testuali dei settori a parole intere", () => {
     expect(result).toMatchObject({
       eligible: false,
       score: 0,
-      reason: "Attività non corrispondente al profilo.",
+      reason: "Nessun segnale di attività riconosciuto dal filtro.",
     });
   });
 });

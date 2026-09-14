@@ -329,7 +329,7 @@ it.each([
     label: "attività e parole chiave",
     p: {},
     profile: { sectors: [], keywords: ["inesistente"] },
-    reason: "non corrispondente",
+    reason: "Nessun segnale di attività riconosciuto",
   },
   {
     label: "importo",
