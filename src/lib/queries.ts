@@ -13,7 +13,6 @@ import { presentMatch } from "./match-presentation";
 import { preliminaryMatch } from "./matching";
 import {
   CPV_ACTIVITY_REVIEW_MARKER,
-  CPV_ACTIVITY_REVIEW_VERSION,
   hasActivityReviewRevision,
 } from "./cpv-service-signals";
 import {
@@ -77,7 +76,7 @@ export async function getRadarStatus(
       !manual &&
       activityReview &&
       !match?.revision.includes(
-        `${CPV_ACTIVITY_REVIEW_MARKER}${CPV_ACTIVITY_REVIEW_VERSION}:`,
+        `${CPV_ACTIVITY_REVIEW_MARKER}${activityReview.version}:${fingerprint(activityReview.signals)}`,
       )
     )
       pending = true;
@@ -228,6 +227,8 @@ export async function getOpportunity(
   // An old saved URL may resolve to a newer official copy, but never to another
   // tenant's match. The canonical reader independently verifies the selected row.
   const now = new Date();
-  const row = await readCanonicalMatch(viewer.companyId, id, now, { legacyDetail: true });
+  const row = await readCanonicalMatch(viewer.companyId, id, now, {
+    legacyDetail: true,
+  });
   return row ? canonicalOpportunity(row, now, true, false) : null;
 }

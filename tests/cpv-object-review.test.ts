@@ -54,7 +54,7 @@ describe("componenti classificati e attività da verificare", () => {
         eligible: true,
         score: 0,
         uncertain: true,
-        activityReview: { version: "published-building-object-review-v1" },
+        activityReview: { version: "published-building-object-review-v2" },
       });
       expect(r.activityReview!.signals[0]).toMatchObject({
         basis: "published_cpv_component",
@@ -85,6 +85,62 @@ describe("componenti classificati e attività da verificare", () => {
     ).toBe("cancelli");
     profile.activities = "Manutenzione frigoriferi e supporti.";
     expect(preliminaryMatch(p, profile, now).eligible).toBe(false);
+  });
+  it.each([
+    "44520000",
+    "44520000-1",
+    "44521000-8",
+    "44521100-9",
+    "44521110-2",
+    "44521120-5",
+    "44521130-8",
+    "44522000-5",
+    "44522400-9",
+  ])(
+    "recupera %s per un profilo che dichiara serrature, senza dedurre il ruolo",
+    (cpv) => {
+      const { p, profile } = fixture();
+      p.cpv = [cpv];
+      profile.activities = "🔑 Ripariamo SERRATURE negli edifici.";
+      const r = preliminaryMatch(p, profile, now);
+      expect(r).toMatchObject({ eligible: true, score: 0, uncertain: true });
+      const [signal] = r.activityReview!.signals;
+      expect(signal).toMatchObject({
+        basis: "published_cpv_component",
+        field: "cpv[0]",
+        quote: cpv,
+        profileEvidence: {
+          field: "activities",
+          quote: "SERRATURE",
+          start: 13,
+          end: 22,
+        },
+      });
+      profile.activities =
+        "Regoliamo porte, ma il dettaglio dei componenti non è indicato.";
+      expect(preliminaryMatch(p, profile, now).eligible).toBe(false);
+    },
+  );
+  it.each([
+    "44521140-1",
+    "44521200-0",
+    "44522200-7",
+    "44523100-3",
+    "44520000-9",
+    "4452",
+  ])("non estende la regola serrature alla classe %s", (cpv) => {
+    const { p, profile } = fixture();
+    p.cpv = [cpv];
+    expect(findPublishedObjectReview(p, profile)).toBeUndefined();
+  });
+  it("non usa composti o un altro settore del profilo come dichiarazione di serrature", () => {
+    const { p, profile } = fixture();
+    p.cpv = ["44520000"];
+    profile.activities = "Supporto al portale preventivi_serrature.";
+    expect(findPublishedObjectReview(p, profile)).toBeUndefined();
+    profile.activities = "Fornitura serrature";
+    profile.sectors = ["sicurezza"];
+    expect(findPublishedObjectReview(p, profile)).toBeUndefined();
   });
   it.each(["45421132", "45421140", "45000000", "72200000", "45421100-9"])(
     "non attribuisce porte a %s",
@@ -131,7 +187,7 @@ describe("componenti classificati e attività da verificare", () => {
     };
     expect(args.preliminary.activityReview).toBeUndefined();
     expect(activityReviewForMatch(args)?.version).toBe(
-      "published-building-object-review-v1",
+      "published-building-object-review-v2",
     );
     expect(
       activityReviewForMatch({ ...args, profileRevision: "changed" }),

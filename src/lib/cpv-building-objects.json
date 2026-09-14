@@ -1,0 +1,79 @@
+{
+  "reference": "https://ted.europa.eu/it/simap/cpv",
+  "download": "https://ted.europa.eu/documents/d/ted/cpv_2008_xml",
+  "version": "CPV 2008",
+  "sourceXmlSha256": "542fb7a8f35f5d0e377fd0ee621e78d0804705578c4c913dc90ec012310e59ff",
+  "scope": "Exact published classes for manual component review. No sector, contract role or professional relation is inferred.",
+  "entries": [
+    {
+      "code": "44520000-1",
+      "object": "locks",
+      "label": "Serrature, chiavi e cerniere"
+    },
+    {
+      "code": "44521000-8",
+      "object": "locks",
+      "label": "Lucchetti e serrature vari"
+    },
+    {
+      "code": "44521100-9",
+      "object": "locks",
+      "label": "Serrature"
+    },
+    {
+      "code": "44521110-2",
+      "object": "locks",
+      "label": "Serrature per porte"
+    },
+    {
+      "code": "44521120-5",
+      "object": "locks",
+      "label": "Serrature elettroniche di sicurezza"
+    },
+    {
+      "code": "44521130-8",
+      "object": "locks",
+      "label": "Serrature di sicurezza rinforzate"
+    },
+    {
+      "code": "44522000-5",
+      "object": "locks",
+      "label": "Ganci, parti di serrature e chiavi"
+    },
+    {
+      "code": "44522400-9",
+      "object": "locks",
+      "label": "Parti di serrature"
+    },
+    {
+      "code": "45421100-5",
+      "object": "doors",
+      "label": "Installazione di porte, finestre e componenti connesse"
+    },
+    {
+      "code": "45421110-8",
+      "object": "doors",
+      "label": "Installazione di telai per porte e finestre"
+    },
+    {
+      "code": "45421111-5",
+      "object": "doors",
+      "label": "Installazione di telai per porte"
+    },
+    {
+      "code": "45421130-4",
+      "object": "doors",
+      "label": "Installazione di porte e finestre"
+    },
+    {
+      "code": "45421131-1",
+      "object": "doors",
+      "label": "Installazione di porte"
+    },
+    {
+      "code": "45421148-3",
+      "object": "gates",
+      "label": "Installazione di cancelli"
+    }
+  ]
+}

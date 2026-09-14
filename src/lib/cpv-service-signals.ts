@@ -2,6 +2,10 @@ import type { Publication, Sector } from "./domain";
 import vocabulary from "./cpv-service-labels.json";
 import { isMatchContentCurrent } from "./source-scope-review";
 import { findPublishedObjectReview } from "./cpv-object-review";
+import {
+  findGardenActivityReview,
+  type GardenActivitySignal,
+} from "./garden-activity-review";
 
 export const CPV_ACTIVITY_REVIEW_VERSION = "cpv-labels-v1";
 export const CPV_ACTIVITY_REVIEW_MARKER = ":activity-review:";
@@ -153,7 +157,7 @@ export function findCpvServiceSignals(
 
 export type ActivityReview = {
   version: string;
-  signals: CpvSignal[];
+  signals: (CpvSignal | GardenActivitySignal)[];
   reason: string;
 };
 
@@ -174,7 +178,8 @@ export function findActivityReview(
     activities,
     sectors: [...sectors],
   });
-  if (!related) return undefined;
+  if (!related)
+    return findGardenActivityReview(p, { sectors: [...sectors], activities });
   return {
     version: related.version,
     reason: related.reason,

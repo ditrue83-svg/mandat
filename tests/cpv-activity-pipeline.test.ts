@@ -258,12 +258,44 @@ afterAll(async () => {
   await pg.close();
 });
 
-async function useDoorProfile() {
+const componentCases = [
+  {
+    name: "porte",
+    sector: "manutenzioni",
+    activities: "Ripariamo porte e cancelli negli edifici.",
+    cpv: ["45421100"],
+    descriptions: [],
+    version: "published-building-object-review-v2",
+  },
+  {
+    name: "serrature",
+    sector: "manutenzioni",
+    activities: "Ripariamo serrature negli edifici.",
+    cpv: ["44520000"],
+    descriptions: [],
+    version: "published-building-object-review-v2",
+  },
+  {
+    name: "verde",
+    sector: "giardinaggio",
+    activities: "Potiamo alberi e siepi nei giardini.",
+    cpv: ["45000000"],
+    descriptions: [
+      {
+        text: "Livraison et plantation d’arbres, terrassement et drainage.",
+        language: "fr",
+        url,
+      },
+    ],
+    version: "garden-activity-review-v1",
+  },
+] as const;
+async function useRelatedProfile(candidate: (typeof componentCases)[number]) {
   await db.update(schema.companies).set({
     profile: {
       ...profile,
-      sectors: ["manutenzioni"],
-      activities: "Ripariamo porte e cancelli negli edifici.",
+      sectors: [candidate.sector],
+      activities: candidate.activities,
     },
   });
   const [firm] = await db.select().from(schema.companies);
@@ -271,62 +303,117 @@ async function useDoorProfile() {
   context.viewer = { ...localViewer, admin: true };
   await amend({
     sectors: ["edilizia"],
-    cpv: ["45421100"],
-    originalDescriptions: [],
+    cpv: [...candidate.cpv],
+    originalDescriptions: [...candidate.descriptions],
   });
   return localViewer;
 }
 
-it("recupera il CPV delle porte senza confronto AI e resiste all’arricchimento della sintesi", async () => {
-  const localViewer = await useDoorProfile();
-  await amend({ summary: null });
-  await db.update(schema.publications).set({ aiRevision: null });
-  vi.mocked(summarize).mockResolvedValue({
-    summary: "Sintesi inventata",
-    sectors: ["manutenzioni"],
-    evidence: [],
-    requirements: [],
-  });
-  await run();
-  const [first] = await rows();
-  expect(first).toMatchObject({ eligible: true, score: 0, approved: null });
-  expect(first.revision).toContain(
-    ":activity-review:published-building-object-review-v1:",
-  );
-  expect(classify).not.toHaveBeenCalled();
-  expect((await listOpportunities(localViewer))[0]).toMatchObject({
-    assessment: "uncertain",
-    score: 0,
-  });
-  await run();
-  expect(await rows()).toEqual([first]);
-  expect(classify).not.toHaveBeenCalled();
-});
+it.each(componentCases)(
+  "recupera $name senza confronto AI e resiste all’arricchimento della sintesi",
+  async (candidate) => {
+    const localViewer = await useRelatedProfile(candidate);
+    await amend({ summary: null });
+    await db.update(schema.publications).set({ aiRevision: null });
+    vi.mocked(summarize).mockResolvedValue({
+      summary: "Sintesi inventata",
+      sectors: [candidate.sector],
+      evidence: [],
+      requirements: [],
+    });
+    await run();
+    const [first] = await rows();
+    expect(first).toMatchObject({ eligible: true, score: 0, approved: null });
+    expect(first.revision).toContain(`:activity-review:${candidate.version}:`);
+    expect(classify).not.toHaveBeenCalled();
+    expect((await listOpportunities(localViewer))[0]).toMatchObject({
+      assessment: "uncertain",
+      score: 0,
+    });
+    await run();
+    expect(await rows()).toEqual([first]);
+    expect(classify).not.toHaveBeenCalled();
+  },
+);
 
-it("il recupero di componenti blocca vecchi invii e richiede l’approvazione manuale corrente", async () => {
-  const localViewer = await useDoorProfile();
-  await insertMatch({
-    revision: `${publication.revision}:${fingerprint(localViewer.profile)}:ready:test-model:true`,
-  });
-  await queueDigests(now);
-  expect(await mailRows()).toHaveLength(0);
-  await pending();
-  await sendPending();
-  expect(sendMail).not.toHaveBeenCalled();
-  expect((await mailRows())[0]).toMatchObject({
-    status: "cancelled",
-    attempts: 0,
-  });
-  await db.delete(schema.notifications);
-  await run();
-  expect(classify).not.toHaveBeenCalled();
-  const command = await reviewCommand();
-  expect((await review(command)).status).toBe(200);
-  await queueDigests(now);
-  await sendPending();
-  expect(sendMail).toHaveBeenCalledTimes(1);
-  expect((await mailRows())[0].status).toBe("sent");
-});
+it.each(componentCases)(
+  "il recupero di $name blocca vecchi invii e richiede l’approvazione manuale corrente",
+  async (candidate) => {
+    const localViewer = await useRelatedProfile(candidate);
+    await insertMatch({
+      revision: `${publication.revision}:${fingerprint(localViewer.profile)}:ready:test-model:true`,
+    });
+    await queueDigests(now);
+    expect(await mailRows()).toHaveLength(0);
+    await pending();
+    await sendPending();
+    expect(sendMail).not.toHaveBeenCalled();
+    expect((await mailRows())[0]).toMatchObject({
+      status: "cancelled",
+      attempts: 0,
+    });
+    await db.delete(schema.notifications);
+    await run();
+    expect(classify).not.toHaveBeenCalled();
+    const command = await reviewCommand();
+    expect((await review(command)).status).toBe(200);
+    await queueDigests(now);
+    await sendPending();
+    expect(sendMail).toHaveBeenCalledTimes(1);
+    expect((await mailRows())[0].status).toBe("sent");
+  },
+);
+
+it.each(componentCases)(
+  "il Radar termina l’elaborazione di $name e rileva una citazione cambiata",
+  async (candidate) => {
+    const localViewer = await useRelatedProfile(candidate);
+    expect((await getRadarStatus(localViewer, now)).pendingCount).toBe(1);
+    await run();
+    expect(await getRadarStatus(localViewer, now)).toEqual({
+      state: "ready",
+      pendingCount: 0,
+    });
+    await amend({
+      cpv: ["45000000", ...candidate.cpv],
+      originalDescriptions: candidate.descriptions.map((d) => ({
+        ...d,
+        text: `${d.text} Autres conditions.`,
+      })),
+    });
+    // For the garden signal, a change outside its cited sentence does not change
+    // its review token. Change that sentence explicitly to require fresh work.
+    if (candidate.sector === "giardinaggio")
+      await amend({
+        originalDescriptions: [
+          { text: "Plantation d’arbres et terrassement.", language: "fr", url },
+        ],
+      });
+    expect((await getRadarStatus(localViewer, now)).pendingCount).toBe(1);
+    await run();
+    expect((await getRadarStatus(localViewer, now)).pendingCount).toBe(0);
+    expect(classify).not.toHaveBeenCalled();
+  },
+);
+
+it.each([true, false])(
+  "le nuove revisioni preservano un giudizio manuale corrente (%s)",
+  async (approved) => {
+    const localViewer = await useRelatedProfile(componentCases[2]);
+    await insertMatch({
+      revision: `${publication.revision}:${fingerprint(localViewer.profile)}:ready:test-model:true`,
+      approved,
+      reviewedAt: now,
+      eligible: approved,
+      score: approved ? 85 : 0,
+    });
+    const before = await rows();
+    await run();
+    expect(await rows()).toEqual(before);
+    expect((await getRadarStatus(localViewer, now)).pendingCount).toBe(0);
+    expect(classify).not.toHaveBeenCalled();
+  },
+);
 
 it("recupera una vecchia esclusione senza classificatore, completa il Radar e conserva la cache", async () => {
   await insertMatch({
