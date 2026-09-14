@@ -3,6 +3,10 @@ import vocabulary from "./cpv-service-labels.json";
 import { isMatchContentCurrent } from "./source-scope-review";
 import { findPublishedObjectReview } from "./cpv-object-review";
 import {
+  findBuildingActivityReview,
+  type BuildingActivitySignal,
+} from "./building-activity-review";
+import {
   findGardenActivityReview,
   type GardenActivitySignal,
 } from "./garden-activity-review";
@@ -157,7 +161,7 @@ export function findCpvServiceSignals(
 
 export type ActivityReview = {
   version: string;
-  signals: (CpvSignal | GardenActivitySignal)[];
+  signals: (CpvSignal | GardenActivitySignal | BuildingActivitySignal)[];
   reason: string;
 };
 
@@ -179,7 +183,10 @@ export function findActivityReview(
     sectors: [...sectors],
   });
   if (!related)
-    return findGardenActivityReview(p, { sectors: [...sectors], activities });
+    return (
+      findBuildingActivityReview(p, { sectors: [...sectors], activities }) ??
+      findGardenActivityReview(p, { sectors: [...sectors], activities })
+    );
   return {
     version: related.version,
     reason: related.reason,

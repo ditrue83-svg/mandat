@@ -289,6 +289,20 @@ const componentCases = [
     ],
     version: "garden-activity-review-v1",
   },
+  {
+    name: "interventi su porte negli originali",
+    sector: "manutenzioni",
+    activities: "Ripariamo porte e serrature negli edifici.",
+    cpv: ["45210000"],
+    descriptions: [
+      {
+        text: "Instandhaltung historischer Türen mit zusätzlichen Elektroinstallationen.",
+        language: "de",
+        url,
+      },
+    ],
+    version: "building-activity-review-v1",
+  },
 ] as const;
 async function useRelatedProfile(candidate: (typeof componentCases)[number]) {
   await db.update(schema.companies).set({
@@ -387,6 +401,16 @@ it.each(componentCases)(
       await amend({
         originalDescriptions: [
           { text: "Plantation d’arbres et terrassement.", language: "fr", url },
+        ],
+      });
+    if (candidate.version === "building-activity-review-v1")
+      await amend({
+        originalDescriptions: [
+          {
+            text: "Reparatur der Türen und Einbau neuer Anlagen.",
+            language: "de",
+            url,
+          },
         ],
       });
     expect((await getRadarStatus(localViewer, now)).pendingCount).toBe(1);
