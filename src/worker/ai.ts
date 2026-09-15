@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { aiUsage, settings } from "@/db/schema";
@@ -97,6 +97,54 @@ class AiResponseRejected extends Error {
   ) {
     super(message);
   }
+}
+const aiLedgerRetryDelaysMs = [0, 250, 1000] as const;
+const aiReservationStaleAfterMs = 10 * 60 * 1000;
+type AiUsageSettlement = {
+  status: "completed" | "uncertain";
+  error?: string | null;
+  costChf?: string | null;
+  inputTokens?: number;
+  outputTokens?: number;
+};
+class AiLedgerUnavailable extends AiUnavailable {
+  readonly cause: unknown;
+  constructor(cause: unknown) {
+    super("Registro AI temporaneamente non aggiornabile: richiesta verifica.");
+    this.cause = cause;
+  }
+}
+async function settleAiUsage(id: string, values: AiUsageSettlement) {
+  let lastError: unknown;
+  for (const delay of aiLedgerRetryDelaysMs) {
+    if (delay)
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, delay);
+      });
+    try {
+      // Repeating this write is safe if PostgreSQL committed a prior attempt but
+      // the connection failed before acknowledging it.
+      await getDb().update(aiUsage).set(values).where(eq(aiUsage.id, id));
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw new AiLedgerUnavailable(lastError);
+}
+export async function recoverStaleAiReservations(now = new Date()) {
+  if (!Number.isFinite(now.getTime()))
+    throw new Error("Data di recupero AI non valida");
+  const cutoff = new Date(now.getTime() - aiReservationStaleAfterMs);
+  const recovered = await getDb()
+    .update(aiUsage)
+    .set({
+      status: "uncertain",
+      error: "Richiesta AI interrotta: esito e costo da verificare",
+    })
+    .where(and(eq(aiUsage.status, "reserved"), lt(aiUsage.createdAt, cutoff)))
+    .returning({ id: aiUsage.id });
+  return recovered.length;
 }
 function rates() {
   const input = Number(process.env.LLM_INPUT_CHF_PER_MILLION),
@@ -294,17 +342,9 @@ async function infer(
         "Costo AI fuori capacità del registro",
         knownUsage,
       );
-    await getDb()
-      .update(aiUsage)
-      .set({
-        status: "completed",
-        costChf,
-        inputTokens: knownUsage.inputTokens,
-        outputTokens: knownUsage.outputTokens,
-      })
-      .where(eq(aiUsage.id, id));
+    let parsed: unknown;
     try {
-      return parseAiJson(result.text);
+      parsed = parseAiJson(result.text);
     } catch {
       // JSON parser messages can include fragments of the provider's content.
       throw new AiResponseRejected(
@@ -312,6 +352,14 @@ async function infer(
         knownUsage,
       );
     }
+    await settleAiUsage(id, {
+      status: "completed",
+      error: null,
+      costChf,
+      inputTokens: knownUsage.inputTokens,
+      outputTokens: knownUsage.outputTokens,
+    });
+    return parsed;
   } catch (error) {
     const usage =
       error instanceof AiResponseRejected ? error.usage : knownUsage;
@@ -320,9 +368,8 @@ async function infer(
           (usage.inputTokens * input + usage.outputTokens * output) / 1e6,
         )
       : null;
-    await getDb()
-      .update(aiUsage)
-      .set({
+    try {
+      await settleAiUsage(id, {
         status: "uncertain",
         error:
           usage && costChf === null
@@ -337,8 +384,15 @@ async function infer(
               outputTokens: usage.outputTokens,
             }
           : {}),
-      })
-      .where(eq(aiUsage.id, id));
+      });
+    } catch (ledgerError) {
+      throw new AiLedgerUnavailable(
+        new AggregateError(
+          [error, ledgerError],
+          "AI request and ledger settlement failed",
+        ),
+      );
+    }
     throw error;
   }
 }

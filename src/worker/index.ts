@@ -21,6 +21,7 @@ import { reconcileLotNotices } from "./lot-notifications";
 import { matchAdoptedPublication } from "./lot-matching";
 import { DOCUMENTARY_ADOPTION_CAPABILITY } from "@/lib/documentary-capability";
 import { loadDocumentaryRuntimeActivation } from "@/lib/documentary-runtime-config";
+import { recoverStaleAiReservations } from "./ai";
 async function main() {
   assertProductionConfig();
   // Read once before registering consumers. A malformed release file stops
@@ -128,6 +129,9 @@ async function main() {
     await sendPending();
   });
   const heartbeat = async () => {
+    const recoveredAiReservations = await recoverStaleAiReservations();
+    if (recoveredAiReservations)
+      console.warn("ai_usage_reservations_recovered", recoveredAiReservations);
     await getDb()
       .insert(settings)
       .values({ key: "worker_heartbeat", value: new Date().toISOString() })

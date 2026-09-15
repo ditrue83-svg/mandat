@@ -17,7 +17,11 @@ import { getDemoOpportunities } from "../src/lib/demo";
 
 const context = vi.hoisted(() => ({ db: undefined as unknown }));
 vi.mock("@/db", () => ({ getDb: () => context.db }));
-import { configuredTransport, summarize } from "../src/worker/ai";
+import {
+  configuredTransport,
+  recoverStaleAiReservations,
+  summarize,
+} from "../src/worker/ai";
 
 const expectedModel = "mistralai/Ministral-3-14B-Instruct-2512";
 const privateResponseText = "provider-private-content-never-log";
@@ -60,6 +64,43 @@ function mockResponse(body: unknown, status = 200) {
   );
   vi.stubGlobal("fetch", fetch);
   return fetch;
+}
+function withFailingAiUsageUpdates(failures: number) {
+  let calls = 0;
+  const value = new Proxy(db, {
+    get(target, property) {
+      if (property === "update")
+        return (table: unknown) => {
+          const query = (target.update as (table: unknown) => unknown).call(
+            target,
+            table,
+          ) as {
+            set(values: unknown): {
+              where(condition: unknown): Promise<unknown>;
+            };
+          };
+          if (table !== schema.aiUsage) return query;
+          return {
+            set(values: unknown) {
+              const update = query.set(values);
+              return {
+                where(condition: unknown) {
+                  calls++;
+                  if (calls <= failures)
+                    return Promise.reject(
+                      new Error("Transient ledger update failure"),
+                    );
+                  return update.where(condition);
+                },
+              };
+            },
+          };
+        };
+      const member = Reflect.get(target, property, target) as unknown;
+      return typeof member === "function" ? member.bind(target) : member;
+    },
+  });
+  return { value, calls: () => calls };
 }
 const rejectedAnswers: [string, (body: ProviderPayload) => void][] = [
   [
@@ -171,6 +212,7 @@ beforeAll(async () => {
   await migrate(db, { migrationsFolder: "drizzle" });
 });
 beforeEach(async () => {
+  context.db = db;
   vi.stubEnv("LLM_API_KEY", "test-transport-only");
   vi.stubEnv("LLM_API_BASE_URL", "https://provider.example.invalid/openai/v1");
   vi.stubEnv("LLM_MODEL", expectedModel);
@@ -181,6 +223,7 @@ beforeEach(async () => {
   await db.delete(schema.settings);
 });
 afterEach(() => {
+  context.db = db;
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
@@ -398,6 +441,81 @@ describe("trasporto AI e consumo degli output respinti", () => {
       costChf: null,
       inputTokens: null,
       outputTokens: null,
+    });
+  });
+
+  it("ritenta la sola chiusura del registro senza ripetere la richiesta al fornitore", async () => {
+    const flaky = withFailingAiUsageUpdates(2);
+    context.db = flaky.value;
+    const complete = vi.fn(async () => {
+      throw new Error("Timeout simulato");
+    });
+    await expect(summarize(publication, { complete })).rejects.toThrow(
+      "Timeout simulato",
+    );
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(flaky.calls()).toBe(3);
+    context.db = db;
+    const [row] = await db.select().from(schema.aiUsage);
+    expect(row).toMatchObject({
+      status: "uncertain",
+      costChf: null,
+      inputTokens: null,
+      outputTokens: null,
+    });
+  });
+
+  it("chiude come completata una risposta valida dopo errori transitori del registro", async () => {
+    const flaky = withFailingAiUsageUpdates(2);
+    context.db = flaky.value;
+    const complete = vi.fn(async () => ({
+      text: JSON.stringify(summary),
+      inputTokens: 100,
+      outputTokens: 50,
+    }));
+    await expect(summarize(publication, { complete })).resolves.toMatchObject({
+      summary: summary.summary,
+    });
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(flaky.calls()).toBe(3);
+    context.db = db;
+    const [row] = await db.select().from(schema.aiUsage);
+    expect(row).toMatchObject({
+      status: "completed",
+      costChf: "0.000200",
+      inputTokens: 100,
+      outputTokens: 50,
+    });
+  });
+
+  it("recupera una riserva vecchia dopo un guasto persistente del registro", async () => {
+    const unavailable = withFailingAiUsageUpdates(Number.POSITIVE_INFINITY);
+    context.db = unavailable.value;
+    const complete = vi.fn(async () => {
+      throw new Error("Timeout simulato");
+    });
+    await expect(summarize(publication, { complete })).rejects.toThrow(
+      "Registro AI temporaneamente non aggiornabile",
+    );
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(unavailable.calls()).toBe(3);
+    context.db = db;
+    const [reserved] = await db.select().from(schema.aiUsage);
+    expect(reserved.status).toBe("reserved");
+
+    expect(
+      await recoverStaleAiReservations(
+        new Date(reserved.createdAt.getTime() + 10 * 60 * 1000 + 1),
+      ),
+    ).toBe(1);
+    expect(await recoverStaleAiReservations(new Date("2030-01-01"))).toBe(0);
+    const [recovered] = await db.select().from(schema.aiUsage);
+    expect(recovered).toMatchObject({
+      status: "uncertain",
+      costChf: null,
+      inputTokens: null,
+      outputTokens: null,
+      error: "Richiesta AI interrotta: esito e costo da verificare",
     });
   });
 
