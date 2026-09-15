@@ -1,7 +1,7 @@
 import { readCanonicalFeedback } from "./canonical-feedback";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { companies, matches, feedback } from "@/db/schema";
+import { companies, matches, feedback, publications } from "@/db/schema";
 import {
   compareCanonicalPublications,
   sourceAvailable,
@@ -145,6 +145,21 @@ export function lotOpportunityVisible(
   );
 }
 
+// The founder queue lists individual publications, including duplicate copies.
+// Select its legacy/documentary branch only after locking and re-reading it.
+export async function readCurrentMatch(
+  companyId: string,
+  publicationId: string,
+  now = new Date(),
+) {
+  return getDb().transaction(async (tx) => {
+    const group = await lockCanonicalPublications(tx, publicationId);
+    return group
+      ? readPublicationMatch(tx, group.publication, companyId, now)
+      : null;
+  });
+}
+
 // Canonical reads inspect ALL group members before matching/visibility filters.
 // A closed, refused or not-yet-matched adopted representative blocks fallback.
 export async function readCanonicalMatch(
@@ -164,72 +179,77 @@ export async function readCanonicalMatch(
         ? available.find((p) => p.id === publicationId)
         : available.sort(compareCanonicalPublications)[0];
     if (!publication) return null;
-    const [company] = await tx
-      .select()
-      .from(companies)
-      .where(eq(companies.id, companyId))
-      .for("share");
-    if (!company) return null;
-    const [match] = await tx
-      .select()
-      .from(matches)
-      .where(
-        and(
-          eq(matches.companyId, companyId),
-          eq(matches.publicationId, publication.id),
-        ),
-      )
-      .for("share");
-    if (!match)
-      return {
-        publication,
-        company,
-        match: null,
-        loaded: null,
-        sourceReview: null,
-        feedback: null,
-      };
-    if (publication.documentarySnapshotId) {
-      const loaded = await readLotMatchReview(
-        tx,
-        publication,
-        company,
-        match,
-        now,
-      );
-      return {
-        publication,
-        company,
-        match,
-        loaded,
-        sourceReview: null,
-        feedback: loaded.feedback,
-      };
-    }
-    const [currentFeedback] = await tx
-      .select()
-      .from(feedback)
-      .where(
-        and(
-          eq(feedback.companyId, companyId),
-          eq(feedback.publicationId, publication.id),
-        ),
-      )
-      .for("share");
+    return readPublicationMatch(tx, publication, companyId, now);
+  });
+}
+
+async function readPublicationMatch(
+  tx: Parameters<typeof readLotMatchReview>[0],
+  publication: typeof publications.$inferSelect,
+  companyId: string,
+  now: Date,
+) {
+  const [company] = await tx
+    .select()
+    .from(companies)
+    .where(eq(companies.id, companyId))
+    .for("share");
+  if (!company) return null;
+  const [match] = await tx
+    .select()
+    .from(matches)
+    .where(
+      and(
+        eq(matches.companyId, companyId),
+        eq(matches.publicationId, publication.id),
+      ),
+    )
+    .for("share");
+  if (!match)
+    return {
+      publication,
+      company,
+      match: null,
+      loaded: null,
+      sourceReview: null,
+      feedback: null,
+    };
+  if (publication.documentarySnapshotId) {
+    const loaded = await readLotMatchReview(
+      tx,
+      publication,
+      company,
+      match,
+      now,
+    );
     return {
       publication,
       company,
       match,
-      loaded: null,
-      sourceReview: await readSourceReviewContext(tx, publication),
-      feedback: {
-        ...(await readCanonicalFeedback(
-          tx,
-          companyId,
-          publication.canonicalId,
-        )),
-        relevant: currentFeedback?.relevant ?? null,
-      },
+      loaded,
+      sourceReview: null,
+      feedback: loaded.feedback,
     };
-  });
+  }
+  const [currentFeedback] = await tx
+    .select()
+    .from(feedback)
+    .where(
+      and(
+        eq(feedback.companyId, companyId),
+        eq(feedback.publicationId, publication.id),
+      ),
+    )
+    .for("share");
+  return {
+    publication,
+    company,
+    match,
+    loaded: null,
+    sourceReview: await readSourceReviewContext(tx, publication),
+    feedback: {
+      ...(await readCanonicalFeedback(tx, companyId, publication.canonicalId)),
+      relevant: currentFeedback?.relevant ?? null,
+    },
+  };
 }

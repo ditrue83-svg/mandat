@@ -59,6 +59,7 @@ import {
   getRadarStatus,
 } from "../src/lib/queries";
 import { adminSnapshot, getGate } from "../src/lib/admin";
+import * as projectQuality from "../src/lib/project-quality";
 import {
   loadSourceReviewContext,
   appendSourceReview,
@@ -524,6 +525,73 @@ async function matchRows(publicationId: string) {
     .where(eq(schema.matches.publicationId, publicationId))
     .orderBy(schema.matches.id);
 }
+
+it("the founder inventory is re-read when adoption occurs during dashboard loading", async () => {
+  const f = await fixture({ adopt: false });
+  const revisedProfile = {
+    ...f.profile,
+    name: "Ditta inventata aggiornata",
+    activities: "Cura delle alberature e potatura aggiornata durante il test.",
+  };
+  const readQuality = projectQuality.readProjectQuality;
+  let changed = false;
+  // The parallel inventory has already returned when the quality reader
+  // completes its additional canonical reads. Advance the source at this
+  // boundary, before the dashboard consumes those earlier inventory rows.
+  const gateRead = vi
+    .spyOn(projectQuality, "readProjectQuality")
+    .mockImplementationOnce(async (...args) => {
+      const result = await readQuality(...args);
+      await f.adopt();
+      await db
+        .update(schema.companies)
+        .set({ profile: revisedProfile })
+        .where(eq(schema.companies.id, f.companyId));
+      changed = true;
+      return result;
+    });
+  try {
+    const snapshot = await adminSnapshot(false);
+    expect(changed).toBe(true);
+    const item = snapshot.matches.find(
+      (row) =>
+        row.publicationId === f.p.id && row.company === revisedProfile.name,
+    );
+    expect(item).toMatchObject({
+      score: 0,
+      approved: null,
+      reviewed: false,
+      assessment: "uncertain",
+      reviewRequired: true,
+      companyActivities: revisedProfile.activities,
+      profileRevision: fingerprint((await customer(f)).profile),
+      lotReviewUrl: `/admin/valutazioni/${f.companyId}/${f.p.id}`,
+    });
+    expect(item?.lotReview).not.toBeNull();
+  } finally {
+    gateRead.mockRestore();
+  }
+});
+
+it("the founder inventory omits a publication closed while the dashboard loads", async () => {
+  const f = await fixture();
+  const readQuality = projectQuality.readProjectQuality;
+  const gateRead = vi
+    .spyOn(projectQuality, "readProjectQuality")
+    .mockImplementationOnce(async (...args) => {
+      const result = await readQuality(...args);
+      await db
+        .update(schema.publications)
+        .set({ status: "cancelled", data: { ...f.p, status: "cancelled" } })
+        .where(eq(schema.publications.id, f.p.id));
+      return result;
+    });
+  try {
+    expect((await adminSnapshot(false)).matches).toEqual([]);
+  } finally {
+    gateRead.mockRestore();
+  }
+});
 
 it("an existing positive v1 review becomes a non-positive adopted/refused project without erasing its history", async () => {
   const f = await fixture({ adopt: false });

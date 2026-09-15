@@ -17,7 +17,7 @@ import {
 } from "@/db/schema";
 import { readProjectQuality } from "./project-quality";
 import {
-  readCurrentLotMatch,
+  readCurrentMatch,
   presentLotOpportunity,
   lotOpportunityVisible,
 } from "./lot-readers";
@@ -31,7 +31,6 @@ import { fingerprint } from "@/sources/common";
 import { presentMatch } from "./match-presentation";
 import { matchReviewToken } from "./match-review-token";
 import { hasSourceScopeReview } from "./source-scope-review";
-import { readSourceReviewContexts } from "./source-reviews";
 import {
   sourceReviewBindingState,
   sourceReviewBlocksComparison,
@@ -145,7 +144,7 @@ export async function adminSnapshot(demo: boolean) {
     gate,
     runs,
     invites,
-    review,
+    reviewInventory,
     problem,
     mail,
     auto,
@@ -170,22 +169,7 @@ export async function adminSnapshot(demo: boolean) {
       .select({
         id: matches.id,
         companyId: companies.id,
-        documentarySnapshotId: publications.documentarySnapshotId,
         publicationId: publications.id,
-        title: publications.title,
-        company: companies.profile,
-        score: matches.score,
-        eligible: matches.eligible,
-        reason: matches.reason,
-        approved: matches.approved,
-        reviewedAt: matches.reviewedAt,
-        revision: matches.revision,
-        updatedAt: matches.updatedAt,
-        reviewNotes: matches.reviewNotes,
-        sourceReviewDependency: matches.sourceReviewDependency,
-        aiRevision: publications.aiRevision,
-        sourceRevision: publications.revision,
-        reviewRequired: publications.data,
       })
       .from(matches)
       .innerJoin(publications, eq(publications.id, matches.publicationId))
@@ -235,19 +219,24 @@ export async function adminSnapshot(demo: boolean) {
       .where(sql`${feedback.relevant} is not null`)
       .orderBy(desc(feedback.updatedAt)),
   ]);
-  const sourceReviews = await readSourceReviewContexts(
-    db,
-    review.filter((r) => !r.documentarySnapshotId).map((r) => r.reviewRequired),
-  );
-  const lotReviews = new Map<
-    string,
-    NonNullable<Awaited<ReturnType<typeof readCurrentLotMatch>>>
-  >();
-  for (const r of review) {
-    if (!r.documentarySnapshotId) continue;
-    const loaded = await readCurrentLotMatch(r.companyId, r.publicationId);
-    if (loaded) lotReviews.set(r.id, loaded);
+  const review = [];
+  for (const item of reviewInventory) {
+    const current = await readCurrentMatch(item.companyId, item.publicationId);
+    if (!current?.match || current.publication.status !== "open") continue;
+    const { publication, company, match, loaded, sourceReview } = current;
+    review.push({
+      ...match,
+      documentarySnapshotId: publication.documentarySnapshotId,
+      title: publication.title,
+      company: company.profile,
+      aiRevision: publication.aiRevision,
+      sourceRevision: publication.revision,
+      reviewRequired: publication.data,
+      loaded,
+      sourceReview,
+    });
   }
+
   return {
     demo: false,
     gate: {
@@ -276,8 +265,7 @@ export async function adminSnapshot(demo: boolean) {
       revokedAt: i.revokedAt?.toISOString() ?? null,
     })),
     matches: review.map((r) => {
-      const sourceReview = sourceReviews.get(r.publicationId) ?? null;
-      const loaded = lotReviews.get(r.id);
+      const { sourceReview, loaded } = r;
       const lot = loaded ? presentLotOpportunity(loaded) : null;
       const documentary = !!r.documentarySnapshotId;
       return {
