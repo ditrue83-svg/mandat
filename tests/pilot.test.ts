@@ -36,7 +36,10 @@ import {
   requestPilotExternalDeliveryTest,
 } from "../src/lib/pilot-delivery";
 import { summarizePilot } from "../src/lib/pilot";
-import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-consent";
+import {
+  acceptPilotParticipation,
+  PILOT_PARTICIPATION_TERMS_VERSION,
+} from "../src/lib/pilot-consent";
 import { readProjectQuality } from "../src/lib/project-quality";
 
 const pg = new PGlite();
@@ -162,13 +165,13 @@ describe("preparazione e misure del pilota", () => {
     const acceptedAt = new Date("2026-09-15T09:10:00.000Z");
     const onboardedAt = new Date("2026-09-15T09:18:00.000Z");
     for (const firm of firms) {
-      await db
-        .update(schema.invitations)
-        .set({
-          acceptedAt,
-          acceptedVersion: PILOT_PARTICIPATION_TERMS_VERSION,
-        })
-        .where(eq(schema.invitations.companyId, firm.companyId));
+      await acceptPilotParticipation({
+        userId: firm.userId,
+        termsVersion: PILOT_PARTICIPATION_TERMS_VERSION,
+        participationConfirmed: true,
+        emailProcessingConfirmed: true,
+        now: acceptedAt,
+      });
       await db
         .update(schema.companies)
         .set({ profile: demoProfile, onboardedAt })

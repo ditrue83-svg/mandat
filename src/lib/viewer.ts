@@ -7,6 +7,7 @@ import { getAuth, invitationAllowsLogin } from "./auth";
 import { isDemo } from "./config";
 import { demoViewer } from "./demo";
 import type { Viewer } from "./domain";
+import { PILOT_PARTICIPATION_TERMS_VERSION } from "./pilot-participation";
 export class HttpError extends Error {
   constructor(
     public status: number,
@@ -16,9 +17,17 @@ export class HttpError extends Error {
   }
 }
 export function viewerNeedsPilotAcceptance(
-  viewer: Pick<Viewer, "demo" | "admin" | "invitationAcceptedAt">,
+  viewer: Pick<
+    Viewer,
+    "demo" | "admin" | "invitationAcceptedAt" | "invitationAcceptanceVersion"
+  >,
 ) {
-  return !viewer.demo && !viewer.admin && !viewer.invitationAcceptedAt;
+  return (
+    !viewer.demo &&
+    !viewer.admin &&
+    (!viewer.invitationAcceptedAt ||
+      viewer.invitationAcceptanceVersion !== PILOT_PARTICIPATION_TERMS_VERSION)
+  );
 }
 export async function currentViewer(): Promise<Viewer | null> {
   if (isDemo()) return demoViewer;

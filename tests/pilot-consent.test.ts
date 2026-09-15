@@ -112,6 +112,7 @@ describe("accettazione esplicita del pilota", () => {
         demo: false,
         admin: false,
         invitationAcceptedAt: null,
+        invitationAcceptanceVersion: null,
       }),
     ).toBe(true);
     expect(
@@ -119,6 +120,7 @@ describe("accettazione esplicita del pilota", () => {
         demo: false,
         admin: true,
         invitationAcceptedAt: null,
+        invitationAcceptanceVersion: null,
       }),
     ).toBe(false);
     expect(
@@ -126,6 +128,23 @@ describe("accettazione esplicita del pilota", () => {
         demo: true,
         admin: false,
         invitationAcceptedAt: null,
+        invitationAcceptanceVersion: null,
+      }),
+    ).toBe(false);
+    expect(
+      viewerNeedsPilotAcceptance({
+        demo: false,
+        admin: false,
+        invitationAcceptedAt: "2026-09-15T16:00:00.000Z",
+        invitationAcceptanceVersion: "legacy-acceptance-v1",
+      }),
+    ).toBe(true);
+    expect(
+      viewerNeedsPilotAcceptance({
+        demo: false,
+        admin: false,
+        invitationAcceptedAt: "2026-09-15T16:00:00.000Z",
+        invitationAcceptanceVersion: PILOT_PARTICIPATION_TERMS_VERSION,
       }),
     ).toBe(false);
   });
