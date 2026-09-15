@@ -120,6 +120,7 @@ vi.mock("next/navigation", () => ({
 import { AdminDashboard } from "../src/components/admin-dashboard";
 import type { AdminSnapshot } from "../src/lib/admin";
 import { demoViewer } from "../src/lib/demo";
+import { summarizePilot } from "../src/lib/pilot";
 it("il filtro iniziale dell’admin mostra tutti i giudizi ancora da verificare, inclusi quelli senza proposta Radar", () => {
   function row(
     id: string,
@@ -127,6 +128,9 @@ it("il filtro iniziale dell’admin mostra tutti i giudizi ancora da verificare,
   ): AdminSnapshot["matches"][number] {
     return {
       id,
+      companyId: "pilot-company",
+      pilotParticipant: true,
+      pilotAudit: null,
       publicationId: id,
       lotReview: null,
       lotReviewUrl: null,
@@ -180,6 +184,18 @@ it("il filtro iniziale dell’admin mostra tutti i giudizi ancora da verificare,
     issues: [],
     notifications: [],
     feedback: [],
+    pilot: summarizePilot({
+      startedAt: null,
+      participants: [],
+      feedback: [],
+      deliveries: [],
+      audits: [],
+      continuation: [],
+      prerequisites: {
+        data_residency: null,
+        external_delivery: null,
+      },
+    }),
     sourceEnabled: { simap: false, foglio: false },
     matches: [
       row("LOW-CACHE-CANDIDATE", {}),

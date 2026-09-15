@@ -8,6 +8,8 @@ import {
   publications,
   feedback,
   settings,
+  pilotFeedbackEvents,
+  pilotParticipants,
 } from "@/db/schema";
 import type { CompanyProfile } from "./domain";
 import { enqueueProfileMatching } from "./profile-matching";
@@ -59,7 +61,12 @@ export async function updateCompanyProfile(
           );
         await tx
           .update(companies)
-          .set({ profile: detachedProfile, onboardedAt: new Date() })
+          .set({
+            profile: detachedProfile,
+            // This timestamp measures completion of the first onboarding. A
+            // later profile edit must not rewrite the pilot measurement.
+            onboardedAt: company.onboardedAt ?? new Date(),
+          })
           .where(eq(companies.id, companyId));
         // Adopted rows retain every human/legacy field, including the original
         // timestamps and revision. Freshness is resolved against the new profile.
@@ -202,6 +209,21 @@ export async function saveCompanyFeedback(
         .onConflictDoUpdate({
           target: [feedback.companyId, feedback.publicationId],
           set: { ...values, updatedAt: new Date() },
+        });
+    }
+    if (draft.relevant !== undefined) {
+      const [participant] = await tx
+        .select({ companyId: pilotParticipants.companyId })
+        .from(pilotParticipants)
+        .where(eq(pilotParticipants.companyId, companyId))
+        .for("share");
+      if (participant)
+        await tx.insert(pilotFeedbackEvents).values({
+          id: crypto.randomUUID(),
+          companyId,
+          publicationId,
+          canonicalId: group.canonicalId,
+          relevant: draft.relevant,
         });
     }
   });

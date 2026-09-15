@@ -1,4 +1,4 @@
-import { and, eq, isNull, desc, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, desc, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   user,
@@ -12,8 +12,11 @@ import {
   settings,
   issues,
   aiUsage,
-  feedback,
   session,
+  pilotAudits,
+  pilotContinuation,
+  pilotParticipants,
+  pilotFeedbackEvents,
 } from "@/db/schema";
 import { readProjectQuality } from "./project-quality";
 import {
@@ -35,12 +38,23 @@ import {
   sourceReviewBindingState,
   sourceReviewBlocksComparison,
 } from "./source-review-policy";
+import { summarizePilot } from "./pilot";
+import {
+  pilotDate,
+  readPilotPrerequisites,
+  readPilotStartedAt,
+} from "./pilot-admin";
 export async function provisionInvite(
   email: string,
   name: string,
   admin = false,
 ) {
   const db = getDb();
+  if (!admin && (await readPilotStartedAt()))
+    throw new HttpError(
+      409,
+      "Il gruppo pilota è già stato fissato: non puoi aggiungere altre ditte.",
+    );
   const [exists] = await db
     .select({ id: user.id })
     .from(user)
@@ -77,11 +91,6 @@ export async function provisionInvite(
       acceptedAt: admin ? new Date() : null,
     });
     if (admin) await tx.insert(administrators).values({ userId });
-    if (!admin)
-      await tx
-        .insert(settings)
-        .values({ key: "pilot_started_at", value: new Date().toISOString() })
-        .onConflictDoNothing();
   });
   return { userId, companyId, inviteId };
 }
@@ -97,23 +106,36 @@ export async function notifyInvitation(email: string, name: string) {
 }
 export async function getGate() {
   const db = getDb();
-  const quality = await readProjectQuality();
-  const [critical] = await db
-    .select({ total: sql<number>`count(*)::int` })
-    .from(issues)
-    .where(and(eq(issues.severity, "critical"), isNull(issues.resolvedAt)));
-  const [started] = await db
-    .select()
-    .from(settings)
-    .where(eq(settings.key, "pilot_started_at"));
+  const [[critical], [started]] = await Promise.all([
+    db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(issues)
+      .where(and(eq(issues.severity, "critical"), isNull(issues.resolvedAt))),
+    db
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, "pilot_started_at")),
+  ]);
+  const startedAt = pilotDate(started?.value);
+  const cohort = startedAt
+    ? await db
+        .select({ companyId: pilotParticipants.companyId })
+        .from(pilotParticipants)
+    : [];
+  const quality = startedAt
+    ? await readProjectQuality(new Date(), {
+        excludeAdministratorCompanies: true,
+        includeCompanyIds: cohort.map((row) => row.companyId),
+        reviewedSince: startedAt,
+      })
+    : await readProjectQuality();
   return {
     ...quality,
     ...automationGate({
       reviewed: quality.reviewed,
       approved: quality.approved,
       criticalIssues: critical.total,
-      startedAt:
-        typeof started?.value === "string" ? new Date(started.value) : null,
+      startedAt,
     }),
   };
 }
@@ -137,6 +159,18 @@ export async function adminSnapshot(demo: boolean) {
       issues: [],
       notifications: [],
       feedback: [],
+      pilot: summarizePilot({
+        startedAt: null,
+        participants: [],
+        feedback: [],
+        deliveries: [],
+        audits: [],
+        continuation: [],
+        prerequisites: {
+          data_residency: null,
+          external_delivery: null,
+        },
+      }),
       sourceEnabled: { simap: false, foglio: false },
     };
   const db = getDb();
@@ -149,7 +183,12 @@ export async function adminSnapshot(demo: boolean) {
     mail,
     auto,
     usage,
-    feedbackRows,
+    pilotFeedbackRows,
+    pilotAuditRows,
+    pilotContinuationRows,
+    pilotDeliveryRows,
+    publicationTimingRows,
+    pilotPrerequisites,
   ] = await Promise.all([
     getGate(),
     db.select().from(sourceRuns).orderBy(desc(sourceRuns.startedAt)).limit(10),
@@ -161,10 +200,21 @@ export async function adminSnapshot(demo: boolean) {
         expiresAt: invitations.expiresAt,
         acceptedAt: invitations.acceptedAt,
         revokedAt: invitations.revokedAt,
+        companyId: companies.id,
+        onboardedAt: companies.onboardedAt,
+        disabledAt: companies.disabledAt,
+        sectors: companies.profile,
+        administratorId: administrators.userId,
+        pilotStartedAt: pilotParticipants.startedAt,
       })
       .from(invitations)
       .innerJoin(companies, eq(companies.id, invitations.companyId))
-      .innerJoin(user, eq(user.id, companies.ownerId)),
+      .innerJoin(user, eq(user.id, companies.ownerId))
+      .leftJoin(administrators, eq(administrators.userId, companies.ownerId))
+      .leftJoin(
+        pilotParticipants,
+        eq(pilotParticipants.companyId, companies.id),
+      ),
     db
       .select({
         id: matches.id,
@@ -209,15 +259,42 @@ export async function adminSnapshot(demo: boolean) {
       ),
     db
       .select({
-        companyId: feedback.companyId,
-        canonicalId: publications.canonicalId,
-        relevant: feedback.relevant,
+        companyId: pilotFeedbackEvents.companyId,
+        canonicalId: pilotFeedbackEvents.canonicalId,
+        relevant: pilotFeedbackEvents.relevant,
+        updatedAt: pilotFeedbackEvents.occurredAt,
         sector: publications.data,
       })
-      .from(feedback)
-      .innerJoin(publications, eq(publications.id, feedback.publicationId))
-      .where(sql`${feedback.relevant} is not null`)
-      .orderBy(desc(feedback.updatedAt)),
+      .from(pilotFeedbackEvents)
+      .innerJoin(
+        publications,
+        eq(publications.id, pilotFeedbackEvents.publicationId),
+      )
+      .orderBy(desc(pilotFeedbackEvents.occurredAt)),
+    db.select().from(pilotAudits).orderBy(desc(pilotAudits.auditedAt)),
+    db
+      .select()
+      .from(pilotContinuation)
+      .orderBy(desc(pilotContinuation.updatedAt)),
+    db
+      .select({
+        companyId: notifications.companyId,
+        kind: notifications.kind,
+        sentAt: notifications.sentAt,
+        items: notifications.items,
+      })
+      .from(notifications)
+      .where(
+        and(eq(notifications.status, "sent"), isNotNull(notifications.sentAt)),
+      ),
+    db
+      .select({
+        id: publications.id,
+        canonicalId: publications.canonicalId,
+        visibleAt: publications.visibleAt,
+      })
+      .from(publications),
+    readPilotPrerequisites(),
   ]);
   const review = [];
   for (const item of reviewInventory) {
@@ -227,6 +304,7 @@ export async function adminSnapshot(demo: boolean) {
     review.push({
       ...match,
       documentarySnapshotId: publication.documentarySnapshotId,
+      canonicalId: publication.canonicalId,
       title: publication.title,
       company: company.profile,
       aiRevision: publication.aiRevision,
@@ -236,6 +314,107 @@ export async function adminSnapshot(demo: boolean) {
       sourceReview,
     });
   }
+  const publicationTiming = new Map(
+    publicationTimingRows.map((row) => [row.id, row]),
+  );
+  const pilotDeliveries = pilotDeliveryRows.flatMap((notification) => {
+    if (
+      !notification.sentAt ||
+      !["digest", "lot-update"].includes(notification.kind)
+    )
+      return [];
+    return notification.items.flatMap((item) => {
+      const publication = publicationTiming.get(item.id);
+      return publication
+        ? [
+            {
+              companyId: notification.companyId,
+              canonicalId: publication.canonicalId,
+              visibleAt: publication.visibleAt,
+              sentAt: notification.sentAt!,
+            },
+          ]
+        : [];
+    });
+  });
+  const pilot = summarizePilot({
+    startedAt: gate.startedAt,
+    participants: invites.map((invite) => ({
+      companyId: invite.companyId,
+      admin: !!invite.administratorId,
+      cohort: !!invite.pilotStartedAt,
+      acceptedAt: invite.acceptedAt,
+      onboardedAt: invite.onboardedAt,
+      revokedAt: invite.revokedAt,
+      disabledAt: invite.disabledAt,
+    })),
+    feedback: pilotFeedbackRows,
+    deliveries: pilotDeliveries,
+    audits: pilotAuditRows.map((row) => ({
+      companyId: row.companyId,
+      relevant: row.relevant,
+      alertedAt: row.alertedAt,
+      auditedAt: row.auditedAt,
+    })),
+    continuation: pilotContinuationRows.map((row) => ({
+      companyId: row.companyId,
+      interested: row.interested,
+      updatedAt: row.updatedAt,
+    })),
+    prerequisites: pilotPrerequisites,
+  });
+  const pilotCompanyIds = new Set(
+    invites
+      .filter((invite) =>
+        gate.startedAt
+          ? !invite.administratorId && !!invite.pilotStartedAt
+          : !invite.administratorId && !invite.revokedAt && !invite.disabledAt,
+      )
+      .map((invite) => invite.companyId),
+  );
+  const pilotAuditByKey = new Map(
+    pilotAuditRows.map((row) => [
+      `${row.companyId}:${row.canonicalId}`,
+      {
+        relevant: row.relevant,
+        alertedAt: row.alertedAt?.toISOString() ?? null,
+        note: row.note,
+        auditedAt: row.auditedAt.toISOString(),
+      },
+    ]),
+  );
+  const continuationByCompany = new Map(
+    pilotContinuationRows.map((row) => [
+      row.companyId,
+      {
+        interested: row.interested,
+        note: row.note,
+        recordedAt: row.recordedAt.toISOString(),
+      },
+    ]),
+  );
+  const pilotWindowEnd = gate.startedAt
+    ? new Date(Math.min(Date.now(), gate.startedAt.getTime() + 28 * 86_400_000))
+    : null;
+  const deduplicatedPilotFeedback = gate.startedAt
+    ? pilotFeedbackRows
+        .filter(
+          (row) =>
+            pilotCompanyIds.has(row.companyId) &&
+            row.updatedAt >= gate.startedAt! &&
+            !!pilotWindowEnd &&
+            row.updatedAt <= pilotWindowEnd &&
+            row.relevant !== null,
+        )
+        .filter(
+          (row, index, rows) =>
+            rows.findIndex(
+              (other) =>
+                other.companyId === row.companyId &&
+                other.canonicalId === row.canonicalId,
+            ) === index,
+        )
+    : [];
 
   return {
     demo: false,
@@ -259,10 +438,18 @@ export async function adminSnapshot(demo: boolean) {
       finishedAt: r.finishedAt?.toISOString() ?? null,
     })),
     invites: invites.map((i) => ({
-      ...i,
+      id: i.id,
+      companyId: i.companyId,
+      email: i.email,
+      name: i.name,
       expiresAt: i.expiresAt.toISOString(),
       acceptedAt: i.acceptedAt?.toISOString() ?? null,
       revokedAt: i.revokedAt?.toISOString() ?? null,
+      onboardedAt: i.onboardedAt?.toISOString() ?? null,
+      admin: !!i.administratorId,
+      cohort: !!i.pilotStartedAt,
+      sectors: i.sectors.sectors,
+      continuation: continuationByCompany.get(i.companyId) ?? null,
     })),
     matches: review.map((r) => {
       const { sourceReview, loaded } = r;
@@ -270,6 +457,8 @@ export async function adminSnapshot(demo: boolean) {
       const documentary = !!r.documentarySnapshotId;
       return {
         id: r.id,
+        companyId: r.companyId,
+        pilotParticipant: pilotCompanyIds.has(r.companyId),
         lotReview: lot?.lotReview ?? null,
         lotReviewUrl: r.documentarySnapshotId
           ? `/admin/valutazioni/${encodeURIComponent(r.companyId)}/${encodeURIComponent(r.publicationId)}`
@@ -349,6 +538,8 @@ export async function adminSnapshot(demo: boolean) {
         sourceUrl: r.reviewRequired.sourceUrl,
         sourceConditions: r.reviewRequired.sourceConditions ?? [],
         originalTitles: r.reviewRequired.originalTitles ?? [],
+        pilotAudit:
+          pilotAuditByKey.get(`${r.companyId}:${r.canonicalId}`) ?? null,
       };
     }),
     issues: problem.map((i) => ({
@@ -363,19 +554,11 @@ export async function adminSnapshot(demo: boolean) {
       ...n,
       createdAt: n.createdAt.toISOString(),
     })),
-    feedback: feedbackRows
-      .filter(
-        (f, i, rows) =>
-          rows.findIndex(
-            (other) =>
-              other.companyId === f.companyId &&
-              other.canonicalId === f.canonicalId,
-          ) === i,
-      )
-      .map((f) => ({
-        relevant: f.relevant,
-        sectors: f.sector.sectors,
-      })),
+    feedback: deduplicatedPilotFeedback.map((f) => ({
+      relevant: f.relevant,
+      sectors: f.sector.sectors,
+    })),
+    pilot,
     sourceEnabled: {
       simap: !!process.env.DATABASE_URL,
       foglio: process.env.FOGLIO_REUSE_CONFIRMED === "true",

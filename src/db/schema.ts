@@ -321,6 +321,81 @@ export const feedback = pgTable(
     ),
   ],
 ).enableRLS();
+export const pilotAudits = pgTable(
+  "pilot_audits",
+  {
+    id: text("id").primaryKey(),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    publicationId: text("publication_id")
+      .notNull()
+      .references(() => publications.id, { onDelete: "restrict" }),
+    canonicalId: text("canonical_id").notNull(),
+    relevant: boolean("relevant").notNull(),
+    // Snapshot of the first confirmed delivery at the time of the audit.
+    // Keeping this value stable prevents a later alert from improving recall
+    // retroactively.
+    alertedAt: time("alerted_at"),
+    reviewerId: text("reviewer_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    note: text("note").notNull(),
+    auditedAt: time("audited_at").notNull().defaultNow(),
+    updatedAt: time("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("pilot_audit_company_canonical_idx").on(
+      t.companyId,
+      t.canonicalId,
+    ),
+    index("pilot_audit_publication_idx").on(t.publicationId),
+  ],
+).enableRLS();
+export const pilotContinuation = pgTable("pilot_continuation", {
+  companyId: text("company_id")
+    .primaryKey()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  interested: boolean("interested").notNull(),
+  reviewerId: text("reviewer_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "restrict" }),
+  note: text("note").notNull(),
+  recordedAt: time("recorded_at").notNull().defaultNow(),
+  updatedAt: time("updated_at").notNull().defaultNow(),
+}).enableRLS();
+export const pilotParticipants = pgTable("pilot_participants", {
+  companyId: text("company_id")
+    .primaryKey()
+    .references(() => companies.id, { onDelete: "restrict" }),
+  invitationId: text("invitation_id")
+    .notNull()
+    .unique()
+    .references(() => invitations.id, { onDelete: "restrict" }),
+  startedAt: time("started_at").notNull(),
+}).enableRLS();
+export const pilotFeedbackEvents = pgTable(
+  "pilot_feedback_events",
+  {
+    id: text("id").primaryKey(),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    publicationId: text("publication_id")
+      .notNull()
+      .references(() => publications.id, { onDelete: "restrict" }),
+    canonicalId: text("canonical_id").notNull(),
+    relevant: boolean("relevant"),
+    occurredAt: time("occurred_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("pilot_feedback_company_canonical_idx").on(
+      t.companyId,
+      t.canonicalId,
+      t.occurredAt,
+    ),
+  ],
+).enableRLS();
 export const notifications = pgTable("notifications", {
   id: text("id").primaryKey(),
   companyId: text("company_id")

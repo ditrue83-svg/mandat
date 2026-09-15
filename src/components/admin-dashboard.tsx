@@ -10,6 +10,11 @@ import type { Viewer } from "@/lib/domain";
 import type { AdminSnapshot } from "@/lib/admin";
 import { SECTORS, formatDate } from "@/lib/domain";
 import { DateTime } from "luxon";
+
+function percentage(value: number | null) {
+  return value === null ? "Da misurare" : `${Math.round(value * 100)}%`;
+}
+
 export function AdminDashboard({
   viewer,
   data,
@@ -45,6 +50,7 @@ export function AdminDashboard({
     }
   }
   const disabled = viewer.demo || busy;
+  const pilotInvites = data.invites.filter((invite) => !invite.admin);
   return (
     <Shell viewer={viewer}>
       <section className="page-heading">
@@ -72,8 +78,8 @@ export function AdminDashboard({
       )}
       <div className="stats-row">
         <div className="stat-panel">
-          <strong>{data.invites.filter((i) => !i.revokedAt).length}</strong>
-          <span>accessi attivi</span>
+          <strong>{data.pilot.participants.active}/5</strong>
+          <span>ditte nel pilota</span>
         </div>
         <div className="stat-panel">
           <strong>{data.gate.reviewed}</strong>
@@ -84,6 +90,173 @@ export function AdminDashboard({
           <span>AI nel mese, incluse riserve</span>
         </div>
       </div>
+      <section className="panel">
+        <h2>Pilota di quattro settimane</h2>
+        <p>
+          Stato:{" "}
+          <strong>
+            {data.pilot.status === "preparing"
+              ? "in preparazione"
+              : data.pilot.status === "ready"
+                ? "pronto da avviare"
+                : data.pilot.status === "running"
+                  ? "in corso"
+                  : "concluso"}
+          </strong>
+          {data.pilot.startedAt && data.pilot.endsAt
+            ? ` · dal ${formatDate(data.pilot.startedAt)} al ${formatDate(data.pilot.endsAt)}`
+            : ""}
+        </p>
+        {data.pilot.firstWeekReview && (
+          <div className="notice">
+            Prima settimana: verifica tutte le proposte prima dell’invio e
+            controlla ogni giorno anche un campione delle scartate.
+          </div>
+        )}
+        <div className="admin-table-wrap space-top">
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>Misura</th>
+                <th>Risultato</th>
+                <th>Obiettivo</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Ditte con profilo completo</td>
+                <td>
+                  {data.pilot.participants.onboarded}/
+                  {data.pilot.participants.target}
+                </td>
+                <td>5</td>
+              </tr>
+              <tr>
+                <td>Onboarding entro 10 minuti</td>
+                <td>
+                  {data.pilot.onboarding.withinLimit}/
+                  {data.pilot.onboarding.measured}
+                  {data.pilot.onboarding.medianMinutes === null
+                    ? ""
+                    : ` · mediana ${data.pilot.onboarding.medianMinutes.toFixed(1)} min`}
+                </td>
+                <td>Tutte le ditte</td>
+              </tr>
+              <tr>
+                <td>Alert giudicati pertinenti dalle ditte</td>
+                <td>
+                  {percentage(data.pilot.relevance.rate)} ·{" "}
+                  {data.pilot.relevance.evaluated} riscontri
+                </td>
+                <td>Almeno 80%</td>
+              </tr>
+              <tr>
+                <td>Richiamo nel campione controllato</td>
+                <td>
+                  {percentage(data.pilot.recall.rate)} ·{" "}
+                  {data.pilot.recall.audited} casi controllati
+                </td>
+                <td>Almeno 90%</td>
+              </tr>
+              <tr>
+                <td>Segnalazioni entro 24 ore</td>
+                <td>
+                  {percentage(data.pilot.delivery.rate)} ·{" "}
+                  {data.pilot.delivery.measured} invii misurati
+                </td>
+                <td>Riportare il risultato</td>
+              </tr>
+              <tr>
+                <td>Ditte interessate a continuare</td>
+                <td>
+                  {data.pilot.continuation.interested}/
+                  {data.pilot.continuation.responses} risposte
+                </td>
+                <td>Almeno 3 su 5</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {!data.pilot.startedAt && (
+          <>
+            <h3 className="space-top">Verifiche prima dell’avvio</h3>
+            {[
+              {
+                key: "data_residency" as const,
+                label: "Residenza di dati, log e backup",
+                help: "Registra l’evidenza contrattuale del fornitore o la decisione infrastrutturale adottata.",
+              },
+              {
+                key: "external_delivery" as const,
+                label: "Recapito email verso un provider esterno",
+                help: "Registra la ricezione di una sola prova autorizzata su una casella non Aruba.",
+              },
+            ].map((item) => {
+              const prerequisite = data.pilot.prerequisites[item.key];
+              return (
+                <form
+                  key={item.key}
+                  className="admin-review space-top"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const form = new FormData(event.currentTarget);
+                    void act({
+                      action: "pilot-prerequisite",
+                      key: item.key,
+                      confirmed: form.get("confirmed") === "true",
+                      note: form.get("note"),
+                    });
+                  }}
+                >
+                  <h3>
+                    {item.label}{" "}
+                    <span
+                      className={`status-badge ${prerequisite?.confirmed ? "" : "warning"}`}
+                    >
+                      {prerequisite?.confirmed ? "Verificato" : "Da verificare"}
+                    </span>
+                  </h3>
+                  <p className="meta">{item.help}</p>
+                  <div className="inline-form">
+                    <select
+                      name="confirmed"
+                      defaultValue={String(prerequisite?.confirmed ?? false)}
+                      aria-label={`Stato: ${item.label}`}
+                    >
+                      <option value="false">Da verificare</option>
+                      <option value="true">Verificato</option>
+                    </select>
+                    <input
+                      name="note"
+                      required
+                      minLength={10}
+                      defaultValue={prerequisite?.note ?? ""}
+                      placeholder="Evidenza e data del controllo"
+                      aria-label={`Evidenza: ${item.label}`}
+                    />
+                    <button className="button secondary" disabled={disabled}>
+                      Registra
+                    </button>
+                  </div>
+                </form>
+              );
+            })}
+            <button
+              className="button primary space-top"
+              disabled={disabled || !data.pilot.readyToStart}
+              onClick={() => void act({ action: "pilot-start" })}
+            >
+              Avvia il pilota di quattro settimane
+            </button>
+            {!data.pilot.readyToStart && (
+              <p className="meta">
+                Il pulsante si abilita con entrambe le verifiche concluse e
+                cinque ditte attive, invito accettato e profilo completato.
+              </p>
+            )}
+          </>
+        )}
+      </section>
       <section className="panel">
         <h2>Prima di automatizzare</h2>
         <p>
@@ -154,7 +327,7 @@ export function AdminDashboard({
             <Mail size={17} /> Crea e invia invito
           </button>
         </form>
-        {data.invites.length > 0 && (
+        {pilotInvites.length > 0 && (
           <div className="admin-table-wrap space-top">
             <table className="admin-table">
               <thead>
@@ -162,11 +335,13 @@ export function AdminDashboard({
                   <th>Ditta</th>
                   <th>Email</th>
                   <th>Stato</th>
+                  <th>Profilo</th>
+                  <th>Interesse finale</th>
                   <th>Accesso</th>
                 </tr>
               </thead>
               <tbody>
-                {data.invites.map((i) => (
+                {pilotInvites.map((i) => (
                   <tr key={i.id}>
                     <td>{i.name}</td>
                     <td>{i.email}</td>
@@ -176,6 +351,58 @@ export function AdminDashboard({
                         : i.acceptedAt
                           ? "Accettato"
                           : `Valido fino al ${formatDate(i.expiresAt)}`}
+                    </td>
+                    <td>{i.onboardedAt ? "Completato" : "Da completare"}</td>
+                    <td>
+                      {i.continuation ? (
+                        i.continuation.interested ? (
+                          "Sì"
+                        ) : (
+                          "No"
+                        )
+                      ) : data.pilot.status === "completed" ? (
+                        <form
+                          className="inline-form"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            const form = new FormData(event.currentTarget);
+                            void act({
+                              action: "pilot-continuation",
+                              companyId: i.companyId,
+                              interested: form.get("interested") === "true",
+                              note: form.get("note"),
+                            });
+                          }}
+                        >
+                          <input
+                            name="note"
+                            required
+                            minLength={10}
+                            placeholder="Risposta della ditta"
+                            aria-label={`Risposta finale di ${i.name}`}
+                          />
+                          <button
+                            name="interested"
+                            value="true"
+                            className="button secondary"
+                            disabled={disabled}
+                          >
+                            Sì
+                          </button>
+                          <button
+                            name="interested"
+                            value="false"
+                            className="button secondary"
+                            disabled={disabled}
+                          >
+                            No
+                          </button>
+                        </form>
+                      ) : data.pilot.startedAt ? (
+                        "Da raccogliere a fine pilota"
+                      ) : (
+                        "Da raccogliere"
+                      )}
                     </td>
                     <td>
                       <button
@@ -316,6 +543,56 @@ export function AdminDashboard({
                   Esamina la fonte
                 </a>
               </div>
+              {data.pilot.status === "running" && m.pilotParticipant && (
+                <form
+                  className="space-top"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const form = new FormData(event.currentTarget);
+                    void act({
+                      action: "pilot-audit",
+                      id: m.id,
+                      relevant: form.get("relevant") === "true",
+                      note: form.get("note"),
+                    });
+                  }}
+                >
+                  <strong>Campione manuale di copertura</strong>
+                  <p className="meta">
+                    Valuta anche casi scartati. Mandat conserva se questa
+                    opportunità era già stata inviata al momento del controllo.
+                    {m.pilotAudit
+                      ? ` Ultimo giudizio: ${m.pilotAudit.relevant ? "pertinente" : "non pertinente"}.`
+                      : ""}
+                  </p>
+                  <div className="inline-form">
+                    <input
+                      name="note"
+                      required
+                      minLength={10}
+                      defaultValue={m.pilotAudit?.note ?? ""}
+                      placeholder="Motivo verificato nella fonte"
+                      aria-label={`Nota del campione: ${m.title}`}
+                    />
+                    <button
+                      name="relevant"
+                      value="true"
+                      className="button secondary"
+                      disabled={disabled}
+                    >
+                      Pertinente nel campione
+                    </button>
+                    <button
+                      name="relevant"
+                      value="false"
+                      className="button secondary"
+                      disabled={disabled}
+                    >
+                      Non pertinente nel campione
+                    </button>
+                  </div>
+                </form>
+              )}
               <SourceScopeReviewControls
                 key={`${m.id}:${m.sourceScopeReview?.token ?? "none"}`}
                 publicationId={m.publicationId}

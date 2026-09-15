@@ -35,6 +35,12 @@ import {
 } from "@/lib/source-review-policy";
 import { CONTEXT_VERSION } from "@/lib/source-review-context";
 import { matchReviewToken } from "@/lib/match-review-token";
+import {
+  recordPilotAudit,
+  recordPilotContinuation,
+  setPilotPrerequisite,
+  startPilot,
+} from "@/lib/pilot-admin";
 const sourceDependencySchema = z
   .object({
     version: z.literal(CONTEXT_VERSION),
@@ -80,6 +86,25 @@ const inputSchema = z.discriminatedUnion("action", [
       .optional(),
   }),
   z.object({ action: z.literal("automation"), enabled: z.boolean() }),
+  z.object({
+    action: z.literal("pilot-prerequisite"),
+    key: z.enum(["data_residency", "external_delivery"]),
+    confirmed: z.boolean(),
+    note: z.string().trim().min(10).max(800),
+  }),
+  z.object({ action: z.literal("pilot-start") }),
+  z.object({
+    action: z.literal("pilot-audit"),
+    id: z.string().min(1).max(200),
+    relevant: z.boolean(),
+    note: z.string().trim().min(10).max(800),
+  }),
+  z.object({
+    action: z.literal("pilot-continuation"),
+    companyId: z.string().min(1).max(200),
+    interested: z.boolean(),
+    note: z.string().trim().min(10).max(800),
+  }),
   z
     .object({
       action: z.literal("mark-source-scope"),
@@ -384,6 +409,40 @@ export async function POST(request: Request) {
             target: settings.key,
             set: { value: body.enabled },
           });
+        break;
+      }
+      case "pilot-prerequisite": {
+        await setPilotPrerequisite({
+          key: body.key,
+          confirmed: body.confirmed,
+          note: body.note,
+          actorId: v.userId,
+        });
+        break;
+      }
+      case "pilot-start": {
+        const pilot = await startPilot();
+        return Response.json({
+          ok: true,
+          message: `Pilota avviato. Termine previsto: ${pilot.endsAt}.`,
+        });
+      }
+      case "pilot-audit": {
+        await recordPilotAudit({
+          matchId: body.id,
+          relevant: body.relevant,
+          note: body.note,
+          reviewerId: v.userId,
+        });
+        break;
+      }
+      case "pilot-continuation": {
+        await recordPilotContinuation({
+          companyId: body.companyId,
+          interested: body.interested,
+          note: body.note,
+          reviewerId: v.userId,
+        });
         break;
       }
       case "resolve": {
