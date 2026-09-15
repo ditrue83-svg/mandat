@@ -42,9 +42,46 @@ fi
 # The schema-filtered dump includes CREATE SCHEMA public. Remove only the fresh
 # container's empty default schema; without CASCADE, unexpected objects stop us.
 docker exec "$restore_container" psql -U postgres -d mandat_restore_check \
-  -v ON_ERROR_STOP=1 -c 'DROP SCHEMA public;'
+  -v ON_ERROR_STOP=1 -c 'DROP SCHEMA public; CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;'
 docker exec -i "$restore_container" pg_restore -U postgres -d mandat_restore_check \
   --exit-on-error --single-transaction --no-owner --no-acl < "$restore_dump"
+# Optional release rehearsal. The migration container shares only the fresh
+# database's network namespace (network=none), and receives no production env.
+if [ -n "${RESTORE_CHECK_WORKER_IMAGE:-}" ]; then
+  docker image inspect "$RESTORE_CHECK_WORKER_IMAGE" >/dev/null
+  printf 'DATABASE_PROVIDER=local\nDATABASE_URL=postgresql://postgres:%s@127.0.0.1:5432/mandat_restore_check\n' \
+    "$restore_password" > "$restore_tmp/migration.env"
+  chmod 600 "$restore_tmp/migration.env"
+  docker run --rm --pull=never --network "container:$restore_container" \
+    --env-file "$restore_tmp/migration.env" --entrypoint node \
+    "$RESTORE_CHECK_WORKER_IMAGE" --import tsx scripts/migrate.ts
+fi
+# The dump deliberately omits ACLs. Reapply the server-only access policy to
+# existing and future objects, including roles that can bypass row policies.
+docker exec -i "$restore_container" psql -U postgres -d mandat_restore_check \
+  -v ON_ERROR_STOP=1 < infra/restore-access.sql
+docker exec -i "$restore_container" psql -U postgres -d mandat_restore_check \
+  -v ON_ERROR_STOP=1 <<'SQL'
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_roles r CROSS JOIN pg_namespace n
+    WHERE r.rolname IN ('anon', 'authenticated', 'service_role')
+      AND n.nspname IN ('public', 'drizzle', 'pgboss')
+      AND (has_schema_privilege(r.oid,n.oid,'USAGE,CREATE') OR EXISTS (
+        SELECT 1 FROM pg_class c WHERE c.relnamespace=n.oid AND
+          CASE WHEN c.relkind='S' THEN has_sequence_privilege(r.oid,c.oid,'USAGE,SELECT,UPDATE')
+            WHEN c.relkind IN ('r','p','v','m','f') THEN has_table_privilege(r.oid,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE')
+            ELSE false END
+      ) OR EXISTS (
+        SELECT 1 FROM pg_proc p WHERE p.pronamespace=n.oid AND has_function_privilege(r.oid,p.oid,'EXECUTE')
+      ))
+  ) THEN RAISE EXCEPTION 'Client access remained after restore'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='public' AND c.relkind IN ('r','p') AND NOT c.relrowsecurity)
+  THEN RAISE EXCEPTION 'RLS missing after restore'; END IF;
+END $$;
+SQL
 docker exec "$restore_container" psql -U postgres -d mandat_restore_check \
   -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM public.companies; SELECT count(*) FROM public.publication_versions; SELECT count(*) FROM public.notifications; SELECT count(*) FROM drizzle.__drizzle_migrations; SELECT count(*) FROM pgboss.queue;'
-printf '%s\n' 'Ripristino Supabase verificato in PostgreSQL isolato, senza modificare il database remoto.'
+printf '%s\n' 'Ripristino Supabase verificato in PostgreSQL isolato, inclusi RLS e privilegi dei ruoli client.'
