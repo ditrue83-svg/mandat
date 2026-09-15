@@ -206,6 +206,7 @@ export async function queueOutstandingChanges(companyId?: string) {
       ),
     )
     .orderBy(desc(notifications.createdAt));
+  if (!sent.length) return;
   const all = await db.select().from(publications);
   const byId = new Map(all.map((p) => [p.id, p]));
   const seen = new Set<string>();

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { afterEach, test, vi } from "vitest";
 import { SOURCE_LOT_LIMITS, restoreSimapDetail } from "../src/lib/source-lots";
+import { captureLotSourceSnapshot } from "../src/lib/lot-source-context";
+import { deriveAssessmentShape } from "../src/lib/assessment-shape";
 import { type SourceEntry } from "../src/sources/common";
 import { normalizeSimap } from "../src/sources/simap";
 import {
@@ -106,6 +108,57 @@ function respond(body: Uint8Array) {
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
+
+function individualAward() {
+  const raw = detail();
+  const { lots, base, ...parent } = raw;
+  const { lots: baseLots, ...baseFields } = base;
+  const referencedId = "55000000-0000-4000-8000-000000000005";
+  return {
+    ...parent, type: "award",
+    base: { ...baseFields, type: "award", referencingLotId: firstLot,
+      referencingPubId: referencedId },
+    referencingPub: { publicationId: referencedId, pubType: "tender" },
+    lot: { id: firstLot, lotNumber: 1, title: lots[0].title },
+  };
+}
+
+test("an individual-lot award preserves its exact source without becoming an open tender or inventing the full lot directory", async () => {
+  const raw = individualAward();
+  const body = Buffer.from(JSON.stringify(raw));
+  respond(body);
+  const { publication, acquisition } = accepted(await acquireSimap(entry()));
+  assert.equal(publication.status, "awarded");
+  assert.deepEqual(restoreSimapDetail(acquisition.archive), raw);
+  assert.equal(acquisition.receipt.bodySha256, sha(body));
+  assert.equal(acquisition.archive.presence, "absent");
+  assert.deepEqual(acquisition.archive.directory, []);
+  const shape = deriveAssessmentShape(captureLotSourceSnapshot({
+    publicationId: publication.id, observationId: "award-observation",
+    sourceScopeReview: null,
+    acquisition: { state: "accepted", archive: acquisition.archive },
+  }));
+  assert.equal(shape.kind, "unresolved");
+  assert.deepEqual(shape.targets, []);
+});
+
+test("the individual-award exception never accepts a tender, conflicting link or supplied empty directory", async () => {
+  for (const mutate of [
+    (raw: any) => { raw.type = "tender"; },
+    (raw: any) => { raw.base.type = "tender"; },
+    (raw: any) => { raw.base.referencingLotId = secondLot; },
+    (raw: any) => { raw.base.referencingPubId = publicationId; },
+    (raw: any) => { raw.lot.lotNumber = 0; },
+    (raw: any) => { raw.lots = []; },
+    (raw: any) => { raw.base.lots = []; },
+  ]) {
+    const raw = individualAward();
+    mutate(raw);
+    const body = Buffer.from(JSON.stringify(raw));
+    respond(body);
+    refused(await acquireSimap(entry()), "archive", "missing_lot_details", body);
+  }
+});
 
 function accepted(result: SimapAcquisitionResult) {
   assert.ok(result.publication);

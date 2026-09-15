@@ -195,6 +195,27 @@ function checkIndex(
     return { id, number, path: p };
   });
 }
+function isReferencedLotAward(d: Obj, base: Obj): boolean {
+  // simap publishes an individual-lot award with a singular /lot, not the
+  // tender's /lots directory. Accept only that explicitly linked result shape.
+  // It remains intact in projectSections, as metadata, using the existing v1
+  // mapping/hash rules. No tender directory or open opportunity is synthesized.
+  if (
+    d.type !== "award" || base.type !== "award" ||
+    base.lotsType !== "with" || has(d, "lots") || has(base, "lots") ||
+    !d.lot || typeof d.lot !== "object" || Array.isArray(d.lot) ||
+    !d.referencingPub || typeof d.referencingPub !== "object" ||
+    Array.isArray(d.referencingPub)
+  ) return false;
+  const lot = d.lot, reference = d.referencingPub;
+  uuid(lot.id, "/lot/id");
+  uuid(reference.publicationId, "/referencingPub/publicationId");
+  return typeof lot.lotNumber === "number" &&
+    Number.isSafeInteger(lot.lotNumber) && lot.lotNumber >= 1 &&
+    base.referencingLotId === lot.id &&
+    base.referencingPubId === reference.publicationId &&
+    reference.publicationId !== d.id;
+}
 export function preserveSimapLots(
   detail: unknown,
   expected: Identity,
@@ -222,8 +243,9 @@ export function preserveSimapLots(
   const directory = checkIndex(d.lots, "/lots");
   const baseDirectory = checkIndex(base.lots, "/base/lots");
   if (
-    (baseDirectory.length && !directory.length) ||
-    (base.lotsType === "with" && !directory.length)
+    !directory.length &&
+    (baseDirectory.length || base.lotsType === "with") &&
+    !isReferencedLotAward(d, base)
   )
     return bad("missing_lot_details", "/lots");
   if (

@@ -594,6 +594,30 @@ async function markSent(id: string) {
     .where(eq(schema.notifications.id, id));
 }
 
+it("initial adoption without evaluations or messages avoids global source locks; a later review still creates the digest", async () => {
+  const f = await fixture();
+  const transaction = vi.spyOn(db, "transaction");
+  try {
+    expect(await prepare(f)).toHaveLength(0);
+    expect(transaction).not.toHaveBeenCalled();
+  } finally {
+    transaction.mockRestore();
+  }
+  await approve(f);
+  expect(await prepare(f)).toHaveLength(1);
+});
+
+it("notification history is reconciled even when no company evaluation remains", async () => {
+  const f = await fixture();
+  await approve(f);
+  const [pending] = await prepare(f);
+  await db.update(schema.matches).set({ lotEvaluations: null })
+    .where(eq(schema.matches.companyId, f.companyId));
+  await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
+  expect((await rows(f.companyId)).find(n => n.id === pending.id)?.status)
+    .toBe("cancelled");
+});
+
 it("adopted lots enter the real digest despite legacy eligible=false, and a legacy positive alone cannot enter", async () => {
   const f = await fixture();
   await freshSources();

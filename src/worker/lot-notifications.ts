@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, isNotNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   companies,
@@ -598,8 +598,10 @@ export async function reconcileLotNotices(
       ),
     );
   for (const { id: companyId } of firms) {
-    // A legacy-only company needs no lot sweep or transaction. In particular,
-    // legacy pre-claim checks remain the first claim boundary for those emails.
+    // With neither a documentary evaluation nor any notification history there
+    // is nothing to prepare or invalidate. Avoid locking/loading every source
+    // during initial adoption. A later review commits its own durable job.
+    // Any history (even without remaining evaluations) keeps recovery active.
     const [adopted] = await db
       .select({ id: publications.id })
       .from(publications)
@@ -608,6 +610,10 @@ export async function reconcileLotNotices(
         and(
           eq(matches.companyId, companyId),
           sql`${publications.documentarySnapshotId} is not null`,
+          or(
+            isNotNull(matches.lotEvaluations),
+            sql`exists (select 1 from ${notifications} where ${notifications.companyId} = ${companyId})`,
+          ),
         ),
       )
       .limit(1);

@@ -22,6 +22,10 @@ import { matchAdoptedPublication } from "./lot-matching";
 import { DOCUMENTARY_ADOPTION_CAPABILITY } from "@/lib/documentary-capability";
 import { loadDocumentaryRuntimeActivation } from "@/lib/documentary-runtime-config";
 import { recoverStaleAiReservations } from "./ai";
+import {
+  requestNotificationDelivery,
+  requestNotificationSweeps,
+} from "./notification-scheduling";
 async function main() {
   assertProductionConfig();
   // Read once before registering consumers. A malformed release file stops
@@ -63,9 +67,9 @@ async function main() {
         publicationId: job.data.publicationId,
         signal: job.signal,
       });
-      await reconcileLotNotices({ canonicalId: job.data.canonicalId });
-      await boss.send("digest", {}, { singletonKey: "all" });
-      await boss.send("send", {}, { singletonKey: "all" });
+      // digest/send own the global reconciliation, including stale pending
+      // content. Do not lock every company's projects once for every source.
+      await requestNotificationSweeps(boss);
     },
   );
   await reconcileLotNotices();
@@ -118,12 +122,12 @@ async function main() {
         signal: job.signal,
         documentaryActivation,
       });
-      await boss.send("digest", {}, { singletonKey: "all" });
+      await requestNotificationSweeps(boss);
     },
   );
   await boss.work("digest", { batchSize: 1 }, async () => {
     await queueDigests();
-    await boss.send("send", {}, { singletonKey: "all" });
+    await requestNotificationDelivery(boss);
   });
   await boss.work("send", { batchSize: 1 }, async () => {
     await sendPending();
