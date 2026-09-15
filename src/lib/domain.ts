@@ -274,6 +274,8 @@ export type Viewer = {
   email: string;
   admin: boolean;
   demo: boolean;
+  invitationAcceptedAt: string | null;
+  invitationAcceptanceVersion: string | null;
   profile: CompanyProfile;
 };
 export function sectorLabel(id: string) {

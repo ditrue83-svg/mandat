@@ -135,6 +135,8 @@ it("mantiene il bando poco descritto in revisione senza ripetere analisi o accod
       email: "a@example.invalid",
       admin: false,
       demo: false,
+      invitationAcceptedAt: new Date(0).toISOString(),
+      invitationAcceptanceVersion: "test-acceptance-v1",
     };
     expect(await getRadarStatus(viewer)).toEqual({
       state: "ready",

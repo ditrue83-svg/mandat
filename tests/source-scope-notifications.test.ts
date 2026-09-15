@@ -114,6 +114,7 @@ beforeAll(async () => {
     companyId: "local-scope-mail-company",
     expiresAt: new Date("2035-01-01"),
     acceptedAt: now,
+    acceptedVersion: "test-acceptance-v1",
   });
 }, 20000);
 

@@ -343,6 +343,7 @@ async function fixture(
         email: `${id}@example.invalid`,
         expiresAt: new Date("2035-01-01T00:00:00Z"),
         acceptedAt: new Date(),
+        acceptedVersion: "test-acceptance-v1",
       });
     }
     await db.insert(schema.matches).values({

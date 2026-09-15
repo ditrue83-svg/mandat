@@ -64,6 +64,13 @@
       "when": 1789481330981,
       "tag": "0008_absurd_luckman",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789486937578,
+      "tag": "0009_rich_hex",
+      "breakpoints": true
     }
   ]
 }

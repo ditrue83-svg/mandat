@@ -135,6 +135,9 @@ export function LoginForm({ demo }: { demo: boolean }) {
           <p className="login-foot">
             La beta è su invito. Nessuna carta di credito richiesta.
             <br />
+            Dopo il primo accesso potrai leggere e accettare le condizioni del
+            pilota prima di configurare la ditta.
+            <br />
             {demo && <Link href="/">Esplora la versione dimostrativa →</Link>}
           </p>
         </div>

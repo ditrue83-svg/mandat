@@ -85,6 +85,8 @@ beforeAll(async () => {
     email: "a@example.invalid",
     admin: false,
     demo: false,
+    invitationAcceptedAt: null,
+    invitationAcceptanceVersion: null,
     profile: demoProfile,
   };
   b = {
@@ -95,6 +97,8 @@ beforeAll(async () => {
     email: "b@example.invalid",
     admin: false,
     demo: false,
+    invitationAcceptedAt: null,
+    invitationAcceptanceVersion: null,
     profile: demoProfile,
   };
   await db

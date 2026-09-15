@@ -277,6 +277,7 @@ beforeEach(async () => {
     companyId: firm.id,
     expiresAt: new Date("2099-01-01"),
     acceptedAt: now,
+    acceptedVersion: "test-acceptance-v1",
   });
   await db
     .insert(schema.settings)

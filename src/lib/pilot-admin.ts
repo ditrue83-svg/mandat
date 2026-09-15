@@ -22,6 +22,7 @@ import {
   readPilotPrerequisite,
   type PilotPrerequisiteKey,
 } from "./pilot";
+import { PILOT_PARTICIPATION_TERMS_VERSION } from "./pilot-participation";
 
 export function pilotDate(value: unknown) {
   if (typeof value !== "string") return null;
@@ -105,6 +106,7 @@ export async function startPilot(now = new Date()) {
       companyId: companies.id,
       invitationId: invitations.id,
       acceptedAt: invitations.acceptedAt,
+      acceptedVersion: invitations.acceptedVersion,
       onboardedAt: companies.onboardedAt,
       adminId: administrators.userId,
     })
@@ -118,10 +120,17 @@ export async function startPilot(now = new Date()) {
       400,
       `Servono esattamente ${PILOT_COMPANY_TARGET} ditte pilota attive.`,
     );
-  if (firms.some((firm) => !firm.acceptedAt || !firm.onboardedAt))
+  if (
+    firms.some(
+      (firm) =>
+        !firm.acceptedAt ||
+        firm.acceptedVersion !== PILOT_PARTICIPATION_TERMS_VERSION ||
+        !firm.onboardedAt,
+    )
+  )
     throw new HttpError(
       400,
-      "Tutte le cinque ditte devono aver accettato l’invito e completato il profilo.",
+      "Tutte le cinque ditte devono aver accettato l’informativa corrente e completato il profilo.",
     );
   const startedAt = now.toISOString();
   await db.transaction(async (tx) => {

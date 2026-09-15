@@ -18,6 +18,8 @@ export const demoViewer: Viewer = {
   email: "demo@example.invalid",
   admin: true,
   demo: true,
+  invitationAcceptedAt: new Date(0).toISOString(),
+  invitationAcceptanceVersion: "demo",
   profile: demoProfile,
 };
 const samples: {

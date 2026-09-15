@@ -487,6 +487,8 @@ async function customer(f: Fixture, other = false): Promise<Viewer> {
     email: `${id}@example.invalid`,
     admin: false,
     demo: false,
+    invitationAcceptedAt: new Date(0).toISOString(),
+    invitationAcceptanceVersion: "test-acceptance-v1",
     profile: company.profile,
   };
 }

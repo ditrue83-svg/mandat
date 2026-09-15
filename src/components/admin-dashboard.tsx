@@ -478,9 +478,11 @@ export function AdminDashboard({
                     <td>
                       {i.revokedAt
                         ? "Revocato"
-                        : i.acceptedAt
-                          ? "Accettato"
-                          : `Valido fino al ${formatDate(i.expiresAt)}`}
+                        : i.acceptedAt && i.acceptanceCurrent
+                          ? "Adesione registrata"
+                          : i.acceptedAt
+                            ? "Informativa da verificare"
+                            : `Valido fino al ${formatDate(i.expiresAt)}`}
                     </td>
                     <td>{i.onboardedAt ? "Completato" : "Da completare"}</td>
                     <td>

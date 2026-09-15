@@ -186,6 +186,8 @@ beforeAll(async () => {
     name: "Test",
     admin: false,
     demo: false,
+    invitationAcceptedAt: now.toISOString(),
+    invitationAcceptanceVersion: "test-acceptance-v1",
     profile: firm.profile,
   };
   context.viewer = { ...viewer, admin: true };
@@ -195,6 +197,7 @@ beforeAll(async () => {
     companyId: viewer.companyId,
     expiresAt: new Date("2035-01-01"),
     acceptedAt: now,
+    acceptedVersion: "test-acceptance-v1",
   });
   vi.stubGlobal(
     "fetch",

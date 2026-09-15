@@ -36,6 +36,7 @@ import {
   requestPilotExternalDeliveryTest,
 } from "../src/lib/pilot-delivery";
 import { summarizePilot } from "../src/lib/pilot";
+import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-consent";
 import { readProjectQuality } from "../src/lib/project-quality";
 
 const pg = new PGlite();
@@ -163,7 +164,10 @@ describe("preparazione e misure del pilota", () => {
     for (const firm of firms) {
       await db
         .update(schema.invitations)
-        .set({ acceptedAt })
+        .set({
+          acceptedAt,
+          acceptedVersion: PILOT_PARTICIPATION_TERMS_VERSION,
+        })
         .where(eq(schema.invitations.companyId, firm.companyId));
       await db
         .update(schema.companies)
@@ -242,6 +246,7 @@ describe("preparazione e misure del pilota", () => {
       companyId: "outside-company",
       expiresAt: new Date("2026-09-29T09:10:00.000Z"),
       acceptedAt,
+      acceptedVersion: PILOT_PARTICIPATION_TERMS_VERSION,
     });
     await db.insert(schema.matches).values({
       id: "outside-match",

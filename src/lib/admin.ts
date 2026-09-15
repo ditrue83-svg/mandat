@@ -48,6 +48,10 @@ import {
   getPilotExternalDeliveryTest,
   presentPilotExternalDeliveryTest,
 } from "./pilot-delivery";
+import {
+  FOUNDER_ACCEPTANCE_VERSION,
+  PILOT_PARTICIPATION_TERMS_VERSION,
+} from "./pilot-participation";
 export async function provisionInvite(
   email: string,
   name: string,
@@ -93,6 +97,7 @@ export async function provisionInvite(
       companyId,
       expiresAt: new Date(Date.now() + 14 * 86400000),
       acceptedAt: admin ? new Date() : null,
+      acceptedVersion: admin ? FOUNDER_ACCEPTANCE_VERSION : null,
     });
     if (admin) await tx.insert(administrators).values({ userId });
   });
@@ -102,9 +107,9 @@ export async function notifyInvitation(email: string, name: string) {
   return sendMail({
     to: email,
     subject: "La tua ditta è invitata a provare Mandat",
-    text: `Ciao ${name}, la tua ditta è invitata alla beta gratuita di Mandat. Accedi con questa email entro 14 giorni: ${appUrl()}/accedi`,
+    text: `Ciao ${name}, la tua ditta è invitata alla beta gratuita di Mandat per quattro settimane. Accedi con questa email entro 14 giorni: ${appUrl()}/accedi. Prima di configurare la ditta troverai le condizioni di partecipazione e l’informativa sull’invio email tramite Aruba in Italia. Mandat segnala interessi potenziali; la pubblicazione ufficiale resta determinante.`,
     html: emailLayout(
-      `<h2>Benvenuto nella beta Radar</h2><p>Ciao ${escapeHtml(name)}, la tua ditta è invitata a provare Mandat gratuitamente.</p><p><a href="${appUrl()}/accedi">Accedi al tuo Radar</a></p><p>Usa questo indirizzo email entro 14 giorni. Non serve una carta di credito.</p>`,
+      `<h2>Benvenuto nella beta Radar</h2><p>Ciao ${escapeHtml(name)}, la tua ditta è invitata a provare Mandat gratuitamente per quattro settimane.</p><p><a href="${appUrl()}/accedi">Accedi al tuo Radar</a></p><p>Usa questo indirizzo email entro 14 giorni. Prima di configurare la ditta troverai le condizioni di partecipazione e l’informativa sull’invio email tramite Aruba in Italia. Non serve una carta di credito.</p><p>Mandat segnala interessi potenziali; la pubblicazione ufficiale resta determinante.</p>`,
     ),
   });
 }
@@ -205,6 +210,7 @@ export async function adminSnapshot(demo: boolean) {
         name: user.name,
         expiresAt: invitations.expiresAt,
         acceptedAt: invitations.acceptedAt,
+        acceptedVersion: invitations.acceptedVersion,
         revokedAt: invitations.revokedAt,
         companyId: companies.id,
         onboardedAt: companies.onboardedAt,
@@ -451,6 +457,9 @@ export async function adminSnapshot(demo: boolean) {
       name: i.name,
       expiresAt: i.expiresAt.toISOString(),
       acceptedAt: i.acceptedAt?.toISOString() ?? null,
+      acceptedVersion: i.acceptedVersion,
+      acceptanceCurrent:
+        i.acceptedVersion === PILOT_PARTICIPATION_TERMS_VERSION,
       revokedAt: i.revokedAt?.toISOString() ?? null,
       onboardedAt: i.onboardedAt?.toISOString() ?? null,
       admin: !!i.administratorId,

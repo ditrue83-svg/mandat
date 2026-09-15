@@ -102,17 +102,27 @@ export const administrators = pgTable("administrators", {
     .primaryKey()
     .references(() => user.id, { onDelete: "cascade" }),
 }).enableRLS();
-export const invitations = pgTable("invitations", {
-  id: text("id").primaryKey(),
-  email: text("email").notNull().unique(),
-  companyId: text("company_id")
-    .notNull()
-    .references(() => companies.id, { onDelete: "cascade" }),
-  expiresAt: time("expires_at").notNull(),
-  acceptedAt: time("accepted_at"),
-  revokedAt: time("revoked_at"),
-  createdAt: time("created_at").notNull().defaultNow(),
-}).enableRLS();
+export const invitations = pgTable(
+  "invitations",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull().unique(),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    expiresAt: time("expires_at").notNull(),
+    acceptedAt: time("accepted_at"),
+    acceptedVersion: text("accepted_version"),
+    revokedAt: time("revoked_at"),
+    createdAt: time("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "invitations_acceptance_pair_check",
+      sql`((${t.acceptedAt} is null and ${t.acceptedVersion} is null) or (${t.acceptedAt} is not null and ${t.acceptedVersion} is not null))`,
+    ),
+  ],
+).enableRLS();
 export const publications = pgTable(
   "publications",
   {
