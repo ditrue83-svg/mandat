@@ -44,6 +44,10 @@ import {
   readPilotPrerequisites,
   readPilotStartedAt,
 } from "./pilot-admin";
+import {
+  getPilotExternalDeliveryTest,
+  presentPilotExternalDeliveryTest,
+} from "./pilot-delivery";
 export async function provisionInvite(
   email: string,
   name: string,
@@ -159,6 +163,7 @@ export async function adminSnapshot(demo: boolean) {
       issues: [],
       notifications: [],
       feedback: [],
+      externalDeliveryTest: null,
       pilot: summarizePilot({
         startedAt: null,
         participants: [],
@@ -189,6 +194,7 @@ export async function adminSnapshot(demo: boolean) {
     pilotDeliveryRows,
     publicationTimingRows,
     pilotPrerequisites,
+    pilotExternalDeliveryTest,
   ] = await Promise.all([
     getGate(),
     db.select().from(sourceRuns).orderBy(desc(sourceRuns.startedAt)).limit(10),
@@ -295,6 +301,7 @@ export async function adminSnapshot(demo: boolean) {
       })
       .from(publications),
     readPilotPrerequisites(),
+    getPilotExternalDeliveryTest(),
   ]);
   const review = [];
   for (const item of reviewInventory) {
@@ -558,6 +565,9 @@ export async function adminSnapshot(demo: boolean) {
       relevant: f.relevant,
       sectors: f.sector.sectors,
     })),
+    externalDeliveryTest: presentPilotExternalDeliveryTest(
+      pilotExternalDeliveryTest,
+    ),
     pilot,
     sourceEnabled: {
       simap: !!process.env.DATABASE_URL,

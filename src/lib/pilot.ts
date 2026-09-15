@@ -8,6 +8,8 @@ export const PILOT_DELIVERY_LIMIT_HOURS = 24;
 export const PILOT_RELEVANCE_TARGET = 0.8;
 export const PILOT_RECALL_TARGET = 0.9;
 export const PILOT_CONTINUATION_TARGET = 3;
+export const PILOT_EXTERNAL_DELIVERY_TEST_SETTING =
+  "pilot_external_delivery_test";
 
 export const pilotPrerequisiteKeys = [
   "data_residency",
@@ -27,6 +29,33 @@ const prerequisiteSchema = z
   .strict();
 
 export type PilotPrerequisite = z.infer<typeof prerequisiteSchema>;
+
+const externalDeliveryTestSchema = z
+  .object({
+    version: z.literal("pilot-external-delivery-test-v1"),
+    id: z.string().uuid(),
+    recipient: z.email(),
+    providerConfirmed: z.literal("non-aruba"),
+    status: z.enum(["sending", "accepted", "uncertain", "received"]),
+    requestedBy: z.string().min(1).max(200),
+    requestedAt: z.iso.datetime({ offset: true }),
+    completedAt: z.iso.datetime({ offset: true }).nullable(),
+    receivedAt: z.iso.datetime({ offset: true }).nullable(),
+    messageId: z.string().min(1).max(500).nullable(),
+    error: z.string().max(800).nullable(),
+  })
+  .strict();
+
+export type PilotExternalDeliveryTest = z.infer<
+  typeof externalDeliveryTestSchema
+>;
+
+export function readPilotExternalDeliveryTest(
+  value: unknown,
+): PilotExternalDeliveryTest | null {
+  const parsed = externalDeliveryTestSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
 
 export function pilotPrerequisiteSettingKey(key: PilotPrerequisiteKey) {
   return `pilot_prerequisite:${key}`;

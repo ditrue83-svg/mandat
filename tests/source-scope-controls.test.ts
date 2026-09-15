@@ -184,6 +184,7 @@ it("il filtro iniziale dell’admin mostra tutti i giudizi ancora da verificare,
     issues: [],
     notifications: [],
     feedback: [],
+    externalDeliveryTest: null,
     pilot: summarizePilot({
       startedAt: null,
       participants: [],
@@ -236,5 +237,12 @@ it("il filtro iniziale dell’admin mostra tutti i giudizi ancora da verificare,
   expect(html).toContain("NORMAL-NEGATIVE");
   expect(html).toContain("DOCUMENTARY-PENDING");
   expect(html).toContain('value="da-valutare" selected=""');
+  expect(html).toContain("Invia una sola prova");
+  expect(html).toContain(
+    "Confermo di controllare questa casella e che è gestita da",
+  );
+  expect(html).toContain(
+    "Confermo che la ditta ha accettato di partecipare e di ricevere",
+  );
   expect(data.matches[0].eligible).toBe(false);
 });

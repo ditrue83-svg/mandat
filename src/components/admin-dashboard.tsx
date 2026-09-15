@@ -27,6 +27,9 @@ export function AdminDashboard({
   const [message, setMessage] = useState("");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
+  const [inviteConsentConfirmed, setInviteConsentConfirmed] = useState(false);
+  const [externalEmail, setExternalEmail] = useState("");
+  const [nonArubaConfirmed, setNonArubaConfirmed] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [reviewFilter, setReviewFilter] = useState("da-valutare");
   async function act(body: unknown) {
@@ -180,67 +183,164 @@ export function AdminDashboard({
         {!data.pilot.startedAt && (
           <>
             <h3 className="space-top">Verifiche prima dell’avvio</h3>
-            {[
-              {
-                key: "data_residency" as const,
-                label: "Residenza di dati, log e backup",
-                help: "Registra l’evidenza contrattuale del fornitore o la decisione infrastrutturale adottata.",
-              },
-              {
-                key: "external_delivery" as const,
-                label: "Recapito email verso un provider esterno",
-                help: "Registra la ricezione di una sola prova autorizzata su una casella non Aruba.",
-              },
-            ].map((item) => {
-              const prerequisite = data.pilot.prerequisites[item.key];
-              return (
-                <form
-                  key={item.key}
-                  className="admin-review space-top"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const form = new FormData(event.currentTarget);
-                    void act({
-                      action: "pilot-prerequisite",
-                      key: item.key,
-                      confirmed: form.get("confirmed") === "true",
-                      note: form.get("note"),
-                    });
-                  }}
+            <form
+              className="admin-review space-top"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const form = new FormData(event.currentTarget);
+                void act({
+                  action: "pilot-prerequisite",
+                  key: "data_residency",
+                  confirmed: form.get("confirmed") === "true",
+                  note: form.get("note"),
+                });
+              }}
+            >
+              <h3>
+                Residenza di dati, log e backup{" "}
+                <span
+                  className={`status-badge ${data.pilot.prerequisites.data_residency?.confirmed ? "" : "warning"}`}
                 >
-                  <h3>
-                    {item.label}{" "}
-                    <span
-                      className={`status-badge ${prerequisite?.confirmed ? "" : "warning"}`}
+                  {data.pilot.prerequisites.data_residency?.confirmed
+                    ? "Verificato"
+                    : "Da verificare"}
+                </span>
+              </h3>
+              <p className="meta">
+                Registra l’evidenza contrattuale del fornitore o la decisione
+                infrastrutturale adottata.
+              </p>
+              <div className="inline-form">
+                <select
+                  name="confirmed"
+                  defaultValue={String(
+                    data.pilot.prerequisites.data_residency?.confirmed ?? false,
+                  )}
+                  aria-label="Stato: Residenza di dati, log e backup"
+                >
+                  <option value="false">Da verificare</option>
+                  <option value="true">Verificato</option>
+                </select>
+                <input
+                  name="note"
+                  required
+                  minLength={10}
+                  defaultValue={
+                    data.pilot.prerequisites.data_residency?.note ?? ""
+                  }
+                  placeholder="Evidenza e data del controllo"
+                  aria-label="Evidenza: Residenza di dati, log e backup"
+                />
+                <button className="button secondary" disabled={disabled}>
+                  Registra
+                </button>
+              </div>
+            </form>
+            <div className="admin-review space-top">
+              <h3>
+                Recapito email verso un provider esterno{" "}
+                <span
+                  className={`status-badge ${data.pilot.prerequisites.external_delivery?.confirmed ? "" : "warning"}`}
+                >
+                  {data.pilot.prerequisites.external_delivery?.confirmed
+                    ? "Verificato"
+                    : "Da verificare"}
+                </span>
+              </h3>
+              <p className="meta">
+                Invia una sola prova a una casella che controlli e che non sia
+                gestita da Aruba. La ricezione va poi confermata qui.
+              </p>
+              {!data.externalDeliveryTest &&
+                !data.pilot.prerequisites.external_delivery?.confirmed && (
+                  <form
+                    className="space-top"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void act({
+                        action: "pilot-delivery-test",
+                        email: externalEmail,
+                        nonArubaConfirmed,
+                      });
+                    }}
+                  >
+                    <div className="inline-form">
+                      <input
+                        required
+                        type="email"
+                        value={externalEmail}
+                        onChange={(event) =>
+                          setExternalEmail(event.target.value)
+                        }
+                        placeholder="tua-casella@provider-esterno.ch"
+                        aria-label="Casella esterna per la prova"
+                        disabled={disabled}
+                      />
+                      <button
+                        className="button secondary"
+                        disabled={disabled || !nonArubaConfirmed}
+                      >
+                        <Mail size={17} /> Invia una sola prova
+                      </button>
+                    </div>
+                    <label className="check-label space-top">
+                      <input
+                        type="checkbox"
+                        required
+                        checked={nonArubaConfirmed}
+                        onChange={(event) =>
+                          setNonArubaConfirmed(event.target.checked)
+                        }
+                        disabled={disabled}
+                      />
+                      Confermo di controllare questa casella e che è gestita da
+                      un provider diverso da Aruba.
+                    </label>
+                  </form>
+                )}
+              {data.externalDeliveryTest && (
+                <div className="space-top">
+                  <p>
+                    Destinatario:{" "}
+                    <strong>{data.externalDeliveryTest.recipient}</strong>
+                    {" · "}
+                    {data.externalDeliveryTest.status === "accepted"
+                      ? "accettata dal server SMTP"
+                      : data.externalDeliveryTest.status === "received"
+                        ? "ricezione confermata"
+                        : data.externalDeliveryTest.status === "sending"
+                          ? "invio registrato, esito da controllare"
+                          : "esito SMTP incerto"}
+                  </p>
+                  {data.externalDeliveryTest.error && (
+                    <p className="meta">{data.externalDeliveryTest.error}</p>
+                  )}
+                  {!data.pilot.prerequisites.external_delivery?.confirmed && (
+                    <form
+                      className="inline-form space-top"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void act({
+                          action: "pilot-delivery-received",
+                          note: new FormData(event.currentTarget).get("note"),
+                        });
+                      }}
                     >
-                      {prerequisite?.confirmed ? "Verificato" : "Da verificare"}
-                    </span>
-                  </h3>
-                  <p className="meta">{item.help}</p>
-                  <div className="inline-form">
-                    <select
-                      name="confirmed"
-                      defaultValue={String(prerequisite?.confirmed ?? false)}
-                      aria-label={`Stato: ${item.label}`}
-                    >
-                      <option value="false">Da verificare</option>
-                      <option value="true">Verificato</option>
-                    </select>
-                    <input
-                      name="note"
-                      required
-                      minLength={10}
-                      defaultValue={prerequisite?.note ?? ""}
-                      placeholder="Evidenza e data del controllo"
-                      aria-label={`Evidenza: ${item.label}`}
-                    />
-                    <button className="button secondary" disabled={disabled}>
-                      Registra
-                    </button>
-                  </div>
-                </form>
-              );
-            })}
+                      <input
+                        name="note"
+                        required
+                        minLength={10}
+                        placeholder="Dove e quando hai verificato la ricezione"
+                        aria-label="Evidenza della ricezione"
+                      />
+                      <button className="button secondary" disabled={disabled}>
+                        <Check size={17} /> Conferma ricezione
+                      </button>
+                    </form>
+                  )}
+                </div>
+              )}
+            </div>
             <button
               className="button primary space-top"
               disabled={disabled || !data.pilot.readyToStart}
@@ -296,7 +396,12 @@ export function AdminDashboard({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            void act({ action: "invite", name, email });
+            void act({
+              action: "invite",
+              name,
+              email,
+              contactConsentConfirmed: inviteConsentConfirmed,
+            });
           }}
         >
           <div className="form-grid">
@@ -308,7 +413,7 @@ export function AdminDashboard({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Ragione sociale"
-                disabled={disabled}
+                disabled={disabled || !!data.pilot.startedAt}
               />
             </label>
             <label className="field">
@@ -319,13 +424,38 @@ export function AdminDashboard({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="nome@ditta.ch"
-                disabled={disabled}
+                disabled={disabled || !!data.pilot.startedAt}
               />
             </label>
           </div>
-          <button className="button primary" disabled={disabled}>
+          {!data.pilot.startedAt && (
+            <label className="check-label">
+              <input
+                type="checkbox"
+                required
+                checked={inviteConsentConfirmed}
+                onChange={(event) =>
+                  setInviteConsentConfirmed(event.target.checked)
+                }
+                disabled={disabled}
+              />
+              Confermo che la ditta ha accettato di partecipare e di ricevere
+              questo invito.
+            </label>
+          )}
+          <button
+            className="button primary space-top"
+            disabled={
+              disabled || !!data.pilot.startedAt || !inviteConsentConfirmed
+            }
+          >
             <Mail size={17} /> Crea e invia invito
           </button>
+          {data.pilot.startedAt && (
+            <p className="meta">
+              La coorte è già fissata: non è possibile aggiungere altre ditte.
+            </p>
+          )}
         </form>
         {pilotInvites.length > 0 && (
           <div className="admin-table-wrap space-top">

@@ -20,13 +20,21 @@ vi.mock("@/lib/mail", () => ({
 
 import { provisionInvite } from "../src/lib/admin";
 import { saveCompanyFeedback, updateCompanyProfile } from "../src/lib/company";
+import { sendMail } from "../src/lib/mail";
 import {
+  readPilotPrerequisites,
   readPilotStartedAt,
   recordPilotAudit,
   recordPilotContinuation,
   setPilotPrerequisite,
   startPilot,
 } from "../src/lib/pilot-admin";
+import {
+  confirmPilotExternalDeliveryReceipt,
+  getPilotExternalDeliveryTest,
+  presentPilotExternalDeliveryTest,
+  requestPilotExternalDeliveryTest,
+} from "../src/lib/pilot-delivery";
 import { summarizePilot } from "../src/lib/pilot";
 import { readProjectQuality } from "../src/lib/project-quality";
 
@@ -54,6 +62,68 @@ beforeAll(async () => {
 afterAll(async () => pg.close());
 
 describe("preparazione e misure del pilota", () => {
+  it("invia una sola prova esterna e richiede conferma di ricezione", async () => {
+    vi.mocked(sendMail).mockResolvedValueOnce({
+      accepted: ["founder@external.example"],
+      rejected: [],
+      messageId: "<smtp-pilot-test@example.invalid>",
+    } as never);
+
+    await expect(
+      requestPilotExternalDeliveryTest({
+        recipient: "info@mandat-app.com",
+        nonArubaConfirmed: true,
+        actorId: "pilot-external-admin",
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(sendMail).not.toHaveBeenCalled();
+
+    const requested = await requestPilotExternalDeliveryTest({
+      recipient: "FOUNDER@EXTERNAL.EXAMPLE",
+      nonArubaConfirmed: true,
+      actorId: "pilot-external-admin",
+      now: new Date("2026-09-15T08:02:00.000Z"),
+    });
+    expect(requested).toMatchObject({
+      recipient: "founder@external.example",
+      status: "accepted",
+      providerConfirmed: "non-aruba",
+      requestedAt: "2026-09-15T08:02:00.000Z",
+    });
+    expect(sendMail).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sendMail).mock.calls[0][0]).toMatchObject({
+      to: "founder@external.example",
+      subject: "[VERIFICA RECAPITO] Mandat",
+    });
+    expect(presentPilotExternalDeliveryTest(requested)?.recipient).toBe(
+      "fo…@external.example",
+    );
+
+    await expect(
+      requestPilotExternalDeliveryTest({
+        recipient: "second@external.example",
+        nonArubaConfirmed: true,
+        actorId: "pilot-external-admin",
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(sendMail).toHaveBeenCalledTimes(1);
+
+    const received = await confirmPilotExternalDeliveryReceipt({
+      actorId: "pilot-external-admin",
+      note: "Messaggio presente nella casella Inbox del fondatore.",
+      now: new Date("2026-09-15T08:04:00.000Z"),
+    });
+    expect(received.status).toBe("received");
+    expect(received.receivedAt).toBe("2026-09-15T08:04:00.000Z");
+    expect((await getPilotExternalDeliveryTest())?.status).toBe("received");
+    const externalPrerequisite = await readPilotPrerequisites();
+    expect(externalPrerequisite.external_delivery).toMatchObject({
+      confirmed: true,
+      actorId: "pilot-external-admin",
+      recordedAt: "2026-09-15T08:04:00.000Z",
+    });
+  });
+
   it("separa inviti, avvio esplicito e primo completamento del profilo", async () => {
     const admin = await provisionInvite(
       "pilot-founder@example.invalid",

@@ -41,6 +41,10 @@ import {
   setPilotPrerequisite,
   startPilot,
 } from "@/lib/pilot-admin";
+import {
+  confirmPilotExternalDeliveryReceipt,
+  requestPilotExternalDeliveryTest,
+} from "@/lib/pilot-delivery";
 const sourceDependencySchema = z
   .object({
     version: z.literal(CONTEXT_VERSION),
@@ -65,7 +69,11 @@ const sourceScopeSnapshot = {
   note: z.string().trim().min(10).max(800),
 };
 const inputSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("invite"), ...inviteSchema.shape }),
+  z.object({
+    action: z.literal("invite"),
+    ...inviteSchema.shape,
+    contactConsentConfirmed: z.literal(true),
+  }),
   z.object({ action: z.literal("revoke"), id: z.string() }),
   z.object({
     action: z.literal("review"),
@@ -88,9 +96,18 @@ const inputSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("automation"), enabled: z.boolean() }),
   z.object({
     action: z.literal("pilot-prerequisite"),
-    key: z.enum(["data_residency", "external_delivery"]),
+    key: z.literal("data_residency"),
     confirmed: z.boolean(),
     note: z.string().trim().min(10).max(800),
+  }),
+  z.object({
+    action: z.literal("pilot-delivery-test"),
+    email: z.email().trim().toLowerCase(),
+    nonArubaConfirmed: z.literal(true),
+  }),
+  z.object({
+    action: z.literal("pilot-delivery-received"),
+    note: z.string().trim().min(10).max(500),
   }),
   z.object({ action: z.literal("pilot-start") }),
   z.object({
@@ -419,6 +436,30 @@ export async function POST(request: Request) {
           actorId: v.userId,
         });
         break;
+      }
+      case "pilot-delivery-test": {
+        const test = await requestPilotExternalDeliveryTest({
+          recipient: body.email,
+          nonArubaConfirmed: body.nonArubaConfirmed,
+          actorId: v.userId,
+        });
+        return Response.json({
+          ok: true,
+          message:
+            test.status === "accepted"
+              ? "Il server SMTP ha accettato la prova. Controlla la casella e conferma la ricezione."
+              : "L’esito SMTP è incerto. Controlla la casella e il registro prima di qualsiasi altro invio.",
+        });
+      }
+      case "pilot-delivery-received": {
+        await confirmPilotExternalDeliveryReceipt({
+          actorId: v.userId,
+          note: body.note,
+        });
+        return Response.json({
+          ok: true,
+          message: "Ricezione confermata. Il prerequisito email è verificato.",
+        });
       }
       case "pilot-start": {
         const pilot = await startPilot();
