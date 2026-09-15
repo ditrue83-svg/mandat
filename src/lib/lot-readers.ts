@@ -134,14 +134,10 @@ export function lotOpportunityVisible(
   return (
     loaded.publication.status === "open" &&
     !loaded.project.suppressed &&
-    loaded.project.state !== "different" &&
-    (loaded.project.state === "input_refused" ||
-      loaded.project.shape.kind === "unresolved" ||
-      loaded.project.targets.some(
-        (lot) =>
-          lot.state !== "removed-or-unresolved" &&
-          lot.preliminary?.eligible !== false,
-      ))
+    // Pending, stale and refused assessments belong in the founder queue.
+    // Explicit customer dismissals remain available under the Excluse filter;
+    // they are never displayed among the selected opportunities or emailed.
+    (loaded.project.signalEligible || loaded.project.dismissed)
   );
 }
 

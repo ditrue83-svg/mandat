@@ -659,8 +659,24 @@ it("an existing positive v1 review becomes a non-positive adopted/refused projec
     lotReview: { state: "input_refused", signalEligible: false },
   });
   const list = await listOpportunities(who);
-  expect(list).toHaveLength(1);
-  expect(list[0].score).toBe(0);
+  expect(list).toEqual([]);
+  // A saved historical link remains usable even when its current source is
+  // refused, without returning to the selected Radar results.
+  await db.insert(schema.feedback).values({
+    id: randomUUID(),
+    companyId: f.companyId,
+    publicationId: f.p.id,
+    saved: true,
+  });
+  expect(await listOpportunities(who)).toEqual([]);
+  expect(await listOpportunities(who, { includeInactive: true })).toEqual([
+    expect.objectContaining({
+      id: f.p.id,
+      saved: true,
+      assessment: "uncertain",
+      score: 0,
+    }),
+  ]);
   expect(await getRadarStatus(who)).toEqual({
     state: "ready",
     pendingCount: 0,
@@ -760,7 +776,7 @@ it("changing only B preserves the current A judgment, then changing the profile 
     result: null,
     issue: "stale_profile",
   });
-  expect((await listOpportunities(who))[0].score).toBe(0);
+  expect(await listOpportunities(who)).toEqual([]);
   expect(await matchRows(f.p.id)).toEqual(storedBefore);
   expect(await getGate()).toMatchObject({
     approved: 0,
@@ -812,8 +828,7 @@ it.each(["cancelled", "refused", "no-match"] as const)(
     }
     const list = await listOpportunities(who);
     expect(list.every((p) => p.id !== old.p.id)).toBe(true);
-    if (state === "refused") expect(list).toHaveLength(1);
-    else expect(list).toEqual([]);
+    expect(list).toEqual([]);
     const radarStatus = await getRadarStatus(who);
     expect(radarStatus.pendingCount).toBe(state === "no-match" ? 1 : 0);
     const gate = await getGate();
@@ -978,14 +993,14 @@ it("admin candidates follow per-lot operational vetoes without converting them t
     (row) => row.id === outside.match.id,
   );
   expect(mixedAdmin).toMatchObject({
-    eligible: true,
+    eligible: false,
     approved: null,
     reviewed: false,
     assessment: "uncertain",
   });
+  expect(mixedAdmin?.lotReviewUrl).toBeTruthy();
   const current = await listOpportunities(who);
-  expect(current).toHaveLength(1);
-  expect(current[0].lotReview?.signalEligible).toBe(false);
+  expect(current).toEqual([]);
   expect(await matchRows(f.p.id)).toEqual(previousMatches);
   expect(await db.select().from(schema.matchLotReviewEvents)).toEqual(
     previousAudits,
@@ -1056,6 +1071,16 @@ it("explicitly without lots supports a real whole-project assessment, a single R
   });
   expect(before!.lotReview!.targets).toHaveLength(1);
   expect(before!.lotReview!.targets[0].target).toEqual(f.project);
+  expect(await listOpportunities(who)).toEqual([]);
+  const pending = (await adminSnapshot(false)).matches.find(
+    (m) => m.publicationId === f.p.id && m.company === f.profile.name,
+  );
+  expect(pending).toMatchObject({
+    approved: null,
+    reviewed: false,
+    eligible: false,
+    lotReviewUrl: `/admin/valutazioni/${f.companyId}/${f.p.id}`,
+  });
   expect(await getRadarStatus(who)).toEqual({
     state: "ready",
     pendingCount: 0,
@@ -1104,6 +1129,7 @@ it("unknown shape cannot revive legacy approval; returning project after a lots 
     assessment: "uncertain",
     lotReview: { shape: "unresolved", targets: [] },
   });
+  expect(await listOpportunities(await customer(unknown))).toEqual([]);
   const f = await fixture({ withoutLots: true });
   const who = await customer(f);
   await appendLotMatchReview(wholeProjectDraft(await f.load()), viewer);

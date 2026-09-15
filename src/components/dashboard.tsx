@@ -460,7 +460,7 @@ export function Dashboard({
                     ? "Nessuna opportunità con questi filtri."
                     : radarStatus.state !== "ready"
                       ? "Il tuo Radar si sta aggiornando."
-                      : "Al momento nessuna opportunità pertinente."}
+                      : "Al momento nessuna proposta verificata per la tua ditta."}
               </h3>
               <p>
                 {savedOnly
@@ -472,7 +472,7 @@ export function Dashboard({
                     ? "Azzera i filtri o controlla le opportunità che hai nascosto."
                     : radarStatus.state !== "ready"
                       ? "Non serve compilare di nuovo il profilo. Questa pagina si aggiorna automaticamente."
-                      : "Non abbiamo proposte da mostrarti per le preferenze attuali. Il Radar continuerà a cercare nuove pubblicazioni."}
+                      : "Le nuove pubblicazioni vengono valutate prima di comparire qui. Il Radar continuerà a cercare opportunità per le tue attività."}
               </p>
               {(query || sector !== "all" || showDismissed) && (
                 <button

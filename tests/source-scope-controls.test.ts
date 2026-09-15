@@ -120,7 +120,7 @@ vi.mock("next/navigation", () => ({
 import { AdminDashboard } from "../src/components/admin-dashboard";
 import type { AdminSnapshot } from "../src/lib/admin";
 import { demoViewer } from "../src/lib/demo";
-it("il filtro iniziale dell’admin include i negativi AI da verificare e conserva gli scarti del prefiltro", () => {
+it("il filtro iniziale dell’admin mostra tutti i giudizi ancora da verificare, inclusi quelli senza proposta Radar", () => {
   function row(
     id: string,
     values: Partial<AdminSnapshot["matches"][number]>,
@@ -191,6 +191,7 @@ it("il filtro iniziale dell’admin include i negativi AI da verificare e conser
         eligible: true,
         assessment: "rejected",
         approved: false,
+        reviewed: true,
       }),
       row("NORMAL-POSITIVE", {
         eligible: true,
@@ -204,6 +205,9 @@ it("il filtro iniziale dell’admin include i negativi AI da verificare e conser
         reviewRequired: false,
         sourceScopeReview: undefined,
       }),
+      row("DOCUMENTARY-PENDING", {
+        lotReviewUrl: "/admin/valutazioni/company/publication",
+      }),
     ],
   };
   const html = renderToStaticMarkup(
@@ -211,8 +215,10 @@ it("il filtro iniziale dell’admin include i negativi AI da verificare e conser
   );
   expect(html).toContain("LOW-CACHE-CANDIDATE");
   expect(html).toContain("NORMAL-POSITIVE");
-  expect(html).not.toContain("HIGH-CACHE-PREFILTER-EXCLUDED");
+  expect(html).toContain("HIGH-CACHE-PREFILTER-EXCLUDED");
   expect(html).not.toContain("MANUAL-REJECTED");
-  expect(html).not.toContain("NORMAL-NEGATIVE");
+  expect(html).toContain("NORMAL-NEGATIVE");
+  expect(html).toContain("DOCUMENTARY-PENDING");
+  expect(html).toContain('value="da-valutare" selected=""');
   expect(data.matches[0].eligible).toBe(false);
 });

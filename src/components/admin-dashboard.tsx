@@ -23,7 +23,7 @@ export function AdminDashboard({
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
-  const [reviewFilter, setReviewFilter] = useState("proposte");
+  const [reviewFilter, setReviewFilter] = useState("da-valutare");
   async function act(body: unknown) {
     setBusy(true);
     setMessage("");
@@ -214,6 +214,7 @@ export function AdminDashboard({
             value={reviewFilter}
             onChange={(e) => setReviewFilter(e.target.value)}
           >
+            <option value="da-valutare">Da valutare</option>
             <option value="proposte">Proposte dal Radar</option>
             <option value="scartate">
               Scartate · controllo delle opportunità mancate
@@ -238,7 +239,11 @@ export function AdminDashboard({
                 : m.eligible;
             return (
               reviewFilter === "tutte" ||
-              (reviewFilter === "scartate" ? !candidate : candidate)
+              (reviewFilter === "da-valutare"
+                ? !m.reviewed
+                : reviewFilter === "scartate"
+                  ? !candidate
+                  : candidate)
             );
           })
           .map((m) => (

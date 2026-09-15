@@ -281,7 +281,8 @@ export async function adminSnapshot(demo: boolean) {
         profileRevision: fingerprint(r.company),
         score: documentary ? (lot?.score ?? 0) : r.score,
         eligible: loaded
-          ? lotOpportunityVisible(loaded, false, new Date())
+          ? lotOpportunityVisible(loaded, false, new Date()) &&
+            !loaded.project.dismissed
           : documentary
             ? false
             : r.eligible,
