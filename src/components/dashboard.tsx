@@ -305,7 +305,11 @@ export function Dashboard({
         <section className="results">
           <div className="section-title">
             <h2>
-              {savedOnly ? "Da approfondire" : "Selezionate per la tua ditta"}{" "}
+              {savedOnly
+                ? "Da approfondire"
+                : showDismissed
+                  ? "Opportunità escluse"
+                  : "Selezionate per la tua ditta"}{" "}
               <span>{visible.length}</span>
             </h2>
             <span className="meta">

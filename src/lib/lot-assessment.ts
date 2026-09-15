@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { assessmentLocation } from "./assessment-location";
 import { z } from "zod";
 import type { CompanyProfile, Publication } from "./domain";
 import {
@@ -1048,6 +1049,7 @@ export function projectLotAssessmentDto(value: ProjectLotAssessment) {
     operational: item.preliminary
       ? {
           ...item.preliminary.operational,
+          location: assessmentLocation(item.preliminary, item.target.kind),
           cpv: [...item.preliminary.operational.cpv],
         }
       : null,

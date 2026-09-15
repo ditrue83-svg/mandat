@@ -87,7 +87,10 @@ export function presentLotOpportunity(
         ? (project.projectAssessment?.preliminary?.operational.deadline ?? null)
         : null,
     valueChf: null,
-    location: zones.join(" · ") || "Non indicato",
+    location:
+      [...new Set(operational.map((lot) => lot.operational!.location))].join(
+        " / ",
+      ) || "Non indicato",
     score: project.signalEligible ? 100 : 0,
     assessment:
       project.quality === "approved"

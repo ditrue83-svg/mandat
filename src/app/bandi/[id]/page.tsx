@@ -12,6 +12,7 @@ import {
 import { Shell } from "@/components/shell";
 import { DetailActions } from "@/components/detail-actions";
 import { MatchNote } from "@/components/match-note";
+import { plainText } from "@/sources/common";
 export const dynamic = "force-dynamic";
 export default async function Detail({
   params,
@@ -59,8 +60,9 @@ export default async function Detail({
             <h2>Le informazioni essenziali</h2>
             {item.lotReview && (
               <p className="meta">
-                Scadenza, importo e luogo devono essere verificati per ciascun
-                lotto nella fonte ufficiale.
+                {item.lotReview.shape === "lots"
+                  ? "Scadenza, importo e luogo devono essere verificati per ciascun lotto nella fonte ufficiale."
+                  : "Verifica scadenza, importo e luogo del progetto nella fonte ufficiale."}
               </p>
             )}
             <dl className="detail-facts">
@@ -142,12 +144,9 @@ export default async function Detail({
                   {lot.reason && <p>{lot.reason}</p>}
                   {lot.issue && <p className="notice">{lot.issue}</p>}
                   <p className="meta">
-                    Luogo:{" "}
-                    {lot.operational?.zone ||
-                      lot.operational?.canton ||
-                      "Non indicato"}{" "}
-                    · Scadenza: {formatDate(lot.operational?.deadline ?? null)}{" "}
-                    · Importo: {formatMoney(lot.operational?.valueChf ?? null)}
+                    Luogo: {lot.operational?.location || "Non indicato"} ·
+                    Scadenza: {formatDate(lot.operational?.deadline ?? null)} ·
+                    Importo: {formatMoney(lot.operational?.valueChf ?? null)}
                   </p>
                   {!!lot.reviewReasons.length && (
                     <p className="notice">{lot.reviewReasons.join("; ")}</p>
@@ -159,7 +158,7 @@ export default async function Detail({
                       </summary>
                       {lot.evidence.map((e, i) => (
                         <blockquote key={i}>
-                          {e.quote}{" "}
+                          {plainText(e.quote)}{" "}
                           <a
                             className="source-link"
                             href={e.url}
