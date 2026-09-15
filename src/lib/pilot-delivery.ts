@@ -35,6 +35,44 @@ function safeError(error: unknown) {
   return message.replace(/[\r\n]+/g, " ").slice(0, 800);
 }
 
+async function finalizePilotExternalDeliveryTest(input: {
+  requestedId: string;
+  outcome: PilotExternalDeliveryTest;
+  warning?: string;
+}) {
+  return getDb().transaction(async (tx) => {
+    await lockPilotControl(tx);
+    const [row] = await tx
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, PILOT_EXTERNAL_DELIVERY_TEST_SETTING))
+      .for("update");
+    const current = readPilotExternalDeliveryTest(row?.value);
+    if (!current || current.id !== input.requestedId)
+      throw new Error("Pilot external delivery reservation changed");
+    // Receipt confirmation is stronger than a late SMTP result. The request
+    // and its SMTP call intentionally run outside one long transaction, so a
+    // second founder session may confirm delivery while that call settles.
+    if (current.status !== "sending") return current;
+    await tx
+      .update(settings)
+      .set({ value: input.outcome })
+      .where(eq(settings.key, PILOT_EXTERNAL_DELIVERY_TEST_SETTING));
+    if (input.warning)
+      await tx
+        .insert(issues)
+        .values({
+          id: crypto.randomUUID(),
+          key: `pilot-external-delivery:${input.requestedId}`,
+          severity: "warning",
+          title: "Esito incerto della prova email esterna",
+          detail: input.warning,
+        })
+        .onConflictDoNothing();
+    return input.outcome;
+  });
+}
+
 export async function getPilotExternalDeliveryTest() {
   const [row] = await getDb()
     .select({ value: settings.value })
@@ -114,11 +152,10 @@ export async function requestPilotExternalDeliveryTest(input: {
         ? null
         : "Il server SMTP non ha confermato il destinatario.",
     };
-    await db
-      .update(settings)
-      .set({ value: completed })
-      .where(eq(settings.key, PILOT_EXTERNAL_DELIVERY_TEST_SETTING));
-    return completed;
+    return finalizePilotExternalDeliveryTest({
+      requestedId: id,
+      outcome: completed,
+    });
   } catch (error) {
     const uncertain: PilotExternalDeliveryTest = {
       ...requested,
@@ -127,24 +164,12 @@ export async function requestPilotExternalDeliveryTest(input: {
       messageId: deterministicMessageId,
       error: safeError(error),
     };
-    await db.transaction(async (tx) => {
-      await tx
-        .update(settings)
-        .set({ value: uncertain })
-        .where(eq(settings.key, PILOT_EXTERNAL_DELIVERY_TEST_SETTING));
-      await tx
-        .insert(issues)
-        .values({
-          id: crypto.randomUUID(),
-          key: `pilot-external-delivery:${id}`,
-          severity: "warning",
-          title: "Esito incerto della prova email esterna",
-          detail:
-            "Controlla la casella destinataria e il registro SMTP prima di qualsiasi nuovo tentativo.",
-        })
-        .onConflictDoNothing();
+    return finalizePilotExternalDeliveryTest({
+      requestedId: id,
+      outcome: uncertain,
+      warning:
+        "Controlla la casella destinataria e il registro SMTP prima di qualsiasi nuovo tentativo.",
     });
-    return uncertain;
   }
 }
 
@@ -170,6 +195,7 @@ export async function confirmPilotExternalDeliveryReceipt(input: {
     const received: PilotExternalDeliveryTest = {
       ...test,
       status: "received",
+      completedAt: test.completedAt ?? now.toISOString(),
       receivedAt: now.toISOString(),
       error: null,
     };

@@ -451,9 +451,11 @@ export async function POST(request: Request) {
         return Response.json({
           ok: true,
           message:
-            test.status === "accepted"
-              ? "Il server SMTP ha accettato la prova. Controlla la casella e conferma la ricezione."
-              : "L’esito SMTP è incerto. Controlla la casella e il registro prima di qualsiasi altro invio.",
+            test.status === "received"
+              ? "La ricezione è già stata confermata."
+              : test.status === "accepted"
+                ? "Il server SMTP ha accettato la prova. Controlla la casella e conferma la ricezione."
+                : "L’esito SMTP è incerto. Controlla la casella e il registro prima di qualsiasi altro invio.",
         });
       }
       case "pilot-delivery-received": {
