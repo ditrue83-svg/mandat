@@ -41,6 +41,7 @@ import {
   compareCanonicalPublications,
   sourceAvailable,
 } from "@/lib/canonical-publication";
+import { companyAllowsPilotProcessingSql } from "@/lib/pilot-processing";
 export function deliveryFailureKind(error: unknown): "failed" | "uncertain" {
   const e = error as { code?: string; command?: string; responseCode?: number };
   if (e.responseCode && e.responseCode >= 400) return "failed";
@@ -171,7 +172,9 @@ export async function queueChangeNotices(
     const [firm] = await db
       .select()
       .from(companies)
-      .where(eq(companies.id, companyId));
+      .where(
+        and(eq(companies.id, companyId), companyAllowsPilotProcessingSql()),
+      );
     if (!firm || firm.disabledAt || !firm.profile.emailEnabled) continue;
     const subject =
       after.status === "cancelled"
@@ -341,7 +344,9 @@ export async function queueDigests(now = new Date()) {
   const firms = await db
     .select()
     .from(companies)
-    .where(isNull(companies.disabledAt));
+    .where(
+      and(isNull(companies.disabledAt), companyAllowsPilotProcessingSql()),
+    );
   const representativeSources = (await db.select().from(publications))
     .filter((p) => sourceAvailable(p.source))
     .sort(compareCanonicalPublications);

@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { companies, matches } from "@/db/schema";
 import { lockCanonicalPublications } from "@/lib/canonical-lock";
 import { readLotMatchReview } from "@/lib/lot-match-reviews";
+import { companyAllowsPilotProcessingSql } from "@/lib/pilot-processing";
 
 export const LOT_WORKER_REVIEW_VERSION = "lot-worker-review-v1";
 
@@ -32,7 +33,11 @@ export async function matchAdoptedPublication({
       .select()
       .from(companies)
       .where(
-        and(isNull(companies.disabledAt), isNotNull(companies.onboardedAt)),
+        and(
+          isNull(companies.disabledAt),
+          isNotNull(companies.onboardedAt),
+          companyAllowsPilotProcessingSql(),
+        ),
       )
       .orderBy(companies.id)
       .for("share");

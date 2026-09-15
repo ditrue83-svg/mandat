@@ -12,6 +12,7 @@ import {
   type SimapAcquisitionResult,
 } from "../src/sources/simap-documentary";
 import { preserveSimapLots, type Identity } from "../src/lib/source-lots";
+import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-participation";
 const injected = vi.hoisted(() => ({ db: undefined as unknown }));
 vi.mock("@/db", () => ({ getDb: () => injected.db }));
 import { createDocumentaryPublication } from "../src/lib/documentary-create";
@@ -298,6 +299,14 @@ async function predecessorWithHumanHistory(f: Fixture) {
       maxValue: null,
       emailEnabled: true,
     },
+  });
+  await db.insert(schema.invitations).values({
+    id: "creation-invitation",
+    email: "creation-owner@example.invalid",
+    companyId: "creation-company",
+    expiresAt: new Date("2099-01-01"),
+    acceptedAt: new Date(),
+    acceptedVersion: PILOT_PARTICIPATION_TERMS_VERSION,
   });
   await db.insert(schema.matches).values({
     id: "legacy-positive",

@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as schema from "../src/db/schema";
 import { demoProfile, getDemoOpportunities } from "../src/lib/demo";
+import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-participation";
 
 const context = vi.hoisted(() => ({ db: undefined as unknown }));
 vi.mock("@/db", () => ({ getDb: () => context.db }));
@@ -62,6 +63,18 @@ const run = () => enrichAndMatch({ publicationId: publication.id, now });
 const storedMatches = () =>
   db.select().from(schema.matches).orderBy(schema.matches.companyId);
 const storedIssues = () => db.select().from(schema.issues);
+async function replaceInvitationVersion(companyId: string, version: string) {
+  const [invitation] = await db
+    .select()
+    .from(schema.invitations)
+    .where(eq(schema.invitations.companyId, companyId));
+  await db
+    .delete(schema.invitations)
+    .where(eq(schema.invitations.id, invitation.id));
+  await db
+    .insert(schema.invitations)
+    .values({ ...invitation, acceptedVersion: version });
+}
 const sourceReview = {
   status: "required" as const,
   kind: "conflicting" as const,
@@ -98,6 +111,14 @@ beforeAll(async () => {
       .insert(schema.user)
       .values({ id, name: id, email: `${id}@example.invalid` });
     await db.insert(schema.companies).values({ id, ownerId: id, profile });
+    await db.insert(schema.invitations).values({
+      id: `invitation-${id}`,
+      email: `${id}@example.invalid`,
+      companyId: id,
+      expiresAt: new Date("2099-01-01"),
+      acceptedAt: now,
+      acceptedVersion: PILOT_PARTICIPATION_TERMS_VERSION,
+    });
   }
 }, 20000);
 
@@ -116,12 +137,27 @@ beforeEach(async () => {
     .update(schema.companies)
     .set({ onboardedAt: now })
     .where(eq(schema.companies.id, "a"));
+  for (const id of ["a", "b"])
+    await replaceInvitationVersion(id, PILOT_PARTICIPATION_TERMS_VERSION);
   await storePublication(publication);
 });
 
 afterAll(async () => {
   await pg.close();
   await rm(directory, { recursive: true, force: true });
+});
+
+it("non confronta un profilo con consenso precedente e riparte solo con un invito corrente", async () => {
+  await replaceInvitationVersion("a", "pilot-participation-previous");
+  await run();
+  expect(await storedMatches()).toEqual([]);
+  expect(summarize).toHaveBeenCalledTimes(1);
+  expect(classify).not.toHaveBeenCalled();
+
+  await replaceInvitationVersion("a", PILOT_PARTICIPATION_TERMS_VERSION);
+  await run();
+  expect(await storedMatches()).toHaveLength(1);
+  expect(classify).toHaveBeenCalledTimes(1);
 });
 
 it("mantiene lo stesso dubbio sulla fonte per due ditte senza chiamate AI o retry", async () => {
@@ -725,6 +761,16 @@ it("scarta la risposta di un profilo precedente e valuta il profilo corrente al 
   expect(vi.mocked(classify).mock.calls[1][1]).toEqual(changedProfile);
   expect(summarize).toHaveBeenCalledTimes(1);
   expect(classify).toHaveBeenCalledTimes(2);
+});
+
+it("non salva una classificazione se il consenso diventa precedente durante il confronto", async () => {
+  vi.mocked(classify).mockImplementationOnce(async () => {
+    await replaceInvitationVersion("a", "pilot-participation-previous");
+    return assessment;
+  });
+  await run();
+  expect(classify).toHaveBeenCalledTimes(1);
+  expect(await storedMatches()).toEqual([]);
 });
 
 it.each(["summary", "match"])(

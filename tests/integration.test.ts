@@ -16,6 +16,7 @@ import { and, eq, sql } from "drizzle-orm";
 import * as schema from "../src/db/schema";
 import { getDemoOpportunities, demoProfile } from "../src/lib/demo";
 import type { Viewer } from "../src/lib/domain";
+import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-participation";
 const testContext = vi.hoisted(() => ({
   db: undefined as unknown,
   mail: [] as { to: string; text: string }[],
@@ -104,6 +105,21 @@ beforeAll(async () => {
   await db
     .update(schema.companies)
     .set({ profile: demoProfile, onboardedAt: new Date() });
+  const acceptedAt = new Date();
+  await db.update(schema.invitations).set({
+    acceptedAt,
+    acceptedVersion: PILOT_PARTICIPATION_TERMS_VERSION,
+  });
+  a = {
+    ...a,
+    invitationAcceptedAt: acceptedAt.toISOString(),
+    invitationAcceptanceVersion: PILOT_PARTICIPATION_TERMS_VERSION,
+  };
+  b = {
+    ...b,
+    invitationAcceptedAt: acceptedAt.toISOString(),
+    invitationAcceptanceVersion: PILOT_PARTICIPATION_TERMS_VERSION,
+  };
 });
 
 describe("Regressioni di revisione e invio", () => {
@@ -378,14 +394,12 @@ describe("Regressioni di revisione e invio", () => {
     const now = new Date();
     now.setUTCHours(12);
     for (const source of ["simap", "foglio-ti"])
-      await db
-        .insert(schema.sourceRuns)
-        .values({
-          id: crypto.randomUUID(),
-          source,
-          status: "success",
-          finishedAt: now,
-        });
+      await db.insert(schema.sourceRuns).values({
+        id: crypto.randomUUID(),
+        source,
+        status: "success",
+        finishedAt: now,
+      });
     await queueDigests(now);
     const [first] = await db
       .select()
@@ -453,16 +467,14 @@ describe("Regressioni di revisione e invio", () => {
       reviewRequired: true,
       reviewReasons: ["Scadenze discordanti"],
     });
-    await db
-      .insert(schema.issues)
-      .values({
-        id: "critical-conflict",
-        key: `conflict:${p.canonicalKey}`,
-        title: "Fonti discordanti",
-        detail: "Verificare la scadenza",
-        severity: "critical",
-        publicationId: p.id,
-      });
+    await db.insert(schema.issues).values({
+      id: "critical-conflict",
+      key: `conflict:${p.canonicalKey}`,
+      title: "Fonti discordanti",
+      detail: "Verificare la scadenza",
+      severity: "critical",
+      publicationId: p.id,
+    });
     const before = testContext.mail.length;
     await sendPending();
     expect(testContext.mail.length).toBe(before);
@@ -484,15 +496,13 @@ describe("Regressioni di revisione e invio", () => {
       .update(schema.issues)
       .set({ resolvedAt: new Date() })
       .where(eq(schema.issues.id, "critical-conflict"));
-    await db
-      .insert(schema.issues)
-      .values({
-        id: "unrelated-critical",
-        key: "source:unrelated",
-        title: "Problema estraneo",
-        detail: "Verifica indipendente",
-        severity: "critical",
-      });
+    await db.insert(schema.issues).values({
+      id: "unrelated-critical",
+      key: "source:unrelated",
+      title: "Problema estraneo",
+      detail: "Verifica indipendente",
+      severity: "critical",
+    });
     await sendPending();
     expect(testContext.mail.length - before).toBe(1);
   });
@@ -851,7 +861,8 @@ describe("AI: budget e aggiornamenti concorrenti", () => {
     },
   );
   it("salva la pagina selezionata dal modello senza riassegnare una citazione duplicata", async () => {
-    const originalQuote = "Les références pour des travaux similaires sont exigées.";
+    const originalQuote =
+      "Les références pour des travaux similaires sont exigées.";
     const publication = {
       ...getDemoOpportunities()[1],
       id: "selected-evidence-page",

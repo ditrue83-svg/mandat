@@ -15,6 +15,7 @@ import {
   DOCUMENTARY_RELEASE_ATTESTATION_VERSION,
   type DocumentaryAdoptionActivation,
 } from "../src/lib/documentary-adoption";
+import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-participation";
 
 const injected = vi.hoisted(() => ({
   db: undefined as unknown,
@@ -254,14 +255,12 @@ test("an exactly equivalent old hash migrates atomically without being counted a
     revision: oldHash,
     aiRevision: oldHash,
   });
-  await db
-    .insert(schema.publicationVersions)
-    .values({
-      id: randomUUID(),
-      publicationId: normalized.id,
-      revision: oldHash,
-      data: historical,
-    });
+  await db.insert(schema.publicationVersions).values({
+    id: randomUUID(),
+    publicationId: normalized.id,
+    revision: oldHash,
+    data: historical,
+  });
   const before = await current();
   const source = adapter(),
     http = fetchDetail();
@@ -522,6 +521,14 @@ test("configured matching waits before adoption and produces a review-only match
       maxValue: null,
       emailEnabled: true,
     },
+  });
+  await db.insert(schema.invitations).values({
+    id: `${id}-invitation`,
+    email: `${id}@example.invalid`,
+    companyId: id,
+    expiresAt: new Date("2099-01-01"),
+    acceptedAt: new Date(),
+    acceptedVersion: PILOT_PARTICIPATION_TERMS_VERSION,
   });
   await ingest(adapter(), since);
   await enrichAndMatch({ documentaryActivation: activation, now: since });

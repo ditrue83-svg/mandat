@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import * as schema from "../src/db/schema";
 import { demoProfile, getDemoOpportunities } from "../src/lib/demo";
 import type { Publication, SourceScopeReview } from "../src/lib/domain";
+import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-participation";
 import { fingerprint } from "../src/sources/common";
 
 const context = vi.hoisted(() => ({ db: undefined as unknown }));
@@ -87,6 +88,18 @@ async function insertPending(kind: "digest" | "change" = "digest") {
   return id;
 }
 const notificationRows = () => db.select().from(schema.notifications);
+async function replaceInvitationVersion(version: string) {
+  const [invitation] = await db
+    .select()
+    .from(schema.invitations)
+    .where(eq(schema.invitations.companyId, "local-scope-mail-company"));
+  await db
+    .delete(schema.invitations)
+    .where(eq(schema.invitations.id, invitation.id));
+  await db
+    .insert(schema.invitations)
+    .values({ ...invitation, acceptedVersion: version });
+}
 
 beforeAll(async () => {
   context.db = db;
@@ -114,13 +127,14 @@ beforeAll(async () => {
     companyId: "local-scope-mail-company",
     expiresAt: new Date("2035-01-01"),
     acceptedAt: now,
-    acceptedVersion: "test-acceptance-v1",
+    acceptedVersion: PILOT_PARTICIPATION_TERMS_VERSION,
   });
 }, 20000);
 
 beforeEach(async () => {
   vi.clearAllMocks();
   context.db = db;
+  await replaceInvitationVersion(PILOT_PARTICIPATION_TERMS_VERSION);
   await db.delete(schema.notifications);
   await db.delete(schema.issues);
   await db.delete(schema.matches);
@@ -168,6 +182,20 @@ beforeEach(async () => {
 afterAll(async () => {
   await pg.close();
   vi.unstubAllEnvs();
+});
+
+it("non prepara né invia email legacy quando il consenso non è più corrente", async () => {
+  await replaceInvitationVersion("pilot-participation-previous");
+  await queueDigests(now);
+  expect(await notificationRows()).toHaveLength(0);
+
+  await insertPending();
+  await sendPending();
+  expect(sendMail).not.toHaveBeenCalled();
+  expect((await notificationRows())[0]).toMatchObject({
+    status: "cancelled",
+    error: expect.stringContaining("consenso"),
+  });
 });
 
 it.each([false, true])(

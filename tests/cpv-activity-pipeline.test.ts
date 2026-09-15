@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import * as schema from "../src/db/schema";
 import { demoProfile, getDemoOpportunities } from "../src/lib/demo";
 import type { Publication, Viewer } from "../src/lib/domain";
+import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-participation";
 import { fingerprint } from "../src/sources/common";
 
 const context = vi.hoisted(() => ({
@@ -187,7 +188,7 @@ beforeAll(async () => {
     admin: false,
     demo: false,
     invitationAcceptedAt: now.toISOString(),
-    invitationAcceptanceVersion: "test-acceptance-v1",
+    invitationAcceptanceVersion: PILOT_PARTICIPATION_TERMS_VERSION,
     profile: firm.profile,
   };
   context.viewer = { ...viewer, admin: true };
@@ -197,7 +198,7 @@ beforeAll(async () => {
     companyId: viewer.companyId,
     expiresAt: new Date("2035-01-01"),
     acceptedAt: now,
-    acceptedVersion: "test-acceptance-v1",
+    acceptedVersion: PILOT_PARTICIPATION_TERMS_VERSION,
   });
   vi.stubGlobal(
     "fetch",

@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import * as schema from "../src/db/schema";
 import { demoProfile, getDemoOpportunities } from "../src/lib/demo";
 import type { Publication } from "../src/lib/domain";
+import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-participation";
 import type { HumanSourceForm } from "../src/lib/source-review-context";
 
 const context = vi.hoisted(() => ({ db: undefined as unknown }));
@@ -192,6 +193,14 @@ beforeEach(async () => {
   await db
     .insert(schema.companies)
     .values({ id: "firm", ownerId: "firm", profile, onboardedAt: now });
+  await db.insert(schema.invitations).values({
+    id: "firm-invitation",
+    email: "firm@example.invalid",
+    companyId: "firm",
+    expiresAt: new Date("2099-01-01"),
+    acceptedAt: now,
+    acceptedVersion: PILOT_PARTICIPATION_TERMS_VERSION,
+  });
   await insert(p);
   vi.mocked(classify).mockReset().mockResolvedValue(assessment);
   vi.mocked(summarize)
@@ -398,6 +407,14 @@ it("dopo aver rilevato una fonte cambiata non avvia altre richieste per le ditte
     ownerId: "second-firm",
     profile,
     onboardedAt: now,
+  });
+  await db.insert(schema.invitations).values({
+    id: "second-firm-invitation",
+    email: "second@example.invalid",
+    companyId: "second-firm",
+    expiresAt: new Date("2099-01-01"),
+    acceptedAt: now,
+    acceptedVersion: PILOT_PARTICIPATION_TERMS_VERSION,
   });
   await review("defined_service");
   await beforeNextTransaction(async () => {

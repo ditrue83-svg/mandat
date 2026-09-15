@@ -30,6 +30,7 @@ import {
   type DocumentaryReleaseAttestation,
 } from "../src/lib/documentary-adoption";
 import { lotNoticeHash, validateLotNotice } from "../src/lib/lot-notice";
+import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-participation";
 
 const injected = vi.hoisted(() => ({
   db: undefined as unknown,
@@ -343,7 +344,7 @@ async function fixture(
         email: `${id}@example.invalid`,
         expiresAt: new Date("2035-01-01T00:00:00Z"),
         acceptedAt: new Date(),
-        acceptedVersion: "test-acceptance-v1",
+        acceptedVersion: PILOT_PARTICIPATION_TERMS_VERSION,
       });
     }
     await db.insert(schema.matches).values({
@@ -594,6 +595,18 @@ async function markSent(id: string) {
     .set({ status: "sent", sentAt: new Date() })
     .where(eq(schema.notifications.id, id));
 }
+async function replaceInvitationVersion(companyId: string, version: string) {
+  const [invitation] = await db
+    .select()
+    .from(schema.invitations)
+    .where(eq(schema.invitations.companyId, companyId));
+  await db
+    .delete(schema.invitations)
+    .where(eq(schema.invitations.id, invitation.id));
+  await db
+    .insert(schema.invitations)
+    .values({ ...invitation, acceptedVersion: version });
+}
 
 it("initial adoption without evaluations or messages avoids global source locks; a later review still creates the digest", async () => {
   const f = await fixture();
@@ -612,11 +625,42 @@ it("notification history is reconciled even when no company evaluation remains",
   const f = await fixture();
   await approve(f);
   const [pending] = await prepare(f);
-  await db.update(schema.matches).set({ lotEvaluations: null })
+  await db
+    .update(schema.matches)
+    .set({ lotEvaluations: null })
     .where(eq(schema.matches.companyId, f.companyId));
   await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
-  expect((await rows(f.companyId)).find(n => n.id === pending.id)?.status)
-    .toBe("cancelled");
+  expect(
+    (await rows(f.companyId)).find((n) => n.id === pending.id)?.status,
+  ).toBe("cancelled");
+});
+
+it("a stale pilot consent cancels a pending lot notice during reconciliation", async () => {
+  const f = await fixture();
+  await approve(f);
+  const [pending] = await prepare(f);
+  await replaceInvitationVersion(f.companyId, "pilot-participation-previous");
+  await reconcileLotNotices({ companyId: f.companyId, now: digestNow });
+  expect(
+    (await rows(f.companyId)).find((n) => n.id === pending.id),
+  ).toMatchObject({
+    status: "cancelled",
+    error: expect.stringContaining("consenso"),
+  });
+});
+
+it("a stale pilot consent is re-read and cancels the final email claim", async () => {
+  const f = await fixture();
+  await approve(f);
+  const [pending] = await prepare(f);
+  await replaceInvitationVersion(f.companyId, "pilot-participation-previous");
+  expect(await claimLotNotification(pending.id, digestNow)).toBeNull();
+  expect(
+    (await rows(f.companyId)).find((n) => n.id === pending.id),
+  ).toMatchObject({
+    status: "cancelled",
+    error: expect.stringContaining("consenso"),
+  });
 });
 
 it("adopted lots enter the real digest despite legacy eligible=false, and a legacy positive alone cannot enter", async () => {

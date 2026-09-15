@@ -7,6 +7,7 @@ import * as schema from "../src/db/schema";
 import { demoProfile, demoViewer, getDemoOpportunities } from "../src/lib/demo";
 import type { Publication, Viewer } from "../src/lib/domain";
 import type { HumanSourceForm } from "../src/lib/source-review-context";
+import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-participation";
 import { fingerprint } from "../src/sources/common";
 import { matchReviewToken } from "../src/lib/match-review-token";
 
@@ -277,7 +278,7 @@ beforeEach(async () => {
     companyId: firm.id,
     expiresAt: new Date("2099-01-01"),
     acceptedAt: now,
-    acceptedVersion: "test-acceptance-v1",
+    acceptedVersion: PILOT_PARTICIPATION_TERMS_VERSION,
   });
   await db
     .insert(schema.settings)

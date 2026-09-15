@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import * as schema from "../src/db/schema";
 import { demoProfile, demoViewer, getDemoOpportunities } from "../src/lib/demo";
 import type { Publication, Viewer } from "../src/lib/domain";
+import { FOUNDER_ACCEPTANCE_VERSION } from "../src/lib/pilot-participation";
 import { fingerprint } from "../src/sources/common";
 import { matchReviewToken } from "../src/lib/match-review-token";
 
@@ -149,6 +150,14 @@ beforeEach(async () => {
       emailEnabled: true,
     },
     onboardedAt: now,
+  });
+  await db.insert(schema.invitations).values({
+    id: "invented-founder-invitation",
+    email: "founder@example.invalid",
+    companyId: "invented-approval-company",
+    expiresAt: new Date("2099-01-01"),
+    acceptedAt: now,
+    acceptedVersion: FOUNDER_ACCEPTANCE_VERSION,
   });
   const [firm] = await db.select().from(schema.companies);
   viewer = {

@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, isNotNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
+  administrators,
   companies,
   feedback,
   invitations,
@@ -57,6 +58,7 @@ import {
 } from "@/lib/source-scope-review";
 import { presentMatch } from "@/lib/match-presentation";
 import { readCanonicalFeedback } from "@/lib/canonical-feedback";
+import { invitationAllowsPilotProcessing } from "@/lib/pilot-participation";
 
 type Tx = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 type Notification = typeof notifications.$inferSelect;
@@ -145,6 +147,19 @@ async function lockContext(tx: Tx, companyId: string, referenceIds?: string[]) {
     .from(companies)
     .where(eq(companies.id, companyId))
     .for("share");
+  const invitationRows = await tx
+    .select()
+    .from(invitations)
+    .where(eq(invitations.companyId, companyId))
+    .orderBy(invitations.id)
+    .for("share");
+  const [administrator] = company
+    ? await tx
+        .select({ userId: administrators.userId })
+        .from(administrators)
+        .where(eq(administrators.userId, company.ownerId))
+        .for("share")
+    : [];
   const matchRows = sources.length
     ? await tx
         .select()
@@ -199,6 +214,8 @@ async function lockContext(tx: Tx, companyId: string, referenceIds?: string[]) {
   return {
     sources,
     company,
+    invitations: invitationRows,
+    administrator: Boolean(administrator),
     matchRows,
     feedbackRows,
     automatic: automatic?.value === true,
@@ -620,6 +637,24 @@ export async function reconcileLotNotices(
     if (!adopted) continue;
     await db.transaction(async (tx) => {
       const context = await lockContext(tx, companyId);
+      const participationCurrent = context.invitations.some((invitation) =>
+        invitationAllowsPilotProcessing(invitation, context.administrator),
+      );
+      if (!participationCurrent) {
+        await tx
+          .update(notifications)
+          .set({
+            status: "cancelled",
+            error: "Invio sospeso: consenso al pilota non più corrente.",
+          })
+          .where(
+            and(
+              eq(notifications.companyId, companyId),
+              eq(notifications.status, "pending"),
+            ),
+          );
+        return;
+      }
       if (
         !context.company?.profile.emailEnabled ||
         !context.company.onboardedAt
@@ -969,11 +1004,6 @@ export async function claimLotNotification(id: string, now = new Date()) {
           .where(eq(user.id, context.company.ownerId))
           .for("share")
       : [];
-    const [invite] = await tx
-      .select()
-      .from(invitations)
-      .where(eq(invitations.companyId, observed.companyId))
-      .for("share");
     const companyNotices = await tx
       .select()
       .from(notifications)
@@ -996,8 +1026,9 @@ export async function claimLotNotification(id: string, now = new Date()) {
       return null;
     let valid =
       !!owner &&
-      !!invite &&
-      !invite.revokedAt &&
+      context.invitations.some((invitation) =>
+        invitationAllowsPilotProcessing(invitation, context.administrator),
+      ) &&
       !!context.company?.profile.emailEnabled &&
       !context.company.disabledAt;
     const current: LotNotice[] = [];

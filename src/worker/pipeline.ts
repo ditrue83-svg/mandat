@@ -57,6 +57,7 @@ import {
   sameSourceReviewDependency,
   sourceReviewReason,
 } from "@/lib/source-review-policy";
+import { companyAllowsPilotProcessingSql } from "@/lib/pilot-processing";
 // A human source judgment is not an automatic company comparison. Version
 // this completed manual-review path so an earlier automatic cache cannot win
 // merely because it happens to carry the same documentary dependency.
@@ -654,7 +655,9 @@ export async function enrichAndMatch(
   const firms = await db
     .select()
     .from(companies)
-    .where(isNull(companies.disabledAt));
+    .where(
+      and(isNull(companies.disabledAt), companyAllowsPilotProcessingSql()),
+    );
   let failedAnalyses = 0;
   for (const row of rows) {
     options.signal?.throwIfAborted();
@@ -914,7 +917,9 @@ export async function enrichAndMatch(
         const [currentFirm] = await tx
           .select()
           .from(companies)
-          .where(eq(companies.id, firm.id))
+          .where(
+            and(eq(companies.id, firm.id), companyAllowsPilotProcessingSql()),
+          )
           .for("share");
         if (
           !current ||

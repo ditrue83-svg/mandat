@@ -18,6 +18,7 @@ import {
   storeDocumentaryObservation,
 } from "../src/lib/documentary-store";
 import { LOT_RECONCILIATION_QUEUE } from "../src/lib/lot-reconciliation";
+import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-participation";
 import {
   LOT_WORKER_REVIEW_VERSION,
   matchAdoptedPublication,
@@ -116,7 +117,11 @@ afterAll(async () => {
 });
 async function company(
   profile = baseProfile,
-  options: { disabled?: boolean; onboarded?: boolean } = {},
+  options: {
+    disabled?: boolean;
+    onboarded?: boolean;
+    acceptedVersion?: string;
+  } = {},
 ) {
   const id = randomUUID();
   await db
@@ -128,6 +133,15 @@ async function company(
     profile,
     onboardedAt: options.onboarded === false ? null : new Date(),
     disabledAt: options.disabled ? new Date() : null,
+  });
+  await db.insert(schema.invitations).values({
+    id: `${id}-invitation`,
+    email: `${id}@example.invalid`,
+    companyId: id,
+    expiresAt: new Date("2099-01-01"),
+    acceptedAt: new Date(),
+    acceptedVersion:
+      options.acceptedVersion ?? PILOT_PARTICIPATION_TERMS_VERSION,
   });
   return id;
 }
@@ -357,6 +371,29 @@ async function beforeTransaction(action: () => Promise<void>) {
     },
   });
 }
+
+it("Creates reviews only for current participants while preserving the founder's internal review company", async () => {
+  const f = await fixture(),
+    current = await company(),
+    stale = await company(baseProfile, {
+      acceptedVersion: "pilot-participation-previous",
+    }),
+    revoked = await company(),
+    founderCompany = await company(baseProfile, {
+      acceptedVersion: "founder-bootstrap-v1",
+    });
+  await db
+    .update(schema.invitations)
+    .set({ revokedAt: new Date() })
+    .where(eq(schema.invitations.companyId, revoked));
+  await db.insert(schema.administrators).values({ userId: founderCompany });
+
+  await matchAdoptedPublication({ publicationId: f.p.id, now });
+  expect((await rows(f.p.id)).map((row) => row.companyId).sort()).toEqual(
+    [current, founderCompany].sort(),
+  );
+  noAI();
+});
 
 it("Creates one project review for active onboarded firms despite a parent-only exclusion, without AI or v1 source reader", async () => {
   const f = await fixture(),

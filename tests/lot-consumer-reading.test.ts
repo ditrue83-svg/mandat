@@ -7,6 +7,7 @@ import { and, eq } from "drizzle-orm";
 import { PgBoss, fromPglite } from "pg-boss";
 import * as schema from "../src/db/schema";
 import type { CompanyProfile, Viewer } from "../src/lib/domain";
+import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-participation";
 import { normalizeSimap } from "../src/sources/simap";
 import {
   SIMAP_ACQUISITION_VERSION,
@@ -488,7 +489,7 @@ async function customer(f: Fixture, other = false): Promise<Viewer> {
     admin: false,
     demo: false,
     invitationAcceptedAt: new Date(0).toISOString(),
-    invitationAcceptanceVersion: "test-acceptance-v1",
+    invitationAcceptanceVersion: PILOT_PARTICIPATION_TERMS_VERSION,
     profile: company.profile,
   };
 }

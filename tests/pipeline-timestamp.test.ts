@@ -5,6 +5,7 @@ import { migrate } from "drizzle-orm/pglite/migrator";
 import { sql } from "drizzle-orm";
 import * as schema from "../src/db/schema";
 import { demoProfile, getDemoOpportunities } from "../src/lib/demo";
+import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-participation";
 
 const context = vi.hoisted(() => ({
   db: undefined as unknown,
@@ -62,6 +63,14 @@ beforeAll(async () => {
       maxValue: null,
     },
     onboardedAt: new Date(),
+  });
+  await db.insert(schema.invitations).values({
+    id: "timestamp-invitation",
+    email: "a@example.invalid",
+    companyId: "a",
+    expiresAt: new Date("2099-01-01"),
+    acceptedAt: new Date(),
+    acceptedVersion: PILOT_PARTICIPATION_TERMS_VERSION,
   });
 });
 beforeEach(async () => {
@@ -136,7 +145,7 @@ it("mantiene il bando poco descritto in revisione senza ripetere analisi o accod
       admin: false,
       demo: false,
       invitationAcceptedAt: new Date(0).toISOString(),
-      invitationAcceptanceVersion: "test-acceptance-v1",
+      invitationAcceptanceVersion: PILOT_PARTICIPATION_TERMS_VERSION,
     };
     expect(await getRadarStatus(viewer)).toEqual({
       state: "ready",
