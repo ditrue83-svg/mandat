@@ -6,6 +6,12 @@ import {
   presentLotOpportunity,
   lotOpportunityVisible,
 } from "./lot-readers";
+import {
+  compareCanonicalPublications,
+  sourceAvailable,
+} from "./canonical-publication";
+import { readCanonicalFeedbackBatch } from "./canonical-feedback";
+import { readSourceReviewContexts } from "./source-reviews";
 import { fingerprint } from "@/sources/common";
 import { getDemoOpportunities } from "./demo";
 import type { Opportunity, RadarStatus, Viewer } from "./domain";
@@ -25,90 +31,141 @@ import {
   isMatchRevisionCurrent,
 } from "./source-scope-review";
 
+type QueryExecutor = Pick<ReturnType<typeof getDb>, "select">;
+
+async function readCanonicalRepresentatives(
+  executor: QueryExecutor,
+  canonicalIds: readonly string[],
+) {
+  const ids = [...new Set(canonicalIds)];
+  if (!ids.length) return [];
+  const rows = await executor
+    .select()
+    .from(publications)
+    .where(inArray(publications.canonicalId, ids));
+  const groups = new Map<string, (typeof rows)[number][]>();
+  for (const row of rows) {
+    if (!sourceAvailable(row.source)) continue;
+    const group = groups.get(row.canonicalId) ?? [];
+    group.push(row);
+    groups.set(row.canonicalId, group);
+  }
+  return ids.flatMap((canonicalId) => {
+    const group = groups.get(canonicalId);
+    return group?.length ? [group.sort(compareCanonicalPublications)[0]!] : [];
+  });
+}
+
 export async function getRadarStatus(
   viewer: Viewer,
   now = new Date(),
 ): Promise<RadarStatus> {
   if (viewer.demo) return { state: "ready", pendingCount: 0 };
   const db = getDb();
-  const rows = await db
-    .select({ id: publications.id })
-    .from(publications)
-    .where(
-      and(
-        eq(publications.status, "open"),
-        lte(publications.visibleAt, now),
-        inArray(
-          publications.source,
-          process.env.FOGLIO_REUSE_CONFIRMED === "true"
-            ? ["simap", "foglio-ti"]
-            : ["simap"],
+  const { pendingCount, heartbeat } = await db.transaction(async (tx) => {
+    const candidates = await tx
+      .select({ canonicalId: publications.canonicalId })
+      .from(publications)
+      .where(
+        and(
+          eq(publications.status, "open"),
+          lte(publications.visibleAt, now),
+          inArray(
+            publications.source,
+            process.env.FOGLIO_REUSE_CONFIRMED === "true"
+              ? ["simap", "foglio-ti"]
+              : ["simap"],
+          ),
         ),
-      ),
+      );
+    const representatives = await readCanonicalRepresentatives(
+      tx,
+      candidates.map((row) => row.canonicalId),
     );
-  const seen = new Set<string>();
-  let pendingCount = 0;
-  for (const item of rows) {
-    const row = await readCanonicalMatch(viewer.companyId, item.id, now);
-    if (!row || seen.has(row.publication.canonicalId)) continue;
-    seen.add(row.publication.canonicalId);
-    if (row.publication.visibleAt > now || row.publication.status !== "open")
-      continue;
-    if (row.publication.documentarySnapshotId) {
-      if (!row.match) pendingCount++;
-      continue;
-    }
-    if (row.publication.deadline && row.publication.deadline <= now) continue;
-    const publication = row.publication.data;
-    const match = row.match;
-    const profileRevision = fingerprint(row.company.profile);
-    const context = row.sourceReview;
-    const manual =
-      match?.approved === false ||
-      (match?.approved === true && !!match.reviewedAt);
-    const activityReview = preliminaryMatch(
-      publication,
-      row.company.profile,
-      now,
-    ).activityReview;
-    let pending = false;
-    if (
-      !manual &&
-      activityReview &&
-      !match?.revision.includes(
-        `${CPV_ACTIVITY_REVIEW_MARKER}${activityReview.version}:${fingerprint(activityReview.signals)}`,
-      )
-    )
-      pending = true;
-    else if (manual && (context || match?.sourceReviewDependency))
-      pending = false;
-    else if (
-      !manual &&
-      !sourceReviewBlocksComparison(context) &&
-      sourceReviewBindingState(context, match?.sourceReviewDependency) ===
-        "stale"
-    )
-      pending = true;
-    else
-      pending = !(
-        hasSourceScopeReview(publication) ||
-          sourceReviewBlocksComparison(context) ||
-          (manual && context)
-          ? isMatchContentCurrent
-          : isMatchRevisionCurrent
-      )({
-        revision: match?.revision,
+    const visible = representatives.filter(
+      (row) => row.visibleAt <= now && row.status === "open",
+    );
+    const matchRows = visible.length
+      ? await tx
+          .select()
+          .from(matches)
+          .where(
+            and(
+              eq(matches.companyId, viewer.companyId),
+              inArray(
+                matches.publicationId,
+                visible.map((row) => row.id),
+              ),
+            ),
+          )
+      : [];
+    const matchesByPublication = new Map(
+      matchRows.map((match) => [match.publicationId, match]),
+    );
+    const legacy = visible.filter(
+      (publication) => !publication.documentarySnapshotId,
+    );
+    const contexts = await readSourceReviewContexts(tx, legacy);
+    let count = 0;
+    const profileRevision = fingerprint(viewer.profile);
+    for (const row of visible) {
+      const match = matchesByPublication.get(row.id);
+      if (row.documentarySnapshotId) {
+        if (!match) count++;
+        continue;
+      }
+      if (row.deadline && row.deadline <= now) continue;
+      const publication = row.data;
+      const context = contexts.get(row.id) ?? null;
+      const manual =
+        match?.approved === false ||
+        (match?.approved === true && !!match.reviewedAt);
+      const activityReview = preliminaryMatch(
         publication,
-        profileRevision,
-        manuallyReviewed: manual,
-      });
-    if (pending) pendingCount++;
-  }
+        viewer.profile,
+        now,
+      ).activityReview;
+      let pending = false;
+      if (
+        !manual &&
+        activityReview &&
+        !match?.revision.includes(
+          `${CPV_ACTIVITY_REVIEW_MARKER}${activityReview.version}:${fingerprint(activityReview.signals)}`,
+        )
+      )
+        pending = true;
+      else if (manual && (context || match?.sourceReviewDependency))
+        pending = false;
+      else if (
+        !manual &&
+        !sourceReviewBlocksComparison(context) &&
+        sourceReviewBindingState(context, match?.sourceReviewDependency) ===
+          "stale"
+      )
+        pending = true;
+      else
+        pending = !(
+          hasSourceScopeReview(publication) ||
+            sourceReviewBlocksComparison(context) ||
+            (manual && context)
+            ? isMatchContentCurrent
+            : isMatchRevisionCurrent
+        )({
+          revision: match?.revision,
+          publication,
+          profileRevision,
+          manuallyReviewed: manual,
+        });
+      if (pending) count++;
+    }
+    if (!count) return { pendingCount: 0, heartbeat: undefined };
+    const [heartbeatRow] = await tx
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, "worker_heartbeat"));
+    return { pendingCount: count, heartbeat: heartbeatRow };
+  });
   if (!pendingCount) return { state: "ready", pendingCount };
-  const [heartbeat] = await db
-    .select({ value: settings.value })
-    .from(settings)
-    .where(eq(settings.key, "worker_heartbeat"));
   const at =
     typeof heartbeat?.value === "string" ? Date.parse(heartbeat.value) : NaN;
   const age = now.getTime() - at;
@@ -127,18 +184,54 @@ export async function listOpportunities(
 ): Promise<Opportunity[]> {
   if (viewer.demo) return getDemoOpportunities();
   const now = new Date();
-  const groups = await getDb()
-    .select({ id: publications.id, canonicalId: publications.canonicalId })
+  const db = getDb();
+  const groups = await db
+    .select({ canonicalId: publications.canonicalId })
     .from(matches)
     .innerJoin(publications, eq(matches.publicationId, publications.id))
     .where(eq(matches.companyId, viewer.companyId));
-  const seen = new Set<string>();
+  const representatives = await readCanonicalRepresentatives(
+    db,
+    groups.map((row) => row.canonicalId),
+  );
+  const representativeMatches = representatives.length
+    ? await db
+        .select()
+        .from(matches)
+        .where(
+          and(
+            eq(matches.companyId, viewer.companyId),
+            inArray(
+              matches.publicationId,
+              representatives.map((row) => row.id),
+            ),
+          ),
+        )
+    : [];
+  const matchByPublication = new Map(
+    representativeMatches.map((match) => [match.publicationId, match]),
+  );
+  const documentary = representatives.filter(
+    (publication) => publication.documentarySnapshotId,
+  );
+  const canonicalFeedback = await readCanonicalFeedbackBatch(
+    db,
+    viewer.companyId,
+    documentary.map((publication) => publication.canonicalId),
+  );
+  const candidates = representatives.filter((publication) => {
+    const match = matchByPublication.get(publication.id);
+    if (!match) return false;
+    if (!publication.documentarySnapshotId) return true;
+    const state = canonicalFeedback.get(publication.canonicalId);
+    return options.includeInactive
+      ? !!state?.saved
+      : match.lotEvaluations !== null || !!state?.dismissed;
+  });
   const result: Opportunity[] = [];
-  for (const group of groups) {
-    if (seen.has(group.canonicalId)) continue;
-    const row = await readCanonicalMatch(viewer.companyId, group.id, now);
+  for (const publication of candidates) {
+    const row = await readCanonicalMatch(viewer.companyId, publication.id, now);
     if (!row) continue;
-    seen.add(row.publication.canonicalId);
     const item = canonicalOpportunity(
       row,
       now,

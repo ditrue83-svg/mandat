@@ -1,5 +1,5 @@
 "use client";
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Radar,
@@ -17,6 +17,14 @@ const links = [
   { href: "/profilo", label: "La tua ditta", icon: Building2 },
   { href: "/notifiche", label: "Notifiche", icon: Bell },
 ];
+function NavigationLabel({ label }: { label: string }) {
+  const { pending } = useLinkStatus();
+  return (
+    <span className="navigation-label" aria-live="polite">
+      {pending ? "Apro…" : label}
+    </span>
+  );
+}
 export function Shell({
   viewer,
   children,
@@ -48,7 +56,7 @@ export function Shell({
               aria-current={path === href ? "page" : undefined}
             >
               <Icon size={20} />
-              <span>{label}</span>
+              <NavigationLabel label={label} />
               {href === "/" && <span className="nav-pill">Beta</span>}
             </Link>
           ))}
@@ -156,9 +164,10 @@ export function Shell({
             key={href}
             href={href}
             className={path === href ? "active" : ""}
+            aria-current={path === href ? "page" : undefined}
           >
             <Icon size={21} />
-            <span>{label}</span>
+            <NavigationLabel label={label} />
           </Link>
         ))}
       </nav>

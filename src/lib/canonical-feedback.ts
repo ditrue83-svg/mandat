@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { feedback, publications, settings } from "@/db/schema";
 import type { SourceReviewExecutor } from "./source-reviews";
@@ -62,4 +62,68 @@ export async function readCanonicalFeedback(
     canonicalId,
   );
   return { saved, dismissed };
+}
+
+export async function readCanonicalFeedbackBatch(
+  executor: SourceReviewExecutor,
+  companyId: string,
+  canonicalIds: readonly string[],
+): Promise<Map<string, { saved: boolean; dismissed: boolean }>> {
+  const ids = [...new Set(canonicalIds)];
+  const result = new Map(
+    ids.map((canonicalId) => [canonicalId, { saved: false, dismissed: false }]),
+  );
+  if (!ids.length) return result;
+
+  const keys = ids.map((canonicalId) =>
+    canonicalFeedbackKey(companyId, canonicalId),
+  );
+  const canonicalIdByKey = new Map(
+    ids.map((canonicalId) => [
+      canonicalFeedbackKey(companyId, canonicalId),
+      canonicalId,
+    ]),
+  );
+  const stored = await executor
+    .select({ key: settings.key, value: settings.value })
+    .from(settings)
+    .where(inArray(settings.key, keys));
+  const resolved = new Set<string>();
+  for (const row of stored) {
+    const canonicalId = canonicalIdByKey.get(row.key);
+    if (!canonicalId) continue;
+    const state = stateSchema.parse(row.value);
+    if (state.companyId !== companyId || state.canonicalId !== canonicalId)
+      throw new Error("Feedback canonico di un'altra ditta o progetto.");
+    result.set(canonicalId, {
+      saved: state.saved,
+      dismissed: state.dismissed,
+    });
+    resolved.add(canonicalId);
+  }
+
+  const unresolved = ids.filter((canonicalId) => !resolved.has(canonicalId));
+  if (!unresolved.length) return result;
+  const legacy = await executor
+    .select({
+      canonicalId: publications.canonicalId,
+      saved: feedback.saved,
+      dismissed: feedback.dismissed,
+    })
+    .from(feedback)
+    .innerJoin(publications, eq(publications.id, feedback.publicationId))
+    .where(
+      and(
+        eq(feedback.companyId, companyId),
+        inArray(publications.canonicalId, unresolved),
+      ),
+    );
+  for (const row of legacy) {
+    const current = result.get(row.canonicalId)!;
+    result.set(row.canonicalId, {
+      saved: current.saved || row.saved,
+      dismissed: current.dismissed || row.dismissed,
+    });
+  }
+  return result;
 }
