@@ -10,7 +10,10 @@ import {
   readPilotExternalDeliveryTest,
   type PilotExternalDeliveryTest,
 } from "./pilot";
-import { readPilotStartedAt } from "./pilot-admin";
+import {
+  lockPilotControl,
+  readPilotStartedAtInTransaction,
+} from "./pilot-control";
 import { HttpError } from "./viewer";
 
 const SUBJECT = "[VERIFICA RECAPITO] Mandat";
@@ -46,8 +49,6 @@ export async function requestPilotExternalDeliveryTest(input: {
   actorId: string;
   now?: Date;
 }) {
-  if (await readPilotStartedAt())
-    throw new HttpError(409, "Il pilota è già iniziato.");
   const recipient = z.email().parse(input.recipient.trim().toLowerCase());
   if (
     input.nonArubaConfirmed !== true ||
@@ -73,16 +74,22 @@ export async function requestPilotExternalDeliveryTest(input: {
     messageId: null,
     error: null,
   };
-  const inserted = await getDb()
-    .insert(settings)
-    .values({ key: PILOT_EXTERNAL_DELIVERY_TEST_SETTING, value: requested })
-    .onConflictDoNothing()
-    .returning({ key: settings.key });
-  if (!inserted.length)
-    throw new HttpError(
-      409,
-      "La prova unica è già stata richiesta. Controlla lo stato prima di qualsiasi nuovo invio.",
-    );
+  const db = getDb();
+  await db.transaction(async (tx) => {
+    await lockPilotControl(tx);
+    if (await readPilotStartedAtInTransaction(tx))
+      throw new HttpError(409, "Il pilota è già iniziato.");
+    const inserted = await tx
+      .insert(settings)
+      .values({ key: PILOT_EXTERNAL_DELIVERY_TEST_SETTING, value: requested })
+      .onConflictDoNothing()
+      .returning({ key: settings.key });
+    if (!inserted.length)
+      throw new HttpError(
+        409,
+        "La prova unica è già stata richiesta. Controlla lo stato prima di qualsiasi nuovo invio.",
+      );
+  });
 
   const deterministicMessageId = `<pilot-external-delivery-${id}@mandat-app.com>`;
   try {
@@ -107,7 +114,7 @@ export async function requestPilotExternalDeliveryTest(input: {
         ? null
         : "Il server SMTP non ha confermato il destinatario.",
     };
-    await getDb()
+    await db
       .update(settings)
       .set({ value: completed })
       .where(eq(settings.key, PILOT_EXTERNAL_DELIVERY_TEST_SETTING));
@@ -120,7 +127,7 @@ export async function requestPilotExternalDeliveryTest(input: {
       messageId: deterministicMessageId,
       error: safeError(error),
     };
-    await getDb().transaction(async (tx) => {
+    await db.transaction(async (tx) => {
       await tx
         .update(settings)
         .set({ value: uncertain })
@@ -146,31 +153,36 @@ export async function confirmPilotExternalDeliveryReceipt(input: {
   note: string;
   now?: Date;
 }) {
-  if (await readPilotStartedAt())
-    throw new HttpError(409, "Il pilota è già iniziato.");
-  const test = await getPilotExternalDeliveryTest();
-  if (!test) throw new HttpError(400, "Invia prima la prova email esterna.");
-  if (test.status === "received")
-    throw new HttpError(409, "La ricezione è già stata confermata.");
   const now = input.now ?? new Date();
   if (!Number.isFinite(now.getTime())) throw new Error("Invalid pilot clock");
-  const received: PilotExternalDeliveryTest = {
-    ...test,
-    status: "received",
-    receivedAt: now.toISOString(),
-    error: null,
-  };
-  const prerequisite = createPilotPrerequisite(
-    "external_delivery",
-    true,
-    `${input.note.trim()} Prova ${test.id}; destinatario ${maskEmail(test.recipient)}; richiesta ${test.requestedAt}.`.slice(
-      0,
-      800,
-    ),
-    input.actorId,
-    now,
-  );
-  await getDb().transaction(async (tx) => {
+  return getDb().transaction(async (tx) => {
+    await lockPilotControl(tx);
+    if (await readPilotStartedAtInTransaction(tx))
+      throw new HttpError(409, "Il pilota è già iniziato.");
+    const [row] = await tx
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, PILOT_EXTERNAL_DELIVERY_TEST_SETTING));
+    const test = readPilotExternalDeliveryTest(row?.value);
+    if (!test) throw new HttpError(400, "Invia prima la prova email esterna.");
+    if (test.status === "received")
+      throw new HttpError(409, "La ricezione è già stata confermata.");
+    const received: PilotExternalDeliveryTest = {
+      ...test,
+      status: "received",
+      receivedAt: now.toISOString(),
+      error: null,
+    };
+    const prerequisite = createPilotPrerequisite(
+      "external_delivery",
+      true,
+      `${input.note.trim()} Prova ${test.id}; destinatario ${maskEmail(test.recipient)}; richiesta ${test.requestedAt}.`.slice(
+        0,
+        800,
+      ),
+      input.actorId,
+      now,
+    );
     await tx
       .update(settings)
       .set({ value: received })
@@ -185,8 +197,8 @@ export async function confirmPilotExternalDeliveryReceipt(input: {
         target: settings.key,
         set: { value: prerequisite },
       });
+    return received;
   });
-  return received;
 }
 
 export function presentPilotExternalDeliveryTest(

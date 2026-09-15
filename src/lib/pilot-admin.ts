@@ -23,6 +23,10 @@ import {
   type PilotPrerequisiteKey,
 } from "./pilot";
 import { PILOT_PARTICIPATION_TERMS_VERSION } from "./pilot-participation";
+import {
+  lockPilotControl,
+  readPilotStartedAtInTransaction,
+} from "./pilot-control";
 
 export function pilotDate(value: unknown) {
   if (typeof value !== "string") return null;
@@ -64,11 +68,6 @@ export async function setPilotPrerequisite(input: {
   actorId: string;
   now?: Date;
 }) {
-  if (await readPilotStartedAt())
-    throw new HttpError(
-      409,
-      "Le verifiche iniziali restano fissate dopo l’avvio del pilota.",
-    );
   const value = createPilotPrerequisite(
     input.key,
     input.confirmed,
@@ -76,64 +75,93 @@ export async function setPilotPrerequisite(input: {
     input.actorId,
     input.now,
   );
-  await getDb()
-    .insert(settings)
-    .values({ key: pilotPrerequisiteSettingKey(input.key), value })
-    .onConflictDoUpdate({
-      target: settings.key,
-      set: { value },
-    });
+  await getDb().transaction(async (tx) => {
+    await lockPilotControl(tx);
+    if (await readPilotStartedAtInTransaction(tx))
+      throw new HttpError(
+        409,
+        "Le verifiche iniziali restano fissate dopo l’avvio del pilota.",
+      );
+    await tx
+      .insert(settings)
+      .values({ key: pilotPrerequisiteSettingKey(input.key), value })
+      .onConflictDoUpdate({
+        target: settings.key,
+        set: { value },
+      });
+  });
   return value;
 }
 
 export async function startPilot(now = new Date()) {
   if (!Number.isFinite(now.getTime())) throw new Error("Invalid pilot clock");
   const db = getDb();
-  const existing = await readPilotStartedAt();
-  if (existing)
-    throw new HttpError(
-      409,
-      `Il pilota è già iniziato il ${existing.toISOString()}.`,
+  return db.transaction(async (tx) => {
+    await lockPilotControl(tx);
+    const existing = await readPilotStartedAtInTransaction(tx);
+    if (existing)
+      throw new HttpError(
+        409,
+        `Il pilota è già iniziato il ${existing.toISOString()}.`,
+      );
+    const prerequisiteRows = await tx
+      .select({ key: settings.key, value: settings.value })
+      .from(settings)
+      .where(
+        inArray(
+          settings.key,
+          pilotPrerequisiteKeys.map(pilotPrerequisiteSettingKey),
+        ),
+      );
+    const prerequisiteValues = new Map(
+      prerequisiteRows.map((row) => [row.key, row.value]),
     );
-  const prerequisites = await readPilotPrerequisites();
-  if (!pilotPrerequisiteKeys.every((key) => prerequisites[key]?.confirmed))
-    throw new HttpError(
-      400,
-      "Completa prima le verifiche sulla residenza dei dati e sul recapito email esterno.",
-    );
-  const participants = await db
-    .select({
-      companyId: companies.id,
-      invitationId: invitations.id,
-      acceptedAt: invitations.acceptedAt,
-      acceptedVersion: invitations.acceptedVersion,
-      onboardedAt: companies.onboardedAt,
-      adminId: administrators.userId,
-    })
-    .from(invitations)
-    .innerJoin(companies, eq(companies.id, invitations.companyId))
-    .leftJoin(administrators, eq(administrators.userId, companies.ownerId))
-    .where(and(isNull(invitations.revokedAt), isNull(companies.disabledAt)));
-  const firms = participants.filter((participant) => !participant.adminId);
-  if (firms.length !== PILOT_COMPANY_TARGET)
-    throw new HttpError(
-      400,
-      `Servono esattamente ${PILOT_COMPANY_TARGET} ditte pilota attive.`,
-    );
-  if (
-    firms.some(
-      (firm) =>
-        !firm.acceptedAt ||
-        firm.acceptedVersion !== PILOT_PARTICIPATION_TERMS_VERSION ||
-        !firm.onboardedAt,
+    const prerequisites = Object.fromEntries(
+      pilotPrerequisiteKeys.map((key) => [
+        key,
+        readPilotPrerequisite(
+          key,
+          prerequisiteValues.get(pilotPrerequisiteSettingKey(key)),
+        ),
+      ]),
+    ) as Record<PilotPrerequisiteKey, ReturnType<typeof readPilotPrerequisite>>;
+    if (!pilotPrerequisiteKeys.every((key) => prerequisites[key]?.confirmed))
+      throw new HttpError(
+        400,
+        "Completa prima le verifiche sulla residenza dei dati e sul recapito email esterno.",
+      );
+    const participants = await tx
+      .select({
+        companyId: companies.id,
+        invitationId: invitations.id,
+        acceptedAt: invitations.acceptedAt,
+        acceptedVersion: invitations.acceptedVersion,
+        onboardedAt: companies.onboardedAt,
+        adminId: administrators.userId,
+      })
+      .from(invitations)
+      .innerJoin(companies, eq(companies.id, invitations.companyId))
+      .leftJoin(administrators, eq(administrators.userId, companies.ownerId))
+      .where(and(isNull(invitations.revokedAt), isNull(companies.disabledAt)));
+    const firms = participants.filter((participant) => !participant.adminId);
+    if (firms.length !== PILOT_COMPANY_TARGET)
+      throw new HttpError(
+        400,
+        `Servono esattamente ${PILOT_COMPANY_TARGET} ditte pilota attive.`,
+      );
+    if (
+      firms.some(
+        (firm) =>
+          !firm.acceptedAt ||
+          firm.acceptedVersion !== PILOT_PARTICIPATION_TERMS_VERSION ||
+          !firm.onboardedAt,
+      )
     )
-  )
-    throw new HttpError(
-      400,
-      "Tutte le cinque ditte devono aver accettato l’informativa corrente e completato il profilo.",
-    );
-  const startedAt = now.toISOString();
-  await db.transaction(async (tx) => {
+      throw new HttpError(
+        400,
+        "Tutte le cinque ditte devono aver accettato l’informativa corrente e completato il profilo.",
+      );
+    const startedAt = now.toISOString();
     const inserted = await tx
       .insert(settings)
       .values({ key: "pilot_started_at", value: startedAt })
@@ -148,13 +176,13 @@ export async function startPilot(now = new Date()) {
         startedAt: now,
       })),
     );
+    return {
+      startedAt,
+      endsAt: new Date(
+        now.getTime() + PILOT_DURATION_DAYS * 86_400_000,
+      ).toISOString(),
+    };
   });
-  return {
-    startedAt,
-    endsAt: new Date(
-      now.getTime() + PILOT_DURATION_DAYS * 86_400_000,
-    ).toISOString(),
-  };
 }
 
 async function activePilotMatch(matchId: string) {

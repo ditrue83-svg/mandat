@@ -45,6 +45,7 @@ import {
   confirmPilotExternalDeliveryReceipt,
   requestPilotExternalDeliveryTest,
 } from "@/lib/pilot-delivery";
+import { lockPilotControl } from "@/lib/pilot-control";
 const sourceDependencySchema = z
   .object({
     version: z.literal(CONTEXT_VERSION),
@@ -184,21 +185,25 @@ export async function POST(request: Request) {
         break;
       }
       case "revoke": {
-        const [invite] = await db
-          .select()
-          .from(invitations)
-          .where(eq(invitations.id, body.id));
-        if (!invite) throw new HttpError(404, "Invito non trovato");
-        const [firm] = await db
-          .select()
-          .from(companies)
-          .where(eq(companies.id, invite.companyId));
-        if (firm.ownerId === v.userId)
-          throw new HttpError(
-            400,
-            "Non puoi revocare il tuo accesso da questa pagina.",
-          );
         await db.transaction(async (tx) => {
+          await lockPilotControl(tx);
+          const [invite] = await tx
+            .select()
+            .from(invitations)
+            .where(eq(invitations.id, body.id))
+            .for("update");
+          if (!invite) throw new HttpError(404, "Invito non trovato");
+          const [firm] = await tx
+            .select()
+            .from(companies)
+            .where(eq(companies.id, invite.companyId))
+            .for("update");
+          if (!firm) throw new HttpError(404, "Ditta non trovata");
+          if (firm.ownerId === v.userId)
+            throw new HttpError(
+              400,
+              "Non puoi revocare il tuo accesso da questa pagina.",
+            );
           await tx
             .update(invitations)
             .set({ revokedAt: new Date() })

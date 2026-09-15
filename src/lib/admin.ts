@@ -39,11 +39,11 @@ import {
   sourceReviewBlocksComparison,
 } from "./source-review-policy";
 import { summarizePilot } from "./pilot";
+import { pilotDate, readPilotPrerequisites } from "./pilot-admin";
 import {
-  pilotDate,
-  readPilotPrerequisites,
-  readPilotStartedAt,
-} from "./pilot-admin";
+  lockPilotControl,
+  readPilotStartedAtInTransaction,
+} from "./pilot-control";
 import {
   getPilotExternalDeliveryTest,
   presentPilotExternalDeliveryTest,
@@ -58,17 +58,6 @@ export async function provisionInvite(
   admin = false,
 ) {
   const db = getDb();
-  if (!admin && (await readPilotStartedAt()))
-    throw new HttpError(
-      409,
-      "Il gruppo pilota è già stato fissato: non puoi aggiungere altre ditte.",
-    );
-  const [exists] = await db
-    .select({ id: user.id })
-    .from(user)
-    .where(eq(user.email, email));
-  if (exists)
-    throw new HttpError(409, "Questo indirizzo ha già un invito o un account.");
   const userId = crypto.randomUUID(),
     companyId = crypto.randomUUID(),
     inviteId = crypto.randomUUID();
@@ -85,6 +74,23 @@ export async function provisionInvite(
     emailEnabled: true,
   };
   await db.transaction(async (tx) => {
+    if (!admin) {
+      await lockPilotControl(tx);
+      if (await readPilotStartedAtInTransaction(tx))
+        throw new HttpError(
+          409,
+          "Il gruppo pilota è già stato fissato: non puoi aggiungere altre ditte.",
+        );
+    }
+    const [exists] = await tx
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.email, email));
+    if (exists)
+      throw new HttpError(
+        409,
+        "Questo indirizzo ha già un invito o un account.",
+      );
     await tx
       .insert(user)
       .values({ id: userId, email, name, emailVerified: false });
