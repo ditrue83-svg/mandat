@@ -94,7 +94,7 @@ function lotNoticeBlocks(notices: readonly LotNotice[], appUrl: string) {
       }[p.status] ?? "da verificare";
     return {
       text: `${p.title}\nStato della pubblicazione: ${status}\n${lots.map((l) => l.text).join("\n\n")}\n${appUrl}/bandi/${p.publicationId}\nFonte originale: ${p.sourceUrl}`,
-      html: `<section><h3>${escapeHtml(p.title)}</h3><p>Stato della pubblicazione: ${escapeHtml(status)}</p>${lots.map((l) => `<h4>${escapeHtml(l.label)}</h4><p style="white-space:pre-line">${escapeHtml(l.body)}</p>`).join("")}<p><a href="${escapeHtml(`${appUrl}/bandi/${p.publicationId}`)}">Apri il bando</a> · <a href="${escapeHtml(p.sourceUrl)}">Fonte originale</a></p></section>`,
+      html: `<section><h3>${escapeHtml(p.title)}</h3><p>Stato della pubblicazione: ${escapeHtml(status)}</p>${lots.map((l) => `<h4>${escapeHtml(l.label)}</h4><p style="white-space:pre-line;overflow-wrap:anywhere;word-break:break-word">${escapeHtml(l.body)}</p>`).join("")}<p><a href="${escapeHtml(`${appUrl}/bandi/${p.publicationId}`)}">Apri il bando</a> · <a href="${escapeHtml(p.sourceUrl)}">Fonte originale</a></p></section>`,
     };
   });
   return blocks;
