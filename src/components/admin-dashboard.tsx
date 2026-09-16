@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Check, Mail, ShieldCheck, ArrowUpRight } from "lucide-react";
 import { Shell } from "./shell";
 import { MatchNote } from "./match-note";
@@ -54,6 +55,9 @@ export function AdminDashboard({
   }
   const disabled = viewer.demo || busy;
   const pilotInvites = data.invites.filter((invite) => !invite.admin);
+  const pagination = data.reviewPage;
+  const reviewHref = (page: number) =>
+    `/admin?${new URLSearchParams({ q: pagination.query, pagina: String(page) })}#proposte`;
   return (
     <Shell viewer={viewer}>
       <section className="page-heading">
@@ -559,16 +563,35 @@ export function AdminDashboard({
           </div>
         )}
       </section>
-      <section className="panel">
+      <section className="panel" id="proposte">
         <h2>Proposte da verificare</h2>
+        <form action="/admin#proposte" className="inline-form">
+          <input
+            name="q"
+            defaultValue={pagination.query}
+            key={pagination.query}
+            maxLength={200}
+            placeholder="Titolo del bando o nome della ditta"
+            aria-label="Cerca tra tutte le proposte"
+          />
+          <button className="button secondary" type="submit">
+            Cerca proposte
+          </button>
+          {pagination.query && (
+            <Link href="/admin#proposte" className="text-link">
+              Azzera ricerca
+            </Link>
+          )}
+        </form>
         {!data.matches.length && (
           <p>
-            Le opportunità compariranno qui dopo aver collegato le fonti e
-            completato i profili delle ditte.
+            {pagination.query
+              ? "Nessuna proposta con questa ricerca."
+              : "Nessuna proposta disponibile in questa pagina. Le nuove proposte compariranno dopo la raccolta delle fonti."}
           </p>
         )}
         <label className="field">
-          Mostra valutazioni
+          Filtra questa pagina
           <select
             value={reviewFilter}
             onChange={(e) => setReviewFilter(e.target.value)}
@@ -582,8 +605,9 @@ export function AdminDashboard({
           </select>
         </label>
         <p className="meta">
-          Ultime {data.matches.length} valutazioni, fino a 500. Controlla anche
-          un campione di scartate per ogni settore.
+          {pagination.total} proposte trovate · pagina {pagination.page} di{" "}
+          {pagination.pages}, fino a {pagination.pageSize} per pagina. La
+          ricerca per titolo o ditta comprende tutte le pagine.
         </p>
         {data.matches
           .filter((m) => {
@@ -817,6 +841,33 @@ export function AdminDashboard({
             </div>
           ))}
       </section>
+      {pagination.pages > 1 && (
+        <nav className="pagination" aria-label="Pagine delle proposte">
+          {pagination.page > 1 ? (
+            <Link
+              href={reviewHref(pagination.page - 1)}
+              className="button secondary"
+            >
+              Precedente
+            </Link>
+          ) : (
+            <span />
+          )}
+          <span>
+            Pagina {pagination.page} di {pagination.pages}
+          </span>
+          {pagination.page < pagination.pages ? (
+            <Link
+              href={reviewHref(pagination.page + 1)}
+              className="button secondary"
+            >
+              Successiva
+            </Link>
+          ) : (
+            <span />
+          )}
+        </nav>
+      )}
       <section className="panel">
         <h2>Fonti e importazioni</h2>
         <p>

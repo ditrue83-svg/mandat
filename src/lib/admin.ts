@@ -19,6 +19,7 @@ import {
   pilotFeedbackEvents,
 } from "@/db/schema";
 import { readProjectQuality } from "./project-quality";
+import { matchesSearch, pageNumber } from "./search";
 import {
   readCurrentMatch,
   presentLotOpportunity,
@@ -154,7 +155,10 @@ export async function getGate() {
     }),
   };
 }
-export async function adminSnapshot(demo: boolean) {
+export async function adminSnapshot(
+  demo: boolean,
+  options: { page?: string; q?: string } = {},
+) {
   if (demo)
     return {
       demo: true,
@@ -171,6 +175,7 @@ export async function adminSnapshot(demo: boolean) {
       runs: [],
       invites: [],
       matches: [],
+      reviewPage: { page: 1, pages: 1, total: 0, query: "", pageSize: 20 },
       issues: [],
       notifications: [],
       feedback: [],
@@ -238,13 +243,14 @@ export async function adminSnapshot(demo: boolean) {
         id: matches.id,
         companyId: companies.id,
         publicationId: publications.id,
+        title: publications.title,
+        companyName: sql<string>`${companies.profile}->>'name'`,
       })
       .from(matches)
       .innerJoin(publications, eq(publications.id, matches.publicationId))
       .innerJoin(companies, eq(companies.id, matches.companyId))
       .where(eq(publications.status, "open"))
-      .orderBy(desc(matches.updatedAt))
-      .limit(500),
+      .orderBy(desc(matches.updatedAt), matches.id),
     db
       .select()
       .from(issues)
@@ -315,8 +321,14 @@ export async function adminSnapshot(demo: boolean) {
     readPilotPrerequisites(),
     getPilotExternalDeliveryTest(),
   ]);
+  const query = (options.q ?? "").trim().slice(0, 200);
+  const inventory = reviewInventory.filter((item) =>
+    matchesSearch(`${item.title} ${item.companyName}`, query),
+  );
+  const pages = Math.max(1, Math.ceil(inventory.length / 20));
+  const page = Math.min(pageNumber(options.page), pages);
   const review = [];
-  for (const item of reviewInventory) {
+  for (const item of inventory.slice((page - 1) * 20, page * 20)) {
     const current = await readCurrentMatch(item.companyId, item.publicationId);
     if (!current?.match || current.publication.status !== "open") continue;
     const { publication, company, match, loaded, sourceReview } = current;
@@ -473,6 +485,7 @@ export async function adminSnapshot(demo: boolean) {
       sectors: i.sectors.sectors,
       continuation: continuationByCompany.get(i.companyId) ?? null,
     })),
+    reviewPage: { page, pages, total: inventory.length, query, pageSize: 20 },
     matches: review.map((r) => {
       const { sourceReview, loaded } = r;
       const lot = loaded ? presentLotOpportunity(loaded) : null;

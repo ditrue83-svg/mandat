@@ -54,6 +54,14 @@ export default async function Detail({
           . Controlla la pubblicazione originale.
         </div>
       )}
+      {item.status === "open" &&
+        item.deadline &&
+        Date.parse(item.deadline) <= Date.now() && (
+          <div role="alert" className="notice error">
+            Il termine indicato è scaduto. Controlla eventuali proroghe nella
+            fonte ufficiale prima di procedere.
+          </div>
+        )}
       <div className="detail-grid space-top">
         <div>
           <section className="panel">
@@ -243,7 +251,7 @@ export default async function Detail({
                 ))}
               </p>
             )}
-            <p className="original-text">{item.originalText}</p>
+            <p className="original-text">{plainText(item.originalText)}</p>
             {!viewer.demo && (
               <div className="space-top">
                 <a

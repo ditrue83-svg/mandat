@@ -1,5 +1,6 @@
 "use client";
 import Link, { useLinkStatus } from "next/link";
+import { useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   Radar,
@@ -9,10 +10,12 @@ import {
   ArrowUpRight,
   ShieldCheck,
   LogOut,
+  Search,
 } from "lucide-react";
 import type { Viewer } from "@/lib/domain";
 const links = [
   { href: "/", label: "Il tuo Radar", icon: Radar },
+  { href: "/esplora", label: "Esplora", icon: Search },
   { href: "/salvati", label: "Salvati", icon: Bookmark },
   { href: "/profilo", label: "La tua ditta", icon: Building2 },
   { href: "/notifiche", label: "Notifiche", icon: Bell },
@@ -33,6 +36,10 @@ export function Shell({
   children: React.ReactNode;
 }) {
   const path = usePathname();
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
+  const active = (href: string) =>
+    path === href || (href === "/esplora" && path.startsWith("/esplora/"));
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -52,8 +59,8 @@ export function Shell({
             <Link
               key={href}
               href={href}
-              className={`nav-link ${path === href ? "active" : ""}`}
-              aria-current={path === href ? "page" : undefined}
+              className={`nav-link ${active(href) ? "active" : ""}`}
+              aria-current={active(href) ? "page" : undefined}
             >
               <Icon size={20} />
               <NavigationLabel label={label} />
@@ -89,17 +96,31 @@ export function Shell({
           {!viewer.demo && (
             <button
               className="logout"
+              disabled={loggingOut}
               onClick={async () => {
-                await fetch("/api/auth/sign-out", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: "{}",
-                });
-                location.assign("/accedi");
+                setLoggingOut(true);
+                setLogoutError("");
+                try {
+                  const response = await fetch("/api/auth/sign-out", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: "{}",
+                  });
+                  if (!response.ok) throw new Error();
+                  location.assign("/accedi");
+                } catch {
+                  setLogoutError("Uscita non riuscita. Riprova.");
+                  setLoggingOut(false);
+                }
               }}
             >
-              <LogOut size={15} /> Esci
+              <LogOut size={15} /> {loggingOut ? "Uscita…" : "Esci"}
             </button>
+          )}
+          {logoutError && (
+            <p role="alert" className="logout-error">
+              {logoutError}
+            </p>
           )}
         </div>
       </aside>
@@ -163,8 +184,8 @@ export function Shell({
           <Link
             key={href}
             href={href}
-            className={path === href ? "active" : ""}
-            aria-current={path === href ? "page" : undefined}
+            className={active(href) ? "active" : ""}
+            aria-current={active(href) ? "page" : undefined}
           >
             <Icon size={21} />
             <NavigationLabel label={label} />

@@ -5,12 +5,17 @@ export default function NotFound() {
       <section className="panel space-top">
         <h1>Questa opportunità non è disponibile.</h1>
         <p>
-          Il collegamento potrebbe non essere valido o il bando non essere
-          presente nel tuo Radar.
+          Il collegamento potrebbe essere cambiato dopo una nuova pubblicazione,
+          oppure il bando potrebbe non essere disponibile per il tuo account.
         </p>
         <Link href="/" className="button primary space-top">
           Torna al Radar
         </Link>
+        <p className="space-top">
+          <Link href="/esplora" className="text-link">
+            Cerca la pubblicazione in Esplora bandi
+          </Link>
+        </p>
       </section>
     </main>
   );

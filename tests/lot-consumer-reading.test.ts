@@ -61,6 +61,7 @@ import {
 } from "../src/lib/queries";
 import { adminSnapshot, getGate } from "../src/lib/admin";
 import * as projectQuality from "../src/lib/project-quality";
+import * as lotReaders from "../src/lib/lot-readers";
 import {
   loadSourceReviewContext,
   appendSourceReview,
@@ -528,6 +529,64 @@ async function matchRows(publicationId: string) {
     .where(eq(schema.matches.publicationId, publicationId))
     .orderBy(schema.matches.id);
 }
+
+it("paginates the founder inventory and does not resolve document trees with no recorded review", async () => {
+  const f = await fixture({ adopt: false });
+  await db
+    .update(schema.matches)
+    .set({ approved: null, reviewedAt: null, eligible: false });
+  for (let i = 0; i < 23; i++) {
+    const id = `inventory-${i}`;
+    const p = {
+      ...f.p,
+      id,
+      externalId: id,
+      title: i === 22 ? "Ricerca Àlberi mirata" : `Inventario ${i}`,
+    };
+    await db
+      .insert(schema.publications)
+      .values({
+        id,
+        canonicalId: id,
+        externalId: id,
+        source: "simap",
+        title: p.title,
+        status: "open",
+        visibleAt: new Date(p.visibleAt),
+        data: p,
+        revision: p.revision,
+      });
+    await db
+      .insert(schema.matches)
+      .values({
+        id: `match-${id}`,
+        publicationId: id,
+        companyId: f.companyId,
+        revision: "unreviewed",
+        score: 0,
+        eligible: false,
+        reason: "Da valutare",
+      });
+  }
+  const resolve = vi.spyOn(lotReaders, "readCanonicalMatch");
+  const quality = await projectQuality.readProjectQuality();
+  expect(quality).toMatchObject({ reviewed: 0, unresolved: 25 });
+  expect(resolve).not.toHaveBeenCalled();
+  const first = await adminSnapshot(false);
+  const second = await adminSnapshot(false, { page: "2" });
+  expect(first.reviewPage).toMatchObject({ total: 25, pages: 2, page: 1 });
+  expect(first.matches).toHaveLength(20);
+  expect(second.matches).toHaveLength(5);
+  expect(
+    new Set([...first.matches, ...second.matches].map((m) => m.id)).size,
+  ).toBe(25);
+  const searched = await adminSnapshot(false, {
+    q: "alberi mirata",
+    page: "999",
+  });
+  expect(searched.reviewPage).toMatchObject({ total: 1, page: 1 });
+  expect(searched.matches[0].title).toBe("Ricerca Àlberi mirata");
+});
 
 it("the founder inventory is re-read when adoption occurs during dashboard loading", async () => {
   const f = await fixture({ adopt: false });

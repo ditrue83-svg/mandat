@@ -132,12 +132,24 @@ export async function readProjectQuality(
     });
   }
   const seen = new Set<string>();
+  const potentiallyReviewed = new Set([
+    ...historical
+      .filter((row) => row.approved || row.rejected)
+      .map((row) => row.key),
+    ...currentEventKeys,
+  ]);
   const current: { key: string; quality: ProjectQuality }[] = [];
   for (const row of rows) {
     const key = JSON.stringify([row.company.id, row.publication.canonicalId]);
     if (seen.has(key)) continue;
     seen.add(key);
     let quality: ProjectQuality = "unresolved";
+    // An unreviewed group cannot contribute to the approval gate. Avoid loading
+    // its document tree; potentially reviewed groups still get a locked reread.
+    if (!potentiallyReviewed.has(key)) {
+      current.push({ key, quality });
+      continue;
+    }
     const selected = await readCanonicalMatch(
       row.company.id,
       row.publication.id,

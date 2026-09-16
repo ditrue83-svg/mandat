@@ -3,7 +3,13 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { Shell } from "./shell";
-import { SECTORS, ZONES, type CompanyProfile, type Viewer } from "@/lib/domain";
+import {
+  SECTORS,
+  ZONES,
+  sectorLabel,
+  type CompanyProfile,
+  type Viewer,
+} from "@/lib/domain";
 import {
   profileBasicsSchema,
   profileSearchSchema,
@@ -24,6 +30,7 @@ export function ProfileForm({
   );
   const [step, setStep] = useState(1);
   const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState("");
   const [failed, setFailed] = useState(false);
   const [errorField, setErrorField] = useState<string>();
@@ -59,6 +66,8 @@ export function ProfileForm({
     value: CompanyProfile[K],
   ) {
     setForm({ ...form, [key]: value });
+    setDirty(true);
+    setMessage("");
   }
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -118,6 +127,7 @@ export function ProfileForm({
           ? "Profilo dimostrativo salvato in questo browser."
           : "Profilo aggiornato. Abbiamo richiesto la rivalutazione delle opportunità: trovi l’avanzamento nel Radar.",
       );
+      setDirty(false);
       if (onboarding) router.push("/");
       else router.refresh();
     } catch (e) {
@@ -138,14 +148,27 @@ export function ProfileForm({
                 ? "Raccontaci la tua ditta."
                 : "La tua ditta, le tue opportunità."}
             </h1>
-            <p>Pochi dettagli per riconoscere i lavori che fanno per te.</p>
+            <p>
+              Pochi dettagli per riconoscere i lavori che fanno per te. Tre
+              passaggi, sempre modificabili.
+            </p>
           </div>
         </section>
         {onboarding && (
-          <div className="progress-steps" aria-label={`Passo ${step} di 3`}>
-            {[1, 2, 3].map((n) => (
-              <span key={n} className={step >= n ? "done" : ""} />
-            ))}
+          <div>
+            <p className="meta">
+              Passo {step} di 3 ·{" "}
+              {
+                ["La ditta", "Lavori e territorio", "Preferenze e riepilogo"][
+                  step - 1
+                ]
+              }
+            </p>
+            <div className="progress-steps" aria-label={`Passo ${step} di 3`}>
+              {[1, 2, 3].map((n) => (
+                <span key={n} className={step >= n ? "done" : ""} />
+              ))}
+            </div>
           </div>
         )}
         <form ref={formRef} onSubmit={save}>
@@ -176,7 +199,9 @@ export function ProfileForm({
                   onChange={(e) => update("activities", e.target.value)}
                 />
                 <small>
-                  Descrivi il lavoro che fate ogni giorno, con parole tue.
+                  Descrivi i servizi concreti, i clienti e i lavori che non
+                  svolgete. Una qualifica come «titolare» o «fondatore» non
+                  descrive le attività.
                 </small>
               </label>
               <label className="field">
@@ -199,7 +224,10 @@ export function ProfileForm({
           {(!onboarding || step === 2) && (
             <section className="panel">
               <h2 id="profile-sectors-heading">Quali lavori cerchi?</h2>
-              <p id="profile-sectors-hint">Seleziona almeno un settore.</p>
+              <p id="profile-sectors-hint">
+                Seleziona almeno un settore che descrive il lavoro della ditta.
+                Per consultare tutti i settori puoi usare Esplora bandi.
+              </p>
               <div
                 className="check-grid"
                 role="group"
@@ -286,7 +314,11 @@ export function ProfileForm({
                     name="keywords"
                     placeholder="Ad esempio: pulizie notturne, potatura"
                     value={keywords}
-                    onChange={(e) => setKeywords(e.target.value)}
+                    onChange={(e) => {
+                      setKeywords(e.target.value);
+                      setDirty(true);
+                      setMessage("");
+                    }}
                   />
                   <small>Separa le parole o le attività con una virgola.</small>
                 </label>
@@ -296,7 +328,11 @@ export function ProfileForm({
                     name="exclusions"
                     placeholder="Ad esempio: disinfestazione, lavori in quota"
                     value={exclusions}
-                    onChange={(e) => setExclusions(e.target.value)}
+                    onChange={(e) => {
+                      setExclusions(e.target.value);
+                      setDirty(true);
+                      setMessage("");
+                    }}
                   />
                 </label>
                 <div className="form-grid">
@@ -340,6 +376,36 @@ export function ProfileForm({
               </div>
             </section>
           )}
+          {(!onboarding || step === 3) && (
+            <section className="panel">
+              <h2>Il tuo profilo di ricerca</h2>
+              <dl className="catalog-details">
+                <div>
+                  <dt>Attività</dt>
+                  <dd>{form.activities || "Da descrivere"}</dd>
+                </div>
+                <div>
+                  <dt>Settori</dt>
+                  <dd>
+                    {form.sectors.map(sectorLabel).join(", ") ||
+                      "Da selezionare"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Zone</dt>
+                  <dd>{form.zones.join(", ") || "Da selezionare"}</dd>
+                </div>
+                <div>
+                  <dt>Esclusioni</dt>
+                  <dd>{exclusions.trim() || "Nessuna"}</dd>
+                </div>
+              </dl>
+              <p className="meta">
+                Queste preferenze personalizzano il Radar. Non limitano la
+                consultazione in Esplora.
+              </p>
+            </section>
+          )}
           {message && (
             <div
               ref={feedbackRef}
@@ -361,7 +427,11 @@ export function ProfileForm({
                 Indietro
               </button>
             ) : (
-              <small>Le tue preferenze restano modificabili.</small>
+              <small role="status">
+                {dirty
+                  ? "Hai modifiche da salvare."
+                  : "Le tue preferenze restano modificabili."}
+              </small>
             )}
             <button type="submit" disabled={busy} className="button primary">
               {busy

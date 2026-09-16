@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { Shell } from "./shell";
 import { MatchNote } from "./match-note";
+import { matchesSearch } from "@/lib/search";
 import { profileSchema } from "@/lib/validation";
 import { preliminaryMatch } from "@/lib/matching";
 import {
@@ -75,6 +76,9 @@ export function Dashboard({
   const [sort, setSort] = useState("relevance");
   const [toast, setToast] = useState("");
   const [showDismissed, setShowDismissed] = useState(false);
+  const [pendingActions, setPendingActions] = useState<Record<string, boolean>>(
+    {},
+  );
   useEffect(() => {
     if (viewer.demo) {
       try {
@@ -146,6 +150,8 @@ export function Dashboard({
     kind: "saved" | "dismissed",
     value: boolean,
   ) {
+    if (pendingActions[id]) return;
+    setPendingActions((current) => ({ ...current, [id]: true }));
     try {
       if (!viewer.demo) {
         const response = await fetch(`/api/opportunities/${id}/feedback`, {
@@ -159,7 +165,10 @@ export function Dashboard({
         ...current,
         [id]: { ...current[id], [kind]: value },
       }));
-      if (!viewer.demo && opportunities.some((item) => item.id === id && item.lotReview))
+      if (
+        !viewer.demo &&
+        opportunities.some((item) => item.id === id && item.lotReview)
+      )
         startRefresh(() => router.refresh());
       if (viewer.demo) {
         setDemoItems((current) =>
@@ -182,6 +191,8 @@ export function Dashboard({
       );
     } catch {
       setToast("Non siamo riusciti a salvare. Riprova.");
+    } finally {
+      setPendingActions((current) => ({ ...current, [id]: false }));
     }
   }
   const visible = items
@@ -193,9 +204,10 @@ export function Dashboard({
             ? o.dismissed
             : !o.dismissed) &&
         (sector === "all" || o.sectors.includes(sector as never)) &&
-        `${o.title} ${o.buyer} ${o.location}`
-          .toLowerCase()
-          .includes(query.toLowerCase()),
+        matchesSearch(
+          `${o.title} ${o.buyer} ${o.location} ${o.originalText} ${o.sectors.map(sectorLabel).join(" ")}`,
+          query,
+        ),
     )
     .sort((a, b) =>
       sort === "deadline"
@@ -208,7 +220,7 @@ export function Dashboard({
         o.status === "open" &&
         !o.dismissed &&
         o.deadline &&
-        daysUntil(o.deadline)! >= 0,
+        Date.parse(o.deadline) > Date.now(),
     )
     .sort((a, b) => a.deadline!.localeCompare(b.deadline!))
     .slice(0, 3);
@@ -225,13 +237,27 @@ export function Dashboard({
           <p>
             {savedOnly
               ? "Tieni d’occhio i bandi che vuoi approfondire."
-              : "Abbiamo fatto il primo passo. Ecco cosa potrebbe fare per te."}
+              : "Le opportunità selezionate in base al lavoro e alle zone della tua ditta."}
           </p>
         </div>
         <Link href="/profilo" className="button secondary">
           <SlidersHorizontal size={17} /> Personalizza il Radar
         </Link>
       </section>
+      {!savedOnly && (
+        <div className="catalog-notice radar-explore">
+          <div>
+            <strong>Vuoi cercare tra tutti i bandi raccolti?</strong>
+            <p>
+              In Esplora trovi anche quelli ancora da valutare e quelli fuori
+              dal tuo profilo.
+            </p>
+          </div>
+          <Link className="button secondary" href="/esplora">
+            Esplora bandi <ArrowRight size={17} />
+          </Link>
+        </div>
+      )}
       {!savedOnly && !viewer.demo && radarStatus.state !== "ready" && (
         <div className="radar-progress" role="status">
           <Clock3 size={20} aria-hidden="true" />
@@ -276,7 +302,8 @@ export function Dashboard({
                 items.filter(
                   (o) =>
                     !o.dismissed &&
-                    daysUntil(o.deadline)! >= 0 &&
+                    o.deadline &&
+                    Date.parse(o.deadline) > Date.now() &&
                     daysUntil(o.deadline)! <= 7 &&
                     o.deadline,
                 ).length
@@ -320,7 +347,11 @@ export function Dashboard({
             <label className="search-input">
               <Search size={18} />
               <input
-                placeholder="Cerca un’attività, un ente, un luogo…"
+                placeholder={
+                  savedOnly
+                    ? "Cerca nei salvati…"
+                    : "Cerca nelle proposte del Radar…"
+                }
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 aria-label="Cerca opportunità"
@@ -385,6 +416,7 @@ export function Dashboard({
                           : `Salva ${o.title}`
                       }
                       aria-pressed={o.saved}
+                      disabled={!!pendingActions[o.id]}
                       className={`save-button ${o.saved ? "is-saved" : ""}`}
                       onClick={() => action(o.id, "saved", !o.saved)}
                     >
@@ -430,9 +462,11 @@ export function Dashboard({
                               closed: "Bando chiuso",
                             }[o.status]
                           : days !== null
-                            ? days < 0
+                            ? Date.parse(o.deadline!) <= Date.now()
                               ? "Termine scaduto"
-                              : `Scade tra ${days} giorni`
+                              : days <= 1
+                                ? "Scade entro 24 ore"
+                                : `Scade tra ${days} giorni`
                             : "Scadenza da verificare"}
                       </span>
                       <span className="amount">{formatMoney(o.valueChf)}</span>
@@ -443,6 +477,7 @@ export function Dashboard({
                   </div>
                   <button
                     className="dismiss-link"
+                    disabled={!!pendingActions[o.id]}
                     onClick={() => action(o.id, "dismissed", !o.dismissed)}
                   >
                     {o.dismissed ? "Mostra di nuovo" : "Non interessa"}
@@ -476,7 +511,7 @@ export function Dashboard({
                     ? "Azzera i filtri o controlla le opportunità che hai nascosto."
                     : radarStatus.state !== "ready"
                       ? "Non serve compilare di nuovo il profilo. Questa pagina si aggiorna automaticamente."
-                      : "Le nuove pubblicazioni vengono valutate prima di comparire qui. Il Radar continuerà a cercare opportunità per le tue attività."}
+                      : "Le pubblicazioni devono essere valutate prima di comparire qui. Puoi già consultarle in Esplora bandi."}
               </p>
               {(query || sector !== "all" || showDismissed) && (
                 <button
@@ -490,6 +525,9 @@ export function Dashboard({
                   Azzera i filtri
                 </button>
               )}
+              <Link href="/esplora" className="button primary">
+                Consulta i bandi raccolti <ArrowRight size={16} />
+              </Link>
             </div>
           )}
           {!savedOnly && (
@@ -560,8 +598,8 @@ export function Dashboard({
             <div>
               <strong>Una mail, solo quando serve.</strong>
               <p>
-                Le novità pertinenti arrivano alle 09:00. Se non ce ne sono,
-                nessuna email.
+                Riepilogo previsto alle 09:00, dopo le valutazioni della beta.
+                Controlla lo stato e le tue preferenze negli avvisi.
               </p>
               <Link href="/notifiche">
                 Gestisci gli avvisi <ArrowRight size={14} />

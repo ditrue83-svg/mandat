@@ -165,6 +165,7 @@ it("il filtro iniziale dell’admin mostra tutti i giudizi ancora da verificare,
   }
   const data: AdminSnapshot = {
     demo: true,
+    reviewPage: { page: 1, pages: 1, total: 0, query: "", pageSize: 20 },
     gate: {
       allowed: false,
       reviewed: 0,
