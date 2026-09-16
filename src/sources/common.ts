@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { DateTime } from "luxon";
+import { zoneForExactCity } from "@/lib/ticino-localities";
 import {
   SECTORS,
   type Publication,
@@ -87,28 +88,7 @@ export function classifySectors(text: string, cpv: string[]): Sector[] {
   ).map((s) => s.id);
 }
 export function zoneFromCity(city: string): string | null {
-  const c = city.toLowerCase();
-  const known: Record<string, string[]> = {
-    Luganese: [
-      "lugano",
-      "muzzano",
-      "ag n o",
-      "agno",
-      "massagno",
-      "paradiso",
-      "cassarate",
-    ],
-    Mendrisiotto: ["mendrisio", "chiasso", "balerna", "stabio", "coldrerio"],
-    Bellinzonese: ["bellinzona", "giubiasco", "cadenazzo", "arbedo"],
-    Locarnese: ["locarno", "ascona", "minusio", "muralto"],
-    Riviera: ["biasca", "riviera"],
-    Blenio: ["acquarossa", "blenio"],
-    Leventina: ["airolo", "faido", "bodio"],
-    Vallemaggia: ["maggia", "cevio"],
-  };
-  for (const [zone, cities] of Object.entries(known))
-    if (cities.some((x) => c.includes(x))) return zone;
-  return null;
+  return zoneForExactCity(plainText(city));
 }
 export function safeOfficialUrl(value: string, hosts: string[]) {
   const u = new URL(value);

@@ -165,6 +165,73 @@ function rawAt(raw: unknown, path: string): unknown {
     );
 }
 
+test("Collected Ticino localities share an exact district across normalization and project filtering", () => {
+  for (const city of ["Porza", "Bioggio", "Ponte Tresa"]) {
+    const raw = detail();
+    raw.procurement.orderAddress = {
+      countryId: "CH",
+      cantonId: "TI",
+      city: { it: city },
+    };
+    const sameDistrict = filter(raw, { zones: ["Luganese"] });
+    assert.equal(sameDistrict.operational.zone, "Luganese", city);
+    assert.equal(sameDistrict.requiresReview, false, city);
+    const outside = filter(raw, { zones: ["Bellinzonese"] });
+    assert.equal(outside.eligible, false, city);
+    assert.match(outside.reason, /fuori dalle zone/);
+  }
+  for (const city of [
+    "Lavena Ponte Tresa",
+    "Lugano / Bellinzona",
+    "Paradiso sul mare",
+  ]) {
+    const raw = detail();
+    raw.procurement.orderAddress = {
+      countryId: "CH",
+      cantonId: "TI",
+      city: { it: city },
+    };
+    assert.equal(prepared(raw).publication.zone, null, city);
+    assert.equal(
+      filter(raw, { zones: ["Luganese"] }).requiresReview,
+      true,
+      city,
+    );
+  }
+});
+
+test("A source site-visit note is review evidence and invalidates a prior operational approval", () => {
+  const raw = detail(),
+    before = filter(raw);
+  Object.assign(raw.terms, {
+    walkThroughNotes: {
+      it: "Sopralluogo obbligatorio il 10 gennaio 2030 alle 09:00.",
+    },
+  });
+  const withVisit = filter(raw);
+  assert.equal(withVisit.eligible, true);
+  assert.equal(withVisit.requiresReview, true);
+  assert(
+    withVisit.reviewReasons.some((reason) => reason.includes("sopralluogo")),
+  );
+  assert.notEqual(withVisit.operationalInputHash, before.operationalInputHash);
+  assert.deepEqual(
+    withVisit.evidence.find((e) => e.rawPath === "/terms/walkThroughNotes")
+      ?.value,
+    { it: "Sopralluogo obbligatorio il 10 gennaio 2030 alle 09:00." },
+  );
+  // Optional visits must remain reviewable; text is not parsed into a legal veto.
+  Object.assign(raw.terms, {
+    walkThroughNotes: { de: "Eine freiwillige Besichtigung ist möglich." },
+  });
+  assert.equal(filter(raw).eligible, true);
+  assert.equal(filter(raw).requiresReview, true);
+  Object.assign(raw.terms, {
+    walkThroughNotes: { it: null, de: null, fr: null, en: null },
+  });
+  assert.equal(filter(raw).requiresReview, false);
+});
+
 test("A real without project gets its own attributable CPV/place/deadline, with exact source evidence", () => {
   const raw = detail(),
     result = filter(raw);

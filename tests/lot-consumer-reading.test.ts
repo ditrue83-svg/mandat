@@ -1161,7 +1161,9 @@ it("explicitly without lots supports a real whole-project assessment, a single R
       targets: [{ target: f.project, result: "direct" }],
     },
   });
-  expect(cards[0].reason).toContain("progetto");
+  expect(cards[0].reason).toBe(
+    "La potatura dell'intero progetto riguarda la ditta; interesse potenziale.",
+  );
   expect(cards[0].sectors).toContain("giardinaggio");
   expect(JSON.stringify(cards)).not.toMatch(
     /PRIVATE_PROJECT_NOTE|actorId|evidenceSnapshot|lotId/,

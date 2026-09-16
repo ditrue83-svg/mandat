@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { CompanyProfile, Publication, Sector } from "./domain";
 import type { LotSourceContext } from "./lot-source-context";
 import { classifySectors, plainText } from "@/sources/common";
+import { zoneForExactCity } from "./ticino-localities";
 
 export const PREFILTER_VERSION = "lot-operational-prefilter-v1";
 export type LotOperationalEvidence = {
@@ -47,18 +48,6 @@ const countries = new Set(
     " ",
   ),
 );
-// The same established locality/district associations as the project adapter,
-// but require a whole city value. A substring is not a certain work location.
-const districtCities: Record<string, readonly string[]> = {
-  Luganese: ["lugano", "muzzano", "agno", "massagno", "paradiso", "cassarate"],
-  Mendrisiotto: ["mendrisio", "chiasso", "balerna", "stabio", "coldrerio"],
-  Bellinzonese: ["bellinzona", "giubiasco", "cadenazzo", "arbedo"],
-  Locarnese: ["locarno", "ascona", "minusio", "muralto"],
-  Riviera: ["biasca", "riviera"],
-  Blenio: ["acquarossa", "blenio"],
-  Leventina: ["airolo", "faido", "bodio"],
-  Vallemaggia: ["maggia", "cevio"],
-};
 function stable(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(stable).join(",")}]`;
   if (v && typeof v === "object")
@@ -106,9 +95,7 @@ function exactZone(value: unknown): string | null {
   return zones[0] && zones.every((zone) => zone === zones[0]) ? zones[0] : null;
 }
 function zoneForCity(city: string): string | undefined {
-  return Object.entries(districtCities).find(([, names]) =>
-    names.includes(plainText(city).normalize("NFC").toLowerCase()),
-  )?.[0];
+  return zoneForExactCity(plainText(city)) ?? undefined;
 }
 function hasTicinoCityVariant(value: unknown): boolean {
   if (typeof value === "string") return !!zoneForCity(value);

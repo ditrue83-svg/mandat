@@ -98,7 +98,13 @@ export function presentLotOpportunity(
         : project.quality === "rejected"
           ? "rejected"
           : "uncertain",
-    reason: project.reason,
+    reason:
+      project.signalEligible && project.shape.kind === "project"
+        ? (dto.targets.find(
+            (target) =>
+              target.state === "current" && target.result === "direct",
+          )?.reason ?? project.reason)
+        : project.reason,
     reviewRequired:
       dto.targets.some(
         (lot) =>

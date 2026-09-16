@@ -61,7 +61,7 @@ function lotNoticeBlocks(notices: readonly LotNotice[], appUrl: string) {
     const lots = notice.scope.map(({ kind, target, render: lot }) => {
       const label =
         target.kind === "project"
-          ? `Progetto intero: ${lot.title}`
+          ? "Progetto intero"
           : lot.number === null
             ? lot.title
             : `Lotto ${lot.number}: ${lot.title}`;
@@ -69,9 +69,20 @@ function lotNoticeBlocks(notices: readonly LotNotice[], appUrl: string) {
         target.kind === "project"
           ? `Scadenza: ${formatDeadline(lot.operational.deadline)}`
           : "Termine applicabile al lotto: da verificare nella fonte.";
+      // Identical titles may occur in both project-info and base. Deduplicate
+      // only their display; the immutable notice keeps every original path.
+      const seen = new Set<string>();
+      const sharedTexts = lot.sharedTexts.filter((part) => {
+        const key = JSON.stringify([part.label, part.text]);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      const body = `${kind === "positive" ? "Interesse potenziale; non attesta l’idoneità a partecipare." : "Aggiornamento della fonte già segnalata."}\n${lot.reason}\n${lot.description}\n${sharedTexts.map((s) => `${s.label}: ${s.text}`).join("\n")}\nLuogo: ${[lot.operational.country, lot.operational.canton, lot.operational.zone].filter(Boolean).join(" · ") || "Non indicato"}\n${deadline}\n${lot.reviewReasons.join("\n")}\nFonte: ${lot.sourceUrl}`;
       return {
         label,
-        text: `${label}\n${kind === "positive" ? "Interesse potenziale; non attesta l’idoneità a partecipare." : "Aggiornamento della fonte già segnalata."}\n${lot.reason}\n${lot.description}\n${lot.sharedTexts.map((s) => `${s.label}: ${s.text}`).join("\n")}\nLuogo: ${[lot.operational.country, lot.operational.canton, lot.operational.zone].filter(Boolean).join(" · ") || "Non indicato"}\n${deadline}\n${lot.reviewReasons.join("\n")}\nFonte: ${lot.sourceUrl}`,
+        body,
+        text: `${label}\n${body}`,
       };
     });
     const status =
@@ -82,8 +93,8 @@ function lotNoticeBlocks(notices: readonly LotNotice[], appUrl: string) {
         awarded: "aggiudicato",
       }[p.status] ?? "da verificare";
     return {
-      text: `${p.title}\nStato della pubblicazione: ${status}\n${lots.map((l) => l.text).join("\n\n")}\n${appUrl}/bandi/${p.publicationId}`,
-      html: `<section><h3>${escapeHtml(p.title)}</h3><p>Stato della pubblicazione: ${escapeHtml(status)}</p>${lots.map((l) => `<h4>${escapeHtml(l.label)}</h4><p style="white-space:pre-line">${escapeHtml(l.text)}</p>`).join("")}<p><a href="${escapeHtml(`${appUrl}/bandi/${p.publicationId}`)}">Apri il bando</a></p></section>`,
+      text: `${p.title}\nStato della pubblicazione: ${status}\n${lots.map((l) => l.text).join("\n\n")}\n${appUrl}/bandi/${p.publicationId}\nFonte originale: ${p.sourceUrl}`,
+      html: `<section><h3>${escapeHtml(p.title)}</h3><p>Stato della pubblicazione: ${escapeHtml(status)}</p>${lots.map((l) => `<h4>${escapeHtml(l.label)}</h4><p style="white-space:pre-line">${escapeHtml(l.body)}</p>`).join("")}<p><a href="${escapeHtml(`${appUrl}/bandi/${p.publicationId}`)}">Apri il bando</a> · <a href="${escapeHtml(p.sourceUrl)}">Fonte originale</a></p></section>`,
     };
   });
   return blocks;

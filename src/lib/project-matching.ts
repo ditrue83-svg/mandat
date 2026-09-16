@@ -3,6 +3,7 @@ import type { CompanyProfile, Publication, Sector } from "./domain";
 import type { LotSourceContext } from "./lot-source-context";
 import { stableDocumentaryJson } from "./documentary-observation";
 import { classifySectors, parseDeadline, plainText } from "@/sources/common";
+import { zoneForExactCity } from "./ticino-localities";
 
 export const PROJECT_PREFILTER_VERSION = "project-operational-prefilter-v1";
 export type ProjectOperationalEvidence = {
@@ -50,18 +51,6 @@ const countries = new Set(
     " ",
   ),
 );
-// Same explicit district vocabulary as the lot filter: a whole city value is
-// required; a buyer address or a substring is never a certain execution place.
-const districtCities: Record<string, readonly string[]> = {
-  Luganese: ["lugano", "muzzano", "agno", "massagno", "paradiso", "cassarate"],
-  Mendrisiotto: ["mendrisio", "chiasso", "balerna", "stabio", "coldrerio"],
-  Bellinzonese: ["bellinzona", "giubiasco", "cadenazzo", "arbedo"],
-  Locarnese: ["locarno", "ascona", "minusio", "muralto"],
-  Riviera: ["biasca", "riviera"],
-  Blenio: ["acquarossa", "blenio"],
-  Leventina: ["airolo", "faido", "bodio"],
-  Vallemaggia: ["maggia", "cevio"],
-};
 const languages = new Set(["it", "de", "fr", "en"]);
 const object = (v: unknown): Record<string, unknown> =>
   v && typeof v === "object" && !Array.isArray(v)
@@ -80,10 +69,7 @@ function strings(v: unknown): string[] | null {
     ? entries.map(([, value]) => value as string)
     : null;
 }
-const zoneForCity = (city: string) =>
-  Object.entries(districtCities).find(([, values]) =>
-    values.includes(plainText(city).normalize("NFC").toLowerCase()),
-  )?.[0] ?? null;
+const zoneForCity = (city: string) => zoneForExactCity(plainText(city));
 const code = (value: unknown, supported: Set<string>) =>
   typeof value === "string" && supported.has(value.trim().toUpperCase())
     ? value.trim().toUpperCase()
@@ -387,6 +373,31 @@ export function preliminaryProjectMatch({
         }
       } else review("Luogo di esecuzione del progetto da verificare.");
     } else review("Luogo di esecuzione del progetto da verificare.");
+
+    // Keep source visit instructions visible to the reviewer, even when the
+    // offer deadline is still open. Do not infer attendance or parse prose as
+    // an automatic legal deadline/exclusion. Empty language slots are absent.
+    const visit = own(object(sections.terms), "walkThroughNotes");
+    if (
+      visit !== null &&
+      (typeof visit === "string"
+        ? !!plainText(visit)
+        : Object.values(object(visit)).some(
+            (value) =>
+              value !== null &&
+              (typeof value !== "string" || !!plainText(value)),
+          ))
+    ) {
+      field(
+        object(sections.terms),
+        "walkThroughNotes",
+        "/terms",
+        "availability",
+      );
+      review(
+        "La fonte contiene indicazioni sul sopralluogo: verifica obbligatorietà, data ed eventuale partecipazione.",
+      );
+    }
 
     const baseProcess = field(base, "processType", "/base", "deadline");
     const datesProcess = field(dates, "processType", "/dates", "deadline");

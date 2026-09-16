@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import nodemailer from "nodemailer";
+import type { LotNotice } from "../src/lib/lot-notice";
 import {
   renderChangeContent,
   renderDigestContent,
@@ -27,6 +28,72 @@ const item = {
   assessment: "ai" as const,
 };
 const notice = "Pubblicazione non ufficiale.";
+
+it("shows repeated documentary text once while preserving variants, provenance and safe HTML", () => {
+  const original = {
+    label: "Titolo condiviso (IT)",
+    text: "Trasporto scolastico inventato",
+    rawPath: "/base/title/it",
+    url: item.sourceUrl,
+    value: "Trasporto scolastico inventato",
+  };
+  // Rendering fixture only; no fabricated review or validated-notice claim.
+  const source = {
+    renderSnapshot: {
+      publicationId: item.id,
+      title: item.title,
+      status: "open",
+      sourceUrl: item.sourceUrl,
+    },
+    scope: [
+      {
+        kind: "positive",
+        target: { kind: "project", publicationId: item.id },
+        render: {
+          title: item.title,
+          description: "Descrizione inventata",
+          reason: item.reason,
+          sourceUrl: item.sourceUrl,
+          operational: {
+            country: "CH",
+            canton: "TI",
+            zone: "Luganese",
+            deadline: item.deadline,
+            valueChf: null,
+          },
+          reviewReasons: [],
+          sharedTexts: [
+            original,
+            { ...original, rawPath: "/project-info/title/it" },
+            {
+              ...original,
+              text: "Trasporto <rettificato>",
+              rawPath: "/procurement/title/it",
+            },
+            { ...original, label: "Titolo condiviso (FR)" },
+          ],
+        },
+      },
+    ],
+  } as unknown as LotNotice;
+  const before = structuredClone(source);
+  const result = renderDigestContent([{ ...item, lotNotice: source }], appUrl);
+  for (const text of [result.textBody, result.html]) {
+    expect(
+      text.split("Titolo condiviso (IT): Trasporto scolastico inventato"),
+    ).toHaveLength(2);
+    expect(text).toContain(
+      "Titolo condiviso (FR): Trasporto scolastico inventato",
+    );
+    expect(text.split("Progetto intero")).toHaveLength(2);
+  }
+  expect(result.textBody).toContain("Trasporto <rettificato>");
+  expect(result.html).toContain("Trasporto &lt;rettificato&gt;");
+  expect(result.html).not.toContain("<rettificato>");
+  expect(result.html).toContain(`href="${item.sourceUrl}">Fonte originale</a>`);
+  expect(result.textBody).toContain(`Fonte originale: ${item.sourceUrl}`);
+  expect(source).toEqual(before);
+});
 
 it("preserva fonti e citazioni e distingue valutazioni AI e revisionate nelle due parti del digest", () => {
   const reviewed = {

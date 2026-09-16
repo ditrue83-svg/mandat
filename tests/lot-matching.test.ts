@@ -205,6 +205,30 @@ function rawAt(root: unknown, path: string): unknown {
     );
 }
 
+test("Exact collected localities constrain the lot's territory without accepting compound names", () => {
+  for (const city of ["Porza", "Bioggio", "Ponte Tresa"]) {
+    const raw = detail();
+    raw.lots[0].orderAddress = {
+      countryId: "CH",
+      cantonId: "TI",
+      city: { it: city },
+    };
+    assert.equal(
+      filter(raw, { zones: ["Luganese"] }).operational.zone,
+      "Luganese",
+    );
+    const outside = filter(raw, { zones: ["Bellinzonese"] });
+    assert.equal(outside.eligible, false);
+    assert.match(outside.reason, /fuori dalle zone/);
+  }
+  for (const city of ["Lavena Ponte Tresa", "Porza / Bellinzona"]) {
+    const raw = detail();
+    raw.lots[0].orderAddress = { countryId: "CH", cantonId: "TI", city };
+    assert.equal(filter(raw, { zones: ["Luganese"] }).operational.zone, null);
+    assert.equal(filter(raw, { zones: ["Luganese"] }).requiresReview, true);
+  }
+});
+
 test("Uses the lot's own location and CPV, with exact source provenance, despite contradictory parent fields", () => {
   const raw = detail();
   const result = filter(raw, { exclusions: ["amianto"] });
