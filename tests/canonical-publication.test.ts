@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { sourceEdition } from "../src/lib/source-edition";
 import {
   compareCanonicalPublications,
   type CanonicalPublication,
@@ -73,16 +74,53 @@ it.each([false, true])(
     const old = source("old", {
       source: "foglio-ti",
       documentarySnapshotId: adopted ? "previous-observation" : null,
-      data: { publishedAt: "2026-09-01T06:00:00Z", projectId: "notice-41" },
+      data: { publishedAt: "2026-09-01T06:00:00Z", projectId: "123456-41" },
       updatedAt: new Date("2026-09-03T12:00:00Z"),
     });
     const current = source("current", {
       source: "foglio-ti",
       documentarySnapshotId: adopted ? "current-observation" : null,
-      data: { publishedAt: "2026-09-01T06:00:00Z", projectId: "notice-42" },
+      data: { publishedAt: "2026-09-01T06:00:00Z", projectId: "123456-42" },
     });
     expect([old, current].sort(compareCanonicalPublications)[0].id).toBe(
       "current",
     );
   },
 );
+
+it.each([
+  "10000000-0000-4000-8000-999999999999",
+  "10000000-0000-4000-8000-999e99999999",
+])("does not turn a simap UUID tail into an edition: %s", (projectId) => {
+  const old = source("old", {
+    documentarySnapshotId: "previous-observation",
+    data: { publishedAt: "2026-09-01T06:00:00Z", projectId },
+  });
+  const current = source("current", {
+    documentarySnapshotId: "current-observation",
+    data: {
+      publishedAt: "2026-09-01T06:00:00Z",
+      projectId: "10000000-0000-4000-8000-aaaaaaaaaaaa",
+    },
+    updatedAt: new Date("2026-09-01T08:00:00Z"),
+  });
+  expect([old, current].sort(compareCanonicalPublications)[0].id).toBe(
+    "current",
+  );
+});
+
+it("recognizes only an explicit, safe Foglio publication edition", () => {
+  expect(sourceEdition({ source: "foglio-ti", projectId: "123456-02" })).toBe(
+    2,
+  );
+  for (const projectId of [
+    undefined,
+    "123456",
+    "123456-2e3",
+    "123456-9007199254740992",
+    "10000000-0000-4000-8000-999999999999",
+  ]) {
+    expect(sourceEdition({ source: "foglio-ti", projectId })).toBe(0);
+  }
+  expect(sourceEdition({ source: "simap", projectId: "123456-42" })).toBe(0);
+});

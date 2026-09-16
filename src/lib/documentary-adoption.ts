@@ -21,6 +21,7 @@ import { enqueueLotReconciliation } from "./lot-reconciliation";
 import { copyNormalizedDocumentaryPublication } from "./documentary-normalized";
 import type { Publication } from "./domain";
 import { sourceScopeReviewReason } from "./source-scope-review";
+import { sourceEdition } from "./source-edition";
 
 import {
   DOCUMENTARY_ADOPTION_CAPABILITY,
@@ -364,12 +365,7 @@ export async function adoptDocumentaryObservation(
       const newer = (a: Publication, b: Publication) => {
         const at = new Date(a.publishedAt).getTime(),
           bt = new Date(b.publishedAt).getTime();
-        return (
-          at > bt ||
-          (at === bt &&
-            (Number(a.projectId?.split("-").at(-1)) || 0) >
-              (Number(b.projectId?.split("-").at(-1)) || 0))
-        );
+        return at > bt || (at === bt && sourceEdition(a) > sourceEdition(b));
       };
       const status = cousins.some(
         (row) =>

@@ -58,6 +58,7 @@ import {
   sourceReviewReason,
 } from "@/lib/source-review-policy";
 import { companyAllowsPilotProcessingSql } from "@/lib/pilot-processing";
+import { sourceEdition } from "@/lib/source-edition";
 // A human source judgment is not an automatic company comparison. Version
 // this completed manual-review path so an earlier automatic cache cannot win
 // merely because it happens to carry the same documentary dependency.
@@ -188,7 +189,7 @@ export async function storePublication(
     );
   const edition = (value: Publication) => [
     new Date(value.publishedAt).getTime(),
-    Number(value.projectId?.split("-").at(-1)) || 0,
+    sourceEdition(value),
   ];
   const newer = (a: Publication, b: Publication) => {
     const x = edition(a),

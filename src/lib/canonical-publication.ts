@@ -1,3 +1,5 @@
+import { sourceEdition } from "./source-edition";
+
 // Shared by Radar, quality accounting and notifications. Choose a source before
 // inspecting its decision; a favourable copy must never win by its score.
 export type CanonicalPublication = {
@@ -13,7 +15,7 @@ const publishedTime = (value: string) =>
 // Same tie-break as source ingestion: a later edition on the same official date
 // remains current even if merging source links updates its predecessor later.
 const edition = (value: CanonicalPublication) =>
-  Number(value.data.projectId?.split("-").at(-1)) || 0;
+  sourceEdition({ source: value.source, projectId: value.data.projectId });
 export function compareCanonicalPublications(
   a: CanonicalPublication,
   b: CanonicalPublication,

@@ -25,6 +25,7 @@ import { enqueueLotReconciliation } from "./lot-reconciliation";
 import { possibleDuplicate } from "./matching";
 import { sourceScopeReviewReason } from "./source-scope-review";
 import type { Publication } from "./domain";
+import { sourceEdition } from "./source-edition";
 
 // A separate first-insert protocol: never manufacture observedPublication from
 // a response, upsert a concurrent import, or call the post-commit legacy store.
@@ -117,12 +118,7 @@ export async function createDocumentaryPublication(
     const newer = (a: Publication, b: Publication) => {
       const at = new Date(a.publishedAt).getTime(),
         bt = new Date(b.publishedAt).getTime();
-      return (
-        at > bt ||
-        (at === bt &&
-          (Number(a.projectId?.split("-").at(-1)) || 0) >
-            (Number(b.projectId?.split("-").at(-1)) || 0))
-      );
+      return at > bt || (at === bt && sourceEdition(a) > sourceEdition(b));
     };
     const sameSource = cousins.filter(
       (row) => row.source === normalized.source,

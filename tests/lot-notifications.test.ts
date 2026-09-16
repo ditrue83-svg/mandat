@@ -212,13 +212,14 @@ async function fixture(
     legacyVeto?: boolean;
     adopt?: boolean;
     canonicalId?: string;
+    projectId?: string;
     reuseCompanies?: { companyId: string; otherCompanyId: string };
     noLots?: boolean;
     realAdoption?: boolean;
     reviewSource?: boolean;
   } = {},
 ) {
-  const projectId = randomUUID(),
+  const projectId = options.projectId ?? randomUUID(),
     noticeId = randomUUID(),
     aId = randomUUID(),
     bId = randomUUID();
@@ -1104,10 +1105,17 @@ it("claim rereads current profile, manual veto, canonical dismissal and automati
 });
 
 it("adopted representative without a match prevents fallback to a positive legacy copy at preparation and claim", async () => {
-  const f = await fixture();
+  // A numeric UUID tail is an identity, never a later official edition.
+  const f = await fixture({
+    projectId: "10000000-0000-4000-8000-999999999999",
+  });
   await approve(f);
   const [first] = await prepare(f);
-  const copy = await fixture({ canonicalId: f.p.id, reuseCompanies: f });
+  const copy = await fixture({
+    canonicalId: f.p.id,
+    reuseCompanies: f,
+    projectId: "10000000-0000-4000-8000-aaaaaaaaaaaa",
+  });
   await db
     .delete(schema.matches)
     .where(
