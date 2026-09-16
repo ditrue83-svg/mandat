@@ -26,6 +26,7 @@ type Match = {
 };
 
 export const assessmentLabels: Record<MatchAssessment, string> = {
+  unreviewed: "Pertinenza non ancora valutata",
   preliminary: "Pertinenza da verificare",
   uncertain: "Pertinenza da verificare",
   ai: "Pertinenza stimata dall’AI",

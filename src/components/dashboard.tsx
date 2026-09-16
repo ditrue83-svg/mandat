@@ -154,7 +154,14 @@ export function Dashboard({
     setPendingActions((current) => ({ ...current, [id]: true }));
     try {
       if (!viewer.demo) {
-        const response = await fetch(`/api/opportunities/${id}/feedback`, {
+        const catalogOnly = items.some(
+          (item) => item.id === id && item.catalogOnly,
+        );
+        const endpoint =
+          catalogOnly && kind === "saved"
+            ? `/api/catalog/${encodeURIComponent(id)}/bookmark`
+            : `/api/opportunities/${encodeURIComponent(id)}/feedback`;
+        const response = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ [kind]: value }),
@@ -396,6 +403,9 @@ export function Dashboard({
             {visible.map((o) => {
               const Icon = icons[o.sectors[0]] ?? Wrench;
               const days = daysUntil(o.deadline);
+              const detailHref = o.catalogOnly
+                ? `/esplora/${encodeURIComponent(o.id)}?ritorno=${encodeURIComponent("/salvati")}`
+                : `/bandi/${encodeURIComponent(o.id)}`;
               return (
                 <article className="opportunity-card" key={o.id}>
                   <div className="card-top">
@@ -426,7 +436,7 @@ export function Dashboard({
                       />
                     </button>
                   </div>
-                  <Link className="card-title" href={`/bandi/${o.id}`}>
+                  <Link className="card-title" href={detailHref}>
                     <h3>{o.title}</h3>
                   </Link>
                   <div className="card-tags">
@@ -471,17 +481,19 @@ export function Dashboard({
                       </span>
                       <span className="amount">{formatMoney(o.valueChf)}</span>
                     </div>
-                    <Link href={`/bandi/${o.id}`} className="detail-link">
+                    <Link href={detailHref} className="detail-link">
                       Scopri il bando <ArrowUpRight size={17} />
                     </Link>
                   </div>
-                  <button
-                    className="dismiss-link"
-                    disabled={!!pendingActions[o.id]}
-                    onClick={() => action(o.id, "dismissed", !o.dismissed)}
-                  >
-                    {o.dismissed ? "Mostra di nuovo" : "Non interessa"}
-                  </button>
+                  {!o.catalogOnly && (
+                    <button
+                      className="dismiss-link"
+                      disabled={!!pendingActions[o.id]}
+                      onClick={() => action(o.id, "dismissed", !o.dismissed)}
+                    >
+                      {o.dismissed ? "Mostra di nuovo" : "Non interessa"}
+                    </button>
+                  )}
                 </article>
               );
             })}

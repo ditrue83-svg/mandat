@@ -23,6 +23,32 @@
   margin-top: 4px;
   font-size: 14px;
 }
+.source-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: baseline;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #cadbd4;
+  color: #2d5d51;
+  font-size: 13px;
+}
+.source-status-list {
+  display: grid;
+  margin-top: 12px;
+}
+.source-status-list .source-status {
+  margin-top: 0;
+}
+.source-status.error,
+.source-status.delayed,
+.source-status.unavailable {
+  color: #8d4b35;
+}
+.source-status.updating {
+  color: #6f5d24;
+}
 .radar-explore {
   display: flex;
   gap: 20px;
@@ -98,6 +124,28 @@
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+}
+.catalog-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.catalog-bookmark-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
+.catalog-bookmark-wrap.wide {
+  align-items: stretch;
+  margin-top: 16px;
+}
+.catalog-bookmark-message {
+  color: #536c63;
+  font-size: 12px;
+  line-height: 1.4;
 }
 .catalog-card .catalog-excerpt {
   display: -webkit-box;
@@ -240,6 +288,14 @@
   }
   .catalog-card h2 {
     font-size: 18px;
+  }
+  .catalog-card-footer,
+  .catalog-card-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .catalog-bookmark-wrap {
+    align-items: stretch;
   }
   .catalog-details {
     grid-template-columns: minmax(0, 1fr);

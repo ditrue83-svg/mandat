@@ -113,6 +113,7 @@ export const feedbackSchema = z
   })
   .strict()
   .refine((v) => Object.keys(v).length > 0);
+export const catalogBookmarkSchema = z.object({ saved: z.boolean() }).strict();
 export const inviteSchema = z.object({
   email: z
     .email()

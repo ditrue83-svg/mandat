@@ -251,6 +251,7 @@ export type CompanyProfile = {
   emailEnabled: boolean;
 };
 export type MatchAssessment =
+  | "unreviewed"
   | "preliminary"
   | "uncertain"
   | "ai"
@@ -260,6 +261,7 @@ export type MatchAssessment =
   | "demo";
 export type Opportunity = Publication & {
   lotReview?: ReturnType<typeof projectLotAssessmentDto>;
+  catalogOnly?: boolean;
   score: number;
   reason: string;
   assessment: MatchAssessment;

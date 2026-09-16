@@ -3,7 +3,12 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowUpRight, FileText } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { pageViewer } from "@/lib/viewer";
-import { readCatalogEntry, CATALOG_STATUS_LABELS } from "@/lib/catalog";
+import {
+  readCatalogEntry,
+  catalogReturnHref,
+  CATALOG_STATUS_LABELS,
+} from "@/lib/catalog";
+import { CatalogBookmark } from "@/components/catalog-bookmark";
 import {
   formatDate,
   formatDeadline,
@@ -14,16 +19,22 @@ import {
 export const dynamic = "force-dynamic";
 export default async function CatalogDetail({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const viewer = await pageViewer();
   const { id } = await params;
+  const rawReturn = (await searchParams).ritorno;
+  const returnHref = catalogReturnHref(
+    typeof rawReturn === "string" ? rawReturn : undefined,
+  );
   const item = await readCatalogEntry(viewer, id);
   if (!item) notFound();
   return (
     <Shell viewer={viewer}>
-      <Link href="/esplora" className="back-link">
+      <Link href={returnHref} className="back-link">
         <ArrowLeft size={17} /> Esplora bandi
       </Link>
       <section className="page-heading">
@@ -44,7 +55,7 @@ export default async function CatalogDetail({
         </strong>
         <p>
           {item.status === "open"
-              ? "La consultazione non attesta l’idoneità a partecipare. Le proposte pertinenti entrano nel Radar dopo la valutazione prevista dalla beta."
+            ? "La consultazione non attesta l’idoneità a partecipare. Le proposte pertinenti entrano nel Radar dopo la valutazione prevista dalla beta."
             : "Questa pubblicazione è consultabile come storico e non è presentata come opportunità aperta."}
         </p>
       </div>
@@ -94,6 +105,20 @@ export default async function CatalogDetail({
           </section>
         </div>
         <aside>
+          <section className="panel">
+            <h2>Tienilo d’occhio</h2>
+            <p>
+              Salvalo anche se la pertinenza per la tua ditta non è stata ancora
+              valutata.
+            </p>
+            <CatalogBookmark
+              id={item.id}
+              title={item.title}
+              initialSaved={item.saved}
+              demo={viewer.demo}
+              wide
+            />
+          </section>
           <section className="panel">
             <h2>Consulta la fonte</h2>
             <p>

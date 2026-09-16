@@ -9,7 +9,10 @@ export function MatchNote({
   assessment: MatchAssessment;
   reason: string;
 }) {
-  const pending = assessment === "preliminary" || assessment === "uncertain";
+  const pending =
+    assessment === "unreviewed" ||
+    assessment === "preliminary" ||
+    assessment === "uncertain";
   const Icon = pending
     ? Clock3
     : assessment === "reviewed"

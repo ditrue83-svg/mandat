@@ -8,6 +8,7 @@ import {
 } from "./canonical-publication";
 import { getDemoOpportunities } from "./demo";
 import { SECTORS, sectorLabel, type Publication, type Viewer } from "./domain";
+import { readCanonicalFeedbackBatch } from "./canonical-feedback";
 import { matchesSearch, pageNumber } from "./search";
 
 export type CatalogEntry = {
@@ -24,6 +25,7 @@ export type CatalogEntry = {
   sectors: Publication["sectors"];
   originalText: string;
   documents: Publication["documents"];
+  saved: boolean;
 };
 export type CatalogFilters = {
   q?: string;
@@ -33,6 +35,23 @@ export type CatalogFilters = {
   pagina?: string;
 };
 export const CATALOG_PAGE_SIZE = 20;
+export type CatalogSourceStatus = {
+  state:
+    | "ok"
+    | "updating"
+    | "error"
+    | "delayed"
+    | "unavailable"
+    | "disabled"
+    | "demo";
+  lastSuccessAt: string | null;
+  lastAttemptAt: string | null;
+};
+export type CatalogSourceSummary = CatalogSourceStatus & {
+  id: Publication["source"];
+  label: string;
+  included: boolean;
+};
 export const CATALOG_STATUS_LABELS = {
   open: "In corso",
   expired: "Scaduto",
@@ -50,7 +69,11 @@ function publicUrl(value: string) {
   }
 }
 
-export function presentCatalogEntry(p: Publication, now: Date): CatalogEntry {
+export function presentCatalogEntry(
+  p: Publication,
+  now: Date,
+  saved = false,
+): CatalogEntry {
   // Deliberately select original public information. Company data, AI summaries,
   // scores, private review notes and document extraction caches stay server-side.
   return {
@@ -71,6 +94,7 @@ export function presentCatalogEntry(p: Publication, now: Date): CatalogEntry {
         : p.status,
     sectors: p.sectors.filter((sector) => SECTORS.some((s) => s.id === sector)),
     originalText: plainText(p.originalText),
+    saved,
     documents: p.documents.flatMap((document) => {
       const url = publicUrl(document.url);
       return url
@@ -88,7 +112,9 @@ export function presentCatalogEntry(p: Publication, now: Date): CatalogEntry {
 
 async function catalogPublications(viewer: Viewer, now: Date) {
   if (viewer.demo)
-    return getDemoOpportunities().filter((p) => new Date(p.visibleAt) <= now);
+    return getDemoOpportunities()
+      .filter((p) => new Date(p.visibleAt) <= now)
+      .map((p) => ({ ...p, canonicalId: p.canonicalKey ?? p.id }));
   const rows = await getDb()
     .select()
     .from(publications)
@@ -109,6 +135,7 @@ async function catalogPublications(viewer: Viewer, now: Date) {
       {
         ...row.data,
         id: row.id,
+        canonicalId: row.canonicalId,
         source: row.source as Publication["source"],
         status: row.status as Publication["status"],
         deadline: row.deadline?.toISOString() ?? null,
@@ -134,7 +161,14 @@ export async function readCatalog(
       : "open",
     ordine: input.ordine === "scadenza" ? "scadenza" : "recenti",
   };
-  const [publicationsFound, lastSuccessful] = await Promise.all([
+  const foglioAvailable = sourceAvailable("foglio-ti");
+  const [
+    publicationsFound,
+    lastSuccessful,
+    latestAttempt,
+    lastSuccessfulFoglio,
+    latestAttemptFoglio,
+  ] = await Promise.all([
     catalogPublications(viewer, now),
     viewer.demo
       ? Promise.resolve([])
@@ -149,9 +183,59 @@ export async function readCatalog(
           )
           .orderBy(desc(sourceRuns.finishedAt))
           .limit(1),
+    viewer.demo
+      ? Promise.resolve([])
+      : getDb()
+          .select({
+            status: sourceRuns.status,
+            startedAt: sourceRuns.startedAt,
+            finishedAt: sourceRuns.finishedAt,
+          })
+          .from(sourceRuns)
+          .where(eq(sourceRuns.source, "simap"))
+          .orderBy(desc(sourceRuns.startedAt))
+          .limit(1),
+    viewer.demo || !foglioAvailable
+      ? Promise.resolve([])
+      : getDb()
+          .select({ at: sourceRuns.finishedAt })
+          .from(sourceRuns)
+          .where(
+            and(
+              eq(sourceRuns.source, "foglio-ti"),
+              eq(sourceRuns.status, "success"),
+            ),
+          )
+          .orderBy(desc(sourceRuns.finishedAt))
+          .limit(1),
+    viewer.demo || !foglioAvailable
+      ? Promise.resolve([])
+      : getDb()
+          .select({
+            status: sourceRuns.status,
+            startedAt: sourceRuns.startedAt,
+            finishedAt: sourceRuns.finishedAt,
+          })
+          .from(sourceRuns)
+          .where(eq(sourceRuns.source, "foglio-ti"))
+          .orderBy(desc(sourceRuns.startedAt))
+          .limit(1),
   ]);
   const collectedAt = lastSuccessful[0]?.at ?? null;
-  const all = publicationsFound.map((p) => presentCatalogEntry(p, now));
+  const savedByCanonical = viewer.demo
+    ? new Map<string, { saved: boolean; dismissed: boolean }>()
+    : await readCanonicalFeedbackBatch(
+        getDb(),
+        viewer.companyId,
+        publicationsFound.map((p) => p.canonicalId),
+      );
+  const all = publicationsFound.map((p) =>
+    presentCatalogEntry(
+      p,
+      now,
+      savedByCanonical.get(p.canonicalId)?.saved ?? false,
+    ),
+  );
   const filtered = all
     .filter(
       (p) =>
@@ -177,6 +261,33 @@ export async function readCatalog(
     });
   const pages = Math.max(1, Math.ceil(filtered.length / CATALOG_PAGE_SIZE));
   const page = Math.min(pageNumber(input.pagina), pages);
+  const sourceStatus = catalogSourceStatus(
+    latestAttempt[0] ?? null,
+    collectedAt,
+    now,
+    viewer.demo,
+  );
+  const foglioStatus = catalogSourceStatus(
+    latestAttemptFoglio[0] ?? null,
+    lastSuccessfulFoglio[0]?.at ?? null,
+    now,
+    viewer.demo,
+    foglioAvailable,
+  );
+  const sources: CatalogSourceSummary[] = [
+    {
+      id: "simap",
+      label: "simap",
+      included: true,
+      ...sourceStatus,
+    },
+    {
+      id: "foglio-ti",
+      label: "Foglio Ufficiale TI",
+      included: foglioAvailable,
+      ...foglioStatus,
+    },
+  ];
   return {
     filters,
     page,
@@ -190,11 +301,15 @@ export async function readCatalog(
         ...p,
         originalText: p.originalText.slice(0, 320),
       })),
-    foglioAvailable: sourceAvailable("foglio-ti"),
+    foglioAvailable,
     collectedAt: collectedAt?.toISOString() ?? null,
-    sourceDelayed:
-      !viewer.demo &&
-      (!collectedAt || now.getTime() - collectedAt.getTime() > 2 * 60 * 60_000),
+    sourceStatus,
+    sources,
+    sourceDelayed: sources.some(
+      (source) =>
+        source.included &&
+        ["error", "delayed", "unavailable"].includes(source.state),
+    ),
   };
 }
 
@@ -206,7 +321,15 @@ export async function readCatalogEntry(
   const publication = (await catalogPublications(viewer, now)).find(
     (p) => p.id === id,
   );
-  return publication ? presentCatalogEntry(publication, now) : null;
+  if (!publication) return null;
+  const saved = viewer.demo
+    ? false
+    : ((
+        await readCanonicalFeedbackBatch(getDb(), viewer.companyId, [
+          publication.canonicalId,
+        ])
+      ).get(publication.canonicalId)?.saved ?? false);
+  return presentCatalogEntry(publication, now, saved);
 }
 
 export function catalogHref(filters: CatalogFilters, page = 1) {
@@ -215,4 +338,81 @@ export function catalogHref(filters: CatalogFilters, page = 1) {
     if (value && key !== "pagina") params.set(key, value);
   if (page > 1) params.set("pagina", String(page));
   return `/esplora${params.size ? `?${params}` : ""}`;
+}
+
+export function catalogDetailHref(
+  id: string,
+  filters: CatalogFilters,
+  page = 1,
+) {
+  const back = catalogHref(filters, page);
+  return `/esplora/${encodeURIComponent(id)}?ritorno=${encodeURIComponent(back)}`;
+}
+
+export function catalogReturnHref(value: string | undefined) {
+  if (!value || !value.startsWith("/") || value.startsWith("//"))
+    return "/esplora";
+  try {
+    const url = new URL(value, "https://mandat.invalid");
+    if (url.origin !== "https://mandat.invalid") return "/esplora";
+    if (url.pathname === "/salvati") return "/salvati";
+    if (url.pathname !== "/esplora") return "/esplora";
+    const settore = url.searchParams.get("settore") ?? undefined;
+    const stato = url.searchParams.get("stato") ?? undefined;
+    const ordine = url.searchParams.get("ordine") ?? undefined;
+    const filters: CatalogFilters = {
+      q: (url.searchParams.get("q") ?? "").slice(0, 200) || undefined,
+      settore: SECTORS.some((entry) => entry.id === settore)
+        ? settore
+        : undefined,
+      stato: [
+        "all",
+        "open",
+        "expired",
+        "cancelled",
+        "awarded",
+        "closed",
+      ].includes(stato ?? "")
+        ? stato
+        : undefined,
+      ordine:
+        ordine === "scadenza" || ordine === "recenti" ? ordine : undefined,
+    };
+    return catalogHref(
+      filters,
+      pageNumber(url.searchParams.get("pagina") ?? "1"),
+    );
+  } catch {
+    return "/esplora";
+  }
+}
+
+export function catalogSourceStatus(
+  latest: { status: string; startedAt: Date; finishedAt: Date | null } | null,
+  lastSuccess: Date | null,
+  now: Date,
+  demo = false,
+  included = true,
+): CatalogSourceStatus {
+  if (demo) return { state: "demo", lastSuccessAt: null, lastAttemptAt: null };
+  if (!included)
+    return { state: "disabled", lastSuccessAt: null, lastAttemptAt: null };
+  const lastAttemptAt = latest?.finishedAt ?? latest?.startedAt ?? null;
+  const base = {
+    lastSuccessAt: lastSuccess?.toISOString() ?? null,
+    lastAttemptAt: lastAttemptAt?.toISOString() ?? null,
+  };
+  if (latest?.status === "failed") return { state: "error", ...base };
+  if (latest?.status === "running")
+    return {
+      state:
+        now.getTime() - latest.startedAt.getTime() <= 15 * 60_000
+          ? "updating"
+          : "delayed",
+      ...base,
+    };
+  if (!lastSuccess) return { state: "unavailable", ...base };
+  if (now.getTime() - lastSuccess.getTime() > 2 * 60 * 60_000)
+    return { state: "delayed", ...base };
+  return { state: "ok", ...base };
 }

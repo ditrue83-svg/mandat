@@ -1,6 +1,6 @@
 import { and, eq, lte, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { matches, publications, settings } from "@/db/schema";
+import { feedback, matches, publications, settings } from "@/db/schema";
 import {
   readCanonicalMatch,
   presentLotOpportunity,
@@ -15,6 +15,7 @@ import { readSourceReviewContexts } from "./source-reviews";
 import { fingerprint } from "@/sources/common";
 import { getDemoOpportunities } from "./demo";
 import type { Opportunity, RadarStatus, Viewer } from "./domain";
+import { presentCatalogEntry } from "./catalog";
 import { presentMatch } from "./match-presentation";
 import { preliminaryMatch } from "./matching";
 import {
@@ -185,14 +186,28 @@ export async function listOpportunities(
   if (viewer.demo) return getDemoOpportunities();
   const now = new Date();
   const db = getDb();
-  const groups = await db
-    .select({ canonicalId: publications.canonicalId })
-    .from(matches)
-    .innerJoin(publications, eq(matches.publicationId, publications.id))
-    .where(eq(matches.companyId, viewer.companyId));
+  const [matchedGroups, savedGroups] = await Promise.all([
+    db
+      .select({ canonicalId: publications.canonicalId })
+      .from(matches)
+      .innerJoin(publications, eq(matches.publicationId, publications.id))
+      .where(eq(matches.companyId, viewer.companyId)),
+    options.includeInactive
+      ? db
+          .select({ canonicalId: publications.canonicalId })
+          .from(feedback)
+          .innerJoin(publications, eq(feedback.publicationId, publications.id))
+          .where(
+            and(
+              eq(feedback.companyId, viewer.companyId),
+              eq(feedback.saved, true),
+            ),
+          )
+      : Promise.resolve([]),
+  ]);
   const representatives = await readCanonicalRepresentatives(
     db,
-    groups.map((row) => row.canonicalId),
+    [...matchedGroups, ...savedGroups].map((row) => row.canonicalId),
   );
   const representativeMatches = representatives.length
     ? await db
@@ -211,27 +226,34 @@ export async function listOpportunities(
   const matchByPublication = new Map(
     representativeMatches.map((match) => [match.publicationId, match]),
   );
-  const documentary = representatives.filter(
-    (publication) => publication.documentarySnapshotId,
-  );
   const canonicalFeedback = await readCanonicalFeedbackBatch(
     db,
     viewer.companyId,
-    documentary.map((publication) => publication.canonicalId),
+    representatives.map((publication) => publication.canonicalId),
   );
   const candidates = representatives.filter((publication) => {
     const match = matchByPublication.get(publication.id);
+    const state = canonicalFeedback.get(publication.canonicalId);
+    if (options.includeInactive) return !!state?.saved;
     if (!match) return false;
     if (!publication.documentarySnapshotId) return true;
-    const state = canonicalFeedback.get(publication.canonicalId);
-    return options.includeInactive
-      ? !!state?.saved
-      : match.lotEvaluations !== null || !!state?.dismissed;
+    return match.lotEvaluations !== null || !!state?.dismissed;
   });
   const result: Opportunity[] = [];
   for (const publication of candidates) {
+    if (publication.visibleAt > now) continue;
+    const state = canonicalFeedback.get(publication.canonicalId);
+    if (!matchByPublication.has(publication.id)) {
+      if (options.includeInactive && state?.saved)
+        result.push(catalogSavedOpportunity(publication, now));
+      continue;
+    }
     const row = await readCanonicalMatch(viewer.companyId, publication.id, now);
-    if (!row) continue;
+    if (!row) {
+      if (options.includeInactive && state?.saved)
+        result.push(catalogSavedOpportunity(publication, now));
+      continue;
+    }
     const item = canonicalOpportunity(
       row,
       now,
@@ -241,6 +263,58 @@ export async function listOpportunities(
     if (item) result.push(item);
   }
   return result.sort((a, b) => b.score - a.score);
+}
+
+function catalogSavedOpportunity(
+  publication: Awaited<ReturnType<typeof readCanonicalRepresentatives>>[number],
+  now: Date,
+): Opportunity {
+  const source = {
+    ...publication.data,
+    id: publication.id,
+    source: publication.source as Opportunity["source"],
+    status: publication.status as Opportunity["status"],
+    deadline: publication.deadline?.toISOString() ?? null,
+  };
+  const item = presentCatalogEntry(source, now, true);
+  return {
+    id: item.id,
+    source: item.source,
+    externalId: source.externalId,
+    ...(source.projectId ? { projectId: source.projectId } : {}),
+    title: item.title,
+    buyer: item.buyer,
+    location: item.location,
+    canton: source.canton,
+    zone: source.zone,
+    publishedAt: item.publishedAt,
+    updatedAt: source.updatedAt,
+    visibleAt: source.visibleAt,
+    deadline: item.deadline,
+    valueChf: item.valueChf,
+    procedure: source.procedure,
+    status: source.status,
+    sectors: item.sectors,
+    cpv: [],
+    sourceUrl: item.sourceUrl,
+    sourceUrls: item.sourceUrl ? [item.sourceUrl] : [],
+    originalText: item.originalText,
+    summary: null,
+    requirements: [],
+    evidence: [],
+    documents: item.documents,
+    reviewRequired: false,
+    reviewReasons: [],
+    revision: source.revision,
+    score: 0,
+    reason:
+      "Hai salvato questo bando da Esplora. La pertinenza per la tua ditta non è ancora stata valutata.",
+    assessment: "unreviewed",
+    saved: true,
+    dismissed: false,
+    feedback: null,
+    catalogOnly: true,
+  };
 }
 function canonicalOpportunity(
   row: NonNullable<Awaited<ReturnType<typeof readCanonicalMatch>>>,

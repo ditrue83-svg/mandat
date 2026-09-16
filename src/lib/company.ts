@@ -19,6 +19,10 @@ import {
   lockCanonicalPublications,
 } from "./canonical-lock";
 import {
+  compareCanonicalPublications,
+  sourceAvailable,
+} from "./canonical-publication";
+import {
   readCanonicalFeedbackState,
   type CanonicalFeedbackState,
 } from "./canonical-feedback";
@@ -226,5 +230,78 @@ export async function saveCompanyFeedback(
           relevant: draft.relevant,
         });
     }
+  });
+}
+
+export async function saveCatalogBookmark(
+  companyId: string,
+  publicationId: string,
+  saved: boolean,
+  now = new Date(),
+) {
+  await getDb().transaction(async (tx) => {
+    const group = await lockCanonicalPublications(tx, publicationId);
+    if (!group) throw new HttpError(404, "Bando non trovato.");
+    const current = group.publications
+      .filter((row) => sourceAvailable(row.source))
+      .sort(compareCanonicalPublications)[0];
+    if (!current || current.id !== publicationId || current.visibleAt > now)
+      throw new HttpError(404, "Bando non disponibile.");
+
+    const [company] = await tx
+      .select()
+      .from(companies)
+      .where(eq(companies.id, companyId))
+      .for("share");
+    if (!company || company.disabledAt)
+      throw new HttpError(404, "Ditta non disponibile.");
+
+    const ids = group.publications.map((row) => row.id);
+    await tx
+      .select()
+      .from(feedback)
+      .where(
+        and(
+          eq(feedback.companyId, companyId),
+          inArray(feedback.publicationId, ids),
+        ),
+      )
+      .orderBy(feedback.id)
+      .for("update");
+    const canonical = await readCanonicalFeedbackState(
+      tx,
+      companyId,
+      group.canonicalId,
+    );
+    const state: CanonicalFeedbackState = {
+      version: "canonical-company-feedback-v1",
+      companyId,
+      canonicalId: group.canonicalId,
+      saved,
+      dismissed: saved ? false : canonical.dismissed,
+      updatedAt: now.toISOString(),
+    };
+    await tx
+      .insert(settings)
+      .values({ key: canonical.key, value: state })
+      .onConflictDoUpdate({ target: settings.key, set: { value: state } });
+    for (const publication of group.publications)
+      await tx
+        .insert(feedback)
+        .values({
+          id: crypto.randomUUID(),
+          companyId,
+          publicationId: publication.id,
+          saved,
+          ...(saved ? { dismissed: false } : {}),
+        })
+        .onConflictDoUpdate({
+          target: [feedback.companyId, feedback.publicationId],
+          set: {
+            saved,
+            ...(saved ? { dismissed: false } : {}),
+            updatedAt: now,
+          },
+        });
   });
 }

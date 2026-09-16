@@ -5,12 +5,25 @@ import { pageViewer } from "@/lib/viewer";
 import {
   readCatalog,
   catalogHref,
+  catalogDetailHref,
   CATALOG_STATUS_LABELS,
   type CatalogFilters,
+  type CatalogSourceSummary,
 } from "@/lib/catalog";
 import { SECTORS, formatDate, formatDeadline, sectorLabel } from "@/lib/domain";
+import { CatalogBookmark } from "@/components/catalog-bookmark";
 
 export const dynamic = "force-dynamic";
+
+function sourceHeadline(source: CatalogSourceSummary) {
+  if (source.state === "disabled") return "non attivo nella beta";
+  if (source.state === "error") return "problema nell’ultimo aggiornamento";
+  if (source.state === "delayed") return "aggiornamento in ritardo";
+  if (source.state === "unavailable") return "prima raccolta non disponibile";
+  if (source.state === "updating") return "aggiornamento in corso";
+  return "aggiornata";
+}
+
 export default async function Explore({
   searchParams,
 }: {
@@ -124,14 +137,34 @@ export default async function Explore({
           Verifica requisiti e rettifiche sulla fonte ufficiale.
         </p>
         {!viewer.demo && (
-          <p>
-            {data.collectedAt
-              ? `Ultima raccolta simap completata: ${formatDeadline(data.collectedAt)}.`
-              : "Nessuna raccolta simap completata disponibile."}
-            {data.sourceDelayed
-              ? " L’aggiornamento è in ritardo: potrebbero mancare nuove pubblicazioni."
-              : ""}
-          </p>
+          <div className="source-status-list" aria-label="Stato delle fonti">
+            {data.sources.map((source) => {
+              const problem =
+                source.included &&
+                ["error", "delayed", "unavailable"].includes(source.state);
+              return (
+                <div
+                  className={`source-status ${source.state}`}
+                  role={problem ? "alert" : "status"}
+                  key={source.id}
+                >
+                  <strong>
+                    {source.label}: {sourceHeadline(source)}.
+                  </strong>
+                  <span>
+                    {source.state === "disabled"
+                      ? " I contenuti restano esclusi finché non sarà confermato il loro riutilizzo."
+                      : source.lastSuccessAt
+                        ? ` Ultima raccolta completata: ${formatDeadline(source.lastSuccessAt)}.`
+                        : " I bandi non sono ancora stati raccolti."}
+                    {problem
+                      ? " I dati già presenti restano consultabili, ma potrebbero mancare nuove pubblicazioni. Mandat riproverà automaticamente."
+                      : ""}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
       <section className="catalog-grid" aria-label="Risultati della ricerca">
@@ -149,7 +182,7 @@ export default async function Explore({
               </span>
             </div>
             <h2>
-              <Link href={`/esplora/${encodeURIComponent(p.id)}`}>
+              <Link href={catalogDetailHref(p.id, data.filters, data.page)}>
                 {p.title}
               </Link>
             </h2>
@@ -175,12 +208,20 @@ export default async function Explore({
                 {p.sectors.map(sectorLabel).join(" · ") ||
                   "Settore da definire"}
               </span>
-              <Link
-                href={`/esplora/${encodeURIComponent(p.id)}`}
-                className="text-link"
-              >
-                Leggi il bando <ArrowRight size={16} />
-              </Link>
+              <div className="catalog-card-actions">
+                <CatalogBookmark
+                  id={p.id}
+                  title={p.title}
+                  initialSaved={p.saved}
+                  demo={viewer.demo}
+                />
+                <Link
+                  href={catalogDetailHref(p.id, data.filters, data.page)}
+                  className="text-link"
+                >
+                  Leggi il bando <ArrowRight size={16} />
+                </Link>
+              </div>
             </div>
           </article>
         ))}
