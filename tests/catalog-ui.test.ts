@@ -1,10 +1,18 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
 import { demoViewer } from "../src/lib/demo";
-import type { CatalogEntry } from "../src/lib/catalog";
+import type { CatalogDetailEntry } from "../src/lib/catalog";
+import { buildTenderBrief } from "../src/lib/tender-brief";
+import { getDemoOpportunities } from "../src/lib/demo";
+import { briefFixture } from "./fixtures/tender-brief";
+import type { Opportunity } from "../src/lib/domain";
 
 const state = vi.hoisted(() => ({
-  item: null as CatalogEntry | null,
+  item: null as CatalogDetailEntry | null,
+  opportunity: null as Opportunity | null,
+}));
+vi.mock("@/lib/queries", () => ({
+  getOpportunity: async () => state.opportunity,
 }));
 
 vi.mock("@/lib/viewer", () => ({
@@ -69,6 +77,7 @@ vi.mock("@/lib/catalog", async () => {
 
 import Explore from "../src/app/esplora/page";
 import CatalogDetail from "../src/app/esplora/[id]/page";
+import RadarDetail from "../src/app/bandi/[id]/page";
 
 state.item = {
   id: "bando prova",
@@ -85,6 +94,9 @@ state.item = {
   originalText: "Servizio inventato per il collaudo.",
   documents: [],
   saved: false,
+  tenderBrief: buildTenderBrief(getDemoOpportunities()[0]),
+  reason: "Pulizie nel territorio selezionato: confronto ancora da verificare.",
+  assessment: "unreviewed",
 };
 
 it("rende visibili salvataggio, problema fonte e collegamenti con filtri", async () => {
@@ -115,4 +127,52 @@ it("la scheda torna alla ricerca esatta e offre lo stesso salvataggio", async ()
   expect(html).toContain(`href="${ritorno.replaceAll("&", "&amp;")}"`);
   expect(html).toContain("Salvalo anche se la pertinenza");
   expect(html).toContain("Salva");
+});
+
+it("ogni scheda, Radar ed Esplora, include i cinque contenuti e il collegamento diretto a simap", async () => {
+  const f = briefFixture(),
+    brief = buildTenderBrief(f.publication, f.archive);
+  state.opportunity = {
+    ...getDemoOpportunities()[0],
+    ...f.publication,
+    tenderBrief: brief,
+    reason:
+      "Potatura nel territorio della ditta: possibile interesse da verificare.",
+  };
+  const original = state.item;
+  state.item = {
+    ...original!,
+    tenderBrief: brief,
+    reason: state.opportunity.reason,
+    sourceUrl: f.publication.sourceUrl,
+  };
+  try {
+    for (const page of [
+      await CatalogDetail({
+        params: Promise.resolve({ id: "test" }),
+        searchParams: Promise.resolve({}),
+      }),
+      await RadarDetail({ params: Promise.resolve({ id: "test" }) }),
+    ]) {
+      const html = renderToStaticMarkup(page);
+      for (const text of [
+        "Il lavoro richiesto",
+        "Potatura di alberi",
+        "Perché può interessare alla tua ditta",
+        "Potatura nel territorio della ditta",
+        "Requisiti e documenti",
+        "Allegare due referenze",
+        "Sopralluogo obbligatorio",
+        "Scadenze e presentazione",
+        "due copie firmate in busta chiusa",
+        "Apri il bando su simap ↗",
+      ])
+        expect(html).toContain(text);
+      expect(html).toContain('href="' + f.publication.sourceUrl + '"');
+      expect(html).toContain("Fonte: Modalità e formalità di presentazione");
+      expect(html).not.toContain('href="' + f.archive.identity.detailUrl + '"');
+    }
+  } finally {
+    state.item = original;
+  }
 });

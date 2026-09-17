@@ -12,6 +12,7 @@ import {
 } from "@/lib/catalog";
 import { SECTORS, formatDate, formatDeadline, sectorLabel } from "@/lib/domain";
 import { CatalogBookmark } from "@/components/catalog-bookmark";
+import { TenderSourceButton } from "@/components/tender-brief";
 
 export const dynamic = "force-dynamic";
 
@@ -222,6 +223,13 @@ export default async function Explore({
                   Leggi il bando <ArrowRight size={16} />
                 </Link>
               </div>
+            </div>
+            <div className="card-source-action">
+              <TenderSourceButton
+                publication={p}
+                demo={viewer.demo}
+                className="source-link"
+              />
             </div>
           </article>
         ))}

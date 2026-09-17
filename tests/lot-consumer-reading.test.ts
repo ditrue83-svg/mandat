@@ -67,6 +67,7 @@ import {
   appendSourceReview,
 } from "../src/lib/source-reviews";
 import { fingerprint } from "../src/sources/common";
+import { readCatalogEntry } from "../src/lib/catalog";
 const viewer = { userId: "lot-match-founder", admin: true, demo: false };
 const commonText =
   "Progetto inventato suddiviso in due lotti indipendenti per il test.";
@@ -435,7 +436,9 @@ function projectDraft(
   };
 }
 
-function wholeProjectDraft(loaded: LoadedLotMatchReview): LotMatchReviewInput {
+function wholeProjectDraft(
+  loaded: LoadedLotMatchReview,
+): Extract<LotMatchReviewInput, { action: "assess_project" }> {
   const selected = assessmentReviewTarget(loaded, {
     kind: "project",
     publicationId: loaded.publication.id,
@@ -474,6 +477,58 @@ function wholeProjectDraft(loaded: LoadedLotMatchReview): LotMatchReviewInput {
     note: "PRIVATE_PROJECT_NOTE: avvisi verificati, nessuna attestazione di idoneità.",
   };
 }
+
+it("Esplora reads the immutable brief without a match and only compares the authenticated company", async () => {
+  const f = await fixture({ withoutLots: true });
+  const first = await customer(f),
+    second = await customer(f, true);
+  await db
+    .delete(schema.matches)
+    .where(eq(schema.matches.publicationId, f.p.id));
+  await db
+    .update(schema.companies)
+    .set({ profile: { ...f.otherProfile, exclusions: ["potatura"] } })
+    .where(eq(schema.companies.id, f.otherCompanyId));
+  const one = await readCatalogEntry(first, f.p.id),
+    two = await readCatalogEntry(second, f.p.id);
+  expect(one?.tenderBrief.description[0].text).toBe(aText);
+  expect(one?.assessment).toBe("unreviewed");
+  expect(one?.reason).not.toContain("escluso (potatura)");
+  expect(two?.reason).toContain("escluso (potatura)");
+  expect(JSON.stringify(two)).not.toContain(f.profile.name);
+  expect(await db.select().from(schema.matches)).toEqual([]);
+  expect(await db.select().from(schema.feedback)).toEqual([]);
+});
+
+it("Radar and Esplora show the same current work; company reasons never leak or survive an unreadable correction", async () => {
+  const f = await fixture({ withoutLots: true });
+  await clearLegacy(f);
+  const draft = wholeProjectDraft(await f.load());
+  await appendLotMatchReview(draft, viewer);
+  const who = await customer(f),
+    other = await customer(f, true);
+  const radar = await getOpportunity(who, f.p.id),
+    catalog = await readCatalogEntry(who, f.p.id);
+  expect(catalog?.tenderBrief).toEqual(radar?.tenderBrief);
+  expect(catalog?.reason).toBe(draft.reason);
+  expect(catalog?.assessment).toBe("reviewed");
+  expect((await readCatalogEntry(other, f.p.id))?.reason).not.toBe(
+    draft.reason,
+  );
+  expect(JSON.stringify(catalog)).not.toContain("PRIVATE_PROJECT_NOTE");
+  expect((await listOpportunities(who))[0]).not.toHaveProperty("tenderBrief");
+  await f.adopt(await f.observe(f.raw, true));
+  const refused = await readCatalogEntry(who, f.p.id);
+  expect(refused?.tenderBrief.warning).toContain("non è leggibile");
+  expect(refused?.tenderBrief.description).toEqual([]);
+  expect(refused?.reason).not.toBe(draft.reason);
+  expect(refused?.assessment).toBe("uncertain");
+  expect(refused?.reason).toContain("confronto con la tua ditta è sospeso");
+  expect((await getOpportunity(who, f.p.id))?.tenderBrief).toEqual(
+    refused?.tenderBrief,
+  );
+  expect(await listOpportunities(who)).toEqual([]);
+});
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 async function customer(f: Fixture, other = false): Promise<Viewer> {
@@ -543,30 +598,26 @@ it("paginates the founder inventory and does not resolve document trees with no 
       externalId: id,
       title: i === 22 ? "Ricerca Àlberi mirata" : `Inventario ${i}`,
     };
-    await db
-      .insert(schema.publications)
-      .values({
-        id,
-        canonicalId: id,
-        externalId: id,
-        source: "simap",
-        title: p.title,
-        status: "open",
-        visibleAt: new Date(p.visibleAt),
-        data: p,
-        revision: p.revision,
-      });
-    await db
-      .insert(schema.matches)
-      .values({
-        id: `match-${id}`,
-        publicationId: id,
-        companyId: f.companyId,
-        revision: "unreviewed",
-        score: 0,
-        eligible: false,
-        reason: "Da valutare",
-      });
+    await db.insert(schema.publications).values({
+      id,
+      canonicalId: id,
+      externalId: id,
+      source: "simap",
+      title: p.title,
+      status: "open",
+      visibleAt: new Date(p.visibleAt),
+      data: p,
+      revision: p.revision,
+    });
+    await db.insert(schema.matches).values({
+      id: `match-${id}`,
+      publicationId: id,
+      companyId: f.companyId,
+      revision: "unreviewed",
+      score: 0,
+      eligible: false,
+      reason: "Da valutare",
+    });
   }
   const resolve = vi.spyOn(lotReaders, "readCanonicalMatch");
   const quality = await projectQuality.readProjectQuality();

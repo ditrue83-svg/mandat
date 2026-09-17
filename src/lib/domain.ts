@@ -260,6 +260,7 @@ export type MatchAssessment =
   | "excluded"
   | "demo";
 export type Opportunity = Publication & {
+  tenderBrief?: import("./tender-brief").TenderBrief;
   lotReview?: ReturnType<typeof projectLotAssessmentDto>;
   catalogOnly?: boolean;
   score: number;

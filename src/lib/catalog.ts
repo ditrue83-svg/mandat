@@ -1,6 +1,10 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { publications, sourceRuns } from "@/db/schema";
+import {
+  publications,
+  sourceRuns,
+  publicationDocumentarySnapshots,
+} from "@/db/schema";
 import { plainText } from "@/sources/common";
 import {
   compareCanonicalPublications,
@@ -10,6 +14,15 @@ import { getDemoOpportunities } from "./demo";
 import { SECTORS, sectorLabel, type Publication, type Viewer } from "./domain";
 import { readCanonicalFeedbackBatch } from "./canonical-feedback";
 import { matchesSearch, pageNumber } from "./search";
+import {
+  buildTenderBrief,
+  potentialInterest,
+  type TenderBrief,
+} from "./tender-brief";
+import { readCanonicalMatch, presentLotOpportunity } from "./lot-readers";
+import { decodeDocumentarySnapshotRow } from "./documentary-store";
+import type { MatchAssessment } from "./domain";
+import type { LotArchive } from "./source-lots";
 
 export type CatalogEntry = {
   id: string;
@@ -33,6 +46,11 @@ export type CatalogFilters = {
   stato?: string;
   ordine?: string;
   pagina?: string;
+};
+export type CatalogDetailEntry = CatalogEntry & {
+  tenderBrief: TenderBrief;
+  reason: string;
+  assessment: MatchAssessment;
 };
 export const CATALOG_PAGE_SIZE = 20;
 export type CatalogSourceStatus = {
@@ -317,19 +335,88 @@ export async function readCatalogEntry(
   viewer: Viewer,
   id: string,
   now = new Date(),
-) {
-  const publication = (await catalogPublications(viewer, now)).find(
-    (p) => p.id === id,
-  );
-  if (!publication) return null;
-  const saved = viewer.demo
-    ? false
-    : ((
-        await readCanonicalFeedbackBatch(getDb(), viewer.companyId, [
-          publication.canonicalId,
-        ])
-      ).get(publication.canonicalId)?.saved ?? false);
-  return presentCatalogEntry(publication, now, saved);
+): Promise<CatalogDetailEntry | null> {
+  if (viewer.demo) {
+    const p = getDemoOpportunities().find(
+      (p) => p.id === id && new Date(p.visibleAt) <= now,
+    );
+    return p
+      ? {
+          ...presentCatalogEntry(p, now),
+          tenderBrief: buildTenderBrief(p),
+          reason: p.reason,
+          assessment: "demo",
+        }
+      : null;
+  }
+  // Choose and lock the current source before inspecting this company's review.
+  // A frozen snapshot ID keeps the brief coherent if a later import arrives.
+  const current = await readCanonicalMatch(viewer.companyId, id, now);
+  if (
+    !current ||
+    current.publication.id !== id ||
+    current.publication.visibleAt > now ||
+    !sourceAvailable(current.publication.source)
+  )
+    return null;
+  const row = current.publication;
+  const p: Publication = {
+    ...row.data,
+    id: row.id,
+    source: row.source as Publication["source"],
+    status: row.status as Publication["status"],
+    deadline: row.deadline?.toISOString() ?? null,
+  };
+  const acquisition = current.loaded?.input.snapshot.acquisition;
+  let archive: LotArchive | null =
+    acquisition?.state === "accepted" ? acquisition.archive : null;
+  let refused = acquisition?.state === "refused";
+  if (!acquisition && row.documentarySnapshotId) {
+    const [snapshot] = await getDb()
+      .select()
+      .from(publicationDocumentarySnapshots)
+      .where(eq(publicationDocumentarySnapshots.id, row.documentarySnapshotId));
+    if (!snapshot) throw new Error("Missing current documentary snapshot");
+    const decoded = decodeDocumentarySnapshotRow(snapshot, row.id).acquisition;
+    archive = decoded.state === "accepted" ? decoded.archive : null;
+    refused = decoded.state === "refused";
+  }
+  const saved =
+    (
+      await readCanonicalFeedbackBatch(getDb(), viewer.companyId, [
+        row.canonicalId,
+      ])
+    ).get(row.canonicalId)?.saved ?? false;
+  const assessed = current.loaded
+    ? presentLotOpportunity(current.loaded)
+    : null;
+  const currentReasons =
+    assessed?.lotReview?.targets
+      .filter((target) => target.state === "current" && target.reason)
+      .map(
+        (target) =>
+          (target.target.kind === "lot"
+            ? `Lotto ${target.number ?? "senza numero"}: `
+            : "") + target.reason,
+      ) ?? [];
+  const hasCurrentJudgment = assessed && currentReasons.length > 0;
+  return {
+    ...presentCatalogEntry(p, now, saved),
+    tenderBrief: buildTenderBrief(p, archive, refused),
+    reason: refused
+      ? "La versione più recente della fonte non è leggibile: il confronto con la tua ditta è sospeso. Verifica la pubblicazione originale."
+      : hasCurrentJudgment
+        ? [...new Set(currentReasons)].join(" ")
+        : potentialInterest(p, current.company.profile, now) +
+          (archive?.directory.length
+            ? " La gara comprende più lotti: verifica separatamente attività e territorio di ciascuno."
+            : ""),
+    assessment: refused
+      ? "uncertain"
+      : hasCurrentJudgment
+        ? assessed.assessment
+        : "unreviewed",
+  };
 }
 
 export function catalogHref(filters: CatalogFilters, page = 1) {

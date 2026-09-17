@@ -1467,6 +1467,88 @@ h1 {
 .detail-heading .meta {
   font-size: 13px;
 }
+.detail-heading .tender-source,
+.page-heading .tender-source {
+  margin: 8px 0 18px;
+}
+.tender-source {
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.tender-source.disabled,
+.card-source-action .disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.card-source-action {
+  margin-top: 16px;
+}
+.brief-facts {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.brief-fact {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.brief-fact > strong {
+  font-size: 14px;
+}
+.brief-text {
+  white-space: pre-wrap;
+  margin: 6px 0;
+  line-height: 1.7;
+}
+.brief-reference {
+  display: block;
+  width: fit-content;
+  margin-top: 6px;
+  color: #48783d;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.brief-missing {
+  padding: 12px 14px;
+  border-left: 3px solid #d2ddcb;
+  background: #f7f9f5;
+  color: #56624e;
+}
+.tender-brief h3 {
+  margin: 24px 0 14px;
+}
+.brief-lot,
+.brief-review,
+.brief-translations {
+  border-top: 1px solid var(--line);
+  margin-top: 22px;
+  padding-top: 16px;
+  overflow-wrap: anywhere;
+}
+.brief-translations .brief-fact {
+  margin-top: 16px;
+}
+.brief-review summary,
+.original-publication summary {
+  font-weight: 650;
+}
+.brief-review blockquote {
+  margin: 12px 0;
+  padding-left: 14px;
+  border-left: 3px solid #d2ddcb;
+}
+@media (max-width: 600px) {
+  .tender-source {
+    width: 100%;
+  }
+  .detail-facts > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
 .detail-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 285px;

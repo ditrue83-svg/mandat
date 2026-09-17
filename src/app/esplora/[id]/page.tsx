@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ArrowUpRight, FileText } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { pageViewer } from "@/lib/viewer";
 import {
@@ -9,6 +9,11 @@ import {
   CATALOG_STATUS_LABELS,
 } from "@/lib/catalog";
 import { CatalogBookmark } from "@/components/catalog-bookmark";
+import {
+  TenderBriefPanels,
+  TenderSourceButton,
+} from "@/components/tender-brief";
+import { MatchNote } from "@/components/match-note";
 import {
   formatDate,
   formatDeadline,
@@ -45,12 +50,13 @@ export default async function CatalogDetail({
           </div>
           <h1>{item.title}</h1>
           <p>{item.buyer || "Ente non indicato"}</p>
+          <TenderSourceButton publication={item} demo={viewer.demo} />
         </div>
       </section>
       <div className="catalog-notice">
         <strong>
           {item.status === "open"
-            ? "Pertinenza per la tua ditta da valutare"
+            ? "Consulta il lavoro e confrontalo con la tua ditta"
             : CATALOG_STATUS_LABELS[item.status]}
         </strong>
         <p>
@@ -92,8 +98,21 @@ export default async function CatalogDetail({
               </div>
             </dl>
           </section>
-          <section className="panel">
-            <h2>Testo della pubblicazione</h2>
+          <TenderBriefPanels
+            brief={item.tenderBrief}
+            relevance={
+              <>
+                <MatchNote assessment={item.assessment} reason={item.reason} />
+                <p className="meta">
+                  Il confronto riguarda l’interesse potenziale. Il possesso dei
+                  requisiti e l’idoneità a partecipare vanno verificati nei
+                  documenti ufficiali.
+                </p>
+              </>
+            }
+          />
+          <details className="panel original-publication">
+            <summary>Testo integrale acquisito e fonti</summary>
             <p className="meta">
               Testo originale disponibile, nella lingua della fonte. Le
               condizioni ufficiali e le rettifiche prevalgono.
@@ -102,7 +121,7 @@ export default async function CatalogDetail({
               {item.originalText ||
                 "Il testo non è disponibile. Consulta il portale originale."}
             </div>
-          </section>
+          </details>
         </div>
         <aside>
           <section className="panel">
@@ -125,36 +144,7 @@ export default async function CatalogDetail({
               Controlla la scadenza, i requisiti e tutti i documenti prima di
               preparare un’offerta.
             </p>
-            {item.sourceUrl && (
-              <a
-                href={item.sourceUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="button primary catalog-source"
-              >
-                Apri la fonte ufficiale <ArrowUpRight size={17} />
-              </a>
-            )}
-            {item.documents.map((doc, index) => (
-              <a
-                className="document-link"
-                key={`${doc.url}-${index}`}
-                href={doc.url}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <FileText size={18} />
-                <span>
-                  {doc.title || "Documento"}
-                  <small>
-                    {doc.requiresLogin
-                      ? "Accesso sul portale richiesto"
-                      : "Documento pubblico"}
-                  </small>
-                </span>
-                <ArrowUpRight size={15} />
-              </a>
-            ))}
+            <TenderSourceButton publication={item} demo={viewer.demo} />
           </section>
         </aside>
       </div>

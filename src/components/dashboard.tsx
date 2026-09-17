@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { Shell } from "./shell";
 import { MatchNote } from "./match-note";
+import { TenderSourceButton } from "./tender-brief";
 import { matchesSearch } from "@/lib/search";
 import { profileSchema } from "@/lib/validation";
 import { preliminaryMatch } from "@/lib/matching";
@@ -484,6 +485,13 @@ export function Dashboard({
                     <Link href={detailHref} className="detail-link">
                       Scopri il bando <ArrowUpRight size={17} />
                     </Link>
+                  </div>
+                  <div className="card-source-action">
+                    <TenderSourceButton
+                      publication={o}
+                      demo={viewer.demo}
+                      className="source-link"
+                    />
                   </div>
                   {!o.catalogOnly && (
                     <button

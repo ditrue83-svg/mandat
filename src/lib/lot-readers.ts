@@ -14,6 +14,7 @@ import {
 } from "./lot-match-reviews";
 import { projectLotAssessmentDto } from "./lot-assessment";
 import type { Opportunity } from "./domain";
+import { buildTenderBrief } from "./tender-brief";
 
 // Internal server reader: callers supply the authenticated company ID, never a
 // browser-selected tenant. Re-read every dependency after the canonical lock.
@@ -47,6 +48,7 @@ export async function readCurrentLotMatch(
 
 export function presentLotOpportunity(
   loaded: LoadedLotMatchReview,
+  includeBrief = false,
 ): Opportunity {
   const project = loaded.project;
   const dto = projectLotAssessmentDto(project);
@@ -59,6 +61,17 @@ export function presentLotOpportunity(
   return {
     ...loaded.publication.data,
     id: loaded.publication.id,
+    ...(includeBrief
+      ? {
+          tenderBrief: buildTenderBrief(
+            loaded.publication.data,
+            loaded.input.snapshot.acquisition.state === "accepted"
+              ? loaded.input.snapshot.acquisition.archive
+              : null,
+            loaded.input.snapshot.acquisition.state === "refused",
+          ),
+        }
+      : {}),
     // Only the current target's operational evidence is projected. Parent AI
     // text never substitutes a human assessment, including without lots.
     summary: null,

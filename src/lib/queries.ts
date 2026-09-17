@@ -330,7 +330,7 @@ function canonicalOpportunity(
       (filterRadar && !lotOpportunityVisible(loaded, includeInactive, now))
     )
       return null;
-    return presentLotOpportunity(loaded);
+    return presentLotOpportunity(loaded, !filterRadar);
   }
   const preliminary = preliminaryMatch(
     publication.data,
