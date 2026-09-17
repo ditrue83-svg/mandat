@@ -226,7 +226,7 @@ export function ProfileForm({
               <h2 id="profile-sectors-heading">Quali lavori cerchi?</h2>
               <p id="profile-sectors-hint">
                 Seleziona almeno un settore che descrive il lavoro della ditta.
-                Per consultare tutti i settori puoi usare Esplora bandi.
+                Per consultare tutti i settori puoi usare Tutti i bandi.
               </p>
               <div
                 className="check-grid"

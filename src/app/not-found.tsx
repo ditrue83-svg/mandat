@@ -9,11 +9,11 @@ export default function NotFound() {
           oppure il bando potrebbe non essere disponibile per il tuo account.
         </p>
         <Link href="/" className="button primary space-top">
-          Torna al Radar
+          Torna a Per la tua ditta
         </Link>
         <p className="space-top">
           <Link href="/esplora" className="text-link">
-            Cerca la pubblicazione in Esplora bandi
+            Cerca la pubblicazione in Tutti i bandi
           </Link>
         </p>
       </section>

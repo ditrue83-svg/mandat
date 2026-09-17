@@ -7,7 +7,7 @@ export default function Loading() {
         </span>
         <div>
           <strong>Apro la pagina…</strong>
-          <span>Sto preparando le opportunità della tua ditta.</span>
+          <span>Sto preparando i bandi e i filtri della raccolta.</span>
         </div>
       </div>
     </main>

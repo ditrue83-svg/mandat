@@ -16,6 +16,7 @@ import {
   catalogHref,
   catalogDetailHref,
   catalogReturnHref,
+  collectionReturnHref,
   catalogSourceStatus,
 } from "../src/lib/catalog";
 import { saveCatalogBookmark } from "../src/lib/company";
@@ -368,6 +369,19 @@ it("cerca nel testo originale con accenti e ordine indipendenti; conserva i filt
   );
   expect(catalogReturnHref("/admin")).toBe("/esplora");
   expect(catalogReturnHref("/salvati?ignora=questo")).toBe("/salvati");
+  expect(
+    collectionReturnHref(
+      "/salvati?q=parco&settore=giardinaggio&ordine=scadenza&ignora=1",
+      "/",
+    ),
+  ).toBe("/salvati?q=parco&settore=giardinaggio&ordine=scadenza");
+  expect(
+    collectionReturnHref(
+      "/?q=verde&settore=giardinaggio&ordine=scadenza&vista=escluse",
+      "/",
+    ),
+  ).toBe("/?q=verde&settore=giardinaggio&ordine=scadenza&vista=escluse");
+  expect(collectionReturnHref("//evil.invalid/", "/")).toBe("/");
 });
 it("pagina senza salti, limita parametri fuori intervallo e ordina scadenze mancanti in fondo", async () => {
   for (let i = 0; i < 23; i++)

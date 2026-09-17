@@ -5,10 +5,12 @@ import { briefFixture, briefIdentity } from "./fixtures/tender-brief";
 import {
   buildTenderBrief,
   potentialInterest,
+  tenderWorkExcerpt,
   type BriefFact,
 } from "../src/lib/tender-brief";
 import {
   TenderBriefPanels,
+  TenderDecisionSummary,
   TenderSourceButton,
 } from "../src/components/tender-brief";
 import {
@@ -25,6 +27,12 @@ it("espone lavoro, requisiti, prove, sopralluogo, termini e recapito con citazio
   expect(texts(brief.description)).toContain("Potatura di alberi");
   expect(texts(brief.description)).not.toContain("<p>");
   expect(texts(brief.requirements)).toContain("nei documenti di gara");
+  expect(texts(brief.requirements)).toContain(
+    "La pubblicazione riporta alcuni criteri di idoneità",
+  );
+  expect(texts(brief.requirements)).not.toContain(
+    "non sono elencati in questa pubblicazione",
+  );
   expect(texts(brief.requirements)).toContain("Non ammesso");
   expect(texts(brief.documents)).toContain("Allegare due referenze");
   expect(texts(brief.visits)).toContain(
@@ -61,6 +69,57 @@ it("espone lavoro, requisiti, prove, sopralluogo, termini e recapito con citazio
   }
 });
 
+it("spiega correttamente quando tutti i criteri rinviano ai documenti", () => {
+  const { publication, archive } = briefFixture({
+    criteria: {
+      qualificationCriteriaInDocuments: "yes",
+      qualificationCriteria: [],
+      qualificationCriteriaNote: null,
+    },
+  });
+  const requirements = texts(
+    buildTenderBrief(publication, archive).requirements,
+  );
+  expect(requirements).toContain(
+    "I criteri di idoneità sono nei documenti di gara; non sono elencati in questa pubblicazione.",
+  );
+  expect(requirements).not.toContain("La pubblicazione riporta alcuni criteri");
+});
+
+it("mette in apertura lavoro, fase, sopralluogo e modalità decisive senza perdere i dettagli", () => {
+  const { publication, archive } = briefFixture();
+  const brief = buildTenderBrief(publication, archive);
+  const html = renderToStaticMarkup(
+    createElement(TenderDecisionSummary, {
+      brief,
+      location: publication.location,
+    }),
+  );
+  expect(html).toContain("Le condizioni decisive, in breve");
+  expect(html).toContain("Potatura di alberi");
+  expect(html).toContain("Presentazione dell’offerta");
+  expect(html).toContain("Sopralluogo obbligatorio");
+  expect(html).toContain("Busta o plico");
+  expect(html).toContain("Esperienza in manutenzione di parchi");
+  expect(html).toContain("Lugano");
+});
+
+it("crea una descrizione breve concreta senza ripetere il titolo", () => {
+  expect(
+    tenderWorkExcerpt({
+      title: "Pulizia scuole comunali",
+      originalText:
+        "Pulizia scuole comunali\n\nServizio giornaliero di pulizia delle aule e delle palestre.",
+    }),
+  ).toBe("Servizio giornaliero di pulizia delle aule e delle palestre.");
+  expect(
+    tenderWorkExcerpt({
+      title: "Titolo soltanto",
+      originalText: "Titolo soltanto",
+    }),
+  ).toContain("Descrizione dettagliata");
+});
+
 it("non usa l’orario di apertura come scadenza e lascia le date senza ora esplicite", () => {
   const { publication, archive } = briefFixture();
   const brief = buildTenderBrief(publication, archive);
@@ -73,6 +132,26 @@ it("non usa l’orario di apertura come scadenza e lascia le date senza ora espl
     brief.deadlines.find((f) => f.label === "Documenti disponibili fino al")
       ?.text,
   ).toContain("25 set 2026");
+});
+
+it("associa alla data delle domande l’orario pubblicato nella stessa voce", () => {
+  const { publication, archive } = briefFixture({
+    dates: {
+      processType: "open",
+      offerDeadline: "2026-10-29T16:00:00+01:00",
+      qnas: [{ date: "2026-10-02", note: { it: "ore 16:00" } }],
+    },
+  });
+  const deadlines = buildTenderBrief(publication, archive).deadlines;
+  const questions = deadlines.filter((fact) =>
+    fact.label.startsWith("Domande di chiarimento"),
+  );
+  expect(questions).toHaveLength(1);
+  expect(questions[0].text).toContain("2 ott 2026 · ore 16:00");
+  expect(questions[0].source.path).toContain("/dates/qnas/0");
+  expect(deadlines.some((fact) => fact.label === "Come porre le domande")).toBe(
+    false,
+  );
 });
 
 it("mantiene nome, via e città negli indirizzi tradotti di simap", () => {
@@ -278,7 +357,7 @@ it("mostra tutte le sezioni anche con campi mancanti e impedisce script o URL at
     "Perché può interessare alla tua ditta",
     "Requisiti e documenti",
     "Sopralluoghi",
-    "Scadenze e presentazione",
+    "Scadenze e modalità di partecipazione",
   ])
     expect(html).toContain(title);
   expect(html).toContain("Requisiti non indicati");

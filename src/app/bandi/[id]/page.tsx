@@ -14,26 +14,38 @@ import { DetailActions } from "@/components/detail-actions";
 import { MatchNote } from "@/components/match-note";
 import {
   TenderBriefPanels,
+  TenderDecisionSummary,
   TenderSourceButton,
 } from "@/components/tender-brief";
 import { buildTenderBrief } from "@/lib/tender-brief";
 import { publicLink } from "@/lib/tender-source-link";
 import { plainText } from "@/sources/common";
+import { collectionReturnHref } from "@/lib/catalog";
 
 export const dynamic = "force-dynamic";
 export default async function Detail({
   params,
+  searchParams = Promise.resolve({}),
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const viewer = await pageViewer();
   const item = await getOpportunity(viewer, (await params).id);
   if (!item) notFound();
+  const rawReturn = (await searchParams).ritorno;
+  const returnHref = collectionReturnHref(
+    typeof rawReturn === "string" ? rawReturn : undefined,
+    "/",
+  );
   const brief = item.tenderBrief ?? buildTenderBrief(item);
   return (
     <Shell viewer={viewer}>
-      <Link href="/" className="back-link">
-        <ArrowLeft size={16} /> Torna al Radar
+      <Link href={returnHref} className="back-link">
+        <ArrowLeft size={16} />{" "}
+        {returnHref.startsWith("/salvati")
+          ? "Torna ai Salvati"
+          : "Torna a Per la tua ditta"}
       </Link>
       <section className="detail-heading">
         <div className="eyebrow">
@@ -71,10 +83,11 @@ export default async function Detail({
             fonte ufficiale prima di procedere.
           </div>
         )}
+      <TenderDecisionSummary brief={brief} location={item.location} />
       <div className="detail-grid space-top">
         <div>
-          <section className="panel">
-            <h2>Le informazioni essenziali</h2>
+          <details className="panel secondary-publication-data">
+            <summary>Altri dati della pubblicazione</summary>
             {item.lotReview && (
               <p className="meta">
                 {item.lotReview.shape === "lots"
@@ -83,10 +96,6 @@ export default async function Detail({
               </p>
             )}
             <dl className="detail-facts">
-              <div>
-                <dt>Scadenza</dt>
-                <dd>{formatDeadline(item.deadline)}</dd>
-              </div>
               <div>
                 <dt>Importo stimato</dt>
                 <dd>{formatMoney(item.valueChf)}</dd>
@@ -110,7 +119,7 @@ export default async function Detail({
                 </dd>
               </div>
             </dl>
-          </section>
+          </details>
           <TenderBriefPanels
             brief={brief}
             relevance={
@@ -206,7 +215,7 @@ export default async function Detail({
             }
           />
           <details className="panel original-publication">
-            <summary>Testo integrale acquisito e fonti</summary>
+            <summary>Fonti e testo originale</summary>
             <p className="meta">
               Pubblicazione non ufficiale. Testo disponibile nella lingua della
               fonte.

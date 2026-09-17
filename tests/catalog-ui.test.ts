@@ -109,6 +109,10 @@ it("rende visibili salvataggio, problema fonte e collegamenti con filtri", async
   expect(html).toContain("Foglio Ufficiale TI: non attivo nella beta");
   expect(html).toContain('role="alert"');
   expect(html).toContain("Mandat riproverà automaticamente");
+  expect(html).toContain("Copertura e ultimo aggiornamento");
+  expect(html).toContain("Cerca tra tutti i bandi raccolti…");
+  expect(html).toContain("Sono mostrati inizialmente i bandi in corso");
+  expect(html).toContain("Vedi dettagli");
   expect(html).toContain("Salva");
   expect(html).toContain(
     "/esplora/bando%20prova?ritorno=%2Fesplora%3Fq%3Dpulizia%2Bscuole%26settore%3Dpulizie%26stato%3Dall%26ordine%3Dscadenza%26pagina%3D2",
@@ -163,8 +167,11 @@ it("ogni scheda, Radar ed Esplora, include i cinque contenuti e il collegamento 
         "Requisiti e documenti",
         "Allegare due referenze",
         "Sopralluogo obbligatorio",
-        "Scadenze e presentazione",
+        "Le condizioni decisive, in breve",
+        "Scadenze e modalità di partecipazione",
         "due copie firmate in busta chiusa",
+        "Busta o plico",
+        "Fonti e testo originale",
         "Apri il bando su simap ↗",
       ])
         expect(html).toContain(text);
@@ -175,4 +182,21 @@ it("ogni scheda, Radar ed Esplora, include i cinque contenuti e il collegamento 
   } finally {
     state.item = original;
   }
+});
+
+it("il dettaglio Radar conserva filtri e raccolta nel collegamento di ritorno", async () => {
+  state.opportunity = {
+    ...getDemoOpportunities()[0],
+    id: "ritorno-radar",
+  };
+  const ritorno =
+    "/?q=verde&settore=giardinaggio&ordine=scadenza&vista=escluse";
+  const html = renderToStaticMarkup(
+    await RadarDetail({
+      params: Promise.resolve({ id: "ritorno-radar" }),
+      searchParams: Promise.resolve({ ritorno }),
+    }),
+  );
+  expect(html).toContain(`href="${ritorno.replaceAll("&", "&amp;")}"`);
+  expect(html).toContain("Torna a Per la tua ditta");
 });

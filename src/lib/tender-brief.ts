@@ -44,6 +44,36 @@ export type TenderBrief = {
     submission: BriefFact[];
   }[];
 };
+
+export function tenderWorkExcerpt(
+  publication: Pick<
+    Publication,
+    "title" | "originalText" | "originalDescriptions"
+  >,
+  limit = 280,
+) {
+  const descriptions = publication.originalDescriptions ?? [];
+  const preferred =
+    descriptions.find((description) => description.language === "it") ??
+    descriptions[0];
+  const title = plainText(publication.title).trim();
+  let text = plainText(preferred?.text || publication.originalText).trim();
+  if (
+    title &&
+    text.toLocaleLowerCase("it").startsWith(title.toLocaleLowerCase("it"))
+  )
+    text = text
+      .slice(title.length)
+      .replace(/^[\s.:;–—-]+/, "")
+      .trim();
+  text = text.replace(/\s+/g, " ").trim();
+  if (!text || text.toLocaleLowerCase("it") === title.toLocaleLowerCase("it"))
+    return "Descrizione dettagliata disponibile nella scheda e nella fonte ufficiale.";
+  if (text.length <= limit) return text;
+  const end = text.lastIndexOf(" ", limit - 1);
+  return `${text.slice(0, end > limit * 0.65 ? end : limit - 1).trim()}…`;
+}
+
 const object = (v: unknown): Record<string, unknown> =>
   v && typeof v === "object" && !Array.isArray(v)
     ? (v as Record<string, unknown>)
@@ -214,6 +244,19 @@ function sourceSections(
         },
       ),
     );
+  const publishedQualificationCriteria =
+    variants(
+      criteria.qualificationCriteriaNote,
+      `${prefix}/criteria/qualificationCriteriaNote`,
+    ).length > 0 ||
+    (Array.isArray(criteria.qualificationCriteria) &&
+      criteria.qualificationCriteria.some((value) => {
+        const criterion = object(value);
+        return variants(
+          criterion.description ?? value,
+          `${prefix}/criteria/qualificationCriteria`,
+        ).length;
+      }));
   if (criteria.qualificationCriteriaInDocuments === "yes")
     requirements.push(
       ...coded(
@@ -222,7 +265,9 @@ function sourceSections(
         `${prefix}/criteria/qualificationCriteriaInDocuments`,
         url,
         {
-          yes: "I criteri di idoneità sono nei documenti di gara; non sono elencati in questa pubblicazione.",
+          yes: publishedQualificationCriteria
+            ? "La pubblicazione riporta alcuni criteri di idoneità; eventuali altri criteri e le condizioni complete sono nei documenti di gara."
+            : "I criteri di idoneità sono nei documenti di gara; non sono elencati in questa pubblicazione.",
         },
       ),
     );
@@ -421,15 +466,37 @@ function sourceSections(
     dates.qnas.forEach((q, i) => {
       const entry = object(q),
         path = `/dates/qnas/${i}`;
-      deadlines.push(
-        ...dateFact(
+      const date = dateFact(
           `Domande di chiarimento ${i + 1}`,
           entry.date,
           prefix + path + "/date",
           url,
-        ),
-      );
-      add(deadlines, "Come porre le domande", entry.note, path + "/note");
+        )[0],
+        notes = variants(entry.note, prefix + path + "/note"),
+        timeOnly =
+          notes.length > 0 &&
+          notes.every((note) =>
+            /^(?:entro\s+le\s+)?(?:ore\s+)?\d{1,2}[.:]\d{2}\s*\.?$/i.test(
+              note.text,
+            ),
+          );
+      if (date && timeOnly)
+        deadlines.push(
+          ...notes.map((note) => ({
+            label: date.label,
+            text: `${date.text.replace(" · orario non indicato", "")} · ${note.text}`,
+            ...(note.language ? { language: note.language } : {}),
+            source: {
+              url,
+              path: prefix + path,
+              quote: JSON.stringify(q),
+            },
+          })),
+        );
+      else {
+        if (date) deadlines.push(date);
+        add(deadlines, "Come porre le domande", entry.note, path + "/note");
+      }
     });
   for (const [key, label] of Object.entries({
     specificDeadlinesAndFormalRequirements:

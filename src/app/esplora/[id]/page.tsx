@@ -11,6 +11,7 @@ import {
 import { CatalogBookmark } from "@/components/catalog-bookmark";
 import {
   TenderBriefPanels,
+  TenderDecisionSummary,
   TenderSourceButton,
 } from "@/components/tender-brief";
 import { MatchNote } from "@/components/match-note";
@@ -40,7 +41,10 @@ export default async function CatalogDetail({
   return (
     <Shell viewer={viewer}>
       <Link href={returnHref} className="back-link">
-        <ArrowLeft size={17} /> Esplora bandi
+        <ArrowLeft size={17} />{" "}
+        {returnHref.startsWith("/salvati")
+          ? "Torna ai Salvati"
+          : "Torna a Tutti i bandi"}
       </Link>
       <section className="page-heading">
         <div>
@@ -53,27 +57,22 @@ export default async function CatalogDetail({
           <TenderSourceButton publication={item} demo={viewer.demo} />
         </div>
       </section>
-      <div className="catalog-notice">
-        <strong>
-          {item.status === "open"
-            ? "Consulta il lavoro e confrontalo con la tua ditta"
-            : CATALOG_STATUS_LABELS[item.status]}
-        </strong>
-        <p>
-          {item.status === "open"
-            ? "La consultazione non attesta l’idoneità a partecipare. Le proposte pertinenti entrano nel Radar dopo la valutazione prevista dalla beta."
-            : "Questa pubblicazione è consultabile come storico e non è presentata come opportunità aperta."}
-        </p>
-      </div>
+      {item.status !== "open" && (
+        <div className="notice" role="status">
+          Stato del bando: {CATALOG_STATUS_LABELS[item.status]}. Questa
+          pubblicazione è consultabile come storico e non è presentata come
+          opportunità aperta.
+        </div>
+      )}
+      <TenderDecisionSummary
+        brief={item.tenderBrief}
+        location={item.location}
+      />
       <div className="detail-grid">
         <div>
-          <section className="panel">
-            <h2>Informazioni dalla pubblicazione</h2>
+          <details className="panel secondary-publication-data">
+            <summary>Altri dati della pubblicazione</summary>
             <dl className="catalog-details">
-              <div>
-                <dt>Luogo</dt>
-                <dd>{item.location || "Non indicato"}</dd>
-              </div>
               <div>
                 <dt>Pubblicazione</dt>
                 <dd>{formatDate(item.publishedAt)}</dd>
@@ -97,7 +96,7 @@ export default async function CatalogDetail({
                 </dd>
               </div>
             </dl>
-          </section>
+          </details>
           <TenderBriefPanels
             brief={item.tenderBrief}
             relevance={
@@ -112,7 +111,7 @@ export default async function CatalogDetail({
             }
           />
           <details className="panel original-publication">
-            <summary>Testo integrale acquisito e fonti</summary>
+            <summary>Fonti e testo originale</summary>
             <p className="meta">
               Testo originale disponibile, nella lingua della fonte. Le
               condizioni ufficiali e le rettifiche prevalgono.

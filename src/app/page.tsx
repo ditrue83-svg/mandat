@@ -3,7 +3,11 @@ import { pageViewer, needsOnboarding } from "@/lib/viewer";
 import { getRadarStatus, listOpportunities } from "@/lib/queries";
 import { redirect } from "next/navigation";
 export const dynamic = "force-dynamic";
-export default async function Home() {
+export default async function Home({
+  searchParams = Promise.resolve({}),
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const viewer = await pageViewer();
   if (!viewer.demo && (await needsOnboarding(viewer.companyId)))
     redirect("/profilo?inizia=1");
@@ -15,6 +19,11 @@ export default async function Home() {
       viewer={viewer}
       opportunities={await listOpportunities(viewer)}
       radarStatus={radarStatus}
+      initialFilters={Object.fromEntries(
+        Object.entries(await searchParams).filter(
+          ([, value]) => typeof value === "string",
+        ),
+      )}
     />
   );
 }

@@ -436,14 +436,29 @@ export function catalogDetailHref(
   return `/esplora/${encodeURIComponent(id)}?ritorno=${encodeURIComponent(back)}`;
 }
 
-export function catalogReturnHref(value: string | undefined) {
+export function collectionReturnHref(
+  value: string | undefined,
+  fallback: "/" | "/esplora" | "/salvati" = "/esplora",
+) {
   if (!value || !value.startsWith("/") || value.startsWith("//"))
-    return "/esplora";
+    return fallback;
   try {
     const url = new URL(value, "https://mandat.invalid");
-    if (url.origin !== "https://mandat.invalid") return "/esplora";
-    if (url.pathname === "/salvati") return "/salvati";
-    if (url.pathname !== "/esplora") return "/esplora";
+    if (url.origin !== "https://mandat.invalid") return fallback;
+    if (url.pathname === "/" || url.pathname === "/salvati") {
+      const params = new URLSearchParams();
+      const query = (url.searchParams.get("q") ?? "").slice(0, 200);
+      const sector = url.searchParams.get("settore");
+      const order = url.searchParams.get("ordine");
+      const view = url.searchParams.get("vista");
+      if (query) params.set("q", query);
+      if (SECTORS.some((entry) => entry.id === sector))
+        params.set("settore", sector!);
+      if (order === "scadenza") params.set("ordine", order);
+      if (url.pathname === "/" && view === "escluse") params.set("vista", view);
+      return `${url.pathname}${params.size ? `?${params}` : ""}`;
+    }
+    if (url.pathname !== "/esplora") return fallback;
     const settore = url.searchParams.get("settore") ?? undefined;
     const stato = url.searchParams.get("stato") ?? undefined;
     const ordine = url.searchParams.get("ordine") ?? undefined;
@@ -470,8 +485,12 @@ export function catalogReturnHref(value: string | undefined) {
       pageNumber(url.searchParams.get("pagina") ?? "1"),
     );
   } catch {
-    return "/esplora";
+    return fallback;
   }
+}
+
+export function catalogReturnHref(value: string | undefined) {
+  return collectionReturnHref(value, "/esplora");
 }
 
 export function catalogSourceStatus(

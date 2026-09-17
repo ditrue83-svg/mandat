@@ -2254,6 +2254,370 @@ h1 {
     animation: none !important;
   }
 }
+
+/* Shared Bandi area */
+.bandi-header {
+  margin-bottom: 20px;
+}
+.bandi-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 24px;
+}
+.bandi-title-row h1 {
+  margin: 0;
+}
+.bandi-title-row > div > p {
+  color: var(--muted);
+  margin-top: 7px;
+  line-height: 1.55;
+}
+.bandi-title-row .bandi-radar-note {
+  color: #536c63;
+  font-size: 13px;
+  margin-top: 4px;
+}
+.collection-tabs {
+  display: flex;
+  gap: 6px;
+  margin-top: 20px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.collection-tabs a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 45px;
+  padding: 9px 15px;
+  color: #60736c;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  border-bottom: 3px solid transparent;
+}
+.collection-tabs a:hover {
+  color: var(--green);
+  background: #f0f5f2;
+}
+.collection-tabs a.active {
+  color: var(--green);
+  border-bottom-color: var(--green);
+}
+.collection-results {
+  min-width: 0;
+}
+.collection-controls {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto auto;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.collection-controls .search-input {
+  min-height: 45px;
+}
+.collection-controls .select-wrap {
+  min-height: 45px;
+}
+.collection-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  margin: 0 0 14px;
+}
+.collection-heading h2 {
+  font-size: 19px;
+}
+.collection-heading p {
+  color: #65776f;
+  font-size: 13px;
+}
+.tender-list {
+  display: grid;
+  gap: 15px;
+  min-width: 0;
+}
+.catalog-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.tender-list-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  min-width: 0;
+  padding: 22px 24px;
+}
+.tender-card-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.status-tag.warning {
+  background: #fbefdc;
+  color: #835d1b;
+}
+.status-tag.neutral {
+  background: #f0f1ef;
+  color: #595d5b;
+}
+.tender-list-card h2 {
+  margin: 0;
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+.tender-list-card h2 a:hover {
+  color: var(--green);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.panel .tender-card-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  color: #405b54;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.tender-card-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  color: #60736c;
+  font-size: 13px;
+}
+.tender-card-facts span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.tender-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: auto;
+  padding-top: 4px;
+}
+.tender-card-actions .catalog-bookmark-wrap {
+  align-items: flex-start;
+}
+.tender-card-secondary {
+  border-top: 1px solid var(--line);
+  padding-top: 9px;
+}
+.catalog-scope-note {
+  color: #62756e;
+  font-size: 13px;
+  margin-top: 8px;
+}
+.source-summary-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  margin: -7px 0 18px;
+  padding: 11px 14px;
+  border: 1px solid #d9e4df;
+  border-radius: 9px;
+  background: #f7faf8;
+  color: #49645e;
+  font-size: 13px;
+}
+.source-summary-line.has-problem {
+  border-color: #e3c8ad;
+  background: #fff8ee;
+  color: #835d31;
+}
+.source-summary-line details {
+  flex: 0 1 540px;
+}
+.source-summary-line summary,
+.secondary-publication-data summary {
+  color: var(--green);
+  cursor: pointer;
+  font-weight: 600;
+}
+.source-summary-line details > p {
+  margin-top: 12px;
+  line-height: 1.6;
+}
+.decision-summary {
+  padding: 24px;
+  margin-top: 20px;
+}
+.decision-summary > div:first-child {
+  margin-bottom: 17px;
+}
+.decision-summary h2 {
+  margin: 0;
+}
+.decision-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--line);
+}
+.decision-grid > div {
+  min-width: 0;
+  padding: 16px;
+  background: white;
+}
+.decision-grid .decision-work {
+  grid-column: 1 / -1;
+}
+.decision-grid dt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #48645d;
+  font-size: 12px;
+  font-weight: 700;
+}
+.decision-grid dd {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  margin: 8px 0 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.decision-grid dd small {
+  display: block;
+  margin-top: 6px;
+  color: #6d7f78;
+}
+.decision-grid .decision-warning {
+  background: #fff9ed;
+}
+.decision-grid .decision-warning dt {
+  color: #8a611e;
+}
+.submission-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 7px;
+}
+.submission-modes span {
+  display: inline-flex;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: #eaf2ed;
+  color: #275d51;
+  font-size: 11px;
+  font-weight: 650;
+}
+.secondary-publication-data > summary {
+  font-size: 15px;
+}
+.secondary-publication-data[open] > summary {
+  margin-bottom: 20px;
+}
+
+@media (max-width: 900px) {
+  .catalog-list {
+    grid-template-columns: 1fr;
+  }
+  .source-summary-line {
+    display: block;
+  }
+  .source-summary-line details {
+    margin-top: 8px;
+  }
+}
+
+@media (max-width: 760px) {
+  .bandi-title-row {
+    display: block;
+  }
+  .bandi-title-row > .button {
+    width: fit-content;
+    margin-top: 12px;
+  }
+  .collection-tabs {
+    margin-top: 14px;
+  }
+  .collection-tabs a {
+    min-height: 42px;
+    padding: 8px 11px;
+    font-size: 13px;
+  }
+  .collection-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+  .collection-controls .search-input {
+    grid-column: 1 / -1;
+  }
+  .collection-controls .select-wrap,
+  .collection-controls .select-wrap select {
+    width: 100%;
+  }
+  .collection-heading {
+    display: block;
+  }
+  .collection-heading p {
+    margin-top: 5px;
+  }
+  .tender-list-card {
+    padding: 18px 16px;
+  }
+  .tender-card-facts {
+    display: grid;
+  }
+  .tender-card-actions > *,
+  .tender-card-actions .button,
+  .tender-card-actions .catalog-bookmark-wrap {
+    width: 100%;
+  }
+  .decision-summary {
+    padding: 18px;
+  }
+  .decision-grid {
+    grid-template-columns: 1fr;
+  }
+  .decision-grid .decision-work {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .catalog-filters {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px 12px;
+  }
+  .catalog-filters > .catalog-search {
+    grid-column: 1 / -1;
+  }
+  .catalog-filters > label {
+    min-width: 0;
+  }
+  .catalog-filters > .button {
+    grid-column: auto;
+    width: 100%;
+    min-height: 48px;
+    align-self: end;
+  }
+  .catalog-scope-note {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+}
 :root {
   --font-body: "DM Sans Variable", Arial, sans-serif;
   --font-heading: "Manrope Variable", Arial, sans-serif;

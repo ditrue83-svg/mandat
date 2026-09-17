@@ -4,19 +4,15 @@ import { useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   Radar,
-  Bookmark,
   Building2,
   Bell,
   ArrowUpRight,
   ShieldCheck,
   LogOut,
-  Search,
 } from "lucide-react";
 import type { Viewer } from "@/lib/domain";
 const links = [
-  { href: "/", label: "Il tuo Radar", icon: Radar },
-  { href: "/esplora", label: "Esplora", icon: Search },
-  { href: "/salvati", label: "Salvati", icon: Bookmark },
+  { href: "/", label: "Bandi", icon: Radar },
   { href: "/profilo", label: "La tua ditta", icon: Building2 },
   { href: "/notifiche", label: "Notifiche", icon: Bell },
 ];
@@ -38,8 +34,17 @@ export function Shell({
   const path = usePathname();
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState("");
-  const active = (href: string) =>
-    path === href || (href === "/esplora" && path.startsWith("/esplora/"));
+  const active = (href: string) => {
+    if (href === "/")
+      return (
+        path === "/" ||
+        path === "/esplora" ||
+        path.startsWith("/esplora/") ||
+        path === "/salvati" ||
+        path.startsWith("/bandi/")
+      );
+    return path === href;
+  };
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -69,17 +74,6 @@ export function Shell({
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="pilot-card">
-            <span className="tiny-label">COSTRUITO PER LE PICCOLE DITTE</span>
-            <p>
-              Il tuo prossimo incarico
-              <br />
-              inizia da qui.
-            </p>
-            <span className="pilot-tag">
-              <span className="swiss-cross">✚</span> Ticino, Svizzera
-            </span>
-          </div>
           {viewer.admin && (
             <Link href="/admin" className="admin-link">
               <ShieldCheck size={17} /> Area fondatore{" "}
@@ -126,7 +120,7 @@ export function Shell({
       </aside>
       <div className="main-shell">
         <header className="topbar">
-          <span>Le opportunità giuste, a portata di mano.</span>
+          <span>Mandat · Radar appalti</span>
           <div>
             {viewer.admin && (
               <Link

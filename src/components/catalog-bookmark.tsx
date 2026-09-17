@@ -72,7 +72,11 @@ export function CatalogBookmark({
         disabled={busy}
         onClick={toggle}
       >
-        <Bookmark size={17} fill={saved ? "currentColor" : "none"} />
+        <Bookmark
+          size={17}
+          fill={saved ? "currentColor" : "none"}
+          aria-hidden="true"
+        />
         {busy ? "Salvataggio…" : saved ? "Salvato · Rimuovi" : "Salva"}
       </button>
       {message && (
