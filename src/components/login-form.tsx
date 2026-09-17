@@ -2,6 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { ArrowRight, ArrowLeft, Mail } from "lucide-react";
+import { BrandLogo } from "@/components/brand-logo";
 export function LoginForm({ demo }: { demo: boolean }) {
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
@@ -43,12 +44,7 @@ export function LoginForm({ demo }: { demo: boolean }) {
   return (
     <div className="login-page">
       <section className="login-brand">
-        <Link href="/" className="wordmark">
-          <span className="brand-mark">
-            m<span />
-          </span>
-          mandat<span className="brand-dot">.</span>
-        </Link>
+        <BrandLogo />
         <div>
           <h1>
             Il prossimo incarico

@@ -404,6 +404,35 @@ svg {
   letter-spacing: -1.4px;
   gap: 11px;
 }
+.wordmark-desktop {
+  display: none;
+  width: 100%;
+  height: auto;
+}
+.wordmark-mobile {
+  display: flex;
+  align-items: center;
+  gap: inherit;
+}
+@media (min-width: 761px) {
+  .sidebar,
+  .login-page .login-brand {
+    background: #11403b;
+  }
+  .sidebar .wordmark {
+    margin-inline: -12px;
+  }
+  .login-brand .wordmark {
+    width: 300px;
+    max-width: 100%;
+  }
+  .wordmark-desktop {
+    display: block;
+  }
+  .wordmark-mobile {
+    display: none;
+  }
+}
 .brand-dot {
   color: #a4c4ae;
   margin-left: -10px;

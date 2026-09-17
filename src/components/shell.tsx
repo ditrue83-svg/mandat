@@ -11,6 +11,7 @@ import {
   LogOut,
 } from "lucide-react";
 import type { Viewer } from "@/lib/domain";
+import { BrandLogo } from "@/components/brand-logo";
 const links = [
   { href: "/", label: "Bandi", icon: Radar },
   { href: "/profilo", label: "La tua ditta", icon: Building2 },
@@ -48,16 +49,7 @@ export function Shell({
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <Link
-          href="/"
-          className="wordmark"
-          aria-label="Mandat, pagina iniziale"
-        >
-          <span className="brand-mark">
-            m<span />
-          </span>
-          mandat<span className="brand-dot">.</span>
-        </Link>
+        <BrandLogo />
         <div className="workspace-label">IL TUO SPAZIO</div>
         <nav aria-label="Navigazione principale">
           {links.map(({ href, label, icon: Icon }) => (

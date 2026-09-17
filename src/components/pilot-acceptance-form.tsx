@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import { ArrowRight, LogOut, ShieldCheck } from "lucide-react";
 import { PILOT_PARTICIPATION_TERMS_VERSION } from "@/lib/pilot-participation";
+import { BrandLogo } from "@/components/brand-logo";
 
 export function PilotAcceptanceForm({ email }: { email: string }) {
   const [participationConfirmed, setParticipationConfirmed] = useState(false);
@@ -44,12 +44,7 @@ export function PilotAcceptanceForm({ email }: { email: string }) {
   return (
     <div className="login-page participation-page">
       <section className="login-brand">
-        <Link href="/" className="wordmark">
-          <span className="brand-mark">
-            m<span />
-          </span>
-          mandat<span className="brand-dot">.</span>
-        </Link>
+        <BrandLogo />
         <div>
           <h1>
             Quattro settimane
