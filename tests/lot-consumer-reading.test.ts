@@ -530,6 +530,25 @@ it("Radar and Esplora show the same current work; company reasons never leak or 
   expect(await listOpportunities(who)).toEqual([]);
 });
 
+it("a pending Radar detail explains company relevance using the current profile, without admitting the tender", async () => {
+  const f = await fixture({ withoutLots: true });
+  const who = await customer(f);
+  const pending = await getOpportunity(who, f.p.id);
+  expect(pending?.reason).toContain("attività presenti nel tuo profilo");
+  expect(pending?.reason).toBe((await readCatalogEntry(who, f.p.id))?.reason);
+  expect(pending?.score).toBe(0);
+  await db
+    .update(schema.companies)
+    .set({ profile: { ...f.profile, exclusions: ["potatura"] } })
+    .where(eq(schema.companies.id, f.companyId));
+  const changed = await getOpportunity(who, f.p.id);
+  expect(changed?.reason).toContain("escluso (potatura)");
+  expect(changed?.reason).toBe((await readCatalogEntry(who, f.p.id))?.reason);
+  expect(await listOpportunities(who)).toEqual([]);
+  expect(await db.select().from(schema.feedback)).toEqual([]);
+  expect(await db.select().from(schema.notifications)).toEqual([]);
+});
+
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 async function customer(f: Fixture, other = false): Promise<Viewer> {
   const id = other ? f.otherCompanyId : f.companyId;

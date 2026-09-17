@@ -18,6 +18,7 @@ import type { Opportunity, RadarStatus, Viewer } from "./domain";
 import { presentCatalogEntry } from "./catalog";
 import { presentMatch } from "./match-presentation";
 import { preliminaryMatch } from "./matching";
+import { potentialInterest } from "./tender-brief";
 import {
   CPV_ACTIVITY_REVIEW_MARKER,
   hasActivityReviewRevision,
@@ -397,5 +398,39 @@ export async function getOpportunity(
   const row = await readCanonicalMatch(viewer.companyId, id, now, {
     legacyDetail: true,
   });
-  return row ? canonicalOpportunity(row, now, true, false) : null;
+  if (!row) return null;
+  const item = canonicalOpportunity(row, now, true, false);
+  if (!item) return null;
+  // A pending detail still explains the public work against this company's
+  // current profile. This presentation never changes the Radar admission gate.
+  const currentReasons =
+    item.lotReview?.targets
+      .filter((target) => target.state === "current" && target.reason)
+      .map(
+        (target) =>
+          (target.target.kind === "lot"
+            ? `Lotto ${target.number ?? "senza numero"}: `
+            : "") + target.reason,
+      ) ?? [];
+  if (item.tenderBrief?.warning)
+    item.reason =
+      "La versione più recente della fonte non è leggibile: il confronto con la tua ditta è sospeso. Verifica la pubblicazione originale.";
+  else if (currentReasons.length)
+    item.reason = [...new Set(currentReasons)].join(" ");
+  else if (["unreviewed", "uncertain", "preliminary"].includes(item.assessment))
+    item.reason =
+      (item.lotReview ? "" : `${item.reason} `) +
+      potentialInterest(
+        {
+          ...row.publication.data,
+          status: row.publication.status as Opportunity["status"],
+          deadline: row.publication.deadline?.toISOString() ?? null,
+        },
+        row.company.profile,
+        now,
+      ) +
+      (item.lotReview?.shape === "lots"
+        ? " La gara comprende più lotti: verifica separatamente attività e territorio di ciascuno."
+        : "");
+  return item;
 }

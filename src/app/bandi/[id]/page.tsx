@@ -153,7 +153,15 @@ export default async function Detail({
                         : "Valutazione da aggiornare"}
                     </p>
                     {lot.reason && <p>{lot.reason}</p>}
-                    {lot.issue && <p className="notice">{lot.issue}</p>}
+                    {lot.issue && (
+                      <p className="notice">
+                        {lot.issue === "assessment_missing"
+                          ? "La valutazione per questa ditta non è ancora disponibile."
+                          : lot.issue === "stale_profile"
+                            ? "Il profilo della ditta è cambiato: la valutazione deve essere aggiornata."
+                            : "La valutazione richiede un controllo dei dati correnti della fonte e della ditta."}
+                      </p>
+                    )}
                     <p className="meta">
                       Luogo: {lot.operational?.location || "Non indicato"} ·
                       Scadenza:{" "}
