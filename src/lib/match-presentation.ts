@@ -53,6 +53,7 @@ export function presentMatch({
     eligible: boolean;
     reason: string;
     activityReview?: ActivityReview;
+    classificationReview?: string;
   };
   sourceReview?: SourceContext | null;
 }): Pick<Opportunity, "assessment" | "reason"> &
@@ -114,6 +115,14 @@ export function presentMatch({
       reason: manualSourceComparisonReason,
       score: 0,
     };
+  if (
+    preliminary?.classificationReview &&
+    !match.revision.includes(preliminary.classificationReview)
+  ) {
+    if (!preliminary.eligible)
+      return { assessment: "excluded", reason: preliminary.reason, score: 0 };
+    return { assessment: "uncertain", reason: preliminary.reason, score: 0 };
+  }
   if (current && match.approved === true && match.reviewedAt)
     return {
       assessment: "reviewed",

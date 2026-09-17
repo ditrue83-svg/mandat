@@ -67,7 +67,9 @@ import {
   appendSourceReview,
 } from "../src/lib/source-reviews";
 import { fingerprint } from "../src/sources/common";
-import { readCatalogEntry } from "../src/lib/catalog";
+import { readCatalog, readCatalogEntry } from "../src/lib/catalog";
+import { saveCatalogBookmark } from "../src/lib/company";
+import { classifyPublicationRows } from "../src/lib/publication-classification";
 const viewer = { userId: "lot-match-founder", admin: true, demo: false };
 const commonText =
   "Progetto inventato suddiviso in due lotti indipendenti per il test.";
@@ -478,6 +480,105 @@ function wholeProjectDraft(
   };
 }
 
+it("reclassifies archived lots in every catalogue view without writes, notifications or automatic admission", async () => {
+  const f = await fixture();
+  const who = await customer(f),
+    other = await customer(f, true);
+  // A historical derived value is deliberately obsolete. The archive and its
+  // receipts, identity and edition remain the source of the new read model.
+  await db
+    .update(schema.publications)
+    .set({ data: { ...f.p, sectors: ["sicurezza"] } })
+    .where(eq(schema.publications.id, f.p.id));
+  await saveCatalogBookmark(who.companyId, f.p.id, true);
+  const protectedRows = async () => ({
+    publications: await db.select().from(schema.publications),
+    versions: await db.select().from(schema.publicationVersions),
+    snapshots: await db.select().from(schema.publicationDocumentarySnapshots),
+    companies: await db.select().from(schema.companies),
+    matches: await matchRows(f.p.id),
+    history: await db.select().from(schema.matchLotReviewEvents),
+    feedback: await db.select().from(schema.feedback),
+    notifications: await db.select().from(schema.notifications),
+  });
+  const before = await protectedRows();
+  for (const settore of ["giardinaggio", "impianti"])
+    expect(
+      (await readCatalog(who, { settore, stato: "all" })).items.map(
+        (p) => p.id,
+      ),
+    ).toEqual([f.p.id]);
+  expect(
+    (await readCatalog(who, { settore: "sicurezza", stato: "all" })).total,
+  ).toBe(0);
+  expect(
+    (await readCatalog(who, { settore: "da-classificare", stato: "all" }))
+      .total,
+  ).toBe(0);
+  expect((await readCatalogEntry(who, f.p.id))?.sectors).toEqual([
+    "giardinaggio",
+    "impianti",
+  ]);
+  const saved = await listOpportunities(who, { includeInactive: true });
+  expect(saved[0].sectors).toEqual(["giardinaggio", "impianti"]);
+  expect(saved[0].classification?.lots.map((l) => l.sectors)).toEqual([
+    ["giardinaggio"],
+    ["impianti"],
+  ]);
+  expect(await listOpportunities(other, { includeInactive: true })).toEqual([]);
+  expect(await listOpportunities(who)).toEqual([]);
+  expect(await protectedRows()).toEqual(before);
+  const [stored] = before.publications;
+  const [mismatched] = await classifyPublicationRows(db as never, [
+    { ...stored, revision: "wrong-edition" },
+  ]);
+  expect(mismatched.data.classification).toMatchObject({
+    sectors: [],
+    needsClassification: true,
+    reasons: ["source_unavailable"],
+  });
+});
+
+it("finds a partly unclassified archived tender in both its known sector and Da classificare", async () => {
+  const f = await fixture();
+  const raw = structuredClone(f.raw);
+  raw.lots[1].title = { it: "Prestazione da definire" };
+  raw.lots[1].orderDescription = { it: "Si vedano gli allegati." };
+  delete (raw.lots[1] as { cpvCode?: unknown }).cpvCode;
+  await f.adopt(await f.observe(raw));
+  const who = await customer(f);
+  const snapshots = await db
+    .select()
+    .from(schema.publicationDocumentarySnapshots);
+  const oldJudgments = await matchRows(f.p.id);
+  const unclassified = await readCatalog(who, {
+    settore: "da-classificare",
+    stato: "all",
+  });
+  expect(unclassified.items).toMatchObject([
+    { id: f.p.id, sectors: ["giardinaggio"], needsSectorClassification: true },
+  ]);
+  expect(
+    (await readCatalog(who, { settore: "giardinaggio", stato: "all" })).total,
+  ).toBe(1);
+  expect(
+    (await readCatalog(who, { stato: "all", q: "Progetto lotti inventato" }))
+      .total,
+  ).toBe(1);
+  const detail = await readCatalogEntry(who, f.p.id);
+  expect(detail?.classification).toMatchObject({
+    needsClassification: true,
+    reasons: ["insufficient_information"],
+    lots: [{ sectors: ["giardinaggio"] }, { sectors: [] }],
+  });
+  expect(await listOpportunities(who)).toEqual([]);
+  expect(
+    await db.select().from(schema.publicationDocumentarySnapshots),
+  ).toEqual(snapshots);
+  expect(await matchRows(f.p.id)).toEqual(oldJudgments);
+  expect(await db.select().from(schema.notifications)).toEqual([]);
+});
+
 it("Esplora reads the immutable brief without a match and only compares the authenticated company", async () => {
   const f = await fixture({ withoutLots: true });
   const first = await customer(f),
@@ -730,6 +831,9 @@ it("an existing positive v1 review becomes a non-positive adopted/refused projec
   const oldPublication = {
     ...f.p,
     sectors: ["giardinaggio" as const],
+    title: "Potatura e cura del verde inventata",
+    originalTitles: [],
+    cpv: ["77310000"],
     canton: "TI",
     zone: "Luganese",
   };

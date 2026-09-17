@@ -235,7 +235,7 @@ test("A source site-visit note is review evidence and invalidates a prior operat
 test("A real without project gets its own attributable CPV/place/deadline, with exact source evidence", () => {
   const raw = detail(),
     result = filter(raw);
-  assert.equal(PROJECT_PREFILTER_VERSION, "project-operational-prefilter-v1");
+  assert.equal(PROJECT_PREFILTER_VERSION, "project-operational-prefilter-v2");
   assert.equal(result.eligible, true);
   assert.equal(result.requiresReview, false);
   assert.equal(result.operational.deadline, "2030-12-01T11:00:00.000Z");

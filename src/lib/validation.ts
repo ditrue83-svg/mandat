@@ -30,7 +30,11 @@ export const profileSearchSchema = z.object({
       { error: "Seleziona almeno un settore di attività." },
     )
     .min(1, "Seleziona almeno un settore di attività.")
-    .max(8, "Puoi selezionare al massimo 8 settori di attività."),
+    .max(SECTORS.length, "Seleziona soltanto i settori disponibili.")
+    .refine(
+      (values) => new Set(values).size === values.length,
+      "Seleziona ciascun settore una sola volta.",
+    ),
   zones: z
     .array(
       z.enum(ZONES as [string, ...string[]], {

@@ -7,6 +7,7 @@ import { OriginalText } from "./lot-source-editor";
 import type { LotMatchEditorData } from "@/lib/lot-match-editor-data";
 import type { LotDocumentaryReference } from "@/lib/lot-source-context";
 import type { LotAssessmentResult } from "@/lib/lot-assessment";
+import { sectorLabel } from "@/lib/domain";
 
 const results: Record<LotAssessmentResult, string> = {
   direct: "Potenzialmente pertinente",
@@ -251,7 +252,7 @@ export function LotMatchEditor({ data }: { data: LotMatchEditorData }) {
         <p>{data.company.profile.activities}</p>
         <dl>
           <dt>Settori</dt>
-          <dd>{data.company.profile.sectors.join(", ")}</dd>
+          <dd>{data.company.profile.sectors.map(sectorLabel).join(", ")}</dd>
           <dt>Zone servite</dt>
           <dd>{data.company.profile.zones.join(", ")}</dd>
           <dt>Addetti</dt>

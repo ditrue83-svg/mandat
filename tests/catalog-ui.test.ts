@@ -91,6 +91,7 @@ state.item = {
   valueChf: null,
   status: "open",
   sectors: ["pulizie"],
+  needsSectorClassification: false,
   originalText: "Servizio inventato per il collaudo.",
   documents: [],
   saved: false,

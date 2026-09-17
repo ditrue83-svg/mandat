@@ -5,8 +5,8 @@ import type {
   Publication,
   SourceCondition,
 } from "@/lib/domain";
+import { classifyPublication } from "@/lib/sector-classification";
 import {
-  classifySectors,
   fetchOfficial,
   fingerprint,
   parseDeadline,
@@ -221,7 +221,7 @@ export function normalizeSimap(
         } as Record<string, string>
       )[p.processType] ?? p.processType,
     status,
-    sectors: classifySectors(title + " " + description, cpv),
+    sectors: [],
     cpv,
     sourceUrl,
     sourceUrls: [sourceUrl],
@@ -285,6 +285,22 @@ export function normalizeSimap(
       }),
     )}`,
   };
+  const lots = Array.isArray(d.lots) ? d.lots : [];
+  publication.sectors = classifyPublication(publication, {
+    projectSections: d,
+    lotField: { lots },
+    directory: lots.flatMap((value) => {
+      const lot = record(value);
+      return typeof lot.id === "string"
+        ? [
+            {
+              id: lot.id,
+              number: typeof lot.lotNumber === "number" ? lot.lotNumber : null,
+            },
+          ]
+        : [];
+    }),
+  }).sectors;
   legacyRevisions.set(publication, fingerprint({ p, d }));
   return publication;
 }

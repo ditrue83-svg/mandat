@@ -416,7 +416,7 @@ test("Operational hashes ignore time, project revision/summaries and an unrelate
     preliminaryLotMatch({ publication: p, profile: pr, context, now: clock });
   const baseline = run();
   assert.match(baseline.operationalInputHash, /^[a-f0-9]{64}$/);
-  assert.equal(PREFILTER_VERSION, "lot-operational-prefilter-v1");
+  assert.equal(PREFILTER_VERSION, "lot-operational-prefilter-v2");
   const unrelated: Publication = {
     ...publication,
     revision: "new-revision",

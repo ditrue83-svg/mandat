@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { and, eq, sql, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
+import { classificationReviewSuffix } from "@/lib/sector-classification";
 import {
   invitations,
   companies,
@@ -260,7 +261,9 @@ export async function POST(request: Request) {
           const requiresBoundReview =
             sourceReview ||
             hasActivityReviewRevision(match.revision) ||
-            (firm && preliminaryMatch(p.data, firm.profile).activityReview);
+            (firm &&
+              (preliminaryMatch(p.data, firm.profile).activityReview ||
+                preliminaryMatch(p.data, firm.profile).classificationReview));
           if (
             body.approved &&
             requiresBoundReview &&
@@ -321,7 +324,7 @@ export async function POST(request: Request) {
                 : match.sourceReviewDependency,
               ...(body.approved && requiresBoundReview && firm
                 ? {
-                    revision: `${p.data.revision}:${fingerprint(firm.profile)}:ready:${sourceReview ? "manual-source-review" : "manual-activity-review"}:true${sourceReview ? "" : `${CPV_ACTIVITY_REVIEW_MARKER}${CPV_ACTIVITY_REVIEW_VERSION}:manual`}${sourceScopeReviewSuffix(p.data)}`,
+                    revision: `${p.data.revision}:${fingerprint(firm.profile)}:ready:${sourceReview ? "manual-source-review" : "manual-activity-review"}:true${sourceReview ? "" : `${CPV_ACTIVITY_REVIEW_MARKER}${CPV_ACTIVITY_REVIEW_VERSION}:manual`}${classificationReviewSuffix(p.data)}${sourceScopeReviewSuffix(p.data)}`,
                   }
                 : {}),
             })

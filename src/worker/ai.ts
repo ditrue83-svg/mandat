@@ -19,7 +19,7 @@ const summarySchema = z.object({
       }),
     )
     .max(12),
-  sectors: z.array(z.enum(SECTORS.map((s) => s.id))).max(8),
+  sectors: z.array(z.enum(SECTORS.map((s) => s.id))).max(SECTORS.length),
   evidence: z
     .array(
       z.object({

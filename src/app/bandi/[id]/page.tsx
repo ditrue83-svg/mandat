@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { sectorCaption } from "@/lib/sectors";
+import { SectorSummary } from "@/components/sector-summary";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { pageViewer } from "@/lib/viewer";
@@ -49,8 +51,10 @@ export default async function Detail({
       </Link>
       <section className="detail-heading">
         <div className="eyebrow">
-          {item.sectors.map(sectorLabel).join(" · ") ||
-            "OPPORTUNITÀ PUBBLICATA"}
+          {sectorCaption(
+            item.sectors,
+            item.classification?.needsClassification,
+          )}
         </div>
         <h1>{item.title}</h1>
         <p className="meta">
@@ -120,6 +124,10 @@ export default async function Detail({
               </div>
             </dl>
           </details>
+          <SectorSummary
+            sectors={item.sectors}
+            classification={item.classification}
+          />
           <TenderBriefPanels
             brief={brief}
             relevance={

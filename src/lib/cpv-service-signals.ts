@@ -252,12 +252,25 @@ export function activityReviewBlocksAutomatic(
     approved: boolean | null;
     reviewedAt: Date | null;
   },
-  preliminary: { activityReview?: ActivityReview },
+  preliminary: {
+    activityReview?: ActivityReview;
+    classificationReview?: string;
+  },
   binding: {
     publication: Pick<Publication, "revision">;
     profileRevision: string;
   },
 ): boolean {
+  if (
+    preliminary.classificationReview &&
+    !(
+      match.approved === true &&
+      match.reviewedAt &&
+      match.revision.includes(preliminary.classificationReview) &&
+      isMatchContentCurrent({ revision: match.revision, ...binding })
+    )
+  )
+    return true;
   return (
     !(
       match.approved === true &&

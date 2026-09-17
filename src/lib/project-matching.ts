@@ -2,10 +2,14 @@ import { createHash } from "node:crypto";
 import type { CompanyProfile, Publication, Sector } from "./domain";
 import type { LotSourceContext } from "./lot-source-context";
 import { stableDocumentaryJson } from "./documentary-observation";
-import { classifySectors, parseDeadline, plainText } from "@/sources/common";
+import { parseDeadline, plainText } from "@/sources/common";
+import {
+  classifyProcurement,
+  projectClassificationInput,
+} from "./sector-classification";
 import { zoneForExactCity } from "./ticino-localities";
 
-export const PROJECT_PREFILTER_VERSION = "project-operational-prefilter-v1";
+export const PROJECT_PREFILTER_VERSION = "project-operational-prefilter-v2";
 export type ProjectOperationalEvidence = {
   scope: "publication" | "project_context";
   url: string;
@@ -171,6 +175,9 @@ export function preliminaryProjectMatch({
     sectors = new Set<Sector>();
   const sections = object(content?.projectSections),
     base = object(sections.base);
+  const classification = classifyProcurement(
+    projectClassificationInput(sections),
+  );
   const completeProject =
     !!content && content.directory.length === 0 && base.lotsType === "without";
   if (!completeProject)
@@ -228,7 +235,11 @@ export function preliminaryProjectMatch({
         else review("Classificazione del progetto da verificare.");
       }
     }
-    classifySectors("", [...cpv]).forEach((sector) => sectors.add(sector));
+    classification.sectors.forEach((sector) => sectors.add(sector));
+    if (classification.needsClassification)
+      review(
+        "Settore del progetto da classificare: informazioni insufficienti o discordanti.",
+      );
 
     // All parent content stays in context. Only these documented title/service
     // channels yield lexical signals; conditions/metadata are not professions.
@@ -264,8 +275,6 @@ export function preliminaryProjectMatch({
             transform: "plainText",
             normalized,
           });
-          const found = classifySectors(normalized, []);
-          found.forEach((sector) => sectors.add(sector));
           const addText = (purpose: ProjectOperationalEvidence["purpose"]) =>
             add({
               scope: "project_context",
@@ -275,7 +284,11 @@ export function preliminaryProjectMatch({
               presence: "present",
               purpose,
             });
-          if (found.some((sector) => profile.sectors.includes(sector)))
+          if (
+            classification.sectors.some((sector) =>
+              profile.sectors.includes(sector),
+            )
+          )
             addText("activity");
           if (
             profile.keywords.some(
@@ -455,6 +468,11 @@ export function preliminaryProjectMatch({
     .update(
       stableDocumentaryJson({
         version: PROJECT_PREFILTER_VERSION,
+        classification: {
+          version: classification.version,
+          inputHash: classification.inputHash,
+          sectors: classification.sectors,
+        },
         target: context.target,
         identity: content?.identity ?? null,
         used,

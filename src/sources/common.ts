@@ -1,12 +1,8 @@
 import { createHash } from "node:crypto";
 import { DateTime } from "luxon";
 import { zoneForExactCity } from "@/lib/ticino-localities";
-import {
-  SECTORS,
-  type Publication,
-  type Sector,
-  type SourceId,
-} from "@/lib/domain";
+import { classifyProcurement } from "@/lib/sector-classification";
+import { type Publication, type Sector, type SourceId } from "@/lib/domain";
 export type SourceEntry = { id: string; raw: Record<string, unknown> };
 export interface SourceAdapter {
   id: SourceId;
@@ -73,19 +69,12 @@ export function parseDeadline(value: unknown): string | null {
   return date.toUTC().toISO();
 }
 export function classifySectors(text: string, cpv: string[]): Sector[] {
-  // NFC keeps composed/decomposed accents equivalent without reducing German
-  // compounds to stems. Letters, marks, numbers and connectors belong to the same token.
-  const words = new Set(
-    text
-      .normalize("NFC")
-      .toLowerCase()
-      .match(/[\p{L}\p{M}\p{N}\p{Pc}]+/gu) ?? [],
-  );
-  return SECTORS.filter(
-    (s) =>
-      cpv.some((c) => s.cpv.some((p) => c.startsWith(p))) ||
-      s.words.some((w) => words.has(w)),
-  ).map((s) => s.id);
+  return classifyProcurement({
+    titles: [text],
+    descriptions: [],
+    mainCpv: cpv[0] ?? null,
+    additionalCpv: cpv.slice(1),
+  }).sectors;
 }
 export function zoneFromCity(city: string): string | null {
   return zoneForExactCity(plainText(city));

@@ -164,7 +164,7 @@ describe("candidati parziali del verde", () => {
     const { p, profile } = fixture("Planting trees and earthworks.");
     p.sectors.push("giardinaggio");
     const preliminary = preliminaryMatch(p, profile, now);
-    expect(preliminary.activityReview).toBeUndefined();
+    expect(preliminary.activityReview).toBeDefined();
     expect(
       activityReviewForMatch({
         publication: p,

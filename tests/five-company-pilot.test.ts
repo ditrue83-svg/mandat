@@ -1,3 +1,4 @@
+import { BETA_PRIORITY_SECTORS } from "../src/lib/sectors";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import { PgBoss, fromPglite } from "pg-boss";
@@ -228,7 +229,9 @@ async function login(email: string, ip: string, wrongCode = false) {
 
 async function catalogFixtures() {
   const now = Date.now();
-  for (const sector of SECTORS) {
+  for (const sector of SECTORS.filter((s) =>
+    BETA_PRIORITY_SECTORS.includes(s.id),
+  )) {
     const id = `test-five-${sector.id}`;
     const data: Publication = {
       id,
@@ -315,7 +318,7 @@ describe("collaudo isolato con cinque ditte complete", () => {
   it("attraversa OTP, consenso, profili, catalogo, salvataggi e coorte con cinque sessioni isolate", async () => {
     expect(
       [...new Set(firms.flatMap((firm) => firm.profile.sectors))].sort(),
-    ).toEqual(SECTORS.map((sector) => sector.id).sort());
+    ).toEqual([...BETA_PRIORITY_SECTORS].sort());
     expect(
       firms.every(
         (firm) =>

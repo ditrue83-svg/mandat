@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { sectorCaption } from "@/lib/sectors";
+import { SectorSummary } from "@/components/sector-summary";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Shell } from "@/components/shell";
@@ -92,11 +94,15 @@ export default async function CatalogDetail({
               <div>
                 <dt>Settori indicativi</dt>
                 <dd>
-                  {item.sectors.map(sectorLabel).join(", ") || "Non indicati"}
+                  {sectorCaption(item.sectors, item.needsSectorClassification)}
                 </dd>
               </div>
             </dl>
           </details>
+          <SectorSummary
+            sectors={item.sectors}
+            classification={item.classification}
+          />
           <TenderBriefPanels
             brief={item.tenderBrief}
             relevance={

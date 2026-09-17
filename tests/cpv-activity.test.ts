@@ -10,6 +10,7 @@ import {
   findCpvServiceSignals,
 } from "../src/lib/cpv-service-signals";
 import { presentMatch } from "../src/lib/match-presentation";
+import { classificationReviewSuffix } from "../src/lib/sector-classification";
 
 const cases = casesJson as unknown as Array<Record<string, any>>;
 const now = new Date("2026-09-13T12:00:00Z");
@@ -226,7 +227,20 @@ describe("recupero di attività citate nelle fonti originali", () => {
         profileRevision: "profile-v1",
       }),
     ).toBe(true);
-    const manual = { ...match, approved: true, reviewedAt: now };
+    const oldManual = { ...match, approved: true, reviewedAt: now };
+    expect(
+      presentMatch({
+        publication: p,
+        match: oldManual,
+        profileRevision: "profile-v1",
+        aiRevision: null,
+        preliminary,
+      }).assessment,
+    ).toBe("uncertain");
+    const manual = {
+      ...oldManual,
+      revision: match.revision + classificationReviewSuffix(p),
+    };
     expect(
       presentMatch({
         publication: p,

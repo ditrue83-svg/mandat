@@ -19,6 +19,11 @@ import { presentCatalogEntry } from "./catalog";
 import { presentMatch } from "./match-presentation";
 import { preliminaryMatch } from "./matching";
 import { potentialInterest } from "./tender-brief";
+import { classifyPublicationRows } from "./publication-classification";
+import {
+  withClassification,
+  classificationReviewPending,
+} from "./sector-classification";
 import {
   CPV_ACTIVITY_REVIEW_MARKER,
   hasActivityReviewRevision,
@@ -232,14 +237,17 @@ export async function listOpportunities(
     viewer.companyId,
     representatives.map((publication) => publication.canonicalId),
   );
-  const candidates = representatives.filter((publication) => {
-    const match = matchByPublication.get(publication.id);
-    const state = canonicalFeedback.get(publication.canonicalId);
-    if (options.includeInactive) return !!state?.saved;
-    if (!match) return false;
-    if (!publication.documentarySnapshotId) return true;
-    return match.lotEvaluations !== null || !!state?.dismissed;
-  });
+  const candidates = await classifyPublicationRows(
+    db,
+    representatives.filter((publication) => {
+      const match = matchByPublication.get(publication.id);
+      const state = canonicalFeedback.get(publication.canonicalId);
+      if (options.includeInactive) return !!state?.saved;
+      if (!match) return false;
+      if (!publication.documentarySnapshotId) return true;
+      return match.lotEvaluations !== null || !!state?.dismissed;
+    }),
+  );
   const result: Opportunity[] = [];
   for (const publication of candidates) {
     if (publication.visibleAt > now) continue;
@@ -296,6 +304,7 @@ function catalogSavedOpportunity(
     procedure: source.procedure,
     status: source.status,
     sectors: item.sectors,
+    classification: source.classification,
     cpv: [],
     sourceUrl: item.sourceUrl,
     sourceUrls: item.sourceUrl ? [item.sourceUrl] : [],
@@ -348,6 +357,8 @@ function canonicalOpportunity(
         match.approved === false
       )
         return null;
+      if (classificationReviewPending(publication.data, match.revision))
+        return null;
       const enforce =
         hasSourceScopeReview(publication.data) ||
         sourceReview ||
@@ -369,7 +380,7 @@ function canonicalOpportunity(
     }
   }
   return {
-    ...publication.data,
+    ...withClassification(publication.data),
     id: publication.id,
     score: match.score,
     ...presentMatch({

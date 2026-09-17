@@ -15,6 +15,7 @@ import {
 import { projectLotAssessmentDto } from "./lot-assessment";
 import type { Opportunity } from "./domain";
 import { buildTenderBrief } from "./tender-brief";
+import { withClassification } from "./sector-classification";
 
 // Internal server reader: callers supply the authenticated company ID, never a
 // browser-selected tenant. Re-read every dependency after the canonical lock.
@@ -51,6 +52,12 @@ export function presentLotOpportunity(
   includeBrief = false,
 ): Opportunity {
   const project = loaded.project;
+  const acquisition = loaded.input.snapshot.acquisition;
+  const classified = withClassification(
+    loaded.publication.data,
+    acquisition.state === "accepted" ? acquisition.archive : null,
+    acquisition.state === "refused",
+  );
   const dto = projectLotAssessmentDto(project);
   const operational = dto.targets.filter(
     (lot) => lot.state !== "removed-or-unresolved" && lot.operational,
@@ -59,7 +66,7 @@ export function presentLotOpportunity(
     ...new Set(operational.map((lot) => lot.operational!.zone).filter(Boolean)),
   ];
   return {
-    ...loaded.publication.data,
+    ...classified,
     id: loaded.publication.id,
     ...(includeBrief
       ? {
@@ -75,17 +82,7 @@ export function presentLotOpportunity(
     // Only the current target's operational evidence is projected. Parent AI
     // text never substitutes a human assessment, including without lots.
     summary: null,
-    sectors: [
-      ...new Set(
-        project.targets
-          .filter(
-            (lot) =>
-              lot.state !== "removed-or-unresolved" &&
-              lot.preliminary?.eligible,
-          )
-          .flatMap((lot) => [...(lot.preliminary?.signals.sectors ?? [])]),
-      ),
-    ],
+    sectors: classified.sectors,
     cpv: [...new Set(operational.flatMap((lot) => lot.operational!.cpv))],
     canton: [
       ...new Set(

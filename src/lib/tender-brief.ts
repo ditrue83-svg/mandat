@@ -13,6 +13,7 @@ import {
   tenderSourceLabel,
 } from "./tender-source-link";
 import { DateTime } from "luxon";
+import { classifyPublication } from "./sector-classification";
 
 export type BriefFact = {
   label: string;
@@ -808,7 +809,10 @@ export function potentialInterest(
   profile: CompanyProfile,
   now = new Date(),
 ) {
-  const common = p.sectors.filter((sector) => profile.sectors.includes(sector));
+  const classification = p.classification ?? classifyPublication(p);
+  const common = classification.sectors.filter((sector) =>
+    profile.sectors.includes(sector),
+  );
   const reasons: string[] = [];
   const text = `${p.title} ${p.originalText}`.toLocaleLowerCase("it");
   const exclusions = profile.exclusions.filter(

@@ -855,6 +855,15 @@ test("Shared content, provenance, index, profile and operational changes cannot 
     resolveProjectLotAssessment(withEntry(i, version)).lots[0].issue,
     "stale_version",
   );
+  const oldTaxonomy = signed(i.evaluationSet!.entries[0], (entry) => {
+    entry.dependency.prefilterVersion = "lot-operational-prefilter-v1";
+  });
+  const withOldTaxonomy = withEntry(i, oldTaxonomy);
+  const preserved = JSON.stringify(withOldTaxonomy.evaluationSet);
+  const classificationUpdate = resolveProjectLotAssessment(withOldTaxonomy);
+  assert.equal(classificationUpdate.lots[0].issue, "stale_version");
+  assert.equal(classificationUpdate.signalEligible, false);
+  assert.equal(JSON.stringify(withOldTaxonomy.evaluationSet), preserved);
 });
 
 test("Project source barriers, broad or unclear lots, and operational vetoes cannot be bypassed by direct", () => {

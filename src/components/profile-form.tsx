@@ -24,6 +24,14 @@ export function ProfileForm({
   onboarding?: boolean;
 }) {
   const [form, setForm] = useState<CompanyProfile>(viewer.profile);
+  const [sectorQuery, setSectorQuery] = useState("");
+  const visibleSectors = SECTORS.filter(
+    (s) =>
+      form.sectors.includes(s.id) ||
+      s.label
+        .toLocaleLowerCase("it")
+        .includes(sectorQuery.trim().toLocaleLowerCase("it")),
+  );
   const [keywords, setKeywords] = useState(viewer.profile.keywords.join(", "));
   const [exclusions, setExclusions] = useState(
     viewer.profile.exclusions.join(", "),
@@ -228,6 +236,19 @@ export function ProfileForm({
                 Seleziona almeno un settore che descrive il lavoro della ditta.
                 Per consultare tutti i settori puoi usare Tutti i bandi.
               </p>
+              <label className="sector-search">
+                Cerca un settore
+                <input
+                  type="search"
+                  placeholder="Es. informatica, edilizia, assicurazioni…"
+                  value={sectorQuery}
+                  onChange={(e) => setSectorQuery(e.target.value)}
+                />
+              </label>
+              <p className="meta" aria-live="polite">
+                {form.sectors.length} settori selezionati
+                {sectorQuery ? " · Le tue selezioni restano visibili." : "."}
+              </p>
               <div
                 className="check-grid"
                 role="group"
@@ -239,7 +260,7 @@ export function ProfileForm({
                 }
                 aria-invalid={errorField === "sectors" || undefined}
               >
-                {SECTORS.map((s) => (
+                {visibleSectors.map((s) => (
                   <label key={s.id} className="check-label">
                     <input
                       name="sectors"
@@ -259,6 +280,9 @@ export function ProfileForm({
                   </label>
                 ))}
               </div>
+              {!visibleSectors.length && (
+                <p>Nessun settore corrisponde alla ricerca.</p>
+              )}
               <h3 id="profile-zones-heading">Dove vuoi lavorare?</h3>
               <p id="profile-zones-hint">Seleziona almeno una zona.</p>
               <div

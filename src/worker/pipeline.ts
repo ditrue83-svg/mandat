@@ -1,3 +1,4 @@
+import { classificationChanged } from "@/lib/sector-classification";
 import {
   and,
   or,
@@ -702,7 +703,8 @@ export async function enrichAndMatch(
     if (
       !hasSourceScopeReview(p) &&
       !sourceContext &&
-      (!p.summary || row.aiRevision !== p.revision)
+      (!p.summary || row.aiRevision !== p.revision) &&
+      !classificationChanged(p)
     ) {
       try {
         const result = await summarize(p);
@@ -710,7 +712,8 @@ export async function enrichAndMatch(
         p = {
           ...p,
           summary: result.summary,
-          sectors: [...new Set([...p.sectors, ...result.sectors])],
+          // Catalogue classification comes from source rules, not summary AI.
+          sectors: p.sectors,
           requirements: result.requirements.map((r) => r.text),
           evidence: [
             ...p.evidence,
@@ -824,7 +827,12 @@ export async function enrichAndMatch(
       const activitySuffix = activityReview
         ? `${CPV_ACTIVITY_REVIEW_MARKER}${activityReview.version}:${fingerprint(activityReview.signals)}`
         : "";
-      const revision = `${p.revision}:${profileRevision}:${aiReady ? "ready" : "pending"}:${sourceContext ? HUMAN_SOURCE_REVIEW_VERSION : (process.env.LLM_MODEL ?? "default")}:${preliminary.eligible}${activitySuffix}${sourceScopeReviewSuffix(p)}`;
+      const classificationSuffix =
+        preliminary.classificationReview?.replace(
+          ":sector-review:",
+          ":sector-pending:",
+        ) ?? "";
+      const revision = `${p.revision}:${profileRevision}:${aiReady ? "ready" : "pending"}:${sourceContext ? HUMAN_SOURCE_REVIEW_VERSION : (process.env.LLM_MODEL ?? "default")}:${preliminary.eligible}${activitySuffix}${classificationSuffix}${sourceScopeReviewSuffix(p)}`;
       if (
         (existing?.revision === revision &&
           sameSourceReviewDependency(
@@ -833,7 +841,7 @@ export async function enrichAndMatch(
           )) ||
         // A source event must not relabel an earlier human company decision.
         // Readers separately mask its stale positive binding until a new review.
-        (sourceContext &&
+        ((sourceContext || classificationChanged(p)) &&
           existing &&
           (existing.reviewedAt || existing.approved === false)) ||
         (existing &&
@@ -852,7 +860,12 @@ export async function enrichAndMatch(
       let uncertain = preliminary.uncertain;
       let needsReview = false;
       let retry = false;
-      if (preliminary.eligible && sourceContext) {
+      if (preliminary.eligible && preliminary.classificationReview) {
+        score = 0;
+        reason = preliminary.reason;
+        uncertain = true;
+        needsReview = true;
+      } else if (preliminary.eligible && sourceContext) {
         score = 0;
         reason =
           sourceContext.state === "manual_source" &&

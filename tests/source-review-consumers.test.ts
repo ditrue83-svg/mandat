@@ -1,3 +1,4 @@
+import { classificationReviewSuffix } from "../src/lib/sector-classification";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
@@ -652,7 +653,7 @@ describe("lettura Radar e decisioni manuali", () => {
     });
     expect(response.status).toBe(200);
     expect((await rows())[0].revision).toBe(
-      `invented-content-v2:${profileRevision}:ready:manual-source-review:true`,
+      `invented-content-v2:${profileRevision}:ready:manual-source-review:true${classificationReviewSuffix((await storedPublication()).data)}`,
     );
     expect((await rows())[0].sourceReviewDependency).toEqual(
       current.context.dependency,
@@ -695,7 +696,7 @@ describe("lettura Radar e decisioni manuali", () => {
       ).status,
     ).toBe(200);
     expect((await rows())[0].revision).toBe(
-      `invented-editorial-after-view:${profileRevision}:ready:manual-source-review:true`,
+      `invented-editorial-after-view:${profileRevision}:ready:manual-source-review:true${classificationReviewSuffix((await storedPublication()).data)}`,
     );
     expect(await getOpportunity(viewer, publicationId)).toMatchObject({
       assessment: "reviewed",
@@ -733,7 +734,7 @@ describe("lettura Radar e decisioni manuali", () => {
       ).status,
     ).toBe(200);
     expect((await rows())[0].revision).toBe(
-      `${publication.revision}:${freshProfileRevision}:ready:manual-source-review:true`,
+      `${publication.revision}:${freshProfileRevision}:ready:manual-source-review:true${classificationReviewSuffix((await storedPublication()).data)}`,
     );
     expect(await getOpportunity(viewer, publicationId)).toMatchObject({
       assessment: "reviewed",

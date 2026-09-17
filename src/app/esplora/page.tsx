@@ -13,6 +13,7 @@ import {
   type CatalogSourceSummary,
 } from "@/lib/catalog";
 import { SECTORS, formatDate, formatDeadline, sectorLabel } from "@/lib/domain";
+import { UNCLASSIFIED_SECTOR_FILTER, sectorCaption } from "@/lib/sectors";
 import { CatalogBookmark } from "@/components/catalog-bookmark";
 import { tenderWorkExcerpt } from "@/lib/tender-brief";
 
@@ -65,7 +66,7 @@ export default async function Explore({
               />
             </span>
           </label>
-          <label>
+          <label className="catalog-sector">
             Settore
             <select
               name="settore"
@@ -78,6 +79,9 @@ export default async function Explore({
                   {sector.label}
                 </option>
               ))}
+              <option value={UNCLASSIFIED_SECTOR_FILTER}>
+                Da classificare
+              </option>
             </select>
           </label>
           <label>
@@ -122,6 +126,12 @@ export default async function Explore({
             </Link>
           )}
         </div>
+        {data.filters.settore === UNCLASSIFIED_SECTOR_FILTER && (
+          <p className="catalog-scope-note">
+            Include i bandi senza settore e quelli con almeno un lotto ancora da
+            classificare.
+          </p>
+        )}
         <p className="catalog-scope-note">
           Sono mostrati inizialmente i bandi in corso. La raccolta è dedicata al
           Ticino e non rappresenta tutti gli appalti svizzeri.
@@ -199,10 +209,10 @@ export default async function Explore({
               }
               status={CATALOG_STATUS_LABELS[publication.status]}
               statusTone={publication.status === "open" ? "good" : "neutral"}
-              sector={
-                publication.sectors.map(sectorLabel).join(" · ") ||
-                "Settore da verificare"
-              }
+              sector={sectorCaption(
+                publication.sectors,
+                publication.needsSectorClassification,
+              )}
               detailHref={detailHref}
               saveAction={
                 <CatalogBookmark

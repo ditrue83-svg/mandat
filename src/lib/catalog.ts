@@ -23,6 +23,9 @@ import { readCanonicalMatch, presentLotOpportunity } from "./lot-readers";
 import { decodeDocumentarySnapshotRow } from "./documentary-store";
 import type { MatchAssessment } from "./domain";
 import type { LotArchive } from "./source-lots";
+import { classifyPublicationRows } from "./publication-classification";
+import { withClassification } from "./sector-classification";
+import { sectorFilter, matchesSectorFilter } from "./sectors";
 
 export type CatalogEntry = {
   id: string;
@@ -36,6 +39,7 @@ export type CatalogEntry = {
   valueChf: number | null;
   status: Publication["status"] | "expired";
   sectors: Publication["sectors"];
+  needsSectorClassification: boolean;
   originalText: string;
   documents: Publication["documents"];
   saved: boolean;
@@ -48,6 +52,7 @@ export type CatalogFilters = {
   pagina?: string;
 };
 export type CatalogDetailEntry = CatalogEntry & {
+  classification?: Publication["classification"];
   tenderBrief: TenderBrief;
   reason: string;
   assessment: MatchAssessment;
@@ -111,6 +116,8 @@ export function presentCatalogEntry(
         ? "expired"
         : p.status,
     sectors: p.sectors.filter((sector) => SECTORS.some((s) => s.id === sector)),
+    needsSectorClassification:
+      p.classification?.needsClassification ?? p.sectors.length === 0,
     originalText: plainText(p.originalText),
     saved,
     documents: p.documents.flatMap((document) => {
@@ -143,23 +150,29 @@ async function catalogPublications(viewer: Viewer, now: Date) {
       ),
     );
   const seen = new Set<string>();
-  return rows.sort(compareCanonicalPublications).flatMap((row) => {
-    // Select the current edition BEFORE applying visibility or status filters.
-    // A cancelled or embargoed edition must not expose an older open copy.
-    if (seen.has(row.canonicalId)) return [];
-    seen.add(row.canonicalId);
-    if (row.visibleAt > now) return [];
-    return [
-      {
-        ...row.data,
-        id: row.id,
-        canonicalId: row.canonicalId,
-        source: row.source as Publication["source"],
-        status: row.status as Publication["status"],
-        deadline: row.deadline?.toISOString() ?? null,
-      },
-    ];
-  });
+  const representatives = rows
+    .sort(compareCanonicalPublications)
+    .filter((row) => {
+      // Select the current edition BEFORE applying visibility or status filters.
+      // A cancelled or embargoed edition must not expose an older open copy.
+      if (seen.has(row.canonicalId)) return false;
+      seen.add(row.canonicalId);
+      return row.visibleAt <= now;
+    });
+  return (await classifyPublicationRows(getDb(), representatives)).flatMap(
+    (row) => {
+      return [
+        {
+          ...row.data,
+          id: row.id,
+          canonicalId: row.canonicalId,
+          source: row.source as Publication["source"],
+          status: row.status as Publication["status"],
+          deadline: row.deadline?.toISOString() ?? null,
+        },
+      ];
+    },
+  );
 }
 
 export async function readCatalog(
@@ -169,9 +182,7 @@ export async function readCatalog(
 ) {
   const filters = {
     q: (input.q ?? "").trim().slice(0, 200),
-    settore: SECTORS.some((sector) => sector.id === input.settore)
-      ? input.settore!
-      : "all",
+    settore: sectorFilter(input.settore),
     stato: ["all", "expired", "cancelled", "awarded", "closed"].includes(
       input.stato ?? "",
     )
@@ -258,8 +269,11 @@ export async function readCatalog(
     .filter(
       (p) =>
         (filters.stato === "all" || p.status === filters.stato) &&
-        (filters.settore === "all" ||
-          p.sectors.some((sector) => sector === filters.settore)) &&
+        matchesSectorFilter(
+          p.sectors,
+          filters.settore,
+          p.needsSectorClassification,
+        ) &&
         matchesSearch(
           `${p.title} ${p.buyer} ${p.location} ${p.originalText} ${p.sectors.map(sectorLabel).join(" ")}`,
           filters.q,
@@ -360,7 +374,7 @@ export async function readCatalogEntry(
   )
     return null;
   const row = current.publication;
-  const p: Publication = {
+  let p: Publication = {
     ...row.data,
     id: row.id,
     source: row.source as Publication["source"],
@@ -381,6 +395,7 @@ export async function readCatalogEntry(
     archive = decoded.state === "accepted" ? decoded.archive : null;
     refused = decoded.state === "refused";
   }
+  p = withClassification(p, archive, refused);
   const saved =
     (
       await readCanonicalFeedbackBatch(getDb(), viewer.companyId, [
@@ -402,6 +417,7 @@ export async function readCatalogEntry(
   const hasCurrentJudgment = assessed && currentReasons.length > 0;
   return {
     ...presentCatalogEntry(p, now, saved),
+    classification: p.classification,
     tenderBrief: buildTenderBrief(p, archive, refused),
     reason: refused
       ? "La versione più recente della fonte non è leggibile: il confronto con la tua ditta è sospeso. Verifica la pubblicazione originale."
@@ -452,8 +468,7 @@ export function collectionReturnHref(
       const order = url.searchParams.get("ordine");
       const view = url.searchParams.get("vista");
       if (query) params.set("q", query);
-      if (SECTORS.some((entry) => entry.id === sector))
-        params.set("settore", sector!);
+      if (sectorFilter(sector) !== "all") params.set("settore", sector!);
       if (order === "scadenza") params.set("ordine", order);
       if (url.pathname === "/" && view === "escluse") params.set("vista", view);
       return `${url.pathname}${params.size ? `?${params}` : ""}`;
@@ -464,9 +479,7 @@ export function collectionReturnHref(
     const ordine = url.searchParams.get("ordine") ?? undefined;
     const filters: CatalogFilters = {
       q: (url.searchParams.get("q") ?? "").slice(0, 200) || undefined,
-      settore: SECTORS.some((entry) => entry.id === settore)
-        ? settore
-        : undefined,
+      settore: sectorFilter(settore) !== "all" ? settore : undefined,
       stato: [
         "all",
         "open",

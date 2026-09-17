@@ -660,6 +660,9 @@ it.each(["summary", "classification"] as const)(
       ...f.p,
       canton: "TI",
       sectors: ["giardinaggio"] as ["giardinaggio"],
+      title: "Potatura e cura del verde inventata",
+      originalTitles: [],
+      cpv: ["77310000"],
       summary: stage === "classification" ? "Existing summary" : null,
     };
     await db

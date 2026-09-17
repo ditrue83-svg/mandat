@@ -185,12 +185,12 @@ describe("componenti classificati e attività da verificare", () => {
       revision: `${p.revision}:profile-v1:ready:model:true:activity-review:published-building-object-review-v1:hash`,
       profileRevision: "profile-v1",
     };
-    expect(args.preliminary.activityReview).toBeUndefined();
+    expect(args.preliminary.activityReview).toBeDefined();
     expect(activityReviewForMatch(args)?.version).toBe(
       "published-building-object-review-v2",
     );
     expect(
       activityReviewForMatch({ ...args, profileRevision: "changed" }),
-    ).toBeUndefined();
+    ).toEqual(args.preliminary.activityReview);
   });
 });

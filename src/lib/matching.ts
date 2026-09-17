@@ -1,18 +1,27 @@
 import { DateTime } from "luxon";
 import type { CompanyProfile, Publication } from "./domain";
 import { findActivityReview, type ActivityReview } from "./cpv-service-signals";
+import {
+  classifyPublication,
+  classificationChanged,
+  classificationReviewSuffix,
+} from "./sector-classification";
 export type PreliminaryMatch = {
   eligible: boolean;
   score: number;
   reason: string;
   uncertain: boolean;
   activityReview?: ActivityReview;
+  classificationReview?: string;
 };
 export function preliminaryMatch(
   p: Publication,
   profile: CompanyProfile,
   now = new Date(),
 ): PreliminaryMatch {
+  const classificationReview = classificationChanged(p)
+    ? classificationReviewSuffix(p)
+    : undefined;
   const text = `${p.title} ${p.originalText}`.toLowerCase();
   let reason = "";
   if (p.status !== "open") reason = "La pubblicazione non è un bando aperto.";
@@ -36,9 +45,12 @@ export function preliminaryMatch(
       (profile.maxValue !== null && p.valueChf > profile.maxValue))
   )
     reason = "Importo fuori dalla fascia selezionata.";
-  const sectorMatch = p.sectors.some((s) => profile.sectors.includes(s));
+  const classification = p.classification ?? classifyPublication(p);
+  const sectorMatch = classification.sectors.some((s) =>
+    profile.sectors.includes(s),
+  );
   const keyword = profile.keywords.some((x) => text.includes(x.toLowerCase()));
-  if (!reason && !sectorMatch && !keyword) {
+  if (!reason && ((!sectorMatch && !keyword) || classificationReview)) {
     const activityReview = findActivityReview(
       p,
       profile.sectors,
@@ -51,20 +63,34 @@ export function preliminaryMatch(
         reason: activityReview.reason,
         uncertain: true,
         activityReview,
+        classificationReview,
       };
-    reason = "Nessun segnale di attività riconosciuto dal filtro.";
+    if (!sectorMatch && !keyword)
+      reason = "Nessun segnale di attività riconosciuto dal filtro.";
   }
-  if (reason) return { eligible: false, score: 0, reason, uncertain: false };
+  if (reason)
+    return {
+      eligible: false,
+      score: 0,
+      reason,
+      uncertain: false,
+      ...(classificationReview ? { classificationReview } : {}),
+    };
   const uncertain =
     !p.canton || (!p.zone && !profile.zones.includes("Tutto il Ticino"));
   return {
     eligible: true,
-    score: Math.min(
-      95,
-      65 + (sectorMatch ? 15 : 0) + (keyword ? 10 : 0) + (p.zone ? 5 : 0),
-    ),
-    reason: `${sectorMatch ? "Attività coerente con i servizi della ditta" : "Parole chiave presenti nel bando"}. ${uncertain ? "Luogo di esecuzione da verificare." : "Lavoro nel territorio selezionato."}`,
-    uncertain,
+    score: classificationReview
+      ? 0
+      : Math.min(
+          95,
+          65 + (sectorMatch ? 15 : 0) + (keyword ? 10 : 0) + (p.zone ? 5 : 0),
+        ),
+    reason: classificationReview
+      ? "La classificazione del bando è cambiata. La pertinenza per la ditta richiede una nuova verifica."
+      : `${sectorMatch ? "Attività coerente con i servizi della ditta" : "Parole chiave presenti nel bando"}. ${uncertain ? "Luogo di esecuzione da verificare." : "Lavoro nel territorio selezionato."}`,
+    uncertain: uncertain || !!classificationReview,
+    ...(classificationReview ? { classificationReview } : {}),
   };
 }
 export function automationGate(input: {

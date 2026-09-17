@@ -81,11 +81,11 @@ describe("Titoli originali simap", () => {
     expect({ entry, input }).toEqual(before);
   });
 
-  it("aggiunge solo originalTitles allo stesso raw senza cambiare nessun campo preesistente", () => {
+  it("mantiene i campi originali e calcola i settori dai titoli nelle lingue disponibili", () => {
     const publication = normalizeSimap(entry, detail());
     const { originalTitles, ...previousFields } = publication;
     expect(originalTitles).toHaveLength(4);
-    // Captured from the previous normalizer before adding originalTitles.
+    // Original fields remain stable; derived sectors use the shared taxonomy.
     expect(previousFields).toEqual({
       id: `simap-${projectId}`,
       externalId: projectId,
@@ -104,7 +104,7 @@ describe("Titoli originali simap", () => {
       valueChf: null,
       procedure: "Concorso pubblico",
       status: "open",
-      sectors: ["manutenzioni"],
+      sectors: ["manutenzioni", "arredi"],
       cpv: [],
       sourceUrl,
       sourceUrls: [sourceUrl],

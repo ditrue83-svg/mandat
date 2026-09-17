@@ -42,7 +42,11 @@ import { classify, summarize } from "../src/worker/ai";
 import { sendMail } from "../src/lib/mail";
 import { enrichAndMatch } from "../src/worker/pipeline";
 import { queueDigests, sendPending } from "../src/worker/notifications";
-import { listOpportunities, getRadarStatus } from "../src/lib/queries";
+import {
+  listOpportunities,
+  getRadarStatus,
+  getOpportunity,
+} from "../src/lib/queries";
 import { POST as adminPost } from "../src/app/api/admin/route";
 import { matchReviewToken } from "../src/lib/match-review-token";
 
@@ -344,10 +348,19 @@ it.each(componentCases)(
     expect(first).toMatchObject({ eligible: true, score: 0, approved: null });
     expect(first.revision).toContain(`:activity-review:${candidate.version}:`);
     expect(classify).not.toHaveBeenCalled();
-    expect((await listOpportunities(localViewer))[0]).toMatchObject({
-      assessment: "uncertain",
-      score: 0,
-    });
+    if (candidate.name === "serrature") {
+      // Product-category correction from civil works to materials requires
+      // explicit review; the historical activity clue stays visible in detail.
+      expect(await listOpportunities(localViewer)).toEqual([]);
+      expect(await getOpportunity(localViewer, publication.id)).toMatchObject({
+        assessment: "uncertain",
+        score: 0,
+      });
+    } else
+      expect((await listOpportunities(localViewer))[0]).toMatchObject({
+        assessment: "uncertain",
+        score: 0,
+      });
     await run();
     expect(await rows()).toEqual([first]);
     expect(classify).not.toHaveBeenCalled();
@@ -457,7 +470,8 @@ it("recupera una vecchia esclusione senza classificatore, completa il Radar e co
   expect(first.revision).toContain(":activity-review:cpv-labels-v1:");
   expect(classify).not.toHaveBeenCalled();
   expect((await getRadarStatus(viewer, now)).pendingCount).toBe(0);
-  expect((await listOpportunities(viewer))[0]).toMatchObject({
+  expect(await listOpportunities(viewer)).toEqual([]);
+  expect(await getOpportunity(viewer, publication.id)).toMatchObject({
     assessment: "uncertain",
     score: 0,
     reason: expect.stringContaining("Services de nettoyage"),
@@ -471,12 +485,12 @@ it("una sintesi che aggiunge settori non promuove il recupero ora o al job succe
   await amend({ summary: null });
   await db.update(schema.publications).set({ aiRevision: null });
   await run();
-  expect(summarize).toHaveBeenCalledTimes(1);
+  expect(summarize).not.toHaveBeenCalled();
   expect(classify).not.toHaveBeenCalled();
   expect((await rows())[0]).toMatchObject({ eligible: true, score: 0 });
-  expect(
-    (await db.select().from(schema.publications))[0].data.sectors,
-  ).toContain("pulizie");
+  expect((await db.select().from(schema.publications))[0].data.sectors).toEqual(
+    [],
+  );
   await run();
   expect(classify).not.toHaveBeenCalled();
   expect((await rows())[0].score).toBe(0);

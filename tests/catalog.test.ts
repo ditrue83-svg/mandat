@@ -327,6 +327,7 @@ it("cerca nel testo originale con accenti e ordine indipendenti; conserva i filt
   await publication("uno", {
     title: "Città di Bellinzona",
     sectors: ["pulizie"],
+    cpv: ["90910000"],
   });
   expect(
     (

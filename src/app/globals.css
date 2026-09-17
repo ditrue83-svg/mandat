@@ -84,6 +84,9 @@
 .catalog-filters > .catalog-search {
   flex: 1 0 100%;
 }
+.catalog-filters > .catalog-sector {
+  flex-basis: 285px;
+}
 .catalog-filters select {
   padding: 12px 32px 12px 12px;
   border: 1px solid #d3dfd9;
@@ -1088,6 +1091,26 @@ h1 {
   line-height: 1.8;
   color: #7d8f71;
   margin-top: 13px;
+}
+.sector-search {
+  display: grid;
+  gap: 0.4rem;
+  margin: 1rem 0 0.6rem;
+}
+.sector-search input {
+  width: 100%;
+  min-width: 0;
+}
+.sector-summary {
+  margin: 1rem 0;
+  overflow-wrap: anywhere;
+}
+.sector-summary summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+.sector-summary li {
+  margin-block: 0.65rem;
 }
 .profile-sectors {
   display: flex;
@@ -2566,6 +2589,7 @@ h1 {
   .collection-controls .select-wrap,
   .collection-controls .select-wrap select {
     width: 100%;
+    grid-column: 1 / -1;
   }
   .collection-heading {
     display: block;
@@ -2601,14 +2625,15 @@ h1 {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 10px 12px;
   }
-  .catalog-filters > .catalog-search {
+  .catalog-filters > .catalog-search,
+  .catalog-filters > .catalog-sector {
     grid-column: 1 / -1;
   }
   .catalog-filters > label {
     min-width: 0;
   }
   .catalog-filters > .button {
-    grid-column: auto;
+    grid-column: 1 / -1;
     width: 100%;
     min-height: 48px;
     align-self: end;

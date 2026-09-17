@@ -1,4 +1,10 @@
 "use client";
+import {
+  sectorFilter,
+  matchesSectorFilter,
+  sectorCaption,
+  UNCLASSIFIED_SECTOR_FILTER,
+} from "@/lib/sectors";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -78,7 +84,7 @@ export function Dashboard({
   );
   const [sector, setSector] = useState(() => {
     const value = initialFilters.settore;
-    return SECTORS.some((entry) => entry.id === value) ? value! : "all";
+    return sectorFilter(value);
   });
   const [sort, setSort] = useState(() =>
     initialFilters.ordine === "scadenza" ? "deadline" : "relevance",
@@ -241,7 +247,11 @@ export function Dashboard({
   const visible = collection
     .filter(
       (item) =>
-        (sector === "all" || item.sectors.includes(sector as never)) &&
+        matchesSectorFilter(
+          item.sectors,
+          sector,
+          item.classification?.needsClassification,
+        ) &&
         matchesSearch(
           `${item.title} ${item.buyer} ${item.location} ${item.originalText} ${item.sectors.map(sectorLabel).join(" ")}`,
           query,
@@ -332,13 +342,14 @@ export function Dashboard({
               onChange={(event) => setSector(event.target.value)}
             >
               <option value="all">Tutti i settori</option>
-              {SECTORS.filter((entry) =>
-                items.some((item) => item.sectors.includes(entry.id)),
-              ).map((entry) => (
+              {SECTORS.map((entry) => (
                 <option key={entry.id} value={entry.id}>
                   {entry.label}
                 </option>
               ))}
+              <option value={UNCLASSIFIED_SECTOR_FILTER}>
+                Da classificare
+              </option>
             </select>
             <ChevronDown size={15} aria-hidden="true" />
           </label>
@@ -395,10 +406,10 @@ export function Dashboard({
                 }
                 status={status.label}
                 statusTone={status.tone}
-                sector={
-                  item.sectors.map(sectorLabel).join(" · ") ||
-                  "Settore da verificare"
-                }
+                sector={sectorCaption(
+                  item.sectors,
+                  item.classification?.needsClassification,
+                )}
                 detailHref={detailHref}
                 relevance={
                   <>

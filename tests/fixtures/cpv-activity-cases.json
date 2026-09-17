@@ -419,7 +419,7 @@
     "mainCpv": "42512300",
     "additionalCpvCodes": [],
     "text": "Descrizione da verificare.",
-    "expectedExistingCpvSectorMatch": false,
+    "expectedExistingCpvSectorMatch": true,
     "expectedMaximumEffect": "existing_path_unchanged"
   },
   {

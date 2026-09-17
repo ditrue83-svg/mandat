@@ -1,157 +1,7 @@
 import type { projectLotAssessmentDto } from "./lot-assessment";
-// Text signals are complete tokens, including explicitly supported inflections
-// and German compounds. Do not add stems that match inside unrelated words.
-export const SECTORS = [
-  {
-    id: "pulizie",
-    label: "Pulizie",
-    cpv: ["909"],
-    words: [
-      "pulizia",
-      "pulizie",
-      "cleaning",
-      "nettoyage",
-      "reinigung",
-      "gebäudereinigung",
-      "unterhaltsreinigung",
-      "fensterreinigung",
-      "industriereinigung",
-      "baureinigung",
-      "grundreinigung",
-    ],
-  },
-  {
-    id: "giardinaggio",
-    label: "Giardinaggio",
-    cpv: ["773"],
-    words: [
-      "verde",
-      "giardino",
-      "giardini",
-      "giardinaggio",
-      "giardiniere",
-      "giardinieri",
-      "sfalcio",
-      "potatura",
-      "grün",
-      "grünflächen",
-      "grünflächenpflege",
-      "grünanlagen",
-      "grünanlagenpflege",
-      "grünpflege",
-      "grünflächenunterhalt",
-      "jardin",
-      "jardins",
-      "jardinage",
-      "jardinier",
-      "jardiniers",
-    ],
-  },
-  {
-    id: "manutenzioni",
-    label: "Manutenzioni",
-    cpv: ["500", "507", "508"],
-    words: [
-      "manutenzione",
-      "manutenzioni",
-      "maintenance",
-      "unterhalt",
-      "gebäudeunterhalt",
-      "strassenunterhalt",
-      "anlagenunterhalt",
-      "gartenunterhalt",
-      "grünflächenunterhalt",
-      "unterhaltsarbeiten",
-      "unterhaltsdienst",
-      "unterhaltsreinigung",
-    ],
-  },
-  {
-    id: "edilizia",
-    label: "Edilizia minore",
-    cpv: ["450", "451", "452", "454"],
-    words: [
-      "edili",
-      "edile",
-      "edilizia",
-      "edilizio",
-      "edilizi",
-      "edilizie",
-      "muratura",
-      "risanamento",
-      "ristrutturazione",
-    ],
-  },
-  {
-    id: "impianti",
-    label: "Impianti",
-    cpv: ["453", "505"],
-    words: [
-      "elettrico",
-      "elettrica",
-      "elettrici",
-      "elettriche",
-      "elettricità",
-      "elettricista",
-      "elettricisti",
-      "idraulico",
-      "idraulica",
-      "idraulici",
-      "idrauliche",
-      "sanitario",
-      "sanitaria",
-      "sanitari",
-      "sanitarie",
-      "riscaldamento",
-      "impianti",
-      "elektro",
-      "elektroinstallation",
-      "elektroinstallationen",
-      "elektroarbeiten",
-    ],
-  },
-  {
-    id: "sicurezza",
-    label: "Sicurezza",
-    cpv: ["797"],
-    words: ["sorveglianza", "vigilanza", "sicurezza", "guarding", "security"],
-  },
-  {
-    id: "catering",
-    label: "Catering",
-    cpv: ["555", "553"],
-    words: [
-      "ristorazione",
-      "mensa",
-      "pasti",
-      "catering",
-      "verpflegung",
-      "gemeinschaftsverpflegung",
-      "betriebsverpflegung",
-      "schulverpflegung",
-    ],
-  },
-  {
-    id: "trasporti",
-    label: "Trasporti",
-    cpv: ["601", "600"],
-    words: [
-      "trasporto",
-      "trasporti",
-      "transport",
-      "transports",
-      "transportation",
-      "transporte",
-      "transportdienstleistungen",
-      "gütertransport",
-      "personentransport",
-      "schülertransport",
-      "schülertransporte",
-      "scuolabus",
-    ],
-  },
-] as const;
-export type Sector = (typeof SECTORS)[number]["id"];
+import type { PublicationClassification } from "./sector-classification";
+export { SECTORS, type Sector } from "./sectors";
+import { SECTORS, type Sector } from "./sectors";
 export const ZONES = [
   "Tutto il Ticino",
   "Luganese",
@@ -218,6 +68,8 @@ export type Publication = {
   procedure: string | null;
   status: "open" | "cancelled" | "awarded" | "closed";
   sectors: Sector[];
+  // Read-time derived projection; never written back to documentary snapshots.
+  classification?: PublicationClassification;
   cpv: string[];
   sourceUrl: string;
   sourceUrls: string[];

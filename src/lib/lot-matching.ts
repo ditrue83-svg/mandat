@@ -1,10 +1,14 @@
 import { createHash } from "node:crypto";
 import type { CompanyProfile, Publication, Sector } from "./domain";
 import type { LotSourceContext } from "./lot-source-context";
-import { classifySectors, plainText } from "@/sources/common";
+import { plainText } from "@/sources/common";
+import {
+  classifyProcurement,
+  lotClassificationInput,
+} from "./sector-classification";
 import { zoneForExactCity } from "./ticino-localities";
 
-export const PREFILTER_VERSION = "lot-operational-prefilter-v1";
+export const PREFILTER_VERSION = "lot-operational-prefilter-v2";
 export type LotOperationalEvidence = {
   scope: "publication" | "project_context" | "selected_lot";
   url: string;
@@ -325,7 +329,12 @@ export function preliminaryLotMatch({
       }
     }
   let keyword = false;
-  const sectors = new Set<Sector>(classifySectors("", [...new Set(cpv)]));
+  const classification = classifyProcurement(lotClassificationInput(lot));
+  const sectors = new Set<Sector>(classification.sectors);
+  if (classification.needsClassification)
+    review(
+      "Settore del lotto da classificare: informazioni insufficienti o discordanti.",
+    );
   for (const source of texts) {
     // The stored raw string/path is exact; plainText is a declared lexical
     // transform, not an invented quotation or contract attribution.
@@ -338,9 +347,11 @@ export function preliminaryLotMatch({
       normalized: source.normalized,
     });
     if (source.scope === "selected_lot") {
-      const found = classifySectors(source.normalized, []);
-      found.forEach((sector) => sectors.add(sector));
-      if (found.some((sector) => profile.sectors.includes(sector)))
+      if (
+        classification.sectors.some((sector) =>
+          profile.sectors.includes(sector),
+        )
+      )
         add({
           scope: source.scope,
           url: source.url,
@@ -401,6 +412,11 @@ export function preliminaryLotMatch({
     review("Importo del lotto rispetto alla fascia selezionata da verificare.");
   const operationalInputHash = hash({
     version: PREFILTER_VERSION,
+    classification: {
+      version: classification.version,
+      inputHash: classification.inputHash,
+      sectors: classification.sectors,
+    },
     target: context.target,
     identity: content?.identity ?? null,
     used,

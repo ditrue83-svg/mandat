@@ -169,12 +169,12 @@ describe("componenti e interventi negli originali", () => {
       profileRevision: "profile-v1",
       revision: `${p.revision}:profile-v1:ready:model:true:activity-review:building-activity-review-v1:hash`,
     };
-    expect(args.preliminary.activityReview).toBeUndefined();
+    expect(args.preliminary.activityReview).toBeDefined();
     expect(activityReviewForMatch(args)?.version).toBe(
       "building-activity-review-v1",
     );
     expect(
       activityReviewForMatch({ ...args, profileRevision: "changed" }),
-    ).toBeUndefined();
+    ).toEqual(args.preliminary.activityReview);
   });
 });

@@ -42,10 +42,10 @@ describe("segnali testuali dei settori a parole intere", () => {
   it.each<[string, Sector[]]>([
     ["Gebäudereinigung", ["pulizie"]],
     ["Fensterreinigung", ["pulizie"]],
-    ["Unterhaltsreinigung", ["pulizie", "manutenzioni"]],
+    ["Unterhaltsreinigung", ["pulizie"]],
     ["Grünflächenpflege", ["giardinaggio"]],
     ["Grünanlagenpflege", ["giardinaggio"]],
-    ["Grünflächenunterhalt", ["giardinaggio", "manutenzioni"]],
+    ["Grünflächenunterhalt", ["giardinaggio"]],
     ["Gebäudeunterhalt", ["manutenzioni"]],
     ["Elektroinstallationen", ["impianti"]],
     ["Gemeinschaftsverpflegung", ["catering"]],
@@ -77,7 +77,7 @@ describe("segnali testuali dei settori a parole intere", () => {
         "15000000",
         "55523100",
       ]),
-    ).toEqual(["catering"]);
+    ).toEqual(["catering", "alimentari"]);
     expect(classifySectors("Descrizione senza segnale", ["77310000"])).toEqual([
       "giardinaggio",
     ]);
