@@ -1,6 +1,10 @@
 import { and, eq, inArray, isNull, isNotNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
+  MANUAL_REVIEW_WINDOW,
+  automationForCompany,
+} from "@/lib/manual-review-window";
+import {
   administrators,
   companies,
   feedback,
@@ -111,7 +115,12 @@ const subjectFor = (notices: LotNotice[], count = notices.length) =>
 // Lock every observed group before any source, company, match or outbox row.
 // Membership is re-read after the advisory locks; a moved source aborts rather
 // than adding another lock out of order. Import/feedback/reviews use this key.
-async function lockContext(tx: Tx, companyId: string, referenceIds?: string[]) {
+async function lockContext(
+  tx: Tx,
+  companyId: string,
+  referenceIds?: string[],
+  now = new Date(),
+) {
   const observed = await tx
     .select({ id: publications.id, canonicalId: publications.canonicalId })
     .from(publications)
@@ -192,10 +201,16 @@ async function lockContext(tx: Tx, companyId: string, referenceIds?: string[]) {
         .orderBy(feedback.id)
         .for("share")
     : [];
-  const [automatic] = await tx
+  const automaticSettings = await tx
     .select()
     .from(settings)
-    .where(eq(settings.key, "automation_enabled"))
+    .where(
+      inArray(settings.key, [
+        "automation_enabled",
+        "pilot_started_at",
+        MANUAL_REVIEW_WINDOW,
+      ]),
+    )
     .for("share");
   const canonicalFeedback = new Map<
     string,
@@ -218,7 +233,13 @@ async function lockContext(tx: Tx, companyId: string, referenceIds?: string[]) {
     administrator: Boolean(administrator),
     matchRows,
     feedbackRows,
-    automatic: automatic?.value === true,
+    automatic:
+      !!company &&
+      automationForCompany(
+        new Map(automaticSettings.map((row) => [row.key, row.value])),
+        company,
+        now,
+      ),
     canonicalFeedback,
     critical: critical.length > 0,
     criticalIssues: critical,
@@ -636,7 +657,7 @@ export async function reconcileLotNotices(
       .limit(1);
     if (!adopted) continue;
     await db.transaction(async (tx) => {
-      const context = await lockContext(tx, companyId);
+      const context = await lockContext(tx, companyId, undefined, now);
       const participationCurrent = context.invitations.some((invitation) =>
         invitationAllowsPilotProcessing(invitation, context.administrator),
       );
@@ -995,6 +1016,7 @@ export async function claimLotNotification(id: string, now = new Date()) {
       tx,
       observed.companyId,
       observed.items.map((i) => i.id),
+      now,
     );
     const all = await loadAll(tx, context, now);
     const [owner] = context.company

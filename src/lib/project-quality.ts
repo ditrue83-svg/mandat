@@ -76,7 +76,11 @@ export async function readProjectQuality(
     if (!hasReviewWindow) return true;
     if (!options.reviewedSince) return false;
     const date = at instanceof Date ? at : new Date(at);
-    return Number.isFinite(date.getTime()) && date >= options.reviewedSince;
+    return (
+      Number.isFinite(date.getTime()) &&
+      date >= options.reviewedSince &&
+      date <= now
+    );
   };
   const rows = (
     await db

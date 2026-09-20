@@ -8,6 +8,10 @@ import { demoProfile, getDemoOpportunities } from "../src/lib/demo";
 import type { Publication, SourceScopeReview } from "../src/lib/domain";
 import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-participation";
 import { fingerprint } from "../src/sources/common";
+import {
+  MANUAL_REVIEW_WINDOW,
+  manualReviewProfileRevision,
+} from "../src/lib/manual-review-window";
 
 const context = vi.hoisted(() => ({ db: undefined as unknown }));
 vi.mock("@/db", () => ({ getDb: () => context.db }));
@@ -197,6 +201,29 @@ it("non prepara né invia email legacy quando il consenso non è più corrente",
     error: expect.stringContaining("consenso"),
   });
 });
+it.each(["own", "other", "too-early"])(
+  "la validazione del fondatore limita davvero la selezione automatica: %s",
+  async (scope) => {
+    await db.insert(schema.settings).values({
+      key: MANUAL_REVIEW_WINDOW,
+      value: {
+        version: "manual-review-window-v1",
+        id: crypto.randomUUID(),
+        companyId:
+          scope === "other" ? "another-company" : "local-scope-mail-company",
+        actorId: "founder",
+        startedAt: new Date(
+          now.getTime() - (scope === "too-early" ? 6 : 7) * 86400000,
+        ).toISOString(),
+        profileRevision: manualReviewProfileRevision(profile),
+        realActivityConfirmed: true,
+      },
+    });
+    await queueDigests(now);
+    expect(await notificationRows()).toHaveLength(scope === "own" ? 1 : 0);
+    expect(sendMail).not.toHaveBeenCalled();
+  },
+);
 
 it.each([false, true])(
   "required blocca la selezione digest con reviewRequired=false e approvazione manuale=%s",

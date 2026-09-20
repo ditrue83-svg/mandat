@@ -47,6 +47,7 @@ import {
   requestPilotExternalDeliveryTest,
 } from "@/lib/pilot-delivery";
 import { lockPilotControl } from "@/lib/pilot-control";
+import { startManualReview } from "@/lib/manual-review-admin";
 const sourceDependencySchema = z
   .object({
     version: z.literal(CONTEXT_VERSION),
@@ -96,6 +97,13 @@ const inputSchema = z.discriminatedUnion("action", [
       .optional(),
   }),
   z.object({ action: z.literal("automation"), enabled: z.boolean() }),
+  z
+    .object({
+      action: z.literal("manual-review-start"),
+      realActivityConfirmed: z.literal(true),
+      expectedProfileRevision: z.string().regex(/^[a-f0-9]{64}$/),
+    })
+    .strict(),
   z.object({
     action: z.literal("pilot-prerequisite"),
     key: z.literal("data_residency"),
@@ -435,6 +443,14 @@ export async function POST(request: Request) {
             set: { value: body.enabled },
           });
         break;
+      }
+      case "manual-review-start": {
+        await startManualReview(v, new Date(), body.expectedProfileRevision);
+        return Response.json({
+          ok: true,
+          message:
+            "Periodo di revisione iniziato per il tuo profilo. L’invio automatico resta disattivato.",
+        });
       }
       case "pilot-prerequisite": {
         await setPilotPrerequisite({

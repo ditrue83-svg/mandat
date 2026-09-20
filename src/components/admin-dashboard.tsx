@@ -29,6 +29,7 @@ export function AdminDashboard({
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [inviteConsentConfirmed, setInviteConsentConfirmed] = useState(false);
+  const [realActivityConfirmed, setRealActivityConfirmed] = useState(false);
   const [externalEmail, setExternalEmail] = useState("");
   const [nonArubaConfirmed, setNonArubaConfirmed] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -55,6 +56,9 @@ export function AdminDashboard({
   }
   const disabled = viewer.demo || busy;
   const pilotInvites = data.invites.filter((invite) => !invite.admin);
+  const reviewProfileRevision = data.invites.find(
+    (invite) => invite.companyId === viewer.companyId,
+  )?.profileRevision;
   const pagination = data.reviewPage;
   const reviewHref = (page: number) =>
     `/admin?${new URLSearchParams({ q: pagination.query, pagina: String(page) })}#proposte`;
@@ -364,6 +368,67 @@ export function AdminDashboard({
       </section>
       <section className="panel">
         <h2>Prima di automatizzare</h2>
+        {!data.pilot.startedAt && (
+          <div className="notice">
+            <h3>Revisione per il tuo profilo</h3>
+            <p>
+              Puoi verificare il Radar prima di coinvolgere le ditte pilota.
+              Contano soltanto le valutazioni del tuo profilo registrate dopo
+              l’avvio di questo periodo. L’automazione sarà limitata a questo
+              account.
+            </p>
+            <p>
+              Il profilo deve descrivere l’attività e le zone che userai
+              realmente. Le simulazioni non abilitano gli invii automatici.{" "}
+              <Link href="/profilo">Controlla il tuo profilo</Link>.
+            </p>
+            {data.gate.manualReview && (
+              <p>
+                Revisione iniziata il{" "}
+                {formatDate(data.gate.manualReview.startedAt)}.
+                {!data.gate.manualReview.profileCurrent &&
+                  " Il profilo è cambiato: occorre iniziare un nuovo periodo; i giudizi precedenti restano nello storico."}
+              </p>
+            )}
+            {(!data.gate.manualReview ||
+              !data.gate.manualReview.profileCurrent) && (
+              <>
+                <label className="check-label">
+                  <input
+                    type="checkbox"
+                    checked={realActivityConfirmed}
+                    disabled={disabled || data.automatic}
+                    onChange={(event) =>
+                      setRealActivityConfirmed(event.target.checked)
+                    }
+                  />
+                  <span>
+                    Confermo che il mio profilo descrive l’attività reale da
+                    valutare, non una ditta inventata.
+                  </span>
+                </label>
+                <button
+                  className="button secondary space-top"
+                  disabled={
+                    disabled ||
+                    data.automatic ||
+                    !realActivityConfirmed ||
+                    !reviewProfileRevision
+                  }
+                  onClick={() =>
+                    void act({
+                      action: "manual-review-start",
+                      realActivityConfirmed,
+                      expectedProfileRevision: reviewProfileRevision,
+                    })
+                  }
+                >
+                  Avvia la settimana di revisione
+                </button>
+              </>
+            )}
+          </div>
+        )}
         <p>
           Almeno 7 giorni di revisione, 20 valutazioni, l’80% di proposte
           pertinenti e nessun problema critico aperto.

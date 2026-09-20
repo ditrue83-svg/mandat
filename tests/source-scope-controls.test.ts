@@ -167,6 +167,7 @@ it("il filtro iniziale dell’admin mostra tutti i giudizi ancora da verificare,
     demo: true,
     reviewPage: { page: 1, pages: 1, total: 0, query: "", pageSize: 20 },
     gate: {
+      manualReview: null,
       allowed: false,
       reviewed: 0,
       approved: 0,

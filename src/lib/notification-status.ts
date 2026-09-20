@@ -2,6 +2,12 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { notifications, settings } from "@/db/schema";
 import type { Viewer } from "./domain";
+import {
+  MANUAL_REVIEW_WINDOW,
+  automationForCompany,
+  readManualReviewWindow,
+  reviewProfileMatches,
+} from "./manual-review-window";
 
 export const NOTIFICATION_STATUS_LABELS: Record<string, string> = {
   pending: "In preparazione",
@@ -19,7 +25,13 @@ export async function readNotificationStatus(viewer: Viewer) {
     db
       .select({ key: settings.key, value: settings.value })
       .from(settings)
-      .where(inArray(settings.key, ["automation_enabled", "pilot_started_at"])),
+      .where(
+        inArray(settings.key, [
+          "automation_enabled",
+          "pilot_started_at",
+          MANUAL_REVIEW_WINDOW,
+        ]),
+      ),
     db
       .select({
         id: notifications.id,
@@ -40,12 +52,16 @@ export async function readNotificationStatus(viewer: Viewer) {
       .limit(10),
   ]);
   const values = new Map(configuration.map((row) => [row.key, row.value]));
+  const window = readManualReviewWindow(values.get(MANUAL_REVIEW_WINDOW));
+  const company = { id: viewer.companyId, profile: viewer.profile };
+  const independentReview = window && reviewProfileMatches(window, company);
   return {
-    mode: !values.get("pilot_started_at")
-      ? ("preparation" as const)
-      : values.get("automation_enabled") === true
-        ? ("automatic" as const)
-        : ("manual" as const),
+    mode:
+      !values.get("pilot_started_at") && !independentReview
+        ? ("preparation" as const)
+        : automationForCompany(values, company)
+          ? ("automatic" as const)
+          : ("manual" as const),
     recent: rows.map((row) => ({
       id: row.id,
       subject: row.subject,

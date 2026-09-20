@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull, desc, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, desc, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   user,
@@ -41,6 +41,12 @@ import {
 } from "./source-review-policy";
 import { summarizePilot } from "./pilot";
 import { mapInReadPairs } from "./bounded-read";
+import {
+  MANUAL_REVIEW_WINDOW,
+  readManualReviewWindow,
+  reviewProfileMatches,
+  manualReviewProfileRevision,
+} from "./manual-review-window";
 import { pilotDate, readPilotPrerequisites } from "./pilot-admin";
 import {
   lockPilotControl,
@@ -121,39 +127,74 @@ export async function notifyInvitation(email: string, name: string) {
     ),
   });
 }
-export async function getGate() {
+export async function getGate(now = new Date()) {
   const db = getDb();
-  const [[critical], [started]] = await Promise.all([
+  const [[critical], configuration] = await Promise.all([
     db
       .select({ total: sql<number>`count(*)::int` })
       .from(issues)
       .where(and(eq(issues.severity, "critical"), isNull(issues.resolvedAt))),
     db
-      .select({ value: settings.value })
+      .select({ key: settings.key, value: settings.value })
       .from(settings)
-      .where(eq(settings.key, "pilot_started_at")),
+      .where(inArray(settings.key, ["pilot_started_at", MANUAL_REVIEW_WINDOW])),
   ]);
-  const startedAt = pilotDate(started?.value);
-  const cohort = startedAt
+  const values = new Map(configuration.map((row) => [row.key, row.value]));
+  const pilotStartedAt = pilotDate(values.get("pilot_started_at"));
+  const manualReview = pilotStartedAt
+    ? null
+    : readManualReviewWindow(values.get(MANUAL_REVIEW_WINDOW));
+  const [reviewCompany] = manualReview
+    ? await db
+        .select()
+        .from(companies)
+        .where(eq(companies.id, manualReview.companyId))
+    : [];
+  const manualProfileCurrent =
+    !!manualReview &&
+    !!reviewCompany &&
+    !reviewCompany.disabledAt &&
+    reviewProfileMatches(manualReview, reviewCompany);
+  const startedAt =
+    pilotStartedAt ?? (manualReview ? new Date(manualReview.startedAt) : null);
+  const cohort = pilotStartedAt
     ? await db
         .select({ companyId: pilotParticipants.companyId })
         .from(pilotParticipants)
     : [];
-  const quality = startedAt
-    ? await readProjectQuality(new Date(), {
+  const quality = pilotStartedAt
+    ? await readProjectQuality(now, {
         excludeAdministratorCompanies: true,
         includeCompanyIds: cohort.map((row) => row.companyId),
         reviewedSince: startedAt,
       })
-    : await readProjectQuality();
+    : manualReview
+      ? await readProjectQuality(now, {
+          includeCompanyIds: manualProfileCurrent
+            ? [manualReview.companyId]
+            : [],
+          reviewedSince: new Date(manualReview.startedAt),
+        })
+      : await readProjectQuality(now);
+  const gate = automationGate({
+    reviewed: quality.reviewed,
+    approved: quality.approved,
+    criticalIssues: critical.total,
+    startedAt,
+    now,
+  });
   return {
     ...quality,
-    ...automationGate({
-      reviewed: quality.reviewed,
-      approved: quality.approved,
-      criticalIssues: critical.total,
-      startedAt,
-    }),
+    ...gate,
+    pilotStartedAt,
+    allowed: gate.allowed && (!manualReview || manualProfileCurrent),
+    manualReview: manualReview
+      ? {
+          startedAt: manualReview.startedAt,
+          companyId: manualReview.companyId,
+          profileCurrent: manualProfileCurrent,
+        }
+      : null,
   };
 }
 export async function adminSnapshot(
@@ -164,6 +205,7 @@ export async function adminSnapshot(
     return {
       demo: true,
       gate: {
+        manualReview: null,
         allowed: false,
         reviewed: 0,
         approved: 0,
@@ -375,7 +417,7 @@ export async function adminSnapshot(
     });
   });
   const pilot = summarizePilot({
-    startedAt: gate.startedAt,
+    startedAt: gate.pilotStartedAt,
     criticalIssues: gate.criticalIssues,
     automationEnabled: auto[0]?.value === true,
     participants: invites.map((invite) => ({
@@ -406,7 +448,7 @@ export async function adminSnapshot(
   const pilotCompanyIds = new Set(
     invites
       .filter((invite) =>
-        gate.startedAt
+        gate.pilotStartedAt
           ? !invite.administratorId && !!invite.pilotStartedAt
           : !invite.administratorId && !invite.revokedAt && !invite.disabledAt,
       )
@@ -433,15 +475,17 @@ export async function adminSnapshot(
       },
     ]),
   );
-  const pilotWindowEnd = gate.startedAt
-    ? new Date(Math.min(Date.now(), gate.startedAt.getTime() + 28 * 86_400_000))
+  const pilotWindowEnd = gate.pilotStartedAt
+    ? new Date(
+        Math.min(Date.now(), gate.pilotStartedAt.getTime() + 28 * 86_400_000),
+      )
     : null;
-  const deduplicatedPilotFeedback = gate.startedAt
+  const deduplicatedPilotFeedback = gate.pilotStartedAt
     ? pilotFeedbackRows
         .filter(
           (row) =>
             pilotCompanyIds.has(row.companyId) &&
-            row.updatedAt >= gate.startedAt! &&
+            row.updatedAt >= gate.pilotStartedAt! &&
             !!pilotWindowEnd &&
             row.updatedAt <= pilotWindowEnd &&
             row.relevant !== null,
@@ -469,6 +513,7 @@ export async function adminSnapshot(
       unresolved: gate.unresolved,
       historical: gate.historical,
       version: gate.version,
+      manualReview: gate.manualReview,
     },
     automatic: auto[0]?.value === true,
     spend: Number(usage[0].total),
@@ -480,6 +525,7 @@ export async function adminSnapshot(
     invites: invites.map((i) => ({
       id: i.id,
       companyId: i.companyId,
+      profileRevision: manualReviewProfileRevision(i.sectors),
       email: i.email,
       name: i.name,
       expiresAt: i.expiresAt.toISOString(),

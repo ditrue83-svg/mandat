@@ -42,6 +42,10 @@ import {
   sourceAvailable,
 } from "@/lib/canonical-publication";
 import { companyAllowsPilotProcessingSql } from "@/lib/pilot-processing";
+import {
+  MANUAL_REVIEW_WINDOW,
+  automationForCompany,
+} from "@/lib/manual-review-window";
 export function deliveryFailureKind(error: unknown): "failed" | "uncertain" {
   const e = error as { code?: string; command?: string; responseCode?: number };
   if (e.responseCode && e.responseCode >= 400) return "failed";
@@ -312,11 +316,19 @@ export async function reconcileDelivery(
 export async function queueDigests(now = new Date()) {
   if (!digestDue(now)) return;
   const db = getDb();
-  const [autoSetting] = await db
+  const autoSettings = await db
     .select()
     .from(settings)
-    .where(eq(settings.key, "automation_enabled"));
-  const automatic = autoSetting?.value === true;
+    .where(
+      inArray(settings.key, [
+        "automation_enabled",
+        "pilot_started_at",
+        MANUAL_REVIEW_WINDOW,
+      ]),
+    );
+  const automaticConfiguration = new Map(
+    autoSettings.map((row) => [row.key, row.value]),
+  );
   const critical = await db
     .select({ id: issues.id })
     .from(issues)
@@ -355,6 +367,7 @@ export async function queueDigests(now = new Date()) {
     if (!representatives.has(source.canonicalId))
       representatives.set(source.canonicalId, source.id);
   for (const firm of firms) {
+    const automatic = automationForCompany(automaticConfiguration, firm, now);
     if (!firm.profile.emailEnabled || !firm.onboardedAt) continue;
     const all = await db
       .select({ p: publications, m: matches, f: feedback })
