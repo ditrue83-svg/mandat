@@ -14,7 +14,7 @@ import Loading from "../src/app/loading";
 it("riunisce le tre raccolte sotto Bandi con descrizioni e ricerche esplicite", () => {
   const radar = renderToStaticMarkup(
     createElement(Dashboard, {
-      viewer: demoViewer,
+      viewer: { ...demoViewer, demo: false },
       opportunities: [],
     }),
   );
@@ -23,7 +23,7 @@ it("riunisce le tre raccolte sotto Bandi con descrizioni e ricerche esplicite", 
   expect(radar).toContain(
     "I bandi selezionati in base all’attività e alle zone della tua ditta.",
   );
-  expect(radar).toContain("Cerca nei bandi selezionati per te…");
+  expect(radar).not.toContain("Cerca nei bandi selezionati per te…");
   expect(radar).toContain(
     "Nessuna proposta ancora selezionata per la tua ditta.",
   );
@@ -33,13 +33,13 @@ it("riunisce le tre raccolte sotto Bandi con descrizioni e ricerche esplicite", 
 
   const saved = renderToStaticMarkup(
     createElement(Dashboard, {
-      viewer: demoViewer,
+      viewer: { ...demoViewer, demo: false },
       opportunities: [],
       savedOnly: true,
     }),
   );
   expect(saved).toContain("I bandi che hai conservato per approfondirli.");
-  expect(saved).toContain("Cerca nei tuoi salvati…");
+  expect(saved).not.toContain("Cerca nei tuoi salvati…");
   expect(saved).toContain("Non hai ancora salvato nessun bando.");
   expect(saved).not.toContain("0 risultati");
   expect(saved).not.toContain("opportunità nel Radar");
@@ -55,7 +55,7 @@ it("conserva ricerca, settore e ordinamento nel ritorno dal dettaglio", () => {
   };
   const html = renderToStaticMarkup(
     createElement(Dashboard, {
-      viewer: demoViewer,
+      viewer: { ...demoViewer, demo: false },
       opportunities: [item],
       initialFilters: {
         q: "verde",

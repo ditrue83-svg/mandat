@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Check } from "lucide-react";
 import { Shell } from "./shell";
 import {
   SECTORS,
@@ -25,12 +25,10 @@ export function ProfileForm({
 }) {
   const [form, setForm] = useState<CompanyProfile>(viewer.profile);
   const [sectorQuery, setSectorQuery] = useState("");
-  const visibleSectors = SECTORS.filter(
-    (s) =>
-      form.sectors.includes(s.id) ||
-      s.label
-        .toLocaleLowerCase("it")
-        .includes(sectorQuery.trim().toLocaleLowerCase("it")),
+  const visibleSectors = SECTORS.filter((s) =>
+    s.label
+      .toLocaleLowerCase("it")
+      .includes(sectorQuery.trim().toLocaleLowerCase("it")),
   );
   const [keywords, setKeywords] = useState(viewer.profile.keywords.join(", "));
   const [exclusions, setExclusions] = useState(
@@ -147,18 +145,15 @@ export function ProfileForm({
   }
   return (
     <Shell viewer={viewer}>
-      <div className="content-narrow">
+      <div className="content-narrow profile-page">
         <section className="page-heading">
           <div>
             <div className="eyebrow">IL RADAR PARTE DA TE</div>
-            <h1>
-              {onboarding
-                ? "Raccontaci la tua ditta."
-                : "La tua ditta, le tue opportunità."}
-            </h1>
+            <h1>{onboarding ? "Raccontaci la tua ditta." : "La tua ditta"}</h1>
             <p>
-              Pochi dettagli per riconoscere i lavori che fanno per te. Tre
-              passaggi, sempre modificabili.
+              {onboarding
+                ? "Tre passaggi per impostare le tue preferenze."
+                : "Attività e preferenze per personalizzare le proposte del Radar."}
             </p>
           </div>
         </section>
@@ -179,10 +174,10 @@ export function ProfileForm({
             </div>
           </div>
         )}
-        <form ref={formRef} onSubmit={save}>
+        <form ref={formRef} onSubmit={save} className="profile-form">
           {(!onboarding || step === 1) && (
             <section className="panel">
-              <h2>Partiamo dalle basi</h2>
+              <h2>La ditta e le attività</h2>
               <label className="field">
                 Come si chiama la tua ditta?
                 <input
@@ -230,104 +225,143 @@ export function ProfileForm({
             </section>
           )}
           {(!onboarding || step === 2) && (
-            <section className="panel">
-              <h2 id="profile-sectors-heading">Quali lavori cerchi?</h2>
-              <p id="profile-sectors-hint">
-                Seleziona almeno un settore che descrive il lavoro della ditta.
-                Per consultare tutti i settori puoi usare Tutti i bandi.
-              </p>
-              <label className="sector-search">
-                Cerca un settore
-                <input
-                  type="search"
-                  placeholder="Es. informatica, edilizia, assicurazioni…"
-                  value={sectorQuery}
-                  onChange={(e) => setSectorQuery(e.target.value)}
-                />
-              </label>
-              <p className="meta" aria-live="polite">
-                {form.sectors.length} settori selezionati
-                {sectorQuery ? " · Le tue selezioni restano visibili." : "."}
-              </p>
-              <div
-                className="check-grid"
-                role="group"
-                aria-labelledby="profile-sectors-heading"
-                aria-describedby={
-                  errorField === "sectors"
-                    ? "profile-sectors-hint profile-feedback"
-                    : "profile-sectors-hint"
-                }
-                aria-invalid={errorField === "sectors" || undefined}
-              >
-                {visibleSectors.map((s) => (
-                  <label key={s.id} className="check-label">
-                    <input
-                      name="sectors"
-                      value={s.id}
-                      type="checkbox"
-                      checked={form.sectors.includes(s.id)}
-                      onChange={(e) =>
-                        update(
-                          "sectors",
-                          e.target.checked
-                            ? [...form.sectors, s.id]
-                            : form.sectors.filter((x) => x !== s.id),
-                        )
-                      }
-                    />
-                    {s.label}
-                  </label>
-                ))}
-              </div>
-              {!visibleSectors.length && (
-                <p>Nessun settore corrisponde alla ricerca.</p>
-              )}
-              <h3 id="profile-zones-heading">Dove vuoi lavorare?</h3>
-              <p id="profile-zones-hint">Seleziona almeno una zona.</p>
-              <div
-                className="check-grid"
-                role="group"
-                aria-labelledby="profile-zones-heading"
-                aria-describedby={
-                  errorField === "zones"
-                    ? "profile-zones-hint profile-feedback"
-                    : "profile-zones-hint"
-                }
-                aria-invalid={errorField === "zones" || undefined}
-              >
-                {ZONES.map((z) => (
-                  <label className="check-label" key={z}>
-                    <input
-                      name="zones"
-                      value={z}
-                      type="checkbox"
-                      checked={form.zones.includes(z)}
-                      onChange={(e) =>
-                        update(
-                          "zones",
-                          e.target.checked
-                            ? z === "Tutto il Ticino"
-                              ? [z]
-                              : [
-                                  ...form.zones.filter(
-                                    (x) => x !== "Tutto il Ticino",
-                                  ),
-                                  z,
-                                ]
-                            : form.zones.filter((x) => x !== z),
-                        )
-                      }
-                    />
-                    {z}
-                  </label>
-                ))}
-              </div>
-            </section>
+            <>
+              <section className="panel profile-section">
+                <h2 id="profile-sectors-heading">Settori di attività</h2>
+                <p id="profile-sectors-hint">
+                  Seleziona almeno un settore che descrive il lavoro della
+                  ditta. Per consultare tutti i settori puoi usare Tutti i
+                  bandi.
+                </p>
+                <label className="field sector-search">
+                  Cerca un settore
+                  <input
+                    type="search"
+                    placeholder="Es. informatica, edilizia, assicurazioni…"
+                    value={sectorQuery}
+                    onChange={(e) => setSectorQuery(e.target.value)}
+                  />
+                </label>
+                <div className="sector-selection-bar">
+                  <strong role="status">
+                    {form.sectors.length}{" "}
+                    {form.sectors.length === 1
+                      ? "settore selezionato"
+                      : "settori selezionati"}
+                  </strong>
+                  {sectorQuery && (
+                    <button
+                      type="button"
+                      className="text-link"
+                      onClick={() => setSectorQuery("")}
+                    >
+                      Mostra tutti
+                    </button>
+                  )}
+                </div>
+                {form.sectors.length > 0 && (
+                  <details className="selected-sectors">
+                    <summary>Vedi i settori scelti</summary>
+                    <ul>
+                      {form.sectors.map((sector) => (
+                        <li key={sector}>
+                          <Check size={15} aria-hidden="true" />
+                          {sectorLabel(sector)}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+                {sectorQuery && (
+                  <p className="field-hint">
+                    La ricerca non cambia i settori già scelti.
+                  </p>
+                )}
+                <div
+                  className="check-grid"
+                  role="group"
+                  aria-labelledby="profile-sectors-heading"
+                  aria-describedby={
+                    errorField === "sectors"
+                      ? "profile-sectors-hint profile-feedback"
+                      : "profile-sectors-hint"
+                  }
+                  aria-invalid={errorField === "sectors" || undefined}
+                >
+                  {visibleSectors.map((s) => (
+                    <label key={s.id} className="check-label">
+                      <input
+                        name="sectors"
+                        value={s.id}
+                        type="checkbox"
+                        checked={form.sectors.includes(s.id)}
+                        onChange={(e) =>
+                          update(
+                            "sectors",
+                            e.target.checked
+                              ? [...form.sectors, s.id]
+                              : form.sectors.filter((x) => x !== s.id),
+                          )
+                        }
+                      />
+                      <span>{s.label}</span>
+                    </label>
+                  ))}
+                </div>
+                {!visibleSectors.length && (
+                  <p className="inline-empty" role="status">
+                    Nessun settore corrisponde alla ricerca. Prova un’altra
+                    parola o mostra tutti i settori.
+                  </p>
+                )}
+              </section>
+              <section className="panel profile-section">
+                <h2 id="profile-zones-heading">Zone servite</h2>
+                <p id="profile-zones-hint">Seleziona almeno una zona.</p>
+                <div
+                  className="check-grid"
+                  role="group"
+                  aria-labelledby="profile-zones-heading"
+                  aria-describedby={
+                    errorField === "zones"
+                      ? "profile-zones-hint profile-feedback"
+                      : "profile-zones-hint"
+                  }
+                  aria-invalid={errorField === "zones" || undefined}
+                >
+                  {ZONES.map((z) => (
+                    <label className="check-label" key={z}>
+                      <input
+                        name="zones"
+                        value={z}
+                        type="checkbox"
+                        checked={form.zones.includes(z)}
+                        onChange={(e) =>
+                          update(
+                            "zones",
+                            e.target.checked
+                              ? z === "Tutto il Ticino"
+                                ? [z]
+                                : [
+                                    ...form.zones.filter(
+                                      (x) => x !== "Tutto il Ticino",
+                                    ),
+                                    z,
+                                  ]
+                              : form.zones.filter((x) => x !== z),
+                          )
+                        }
+                      />
+                      <span>{z}</span>
+                    </label>
+                  ))}
+                </div>
+              </section>
+            </>
           )}
           {(!onboarding || step === 3) && (
             <section className="panel">
-              <h2>Affiniamo la ricerca</h2>
+              <h2>Preferenze facoltative</h2>
               <p>
                 Questi dettagli sono facoltativi. Puoi cambiarli quando vuoi.
               </p>
@@ -430,18 +464,20 @@ export function ProfileForm({
               </p>
             </section>
           )}
-          {message && (
-            <div
-              ref={feedbackRef}
-              id="profile-feedback"
-              tabIndex={-1}
-              role={failed ? "alert" : "status"}
-              className={`notice ${failed ? "error" : "success"}`}
-            >
-              {message}
-            </div>
-          )}
-          <div className="form-actions">
+          <div className="profile-feedback-slot">
+            {message && (
+              <div
+                ref={feedbackRef}
+                id="profile-feedback"
+                tabIndex={-1}
+                role={failed ? "alert" : "status"}
+                className={`notice ${failed ? "error" : "success"}`}
+              >
+                {message}
+              </div>
+            )}
+          </div>
+          <div className="form-actions profile-save-bar">
             {onboarding && step > 1 ? (
               <button
                 type="button"
@@ -457,7 +493,12 @@ export function ProfileForm({
                   : "Le tue preferenze restano modificabili."}
               </small>
             )}
-            <button type="submit" disabled={busy} className="button primary">
+            <button
+              type="submit"
+              disabled={busy}
+              aria-busy={busy}
+              className="button primary"
+            >
               {busy
                 ? "Salvataggio…"
                 : onboarding && step < 3

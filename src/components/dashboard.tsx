@@ -22,6 +22,7 @@ import { Shell } from "./shell";
 import { MatchNote } from "./match-note";
 import { BandiNavigation } from "./bandi-navigation";
 import { TenderListCard } from "./tender-list-card";
+import { LoadingContent } from "./page-states";
 import { matchesSearch } from "@/lib/search";
 import { profileSchema } from "@/lib/validation";
 import { preliminaryMatch } from "@/lib/matching";
@@ -29,7 +30,6 @@ import { tenderWorkExcerpt } from "@/lib/tender-brief";
 import {
   SECTORS,
   daysUntil,
-  formatDate,
   sectorLabel,
   type Opportunity,
   type RadarStatus,
@@ -71,6 +71,7 @@ export function Dashboard({
   const pathname = savedOnly ? "/salvati" : "/";
   const [refreshing, startRefresh] = useTransition();
   const [demoItems, setDemoItems] = useState(opportunities);
+  const [demoLoaded, setDemoLoaded] = useState(!viewer.demo);
   const [demoProfile, setDemoProfile] = useState(viewer.profile);
   const [actions, setActions] = useState<
     Record<string, Partial<Pick<Opportunity, "saved" | "dismissed">>>
@@ -119,6 +120,7 @@ export function Dashboard({
             .map((item) => ({ ...item, ...data[item.id] })),
         );
       } catch {}
+      setDemoLoaded(true);
     }
   }, [viewer.demo, opportunities, savedOnly]);
 
@@ -266,7 +268,14 @@ export function Dashboard({
     const days = daysUntil(item.deadline);
     return item.status === "open" && days !== null && days >= 0 && days <= 7;
   }).length;
-  const hasFilters = query.trim() !== "" || sector !== "all" || showDismissed;
+  const hasFilters =
+    query.trim() !== "" || sector !== "all" || sort !== "relevance";
+  const filteringEmpty = collection.length > 0 && visible.length === 0;
+  const processingEmpty =
+    !savedOnly &&
+    !viewer.demo &&
+    radarStatus.state !== "ready" &&
+    collection.length === 0;
   const returnHref = useMemo(() => {
     const params = new URLSearchParams();
     if (query.trim()) params.set("q", query.trim().slice(0, 200));
@@ -279,7 +288,7 @@ export function Dashboard({
   function clearFilters() {
     setQuery("");
     setSector("all");
-    setShowDismissed(false);
+    setSort("relevance");
   }
 
   return (
@@ -288,226 +297,278 @@ export function Dashboard({
         active={savedOnly ? "saved" : "radar"}
         showProfileLink={!savedOnly}
       />
-      {!savedOnly && !viewer.demo && radarStatus.state !== "ready" && (
-        <div className="radar-progress" role="status">
-          <Clock3 size={20} aria-hidden="true" />
-          <div>
-            <strong>
-              {radarStatus.state === "processing"
-                ? "Il Radar sta elaborando pubblicazioni per la tua ditta."
-                : "L’elaborazione sta richiedendo più tempo del previsto."}
-            </strong>
-            <p>
-              {radarStatus.pendingCount} pubblicazioni devono ancora essere
-              elaborate. I risultati già selezionati restano disponibili.
-            </p>
-          </div>
-          <button
-            className="button secondary"
-            disabled={refreshing}
-            onClick={() => startRefresh(() => router.refresh())}
-          >
-            {refreshing ? "Aggiornamento…" : "Aggiorna"}
-          </button>
-        </div>
-      )}
-      <section
-        className="collection-results"
-        aria-labelledby="collection-title"
-      >
-        <div className="collection-controls">
-          <label className="search-input">
-            <Search size={18} aria-hidden="true" />
-            <input
-              placeholder={
-                savedOnly
-                  ? "Cerca nei tuoi salvati…"
-                  : "Cerca nei bandi selezionati per te…"
-              }
-              value={query}
-              maxLength={200}
-              onChange={(event) => setQuery(event.target.value)}
-              aria-label={
-                savedOnly
-                  ? "Cerca nei tuoi salvati"
-                  : "Cerca nei bandi selezionati per te"
-              }
-            />
-          </label>
-          <label className="select-wrap">
-            <span className="sr-only">Settore</span>
-            <select
-              aria-label="Filtra per settore"
-              value={sector}
-              onChange={(event) => setSector(event.target.value)}
+      {!savedOnly &&
+        !viewer.demo &&
+        radarStatus.state !== "ready" &&
+        collection.length > 0 && (
+          <div className="radar-progress" role="status">
+            <Clock3 size={20} aria-hidden="true" />
+            <div>
+              <strong>
+                {radarStatus.state === "processing"
+                  ? "Il Radar sta elaborando pubblicazioni per la tua ditta."
+                  : "L’elaborazione sta richiedendo più tempo del previsto."}
+              </strong>
+              <p>
+                {radarStatus.pendingCount} pubblicazioni devono ancora essere
+                elaborate. I risultati già selezionati restano disponibili.
+              </p>
+            </div>
+            <button
+              className="button secondary"
+              disabled={refreshing}
+              onClick={() => startRefresh(() => router.refresh())}
             >
-              <option value="all">Tutti i settori</option>
-              {SECTORS.map((entry) => (
-                <option key={entry.id} value={entry.id}>
-                  {entry.label}
-                </option>
-              ))}
-              <option value={UNCLASSIFIED_SECTOR_FILTER}>
-                Da classificare
-              </option>
-            </select>
-            <ChevronDown size={15} aria-hidden="true" />
-          </label>
-          <label className="select-wrap">
-            <span className="sr-only">Ordinamento</span>
-            <select
-              aria-label="Ordina bandi"
-              value={sort}
-              onChange={(event) => setSort(event.target.value)}
-            >
-              <option value="relevance">
-                {savedOnly ? "Ordine di pertinenza" : "Più pertinenti"}
-              </option>
-              <option value="deadline">Scadenza più vicina</option>
-            </select>
-            <ChevronDown size={15} aria-hidden="true" />
-          </label>
-        </div>
-        <div className="collection-heading">
-          <h2 id="collection-title">
-            {savedOnly
-              ? "Bandi salvati"
-              : showDismissed
-                ? "Bandi esclusi"
-                : "Selezionati per la tua ditta"}
-          </h2>
-          {(collection.length > 0 || hasFilters) && (
-            <p>
-              <strong>{visible.length}</strong>{" "}
-              {visible.length === 1 ? "risultato" : "risultati"} su{" "}
-              {collection.length}
-              {expiring > 0 ? ` · ${expiring} in scadenza entro 7 giorni` : ""}
-            </p>
-          )}
-        </div>
-        <div className="tender-list">
-          {visible.map((item) => {
-            const status = statusPresentation(item);
-            const detailPath = item.catalogOnly
-              ? `/esplora/${encodeURIComponent(item.id)}`
-              : `/bandi/${encodeURIComponent(item.id)}`;
-            const detailHref = `${detailPath}?ritorno=${encodeURIComponent(returnHref)}`;
-            return (
-              <TenderListCard
-                key={item.id}
-                title={item.title}
-                description={tenderWorkExcerpt(item)}
-                buyer={item.buyer}
-                location={item.location}
-                deadline={
-                  item.deadline
-                    ? `Scadenza ${formatDate(item.deadline)}`
-                    : "Scadenza non indicata"
-                }
-                status={status.label}
-                statusTone={status.tone}
-                sector={sectorCaption(
-                  item.sectors,
-                  item.classification?.needsClassification,
-                )}
-                detailHref={detailHref}
-                relevance={
-                  <>
-                    <MatchNote
-                      assessment={item.assessment}
-                      reason={item.reason}
-                    />
-                    {item.reviewRequired && (
-                      <p className="publication-review-note">
-                        Dati del bando da verificare. Consulta gli avvisi nella
-                        scheda.
-                      </p>
-                    )}
-                  </>
-                }
-                saveAction={
-                  <button
-                    type="button"
-                    aria-label={
-                      item.saved
-                        ? `Rimuovi ${item.title} dai salvati`
-                        : `Salva ${item.title}`
-                    }
-                    aria-pressed={item.saved}
-                    disabled={!!pendingActions[item.id]}
-                    className={`button ${item.saved ? "primary" : "secondary"}`}
-                    onClick={() => action(item.id, "saved", !item.saved)}
-                  >
-                    <Bookmark
-                      size={17}
-                      fill={item.saved ? "currentColor" : "none"}
-                      aria-hidden="true"
-                    />
-                    {pendingActions[item.id]
-                      ? "Salvataggio…"
-                      : item.saved
-                        ? "Salvato · Rimuovi"
-                        : "Salva"}
-                  </button>
-                }
-                secondaryAction={
-                  !item.catalogOnly && !savedOnly ? (
-                    <button
-                      className="dismiss-link"
-                      disabled={!!pendingActions[item.id]}
-                      onClick={() =>
-                        action(item.id, "dismissed", !item.dismissed)
-                      }
-                    >
-                      {item.dismissed
-                        ? "Ripristina nella selezione"
-                        : "Non interessa"}
-                    </button>
-                  ) : undefined
-                }
-              />
-            );
-          })}
-        </div>
-        {visible.length === 0 && (
-          <div className="empty-state panel">
-            {savedOnly ? <Bookmark size={34} /> : <Radar size={34} />}
-            <h3>
-              {hasFilters
-                ? "Nessun risultato corrisponde ai filtri."
-                : savedOnly
-                  ? "Non hai ancora salvato nessun bando."
-                  : "Nessuna proposta ancora selezionata per la tua ditta."}
-            </h3>
-            <p>
-              {hasFilters
-                ? "Azzera ricerca e filtri per rivedere l’intera raccolta."
-                : savedOnly
-                  ? "Usa il pulsante “Salva” su un bando per conservarlo e ritrovarlo qui."
-                  : "Puoi già cercare tra i bandi raccolti."}
-            </p>
-            {hasFilters ? (
-              <button className="button secondary" onClick={clearFilters}>
-                Azzera i filtri
-              </button>
-            ) : (
-              <Link href="/esplora" className="button primary">
-                {savedOnly
-                  ? "Cerca tra tutti i bandi"
-                  : "Esplora i bandi in corso"}
-              </Link>
-            )}
+              {refreshing ? "Aggiornamento…" : "Aggiorna"}
+            </button>
           </div>
         )}
-        {!savedOnly && items.length > 0 && (
-          <button
-            className="subtle-button"
-            onClick={() => setShowDismissed(!showDismissed)}
-          >
-            {showDismissed
-              ? "Torna ai bandi selezionati"
-              : "Mostra i bandi esclusi"}
-          </button>
+      <section
+        className="collection-results"
+        aria-label={savedOnly ? "Bandi salvati" : "Bandi per la tua ditta"}
+      >
+        {!demoLoaded ? (
+          <LoadingContent />
+        ) : (
+          <>
+            {collection.length > 0 && (
+              <div className="collection-controls">
+                <label className="search-input">
+                  <Search size={18} aria-hidden="true" />
+                  <input
+                    placeholder={
+                      savedOnly
+                        ? "Cerca nei tuoi salvati…"
+                        : "Cerca nei bandi selezionati per te…"
+                    }
+                    value={query}
+                    maxLength={200}
+                    onChange={(event) => setQuery(event.target.value)}
+                    aria-label={
+                      savedOnly
+                        ? "Cerca nei tuoi salvati"
+                        : "Cerca nei bandi selezionati per te"
+                    }
+                  />
+                </label>
+                <label className="select-wrap">
+                  <span className="sr-only">Settore</span>
+                  <select
+                    aria-label="Filtra per settore"
+                    value={sector}
+                    onChange={(event) => setSector(event.target.value)}
+                  >
+                    <option value="all">Tutti i settori</option>
+                    {SECTORS.map((entry) => (
+                      <option key={entry.id} value={entry.id}>
+                        {entry.label}
+                      </option>
+                    ))}
+                    <option value={UNCLASSIFIED_SECTOR_FILTER}>
+                      Da classificare
+                    </option>
+                  </select>
+                  <ChevronDown size={15} aria-hidden="true" />
+                </label>
+                <label className="select-wrap">
+                  <span className="sr-only">Ordinamento</span>
+                  <select
+                    aria-label="Ordina bandi"
+                    value={sort}
+                    onChange={(event) => setSort(event.target.value)}
+                  >
+                    <option value="relevance">
+                      {savedOnly ? "Ordine di pertinenza" : "Più pertinenti"}
+                    </option>
+                    <option value="deadline">Scadenza più vicina</option>
+                  </select>
+                  <ChevronDown size={15} aria-hidden="true" />
+                </label>
+              </div>
+            )}
+            {collection.length > 0 && (
+              <div className="collection-heading">
+                <h2 id="collection-title">
+                  {savedOnly
+                    ? "Bandi salvati"
+                    : showDismissed
+                      ? "Bandi esclusi"
+                      : "Selezionati per la tua ditta"}
+                </h2>
+                {(collection.length > 0 || hasFilters) && (
+                  <p>
+                    <strong>{visible.length}</strong>{" "}
+                    {visible.length === 1 ? "risultato" : "risultati"} su{" "}
+                    {collection.length}
+                    {expiring > 0
+                      ? ` · ${expiring} in scadenza entro 7 giorni`
+                      : ""}
+                  </p>
+                )}
+              </div>
+            )}
+            {collection.length > 0 && hasFilters && (
+              <div className="applied-filters" aria-label="Criteri applicati">
+                {query.trim() && <span>Ricerca: “{query.trim()}”</span>}
+                {sector !== "all" && (
+                  <span>
+                    {sector === UNCLASSIFIED_SECTOR_FILTER
+                      ? "Da classificare"
+                      : sectorLabel(sector)}
+                  </span>
+                )}
+                {sort === "deadline" && <span>Scadenza più vicina</span>}
+                <button
+                  type="button"
+                  className="text-link"
+                  onClick={clearFilters}
+                >
+                  Azzera i filtri
+                </button>
+              </div>
+            )}
+            <div className="tender-list">
+              {visible.map((item) => {
+                const status = statusPresentation(item);
+                const detailPath = item.catalogOnly
+                  ? `/esplora/${encodeURIComponent(item.id)}`
+                  : `/bandi/${encodeURIComponent(item.id)}`;
+                const detailHref = `${detailPath}?ritorno=${encodeURIComponent(returnHref)}`;
+                return (
+                  <TenderListCard
+                    key={item.id}
+                    title={item.title}
+                    description={tenderWorkExcerpt(item)}
+                    buyer={item.buyer}
+                    location={item.location}
+                    deadline={item.deadline}
+                    status={status.label}
+                    statusTone={status.tone}
+                    sector={sectorCaption(
+                      item.sectors,
+                      item.classification?.needsClassification,
+                    )}
+                    detailHref={detailHref}
+                    relevance={
+                      <>
+                        <MatchNote
+                          assessment={item.assessment}
+                          reason={item.reason}
+                        />
+                        {item.reviewRequired && (
+                          <p className="publication-review-note">
+                            Dati del bando da verificare. Consulta gli avvisi
+                            nella scheda.
+                          </p>
+                        )}
+                      </>
+                    }
+                    saveAction={
+                      <button
+                        type="button"
+                        aria-label={
+                          item.saved
+                            ? `Rimuovi ${item.title} dai salvati`
+                            : `Salva ${item.title}`
+                        }
+                        aria-pressed={item.saved}
+                        disabled={!!pendingActions[item.id]}
+                        aria-busy={!!pendingActions[item.id]}
+                        className={`button ${item.saved ? "primary" : "secondary"}`}
+                        onClick={() => action(item.id, "saved", !item.saved)}
+                      >
+                        <Bookmark
+                          size={17}
+                          fill={item.saved ? "currentColor" : "none"}
+                          aria-hidden="true"
+                        />
+                        {pendingActions[item.id]
+                          ? "Salvataggio…"
+                          : item.saved
+                            ? "Salvato"
+                            : "Salva"}
+                      </button>
+                    }
+                    secondaryAction={
+                      !item.catalogOnly && !savedOnly ? (
+                        <button
+                          className="dismiss-link"
+                          disabled={!!pendingActions[item.id]}
+                          onClick={() =>
+                            action(item.id, "dismissed", !item.dismissed)
+                          }
+                        >
+                          {item.dismissed
+                            ? "Ripristina nella selezione"
+                            : "Non interessa"}
+                        </button>
+                      ) : undefined
+                    }
+                  />
+                );
+              })}
+            </div>
+            {visible.length === 0 && (
+              <div className="empty-state panel">
+                {savedOnly ? <Bookmark size={34} /> : <Radar size={34} />}
+                <h2>
+                  {processingEmpty
+                    ? radarStatus.state === "delayed"
+                      ? "L’elaborazione sta richiedendo più tempo del previsto."
+                      : "Stiamo preparando le proposte per la tua ditta."
+                    : filteringEmpty
+                      ? "Nessun risultato corrisponde ai filtri."
+                      : showDismissed
+                        ? "Non hai escluso nessun bando."
+                        : savedOnly
+                          ? "Non hai ancora salvato nessun bando."
+                          : "Nessuna proposta ancora selezionata per la tua ditta."}
+                </h2>
+                <p>
+                  {processingEmpty
+                    ? radarStatus.state === "delayed"
+                      ? "Le proposte per la tua ditta non sono ancora pronte. Nel frattempo puoi consultare il catalogo."
+                      : "L’elaborazione è in corso. Nel frattempo puoi consultare il catalogo."
+                    : filteringEmpty
+                      ? "Azzera ricerca e filtri per rivedere l’intera raccolta."
+                      : showDismissed
+                        ? "Qui ritroverai le proposte segnate come non interessanti."
+                        : savedOnly
+                          ? "Usa il pulsante “Salva” su un bando per conservarlo e ritrovarlo qui."
+                          : "Puoi già cercare tra i bandi raccolti. Una proposta compare qui dopo la verifica della pertinenza per la tua ditta."}
+                </p>
+                {filteringEmpty ? (
+                  <button className="button secondary" onClick={clearFilters}>
+                    Azzera i filtri
+                  </button>
+                ) : showDismissed ? (
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() => setShowDismissed(false)}
+                  >
+                    Torna ai bandi selezionati
+                  </button>
+                ) : (
+                  <Link href="/esplora" className="button primary">
+                    {savedOnly
+                      ? "Cerca tra tutti i bandi"
+                      : "Esplora i bandi in corso"}
+                  </Link>
+                )}
+              </div>
+            )}
+            {!savedOnly && items.length > 0 && (
+              <button
+                className="subtle-button"
+                onClick={() => setShowDismissed(!showDismissed)}
+              >
+                {showDismissed
+                  ? "Torna ai bandi selezionati"
+                  : "Mostra i bandi esclusi"}
+              </button>
+            )}
+          </>
         )}
       </section>
       {toast && (

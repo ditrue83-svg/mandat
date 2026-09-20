@@ -5,9 +5,11 @@ import type { Opportunity } from "@/lib/domain";
 export function DetailActions({
   item,
   demo,
+  mode = "all",
 }: {
   item: Opportunity;
   demo: boolean;
+  mode?: "all" | "save" | "feedback";
 }) {
   const [saved, setSaved] = useState(item.saved);
   const [relevant, setRelevant] = useState<boolean | null>(
@@ -15,6 +17,11 @@ export function DetailActions({
   );
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(""), 5000);
+    return () => clearTimeout(timer);
+  }, [message]);
   useEffect(() => {
     if (demo) {
       try {
@@ -29,6 +36,7 @@ export function DetailActions({
     }
   }, [demo, item.id]);
   async function act(data: { saved?: boolean; relevant?: boolean }) {
+    if (busy) return;
     setBusy(true);
     try {
       if (demo) {
@@ -62,38 +70,60 @@ export function DetailActions({
   }
   return (
     <>
-      <button
-        className="button primary full-width"
-        disabled={busy}
-        onClick={() => act({ saved: !saved })}
-      >
-        <Bookmark size={17} fill={saved ? "currentColor" : "none"} />
-        {saved ? "Salvata · Rimuovi" : "Salva opportunità"}
-      </button>
-      <h3>Questo bando fa per te?</h3>
-      <p>Valuta la pertinenza rispetto al lavoro della tua ditta.</p>
-      <div className="feedback-row">
+      {mode !== "feedback" && (
         <button
-          aria-pressed={relevant === true}
+          type="button"
+          className="button secondary detail-save"
+          aria-label={
+            saved ? `Rimuovi ${item.title} dai salvati` : `Salva ${item.title}`
+          }
+          aria-pressed={saved}
+          aria-busy={busy}
           disabled={busy}
-          className={`button ${relevant === true ? "primary" : "secondary"}`}
-          onClick={() => act({ relevant: true })}
+          onClick={() => act({ saved: !saved })}
         >
-          <ThumbsUp size={16} /> Sì
+          <Bookmark
+            size={17}
+            fill={saved ? "currentColor" : "none"}
+            aria-hidden="true"
+          />
+          {busy ? "Salvataggio…" : saved ? "Salvato" : "Salva"}
         </button>
-        <button
-          aria-pressed={relevant === false}
-          disabled={busy}
-          className={`button ${relevant === false ? "primary" : "secondary"}`}
-          onClick={() => act({ relevant: false })}
-        >
-          <ThumbsDown size={16} /> No
-        </button>
-      </div>
-      {message && (
-        <div role="status" className="notice">
-          {message}
+      )}
+      {mode !== "save" && (
+        <div className="detail-feedback">
+          <h3>Questo bando fa per te?</h3>
+          <p>Valuta la pertinenza rispetto al lavoro della tua ditta.</p>
+          <div className="feedback-row">
+            <button
+              aria-pressed={relevant === true}
+              disabled={busy}
+              className={`button ${relevant === true ? "primary" : "secondary"}`}
+              onClick={() => act({ relevant: true })}
+            >
+              <ThumbsUp size={16} /> Sì
+            </button>
+            <button
+              aria-pressed={relevant === false}
+              disabled={busy}
+              className={`button ${relevant === false ? "primary" : "secondary"}`}
+              onClick={() => act({ relevant: false })}
+            >
+              <ThumbsDown size={16} /> No
+            </button>
+          </div>
         </div>
+      )}
+      {mode !== "save" ? (
+        <div className="detail-feedback-message" role="status">
+          {message && <p className="notice">{message}</p>}
+        </div>
+      ) : (
+        message && (
+          <div role="status" className="toast">
+            {message}
+          </div>
+        )
       )}
     </>
   );

@@ -99,7 +99,8 @@ it("mette in apertura lavoro, fase, sopralluogo e modalità decisive senza perde
   expect(html).toContain("Potatura di alberi");
   expect(html).toContain("Presentazione dell’offerta");
   expect(html).toContain("Sopralluogo obbligatorio");
-  expect(html).toContain("Busta o plico");
+  expect(html).toContain("due copie firmate in busta chiusa");
+  expect(html).toContain('href="#brief-submit"');
   expect(html).toContain("Esperienza in manutenzione di parchi");
   expect(html).toContain("Lugano");
 });

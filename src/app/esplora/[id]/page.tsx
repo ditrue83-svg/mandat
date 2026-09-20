@@ -1,3 +1,7 @@
+import {
+  TenderDetailHeader,
+  TenderSectionLinks,
+} from "@/components/tender-detail-header";
 import Link from "next/link";
 import { sectorCaption } from "@/lib/sectors";
 import { SectorSummary } from "@/components/sector-summary";
@@ -48,17 +52,23 @@ export default async function CatalogDetail({
           ? "Torna ai Salvati"
           : "Torna a Tutti i bandi"}
       </Link>
-      <section className="page-heading">
-        <div>
-          <div className="eyebrow">
-            PUBBLICAZIONE NON UFFICIALE ·{" "}
-            {item.source === "simap" ? "SIMAP" : "FOGLIO TI"}
-          </div>
-          <h1>{item.title}</h1>
-          <p>{item.buyer || "Ente non indicato"}</p>
-          <TenderSourceButton publication={item} demo={viewer.demo} />
-        </div>
-      </section>
+      <TenderDetailHeader
+        title={item.title}
+        buyer={item.buyer}
+        source={<TenderSourceButton publication={item} demo={viewer.demo} />}
+        save={
+          <CatalogBookmark
+            id={item.id}
+            title={item.title}
+            initialSaved={item.saved}
+            demo={viewer.demo}
+          />
+        }
+      />
+      <p className="detail-save-hint">
+        Salvalo anche se la pertinenza per la tua ditta non è stata ancora
+        valutata.
+      </p>
       {item.status !== "open" && (
         <div className="notice" role="status">
           Stato del bando: {CATALOG_STATUS_LABELS[item.status]}. Questa
@@ -70,8 +80,22 @@ export default async function CatalogDetail({
         brief={item.tenderBrief}
         location={item.location}
       />
+      <TenderSectionLinks />
       <div className="detail-grid">
         <div>
+          <TenderBriefPanels
+            brief={item.tenderBrief}
+            relevance={
+              <>
+                <MatchNote assessment={item.assessment} reason={item.reason} />
+                <p className="meta">
+                  Il confronto riguarda l’interesse potenziale. Il possesso dei
+                  requisiti e l’idoneità a partecipare vanno verificati nei
+                  documenti ufficiali.
+                </p>
+              </>
+            }
+          />
           <details className="panel secondary-publication-data">
             <summary>Altri dati della pubblicazione</summary>
             <dl className="catalog-details">
@@ -103,19 +127,6 @@ export default async function CatalogDetail({
             sectors={item.sectors}
             classification={item.classification}
           />
-          <TenderBriefPanels
-            brief={item.tenderBrief}
-            relevance={
-              <>
-                <MatchNote assessment={item.assessment} reason={item.reason} />
-                <p className="meta">
-                  Il confronto riguarda l’interesse potenziale. Il possesso dei
-                  requisiti e l’idoneità a partecipare vanno verificati nei
-                  documenti ufficiali.
-                </p>
-              </>
-            }
-          />
           <details className="panel original-publication">
             <summary>Fonti e testo originale</summary>
             <p className="meta">
@@ -129,20 +140,6 @@ export default async function CatalogDetail({
           </details>
         </div>
         <aside>
-          <section className="panel">
-            <h2>Tienilo d’occhio</h2>
-            <p>
-              Salvalo anche se la pertinenza per la tua ditta non è stata ancora
-              valutata.
-            </p>
-            <CatalogBookmark
-              id={item.id}
-              title={item.title}
-              initialSaved={item.saved}
-              demo={viewer.demo}
-              wide
-            />
-          </section>
           <section className="panel">
             <h2>Consulta la fonte</h2>
             <p>

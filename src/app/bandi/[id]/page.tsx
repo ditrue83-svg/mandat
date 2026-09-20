@@ -1,3 +1,7 @@
+import {
+  TenderDetailHeader,
+  TenderSectionLinks,
+} from "@/components/tender-detail-header";
 import Link from "next/link";
 import { sectorCaption } from "@/lib/sectors";
 import { SectorSummary } from "@/components/sector-summary";
@@ -49,19 +53,12 @@ export default async function Detail({
           ? "Torna ai Salvati"
           : "Torna a Per la tua ditta"}
       </Link>
-      <section className="detail-heading">
-        <div className="eyebrow">
-          {sectorCaption(
-            item.sectors,
-            item.classification?.needsClassification,
-          )}
-        </div>
-        <h1>{item.title}</h1>
-        <p className="meta">
-          {item.buyer} · {item.location}
-        </p>
-        <TenderSourceButton publication={item} demo={viewer.demo} />
-      </section>
+      <TenderDetailHeader
+        title={item.title}
+        buyer={item.buyer}
+        source={<TenderSourceButton publication={item} demo={viewer.demo} />}
+        save={<DetailActions item={item} demo={viewer.demo} mode="save" />}
+      />
       {viewer.demo && (
         <div className="notice">
           Questo è un bando inventato per esplorare Mandat. Non corrisponde a
@@ -88,46 +85,9 @@ export default async function Detail({
           </div>
         )}
       <TenderDecisionSummary brief={brief} location={item.location} />
+      <TenderSectionLinks />
       <div className="detail-grid space-top">
         <div>
-          <details className="panel secondary-publication-data">
-            <summary>Altri dati della pubblicazione</summary>
-            {item.lotReview && (
-              <p className="meta">
-                {item.lotReview.shape === "lots"
-                  ? "Scadenza, importo e luogo devono essere verificati per ciascun lotto nella fonte ufficiale."
-                  : "Verifica scadenza, importo e luogo del progetto nella fonte ufficiale."}
-              </p>
-            )}
-            <dl className="detail-facts">
-              <div>
-                <dt>Importo stimato</dt>
-                <dd>{formatMoney(item.valueChf)}</dd>
-              </div>
-              <div>
-                <dt>Luogo di esecuzione</dt>
-                <dd>{item.location || "Non indicato"}</dd>
-              </div>
-              <div>
-                <dt>Procedura</dt>
-                <dd>{item.procedure || "Non indicata"}</dd>
-              </div>
-              <div>
-                <dt>Pubblicazione</dt>
-                <dd>{formatDate(item.publishedAt)}</dd>
-              </div>
-              <div>
-                <dt>Fonte</dt>
-                <dd>
-                  {item.source === "simap" ? "simap.ch" : "Foglio Ufficiale TI"}
-                </dd>
-              </div>
-            </dl>
-          </details>
-          <SectorSummary
-            sectors={item.sectors}
-            classification={item.classification}
-          />
           <TenderBriefPanels
             brief={brief}
             relevance={
@@ -222,6 +182,44 @@ export default async function Detail({
               </>
             }
           />
+          <details className="panel secondary-publication-data">
+            <summary>Altri dati della pubblicazione</summary>
+            {item.lotReview && (
+              <p className="meta">
+                {item.lotReview.shape === "lots"
+                  ? "Scadenza, importo e luogo devono essere verificati per ciascun lotto nella fonte ufficiale."
+                  : "Verifica scadenza, importo e luogo del progetto nella fonte ufficiale."}
+              </p>
+            )}
+            <dl className="detail-facts">
+              <div>
+                <dt>Importo stimato</dt>
+                <dd>{formatMoney(item.valueChf)}</dd>
+              </div>
+              <div>
+                <dt>Luogo di esecuzione</dt>
+                <dd>{item.location || "Non indicato"}</dd>
+              </div>
+              <div>
+                <dt>Procedura</dt>
+                <dd>{item.procedure || "Non indicata"}</dd>
+              </div>
+              <div>
+                <dt>Pubblicazione</dt>
+                <dd>{formatDate(item.publishedAt)}</dd>
+              </div>
+              <div>
+                <dt>Fonte</dt>
+                <dd>
+                  {item.source === "simap" ? "simap.ch" : "Foglio Ufficiale TI"}
+                </dd>
+              </div>
+            </dl>
+          </details>
+          <SectorSummary
+            sectors={item.sectors}
+            classification={item.classification}
+          />
           <details className="panel original-publication">
             <summary>Fonti e testo originale</summary>
             <p className="meta">
@@ -251,7 +249,7 @@ export default async function Detail({
         </div>
         <aside>
           <section className="panel">
-            <DetailActions item={item} demo={viewer.demo} />
+            <DetailActions item={item} demo={viewer.demo} mode="feedback" />
           </section>
           <section className="panel">
             <h3>Prima di partecipare</h3>

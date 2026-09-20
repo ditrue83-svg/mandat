@@ -21,7 +21,20 @@ function NavigationLabel({ label }: { label: string }) {
   const { pending } = useLinkStatus();
   return (
     <span className="navigation-label" aria-live="polite">
-      {pending ? "Apro…" : label}
+      <span
+        className="navigation-original"
+        style={{ visibility: pending ? "hidden" : undefined }}
+        aria-hidden={pending}
+      >
+        {label}
+      </span>
+      <span
+        className="navigation-pending"
+        style={{ visibility: pending ? undefined : "hidden" }}
+        aria-hidden={!pending}
+      >
+        Apro…
+      </span>
     </span>
   );
 }
@@ -29,7 +42,7 @@ export function Shell({
   viewer,
   children,
 }: {
-  viewer: Viewer;
+  viewer?: Viewer;
   children: React.ReactNode;
 }) {
   const path = usePathname();
@@ -66,20 +79,26 @@ export function Shell({
           ))}
         </nav>
         <div className="sidebar-bottom">
-          {viewer.admin && (
+          {viewer?.admin && (
             <Link href="/admin" className="admin-link">
               <ShieldCheck size={17} /> Area fondatore{" "}
               <ArrowUpRight size={15} />
             </Link>
           )}
           <Link href="/profilo" className="company-switch">
-            <span className="avatar">{viewer.name.slice(0, 1)}</span>
+            <span className="avatar">
+              {viewer ? (
+                viewer.name.slice(0, 1)
+              ) : (
+                <Building2 size={18} aria-hidden="true" />
+              )}
+            </span>
             <span>
-              <strong>{viewer.profile.name}</strong>
+              <strong>{viewer?.profile.name ?? "La tua ditta"}</strong>
               <small>Beta Radar · gratuita</small>
             </span>
           </Link>
-          {!viewer.demo && (
+          {viewer && !viewer.demo && (
             <button
               className="logout"
               disabled={loggingOut}
@@ -114,7 +133,7 @@ export function Shell({
         <header className="topbar">
           <span>Mandat · Radar appalti</span>
           <div>
-            {viewer.admin && (
+            {viewer?.admin && (
               <Link
                 href="/admin"
                 className="icon-button"
@@ -138,11 +157,15 @@ export function Shell({
               aria-label="Il tuo profilo"
               className="avatar small"
             >
-              {viewer.name.slice(0, 1)}
+              {viewer ? (
+                viewer.name.slice(0, 1)
+              ) : (
+                <Building2 size={17} aria-hidden="true" />
+              )}
             </Link>
           </div>
         </header>
-        {viewer.demo && (
+        {viewer?.demo && (
           <div className="demo-banner">
             <span>
               <strong>Modalità dimostrativa</strong>

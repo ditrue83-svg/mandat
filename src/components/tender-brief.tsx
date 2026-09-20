@@ -133,25 +133,62 @@ export function BriefFacts({
   );
 }
 
-function firstFact(facts: BriefFact[], empty: string) {
-  return facts[0]?.text || empty;
+function shortWork(text: string) {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (compact.length <= 180) return compact;
+  const boundary = compact.lastIndexOf(" ", 179);
+  return compact.slice(0, boundary > 100 ? boundary : 179).trim() + "…";
 }
 
-function submissionModes(facts: BriefFact[]) {
-  const value = facts
-    .map((fact) => `${fact.label} ${fact.text}`)
-    .join(" ")
-    .toLocaleLowerCase("it");
-  const modes: string[] = [];
-  if (/brevi manu|a mano/.test(value)) modes.push("Consegna a mano");
-  if (/postale|per posta|raccomandat/.test(value))
-    modes.push("Consegna postale");
-  if (/elettronic|digitale|su simap|piattaforma/.test(value))
-    modes.push("Consegna elettronica");
-  if (/busta chiusa|plico/.test(value)) modes.push("Busta o plico");
-  return [...new Set(modes)];
+type ScopedFact = { fact: BriefFact; scope?: string };
+function summaryFacts(brief: TenderBrief, field: "deadlines" | "visits") {
+  return [
+    ...brief[field].map((fact) => ({ fact }) as ScopedFact),
+    ...brief.lots.flatMap((lot) =>
+      lot[field].map((fact) => ({ fact, scope: `Lotto ${lot.number}` })),
+    ),
+  ].filter(
+    (entry, index, all) =>
+      all.findIndex(
+        (other) =>
+          other.scope === entry.scope &&
+          other.fact.label === entry.fact.label &&
+          other.fact.source.path.replace(/\/(it|de|fr|en)$/, "") ===
+            entry.fact.source.path.replace(/\/(it|de|fr|en)$/, ""),
+      ) === index,
+  );
 }
-
+function SummaryFacts({
+  entries,
+  empty,
+}: {
+  entries: ScopedFact[];
+  empty: string;
+}) {
+  if (!entries.length) return <span>{empty}</span>;
+  return (
+    <ul className="decision-facts">
+      {entries.map(({ fact, scope }, index) => (
+        <li key={index} lang={fact.language}>
+          <strong>
+            {scope ? `${scope} · ` : ""}
+            {fact.label}
+          </strong>
+          <span>{fact.text}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+function decisiveRequirement(facts: BriefFact[]) {
+  return (
+    facts.find((fact) =>
+      /qualificationCriteriaNote|qualificationCriteria\/\d+|otherRequirements/.test(
+        fact.source.path,
+      ),
+    ) ?? facts[0]
+  );
+}
 export function TenderDecisionSummary({
   brief,
   location,
@@ -159,35 +196,43 @@ export function TenderDecisionSummary({
   brief: TenderBrief;
   location: string;
 }) {
-  const deadlines = [
-    ...brief.deadlines,
-    ...brief.lots.flatMap((lot) => lot.deadlines),
-  ].filter((fact) =>
-    /partecipazione|presentazione dell’offerta|fase successiva/.test(
+  const allDeadlines = summaryFacts(brief, "deadlines");
+  const deadlines = allDeadlines.filter(({ fact }) =>
+    /partecipazione|presentazione dell’offerta|fase successiva|manifestazione di interesse|procedura da verificare|termine indicato/.test(
       fact.label.toLocaleLowerCase("it"),
     ),
   );
-  const visits = [...brief.visits, ...brief.lots.flatMap((lot) => lot.visits)];
-  const submission = [
-    ...brief.submission,
-    ...brief.lots.flatMap((lot) => lot.submission),
-  ];
-  const requirements = [
-    ...brief.requirements,
-    ...brief.lots.flatMap((lot) => lot.requirements),
-  ];
-  const decisiveRequirement =
-    requirements.find((fact) =>
-      /qualificationCriteriaNote|qualificationCriteria\/\d+|otherRequirements/.test(
-        fact.source.path,
-      ),
-    ) ?? requirements[0];
-  const modes = submissionModes(submission);
-  const mandatoryVisit = visits.some((fact) =>
-    /obbligatori|obbligatorio|obbligatoria|mandatory|zwingend/.test(
-      fact.text.toLocaleLowerCase("it"),
-    ),
+  const questions = allDeadlines.filter(({ fact }) =>
+    /^Domande di chiarimento/.test(fact.label),
   );
+  const visits = summaryFacts(brief, "visits");
+  const mandatoryVisit = visits.some(({ fact }) =>
+    /obbligatori|mandatory|zwingend/.test(fact.text.toLocaleLowerCase("it")),
+  );
+  const requirements: ScopedFact[] = [];
+  const projectRequirement = decisiveRequirement(brief.requirements);
+  if (projectRequirement) requirements.push({ fact: projectRequirement });
+  for (const lot of brief.lots) {
+    const fact = decisiveRequirement(lot.requirements);
+    if (fact) requirements.push({ fact, scope: `Lotto ${lot.number}` });
+  }
+  const submissions: ScopedFact[] = [];
+  const submissionSummary = (facts: BriefFact[]) =>
+    facts.find(
+      (fact) =>
+        fact.label === "Modalità e formalità di presentazione" &&
+        fact.text.length <= 320,
+    ) ??
+    facts.find((fact) => fact.label === "Modalità di inoltro") ??
+    facts.find((fact) => fact.label === "Istruzioni per la consegna") ??
+    facts[0];
+  const projectSubmission = submissionSummary(brief.submission);
+  if (projectSubmission) submissions.push({ fact: projectSubmission });
+  // A lot's instructions are never silently presented as project-wide rules.
+  for (const lot of brief.lots) {
+    const fact = submissionSummary(lot.submission);
+    if (fact) submissions.push({ fact, scope: `Lotto ${lot.number}` });
+  }
   return (
     <section
       className="panel decision-summary"
@@ -197,18 +242,13 @@ export function TenderDecisionSummary({
         <div className="eyebrow">PRIMA DI PARTECIPARE</div>
         <h2 id="decision-summary-title">Le condizioni decisive, in breve</h2>
       </div>
+      {!!brief.lots.length && (
+        <p className="decision-lot-notice">
+          Gara con {brief.lots.length} lotti: controlla separatamente le
+          condizioni di ciascuno.
+        </p>
+      )}
       <dl className="decision-grid">
-        <div className="decision-work">
-          <dt>
-            <Wrench size={17} aria-hidden="true" /> Lavoro richiesto
-          </dt>
-          <dd>
-            {firstFact(
-              brief.description,
-              "Descrizione non disponibile nei dati acquisiti: consulta la fonte ufficiale.",
-            )}
-          </dd>
-        </div>
         <div>
           <dt>
             <MapPin size={17} aria-hidden="true" /> Luogo
@@ -217,17 +257,13 @@ export function TenderDecisionSummary({
         </div>
         <div>
           <dt>
-            <Timer size={17} aria-hidden="true" /> Termine pertinente
+            <Timer size={17} aria-hidden="true" /> Termini di partecipazione
           </dt>
           <dd>
-            {deadlines[0]
-              ? `${deadlines[0].label}: ${deadlines[0].text}`
-              : "Non indicato nei dati acquisiti: verifica la fase applicabile nella fonte."}
-            {brief.lots.length > 0 && (
-              <small>
-                Verifica anche i termini specifici di ciascun lotto.
-              </small>
-            )}
+            <SummaryFacts
+              entries={deadlines}
+              empty="Non indicati nei dati acquisiti: verifica la fase applicabile nella fonte."
+            />
           </dd>
         </div>
         <div className={mandatoryVisit ? "decision-warning" : ""}>
@@ -235,37 +271,62 @@ export function TenderDecisionSummary({
             <AlertTriangle size={17} aria-hidden="true" /> Sopralluogo
           </dt>
           <dd>
-            {firstFact(
-              visits,
-              "Non indicato nei dati acquisiti: controlla il capitolato.",
-            )}
+            <SummaryFacts
+              entries={visits}
+              empty="Non indicato nei dati acquisiti: controlla il capitolato."
+            />
           </dd>
         </div>
         <div>
           <dt>
-            <Send size={17} aria-hidden="true" /> Presentazione
+            <Send size={17} aria-hidden="true" /> Modalità di consegna
           </dt>
           <dd>
-            {modes.length > 0 && (
-              <span className="submission-modes">
-                {modes.map((mode) => (
-                  <span key={mode}>{mode}</span>
-                ))}
-              </span>
-            )}
-            {firstFact(
-              submission,
-              "Modalità non indicata nei dati acquisiti: consulta le istruzioni ufficiali.",
-            )}
+            <SummaryFacts
+              entries={submissions}
+              empty="Modalità non indicata nei dati acquisiti: consulta le istruzioni ufficiali."
+            />
+            <a className="text-link" href="#brief-submit">
+              Tutte le modalità e il recapito
+            </a>
           </dd>
         </div>
-        <div>
+        <div className="decision-requirement">
           <dt>
             <FileCheck2 size={17} aria-hidden="true" /> Requisito determinante
           </dt>
           <dd>
-            {decisiveRequirement?.text ||
-              "Non indicato nei dati acquisiti: verifica criteri e documenti ufficiali."}
+            <SummaryFacts
+              entries={requirements}
+              empty="Non indicato nei dati acquisiti: verifica criteri e documenti ufficiali."
+            />
+            <a className="text-link" href="#brief-requirements">
+              Tutti i requisiti e i documenti
+            </a>
+          </dd>
+        </div>
+        {questions.length > 0 && (
+          <div className="decision-questions">
+            <dt>
+              <Timer size={17} aria-hidden="true" /> Domande di chiarimento
+            </dt>
+            <dd>
+              <SummaryFacts entries={questions} empty="Non indicate" />
+            </dd>
+          </div>
+        )}
+        <div className="decision-work">
+          <dt>
+            <Wrench size={17} aria-hidden="true" /> Il lavoro, in sintesi
+          </dt>
+          <dd>
+            {shortWork(
+              brief.description[0]?.text ||
+                "Descrizione non disponibile nei dati acquisiti: consulta la fonte ufficiale.",
+            )}
+            <a className="text-link" href="#brief-work">
+              Leggi la descrizione completa
+            </a>
           </dd>
         </div>
       </dl>
@@ -307,7 +368,7 @@ export function TenderBriefPanels({
           </div>
         ))}
       </section>
-      <section className="panel" aria-labelledby="brief-fit">
+      <section className="panel relevance-panel" aria-labelledby="brief-fit">
         <h2 id="brief-fit">Perché può interessare alla tua ditta</h2>
         {relevance}
       </section>

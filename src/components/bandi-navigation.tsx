@@ -20,8 +20,7 @@ const collections: {
     id: "catalog",
     href: "/esplora",
     label: "Tutti i bandi",
-    description:
-      "Cerca tra i bandi raccolti da Mandat, anche fuori dalle tue preferenze.",
+    description: "Bandi raccolti in Ticino, anche fuori dalle tue preferenze.",
   },
   {
     id: "saved",
@@ -46,12 +45,6 @@ export function BandiNavigation({
           <div className="eyebrow">BANDI</div>
           <h1>{current.label}</h1>
           <p>{current.description}</p>
-          {active === "radar" && (
-            <p className="bandi-radar-note">
-              Questa selezione è il tuo Radar: consultare o salvare un bando non
-              lo inserisce automaticamente qui.
-            </p>
-          )}
         </div>
         {showProfileLink && (
           <Link href="/profilo" className="button secondary">

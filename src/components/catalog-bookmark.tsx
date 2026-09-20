@@ -19,6 +19,11 @@ export function CatalogBookmark({
   const [saved, setSaved] = useState(initialSaved);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  useEffect(() => {
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(""), 5000);
+    return () => clearTimeout(timer);
+  }, [message]);
 
   useEffect(() => {
     if (!demo) return;
@@ -70,6 +75,7 @@ export function CatalogBookmark({
         aria-label={saved ? `Rimuovi ${title} dai salvati` : `Salva ${title}`}
         aria-pressed={saved}
         disabled={busy}
+        aria-busy={busy}
         onClick={toggle}
       >
         <Bookmark
@@ -77,7 +83,7 @@ export function CatalogBookmark({
           fill={saved ? "currentColor" : "none"}
           aria-hidden="true"
         />
-        {busy ? "Salvataggio…" : saved ? "Salvato · Rimuovi" : "Salva"}
+        {busy ? "Salvataggio…" : saved ? "Salvato" : "Salva"}
       </button>
       {message && (
         <span className="catalog-bookmark-message" role="status">

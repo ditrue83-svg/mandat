@@ -111,7 +111,7 @@ it("rende visibili salvataggio, problema fonte e collegamenti con filtri", async
   expect(html).toContain('role="alert"');
   expect(html).toContain("Mandat riproverà automaticamente");
   expect(html).toContain("Copertura e ultimo aggiornamento");
-  expect(html).toContain("Cerca tra tutti i bandi raccolti…");
+  expect(html).toContain('aria-label="Cerca tra tutti i bandi raccolti"');
   expect(html).toContain("Sono mostrati inizialmente i bandi in corso");
   expect(html).toContain("Vedi dettagli");
   expect(html).toContain("Salva");
@@ -171,7 +171,6 @@ it("ogni scheda, Radar ed Esplora, include i cinque contenuti e il collegamento 
         "Le condizioni decisive, in breve",
         "Scadenze e modalità di partecipazione",
         "due copie firmate in busta chiusa",
-        "Busta o plico",
         "Fonti e testo originale",
         "Apri il bando su simap ↗",
       ])
