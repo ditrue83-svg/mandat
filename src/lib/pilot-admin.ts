@@ -4,6 +4,7 @@ import {
   administrators,
   companies,
   invitations,
+  issues,
   matches,
   notifications,
   pilotAudits,
@@ -19,6 +20,7 @@ import {
   PILOT_DURATION_DAYS,
   pilotPrerequisiteKeys,
   pilotPrerequisiteSettingKey,
+  pilotOperationalStartBlockers,
   readPilotPrerequisite,
   type PilotPrerequisiteKey,
 } from "./pilot";
@@ -161,6 +163,21 @@ export async function startPilot(now = new Date()) {
         400,
         "Tutte le cinque ditte devono aver accettato l’informativa corrente e completato il profilo.",
       );
+    const criticalIssues = await tx
+      .select({ id: issues.id })
+      .from(issues)
+      .where(and(eq(issues.severity, "critical"), isNull(issues.resolvedAt)))
+      .limit(1);
+    const [automation] = await tx
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, "automation_enabled"));
+    const operationalBlockers = pilotOperationalStartBlockers({
+      criticalIssues: criticalIssues.length,
+      automationEnabled: automation?.value === true,
+    });
+    if (operationalBlockers.length)
+      throw new HttpError(400, operationalBlockers.join(" "));
     const startedAt = now.toISOString();
     const inserted = await tx
       .insert(settings)

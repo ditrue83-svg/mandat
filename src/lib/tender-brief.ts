@@ -14,6 +14,7 @@ import {
 } from "./tender-source-link";
 import { DateTime } from "luxon";
 import { classifyPublication } from "./sector-classification";
+import { zoneForExactCity } from "./ticino-localities";
 
 export type BriefFact = {
   label: string;
@@ -835,6 +836,10 @@ export function potentialInterest(
     reasons.push(
       `Il bando è associato a ${common.map(sectorLabel).join(", ")}, attività presenti nel tuo profilo.`,
     );
+  else if (!classification.sectors.length)
+    reasons.push(
+      "Il settore del bando è ancora da classificare: il confronto con le attività del tuo profilo resta da fare.",
+    );
   else
     reasons.push(
       "I settori individuati nel bando non coincidono con quelli del tuo profilo; l’attività richiesta va approfondita.",
@@ -843,16 +848,38 @@ export function potentialInterest(
     reasons.push(
       `Nel testo compaiono le tue parole chiave: ${keywords.join(", ")}.`,
     );
-  if (p.canton && p.canton !== "TI")
+  // Match the territorial scope used by the preliminary filter: a known TI
+  // canton is sufficient for a company serving the whole canton. The partial
+  // locality list is only used to notice conflicts, never to infer a canton
+  // from the buyer's name or turn an unknown district into a confirmed match.
+  const locality = plainText(p.location).trim();
+  const knownCityZone = zoneForExactCity(locality);
+  const locationConflict =
+    !!(p.zone && p.canton && p.canton !== "TI") ||
+    !!(
+      knownCityZone &&
+      ((p.canton && p.canton !== "TI") || (p.zone && p.zone !== knownCityZone))
+    );
+  if (locationConflict)
+    reasons.push(
+      "Località, cantone o zona di esecuzione sono discordanti: il territorio deve essere verificato nella fonte.",
+    );
+  else if (!p.canton || !locality || locality.toLowerCase() === "non indicato")
+    reasons.push("Il territorio di esecuzione deve essere verificato.");
+  else if (p.canton !== "TI")
     reasons.push(
       `Il luogo indicato è nel cantone ${p.canton}, fuori dalle zone ticinesi del tuo profilo.`,
     );
+  else if (
+    profile.zones.includes("Tutto il Ticino") ||
+    (p.zone && profile.zones.includes(p.zone))
+  )
+    reasons.push(
+      `Il luogo indicato (${p.location}) è nel territorio che hai selezionato.`,
+    );
   else if (p.zone)
     reasons.push(
-      profile.zones.includes("Tutto il Ticino") ||
-        profile.zones.includes(p.zone)
-        ? `Il luogo indicato (${p.location}) è nel territorio che hai selezionato.`
-        : `Il luogo indicato (${p.location}) è fuori dalle zone che hai selezionato.`,
+      `Il luogo indicato (${p.location}) è fuori dalle zone che hai selezionato.`,
     );
   else reasons.push("Il territorio di esecuzione deve essere verificato.");
   if (

@@ -48,6 +48,22 @@ export function Shell({
   const path = usePathname();
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState("");
+  async function signOut() {
+    setLoggingOut(true);
+    setLogoutError("");
+    try {
+      const response = await fetch("/api/auth/sign-out", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      if (!response.ok) throw new Error();
+      location.assign("/accedi");
+    } catch {
+      setLogoutError("Uscita non riuscita. Riprova.");
+      setLoggingOut(false);
+    }
+  }
   const active = (href: string) => {
     if (href === "/")
       return (
@@ -99,33 +115,9 @@ export function Shell({
             </span>
           </Link>
           {viewer && !viewer.demo && (
-            <button
-              className="logout"
-              disabled={loggingOut}
-              onClick={async () => {
-                setLoggingOut(true);
-                setLogoutError("");
-                try {
-                  const response = await fetch("/api/auth/sign-out", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: "{}",
-                  });
-                  if (!response.ok) throw new Error();
-                  location.assign("/accedi");
-                } catch {
-                  setLogoutError("Uscita non riuscita. Riprova.");
-                  setLoggingOut(false);
-                }
-              }}
-            >
+            <button className="logout" disabled={loggingOut} onClick={signOut}>
               <LogOut size={15} /> {loggingOut ? "Uscita…" : "Esci"}
             </button>
-          )}
-          {logoutError && (
-            <p role="alert" className="logout-error">
-              {logoutError}
-            </p>
           )}
         </div>
       </aside>
@@ -163,6 +155,20 @@ export function Shell({
                 <Building2 size={17} aria-hidden="true" />
               )}
             </Link>
+            {viewer && !viewer.demo && (
+              <button
+                type="button"
+                className="icon-button mobile-logout"
+                disabled={loggingOut}
+                onClick={signOut}
+                aria-label={
+                  loggingOut ? "Uscita in corso" : "Esci dall’account"
+                }
+                title="Esci dall’account"
+              >
+                <LogOut size={19} aria-hidden="true" />
+              </button>
+            )}
           </div>
         </header>
         {viewer?.demo && (
@@ -179,7 +185,14 @@ export function Shell({
             </Link>
           </div>
         )}
-        <main id="main-content">{children}</main>
+        <main id="main-content">
+          {logoutError && (
+            <p role="alert" className="logout-error">
+              {logoutError}
+            </p>
+          )}
+          {children}
+        </main>
         <footer className="footer">
           <span>© {new Date().getFullYear()} Mandat</span>
           <span>

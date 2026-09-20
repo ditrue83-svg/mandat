@@ -367,6 +367,7 @@ describe("preparazione e misure del pilota", () => {
       admin: false,
       cohort: true,
       acceptedAt: new Date("2026-09-01T07:50:00.000Z"),
+      acceptedVersion: PILOT_PARTICIPATION_TERMS_VERSION,
       onboardedAt: new Date("2026-09-01T07:58:00.000Z"),
       revokedAt: null,
       disabledAt: null,
@@ -374,6 +375,8 @@ describe("preparazione e misure del pilota", () => {
     const summary = summarizePilot({
       now: new Date("2026-09-08T08:00:00.000Z"),
       startedAt: start,
+      criticalIssues: 0,
+      automationEnabled: false,
       participants: [
         ...Array.from({ length: 5 }, (_, index) => participant(`c${index}`)),
         { ...participant("admin"), admin: true },

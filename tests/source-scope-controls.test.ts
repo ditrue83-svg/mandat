@@ -188,6 +188,8 @@ it("il filtro iniziale dell’admin mostra tutti i giudizi ancora da verificare,
     externalDeliveryTest: null,
     pilot: summarizePilot({
       startedAt: null,
+      criticalIssues: 0,
+      automationEnabled: false,
       participants: [],
       feedback: [],
       deliveries: [],

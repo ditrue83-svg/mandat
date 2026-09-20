@@ -353,10 +353,11 @@ export function AdminDashboard({
               Avvia il pilota di quattro settimane
             </button>
             {!data.pilot.readyToStart && (
-              <p className="meta">
-                Il pulsante si abilita con entrambe le verifiche concluse e
-                cinque ditte attive, invito accettato e profilo completato.
-              </p>
+              <ul className="meta">
+                {data.pilot.startBlockers.map((blocker) => (
+                  <li key={blocker}>{blocker}</li>
+                ))}
+              </ul>
             )}
           </>
         )}

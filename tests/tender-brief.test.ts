@@ -19,6 +19,7 @@ import {
   tenderReferenceLink,
 } from "../src/lib/tender-source-link";
 import { demoViewer } from "../src/lib/demo";
+import { preliminaryMatch } from "../src/lib/matching";
 const texts = (facts: BriefFact[]) => facts.map((f) => f.text).join("\n");
 
 it("espone lavoro, requisiti, prove, sopralluogo, termini e recapito con citazioni risolvibili", () => {
@@ -333,6 +334,154 @@ it("confronta solo il profilo dato e rende espliciti esclusioni, territorio, fas
   expect(reason).toContain("fuori dalle zone");
   expect(reason).toContain("fuori dalla fascia");
   expect(reason).toContain("non ammette il bando nel Radar");
+});
+
+it("riconosce il cantone TI per Tutto il Ticino anche senza distretto classificato", () => {
+  const { publication } = briefFixture();
+  const source = { ...publication, location: "Magliaso", zone: null };
+  const profile = { ...demoViewer.profile, zones: ["Tutto il Ticino"] };
+  const before = structuredClone(source);
+  const now = new Date("2026-09-20T12:00:00Z");
+  const reason = potentialInterest(source, profile, now);
+  expect(reason).toContain(
+    "Il luogo indicato (Magliaso) è nel territorio che hai selezionato.",
+  );
+  expect(reason).not.toContain(
+    "territorio di esecuzione deve essere verificato",
+  );
+  expect(preliminaryMatch(source, profile, now).uncertain).toBe(false);
+  expect(reason).toContain("non ammette il bando nel Radar");
+  expect(source).toEqual(before);
+});
+
+it.each([
+  {
+    label: "distretto selezionato",
+    location: "Lugano",
+    canton: "TI",
+    zone: "Luganese",
+    zones: ["Luganese"],
+    expected: "è nel territorio che hai selezionato",
+  },
+  {
+    label: "distretto fuori profilo",
+    location: "Lugano",
+    canton: "TI",
+    zone: "Luganese",
+    zones: ["Mendrisiotto"],
+    expected: "è fuori dalle zone che hai selezionato",
+  },
+  {
+    label: "cantone fuori dal Ticino",
+    location: "Zürich",
+    canton: "ZH",
+    zone: null,
+    zones: ["Tutto il Ticino"],
+    expected: "cantone ZH, fuori dalle zone ticinesi",
+  },
+  {
+    label: "distretto mancante per un profilo locale",
+    location: "Magliaso",
+    canton: "TI",
+    zone: null,
+    zones: ["Luganese"],
+    expected: "Il territorio di esecuzione deve essere verificato.",
+  },
+  {
+    label: "cantone mancante anche con una località ticinese",
+    location: "Lugano",
+    canton: "",
+    zone: "Luganese",
+    zones: ["Tutto il Ticino"],
+    expected: "Il territorio di esecuzione deve essere verificato.",
+  },
+  {
+    label: "località mancante",
+    location: "",
+    canton: "TI",
+    zone: null,
+    zones: ["Tutto il Ticino"],
+    expected: "Il territorio di esecuzione deve essere verificato.",
+  },
+  {
+    label: "località esplicitamente non indicata",
+    location: "Non indicato",
+    canton: "TI",
+    zone: null,
+    zones: ["Tutto il Ticino"],
+    expected: "Il territorio di esecuzione deve essere verificato.",
+  },
+  {
+    label: "città in conflitto con il cantone",
+    location: "Lugano",
+    canton: "ZH",
+    zone: null,
+    zones: ["Tutto il Ticino"],
+    expected: "sono discordanti: il territorio deve essere verificato",
+  },
+  {
+    label: "distretto in conflitto con il cantone",
+    location: "Località da chiarire",
+    canton: "ZH",
+    zone: "Luganese",
+    zones: ["Tutto il Ticino"],
+    expected: "sono discordanti: il territorio deve essere verificato",
+  },
+  {
+    label: "città in conflitto con il distretto",
+    location: "Lugano",
+    canton: "TI",
+    zone: "Mendrisiotto",
+    zones: ["Tutto il Ticino"],
+    expected: "sono discordanti: il territorio deve essere verificato",
+  },
+])(
+  "distingue il territorio del lavoro: $label",
+  ({ label: _label, zones, expected, ...place }) => {
+    const { publication } = briefFixture();
+    const reason = potentialInterest(
+      { ...publication, ...place, buyer: "Comune di Lugano" },
+      { ...demoViewer.profile, zones },
+      new Date("2026-09-20T12:00:00Z"),
+    );
+    expect(reason).toContain(expected);
+    if (!expected.startsWith("è nel territorio"))
+      expect(reason).not.toContain("è nel territorio che hai selezionato");
+  },
+);
+
+it("non scambia un settore mancante per un settore diverso da quelli del profilo", () => {
+  const { publication } = briefFixture();
+  const source = {
+    ...publication,
+    title: "Oggetto da chiarire",
+    originalText: "Descrizione non indicata",
+    originalTitles: [],
+    originalDescriptions: [],
+    cpv: [],
+    sectors: [],
+    classification: undefined,
+  };
+  const reason = potentialInterest(source, demoViewer.profile);
+  expect(reason).toContain("Il settore del bando è ancora da classificare");
+  expect(reason).not.toContain("non coincidono");
+  const html = renderToStaticMarkup(
+    createElement(TenderBriefPanels, {
+      brief: buildTenderBrief(source),
+      relevance: reason,
+    }),
+  );
+  expect(html).toContain("Il settore del bando è ancora da classificare");
+});
+
+it("mantiene distinto un settore conosciuto diverso dalle attività del profilo", () => {
+  const { publication } = briefFixture();
+  const reason = potentialInterest(publication, {
+    ...demoViewer.profile,
+    sectors: ["informatica"],
+  });
+  expect(reason).toContain("non coincidono con quelli del tuo profilo");
+  expect(reason).not.toContain("ancora da classificare");
 });
 
 it("mostra tutte le sezioni anche con campi mancanti e impedisce script o URL attivi non sicuri", () => {

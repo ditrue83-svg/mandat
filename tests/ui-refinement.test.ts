@@ -72,6 +72,22 @@ it("mantiene distinti elaborazione, caricamento della pagina ed errore", () => {
   expect(error).not.toContain("Nessun risultato");
 });
 
+it.each([
+  ["/admin", "Area fondatore", "strumenti di gestione"],
+  ["/notifiche", "Notifiche", "storico delle notifiche"],
+  ["/profilo", "La tua ditta", "dati della tua ditta"],
+  ["/fonti", "Fonti e copertura", "stato delle fonti"],
+])(
+  "il caricamento di %s conserva la sezione di destinazione",
+  (path, title, detail) => {
+    const html = render(h(RouteLoading, { previewPath: path }));
+    expect(html).toContain(`<h1>${title}</h1>`);
+    expect(html).toContain(detail);
+    expect(html).toContain('aria-busy="true"');
+    expect(html).not.toContain('aria-label="Raccolte di bandi"');
+  },
+);
+
 it("segnala il ritardo anche quando il Radar non ha ancora proposte", () => {
   const html = render(
     h(Dashboard, {

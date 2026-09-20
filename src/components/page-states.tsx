@@ -8,8 +8,10 @@ import { BandiNavigation, type BandiCollection } from "./bandi-navigation";
 
 export function LoadingContent({
   kind = "cards",
+  description,
 }: {
   kind?: "cards" | "profile" | "detail";
+  description?: string;
 }) {
   return (
     <section
@@ -21,7 +23,12 @@ export function LoadingContent({
         <span className="loading-dot" aria-hidden="true" /> Apro la pagina…
       </p>
       <p className="sr-only">
-        Sto preparando i bandi e i filtri della raccolta.
+        {description ??
+          (kind === "profile"
+            ? "Sto caricando i dati della tua ditta."
+            : kind === "detail"
+              ? "Sto caricando i dettagli del bando."
+              : "Sto preparando i bandi e i filtri della raccolta.")}
       </p>
       <div className={`skeleton-content skeleton-${kind}`} aria-hidden="true">
         <div className="skeleton-toolbar" />
@@ -52,11 +59,38 @@ export function RouteLoading({ previewPath }: { previewPath?: string }) {
         : "radar";
   const detail = /^\/(esplora|bandi)\/.+/.test(path);
   const profile = path === "/profilo";
+  const section = path.startsWith("/admin")
+    ? {
+        title: "Area fondatore",
+        description: "Sto caricando gli strumenti di gestione.",
+      }
+    : path === "/notifiche"
+      ? {
+          title: "Notifiche",
+          description:
+            "Sto caricando le impostazioni e lo storico delle notifiche.",
+        }
+      : path === "/fonti"
+        ? {
+            title: "Fonti e copertura",
+            description: "Sto caricando lo stato delle fonti.",
+          }
+        : path === "/partecipa"
+          ? {
+              title: "Partecipazione alla beta",
+              description: "Sto caricando le informazioni per partecipare.",
+            }
+          : path === "/accedi"
+            ? {
+                title: "Accedi a Mandat",
+                description: "Sto preparando l’accesso.",
+              }
+            : null;
   return (
     <Shell>
-      {profile ? (
+      {profile || section ? (
         <header className="page-heading">
-          <h1>La tua ditta</h1>
+          <h1>{section?.title ?? "La tua ditta"}</h1>
         </header>
       ) : detail ? (
         <p className="eyebrow">DETTAGLIO DEL BANDO</p>
@@ -64,7 +98,8 @@ export function RouteLoading({ previewPath }: { previewPath?: string }) {
         <BandiNavigation active={collection} />
       )}
       <LoadingContent
-        kind={profile ? "profile" : detail ? "detail" : "cards"}
+        kind={profile || section ? "profile" : detail ? "detail" : "cards"}
+        description={section?.description}
       />
     </Shell>
   );

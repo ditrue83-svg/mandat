@@ -40,6 +40,7 @@ import {
   sourceReviewBlocksComparison,
 } from "./source-review-policy";
 import { summarizePilot } from "./pilot";
+import { mapInReadPairs } from "./bounded-read";
 import { pilotDate, readPilotPrerequisites } from "./pilot-admin";
 import {
   lockPilotControl,
@@ -182,6 +183,8 @@ export async function adminSnapshot(
       externalDeliveryTest: null,
       pilot: summarizePilot({
         startedAt: null,
+        criticalIssues: 0,
+        automationEnabled: false,
         participants: [],
         feedback: [],
         deliveries: [],
@@ -328,8 +331,11 @@ export async function adminSnapshot(
   const pages = Math.max(1, Math.ceil(inventory.length / 20));
   const page = Math.min(pageNumber(options.page), pages);
   const review = [];
-  for (const item of inventory.slice((page - 1) * 20, page * 20)) {
-    const current = await readCurrentMatch(item.companyId, item.publicationId);
+  const currentPage = await mapInReadPairs(
+    inventory.slice((page - 1) * 20, page * 20),
+    (item) => readCurrentMatch(item.companyId, item.publicationId),
+  );
+  for (const current of currentPage) {
     if (!current?.match || current.publication.status !== "open") continue;
     const { publication, company, match, loaded, sourceReview } = current;
     review.push({
@@ -370,11 +376,14 @@ export async function adminSnapshot(
   });
   const pilot = summarizePilot({
     startedAt: gate.startedAt,
+    criticalIssues: gate.criticalIssues,
+    automationEnabled: auto[0]?.value === true,
     participants: invites.map((invite) => ({
       companyId: invite.companyId,
       admin: !!invite.administratorId,
       cohort: !!invite.pilotStartedAt,
       acceptedAt: invite.acceptedAt,
+      acceptedVersion: invite.acceptedVersion,
       onboardedAt: invite.onboardedAt,
       revokedAt: invite.revokedAt,
       disabledAt: invite.disabledAt,

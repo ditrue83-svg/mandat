@@ -311,8 +311,21 @@ button.text-link {
   color: #61756a;
 }
 .logout-error {
-  color: #fff;
+  position: fixed;
+  right: 20px;
+  bottom: 90px;
+  z-index: 50;
+  max-width: calc(100% - 40px);
+  color: #853323;
+  background: #fff3ee;
+  border: 1px solid #e8b6a7;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 0;
   font-size: 13px;
+}
+.icon-button.mobile-logout {
+  display: none;
 }
 @media (max-width: 850px) {
   .catalog-grid {
@@ -2202,6 +2215,7 @@ h1 {
   .topbar {
     min-height: 61px;
     padding: 0 20px;
+    gap: 8px;
   }
   .topbar > span {
     font-size: 11px;
@@ -2209,6 +2223,12 @@ h1 {
   }
   .topbar > div {
     gap: 11px;
+    flex-shrink: 0;
+  }
+  .topbar .mobile-logout {
+    display: flex;
+    min-width: 44px;
+    min-height: 44px;
   }
   .locale {
     display: none;

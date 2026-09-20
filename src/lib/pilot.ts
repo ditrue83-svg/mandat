@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PILOT_PARTICIPATION_TERMS_VERSION } from "./pilot-participation";
 
 export const PILOT_COMPANY_TARGET = 5;
 export const PILOT_DURATION_DAYS = 28;
@@ -91,6 +92,7 @@ type Participant = {
   admin: boolean;
   cohort: boolean;
   acceptedAt: Date | null;
+  acceptedVersion: string | null;
   onboardedAt: Date | null;
   revokedAt: Date | null;
   disabledAt: Date | null;
@@ -145,9 +147,27 @@ function isDateInWindow(date: Date, start: Date | null, end: Date | null) {
   );
 }
 
+export function pilotOperationalStartBlockers(input: {
+  criticalIssues: number;
+  automationEnabled: boolean;
+}) {
+  const blockers: string[] = [];
+  if (input.criticalIssues > 0)
+    blockers.push(
+      "Risolvi i problemi critici aperti prima di avviare il pilota.",
+    );
+  if (input.automationEnabled)
+    blockers.push(
+      "Disattiva l’automazione prima di avviare il pilota: la prima settimana richiede la revisione manuale.",
+    );
+  return blockers;
+}
+
 export function summarizePilot(input: {
   now?: Date;
   startedAt: Date | null;
+  criticalIssues: number;
+  automationEnabled: boolean;
   participants: Participant[];
   feedback: Feedback[];
   deliveries: Delivery[];
@@ -174,7 +194,10 @@ export function summarizePilot(input: {
     : candidates;
   const cohortIds = new Set(cohort.map((participant) => participant.companyId));
   const accepted = cohort.filter(
-    (participant) => participant.acceptedAt,
+    (participant) =>
+      participant.acceptedAt &&
+      (startedAt ||
+        participant.acceptedVersion === PILOT_PARTICIPATION_TERMS_VERSION),
   ).length;
   const onboarded = cohort.filter(
     (participant) => participant.onboardedAt,
@@ -246,12 +269,27 @@ export function summarizePilot(input: {
   const prerequisitesConfirmed = pilotPrerequisiteKeys.every(
     (key) => input.prerequisites[key]?.confirmed === true,
   );
-  const readyToStart =
-    !startedAt &&
-    candidates.length === PILOT_COMPANY_TARGET &&
-    accepted === PILOT_COMPANY_TARGET &&
-    onboarded === PILOT_COMPANY_TARGET &&
-    prerequisitesConfirmed;
+  const startBlockers = startedAt
+    ? []
+    : [
+        ...(!prerequisitesConfirmed
+          ? [
+              "Completa le verifiche sulla residenza dei dati e sul recapito email esterno.",
+            ]
+          : []),
+        ...(candidates.length !== PILOT_COMPANY_TARGET
+          ? [`Servono esattamente ${PILOT_COMPANY_TARGET} ditte pilota attive.`]
+          : []),
+        ...(candidates.length === PILOT_COMPANY_TARGET &&
+        (accepted !== PILOT_COMPANY_TARGET ||
+          onboarded !== PILOT_COMPANY_TARGET)
+          ? [
+              "Tutte le cinque ditte devono aver accettato l’informativa corrente e completato il profilo.",
+            ]
+          : []),
+        ...pilotOperationalStartBlockers(input),
+      ];
+  const readyToStart = !startedAt && startBlockers.length === 0;
   const elapsedDays = startedAt
     ? Math.max(
         0,
@@ -273,6 +311,7 @@ export function summarizePilot(input: {
     elapsedDays,
     firstWeekReview: status === "running" && elapsedDays < PILOT_REVIEW_DAYS,
     readyToStart,
+    startBlockers,
     prerequisites: input.prerequisites,
     participants: {
       active: cohort.length,
