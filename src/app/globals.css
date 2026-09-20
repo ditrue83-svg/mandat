@@ -3191,6 +3191,13 @@ h1 {
   border-top: 1px solid var(--line);
   padding: 22px 0;
 }
+.admin-review .feedback-row {
+  flex-wrap: wrap;
+}
+.admin-review .feedback-row .button {
+  max-width: 100%;
+  white-space: normal;
+}
 .admin-review-heading {
   display: flex;
   justify-content: space-between;
