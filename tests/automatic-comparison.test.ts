@@ -157,6 +157,7 @@ function response(
       sameContractualRole: true,
       mainScopeCovered: relation === "direct",
       conflictingSource: false,
+      requiresSourceCorrection: false,
     },
     targetRef: request.passages.find(
       (p) => p.scope === request.targetScope && p.role === "service",
@@ -215,6 +216,7 @@ test("A shared component or a vague profile cannot be promoted to a positive by 
     { companyIdentifiesService: false, mainScopeCovered: null },
     { activitiesOverlap: null, mainScopeCovered: null },
     { conflictingSource: true },
+    { requiresSourceCorrection: true },
   ]) {
     const value = validateAutomaticComparison(
       { ...full, facts: { ...full.facts, ...change } },

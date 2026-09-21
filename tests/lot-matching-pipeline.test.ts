@@ -145,6 +145,7 @@ function inventedAnswer(prompt: string) {
       sameContractualRole: true,
       mainScopeCovered: true,
       conflictingSource: false,
+      requiresSourceCorrection: false,
     },
     targetRef: data.passages.find(
       (p: { scope: string; role: string }) =>

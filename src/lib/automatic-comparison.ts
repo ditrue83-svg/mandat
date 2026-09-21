@@ -21,7 +21,7 @@ import {
   documentaryAiReasoningEffort,
 } from "./documentary-ai-config";
 
-export const AUTOMATIC_COMPARISON_VERSION = "documentary-service-comparison-v5";
+export const AUTOMATIC_COMPARISON_VERSION = "documentary-service-comparison-v6";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -136,6 +136,11 @@ export const automaticComparisonResponseSchema = z
         .describe(
           "La fonte dà indicazioni materialmente incompatibili sul servizio del medesimo target, non semplici ripetizioni o traduzioni.",
         ),
+      requiresSourceCorrection: z
+        .boolean()
+        .describe(
+          "True se la corrispondenza dipende dal considerare ERRATO un dato della fonte, per esempio ignorare una classificazione esplicita perché ritenuta sbagliata. Non puoi correggere la fonte per supposizione. False se l'interpretazione è coerente senza correggere nulla.",
+        ),
     }),
     targetRef: idSchema,
     sourceRefs: z.array(idSchema).min(1).max(12),
@@ -159,7 +164,8 @@ export const automaticComparisonResponseSchema = z
 export function automaticBasisFromFacts(
   facts: z.infer<typeof automaticComparisonResponseSchema>["facts"],
 ) {
-  if (facts.conflictingSource) return "conflicting_service" as const;
+  if (facts.conflictingSource || facts.requiresSourceCorrection)
+    return "conflicting_service" as const;
   if (
     !facts.sourceIdentifiesService ||
     !facts.companyIdentifiesService ||
@@ -373,7 +379,7 @@ export function buildAutomaticComparisonRequest(
       "conflicting_service: descrizioni materialmente incompatibili della prestazione del medesimo target. Traduzioni, ripetizioni, ordine dei lotti o spezzature del testo non sono conflitti.",
       "Per il lotto selezionato leggi titolo e descrizione insieme al contesto comune. Il titolo può identificarne l'ambito territoriale mentre la descrizione comune definisce il servizio. Non attribuire al target le prestazioni di altri lotti o di procedure separate.",
       "Distingui sempre l'oggetto acquistato dall'opera a cui serve: una consulenza su un cantiere resta consulenza, non esecuzione dei lavori. Prestazioni escluse o assegnate a terzi non sono richieste qui.",
-      "Scadenze, territorio, importi, CPV e ammissibilità sono verificati separatamente: non usarli per cambiare il giudizio sui servizi. Le attività effettivamente dichiarate hanno priorità sulle classificazioni.",
+      "Scadenze, territorio, importi e ammissibilità sono verificati separatamente: non usarli per cambiare il giudizio sui servizi. Usa le classificazioni della FONTE come contesto per disambiguare parole con più significati. Una categoria generale compatibile con una descrizione specifica non è un conflitto. Non dichiarare mai errato un codice o un testo della fonte per adattarlo alla ditta: se la tua interpretazione richiede una tale correzione, requiresSourceCorrection=true. Per la DITTA contano le attività concretamente dichiarate.",
       "targetRef identifica SEMPRE un passaggio service del target selezionato, anche quando è un titolo geografico. sourceRefs aggiunge i passaggi che sostengono il confronto, inclusi limiti o controprove; companyRefs cita le attività della ditta. Le citazioni saranno recuperate dal server, non riscriverle.",
     ],
     target: {

@@ -372,13 +372,23 @@ export async function infer(
   await getDb().delete(settings).where(eq(settings.key, "ai_budget_blocked"));
   let knownUsage: TokenUsage | null = null;
   try {
-    const result = await transport.complete(
-      systemPrompt,
-      prompt,
-      maxTokens,
-      responseFormat,
-      options,
-    );
+    // Preserve the original three-argument contract for legacy transports.
+    const result = options
+      ? await transport.complete(
+          systemPrompt,
+          prompt,
+          maxTokens,
+          responseFormat,
+          options,
+        )
+      : responseFormat
+        ? await transport.complete(
+            systemPrompt,
+            prompt,
+            maxTokens,
+            responseFormat,
+          )
+        : await transport.complete(systemPrompt, prompt, maxTokens);
     const usageResult = tokenUsageSchema.safeParse(result);
     if (!usageResult.success)
       throw new AiResponseRejected("Consumo AI non valido o assente", null);
