@@ -25,6 +25,8 @@ import type {
 } from "@/lib/lot-assessment";
 import type { LotNotice } from "@/lib/lot-notice";
 import type { LotMatchReviewRecord } from "@/lib/lot-review-record";
+import type { StoredAutomaticComparison } from "@/lib/automatic-comparison";
+import type { AssessmentTarget } from "@/lib/lot-assessment";
 const time = (name: string) => timestamp(name, { withTimezone: true });
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -275,6 +277,47 @@ export const matches = pgTable(
     uniqueIndex("match_company_publication_idx").on(
       t.companyId,
       t.publicationId,
+    ),
+    uniqueIndex("match_identity_idx").on(t.id, t.companyId, t.publicationId),
+  ],
+).enableRLS();
+export const automaticMatchRuns = pgTable(
+  "automatic_match_runs",
+  {
+    id: text("id").primaryKey(),
+    matchId: text("match_id").notNull(),
+    companyId: text("company_id").notNull(),
+    publicationId: text("publication_id").notNull(),
+    target: jsonb("target").$type<AssessmentTarget>().notNull(),
+    targetKey: text("target_key").notNull(),
+    inputHash: text("input_hash").notNull(),
+    status: text("status").notNull().default("queued"),
+    attempts: integer("attempts").notNull().default(0),
+    leaseUntil: time("lease_until"),
+    result: jsonb("result").$type<StoredAutomaticComparison>(),
+    issue: text("issue"),
+    createdAt: time("created_at").notNull().defaultNow(),
+    updatedAt: time("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("automatic_match_input_idx").on(
+      t.matchId,
+      t.targetKey,
+      t.inputHash,
+    ),
+    index("automatic_match_reader_idx").on(t.companyId, t.matchId, t.status),
+    foreignKey({
+      columns: [t.matchId, t.companyId, t.publicationId],
+      foreignColumns: [matches.id, matches.companyId, matches.publicationId],
+      name: "automatic_match_owner_fk",
+    }).onDelete("cascade"),
+    check(
+      "automatic_match_state_check",
+      sql`${t.status} in ('queued','running','completed','failed','superseded') and ${t.attempts} between 0 and 3`,
+    ),
+    check(
+      "automatic_match_binding_check",
+      sql`${t.inputHash} ~ '^[a-f0-9]{64}$' and ${t.target}->>'publicationId' = ${t.publicationId} and (${t.result} is null or (${t.result}->>'companyId' = ${t.companyId} and ${t.result}->>'publicationId' = ${t.publicationId} and ${t.result}->>'inputHash' = ${t.inputHash}))`,
     ),
   ],
 ).enableRLS();

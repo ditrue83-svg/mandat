@@ -10,6 +10,7 @@ function project(city: unknown): PreliminaryProjectMatch {
     reason: "Fixture",
     operationalInputHash: "unchanged",
     reviewReasons: [],
+    automaticReviewReasons: [],
     signals: { sectors: [], keyword: false },
     operational: {
       country: "CH",

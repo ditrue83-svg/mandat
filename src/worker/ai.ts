@@ -146,12 +146,11 @@ export async function recoverStaleAiReservations(now = new Date()) {
     .returning({ id: aiUsage.id });
   return recovered.length;
 }
-function rates() {
-  const input = Number(process.env.LLM_INPUT_CHF_PER_MILLION),
-    output = Number(process.env.LLM_OUTPUT_CHF_PER_MILLION);
+function rates(override?: { input: number; output: number }) {
+  const input =
+      override?.input ?? Number(process.env.LLM_INPUT_CHF_PER_MILLION),
+    output = override?.output ?? Number(process.env.LLM_OUTPUT_CHF_PER_MILLION);
   if (
-    !process.env.LLM_INPUT_CHF_PER_MILLION ||
-    !process.env.LLM_OUTPUT_CHF_PER_MILLION ||
     !Number.isFinite(input) ||
     !Number.isFinite(output) ||
     input <= 0 ||
@@ -167,13 +166,34 @@ export interface AiTransport {
     system: string,
     prompt: string,
     maxTokens: number,
+    responseFormat?: AiResponseFormat,
+    options?: AiRequestOptions,
   ): Promise<{ text: string; inputTokens: number; outputTokens: number }>;
 }
+export type AiRequestOptions = {
+  reasoningEffort?: "none" | "low" | "medium" | "high";
+  model?: string;
+  rates?: { input: number; output: number };
+};
+export type AiResponseFormat = {
+  type: "json_schema";
+  json_schema: { name: string; strict: true; schema: Record<string, unknown> };
+};
 export const configuredTransport: AiTransport = {
-  async complete(system, prompt, maxTokens) {
+  async complete(system, prompt, maxTokens, responseFormat, options) {
     if (!process.env.LLM_API_KEY) throw new AiUnavailable("AI non configurata");
+    const reasoningEffort =
+      options?.reasoningEffort ??
+      (process.env.LLM_REASONING_EFFORT || undefined);
+    if (
+      reasoningEffort &&
+      !["none", "low", "medium", "high"].includes(reasoningEffort)
+    )
+      throw new AiUnavailable("Modalità di ragionamento AI non valida");
     const expectedModel =
-      process.env.LLM_MODEL || "mistralai/Ministral-3-14B-Instruct-2512";
+      options?.model ||
+      process.env.LLM_MODEL ||
+      "mistralai/Ministral-3-14B-Instruct-2512";
     const base =
       process.env.LLM_API_BASE_URL ||
       `https://api.infomaniak.com/2/ai/${process.env.INFOMANIAK_AI_PRODUCT_ID}/openai/v1`;
@@ -195,6 +215,8 @@ export const configuredTransport: AiTransport = {
         temperature: 0,
         max_tokens: maxTokens,
         stream: false,
+        ...(responseFormat ? { response_format: responseFormat } : {}),
+        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       }),
       redirect: "error",
       signal: AbortSignal.timeout(90000),
@@ -270,21 +292,43 @@ export function parseAiJson(text: string) {
   );
   return JSON.parse(block ? block[1] : text);
 }
-async function infer(
+export async function infer(
   p: Publication,
   purpose: string,
   prompt: string,
   maxTokens: number,
   transport: AiTransport = configuredTransport,
   systemPrompt: string = system,
+  responseFormat?: AiResponseFormat,
+  options?: AiRequestOptions,
 ) {
   if (!process.env.LLM_API_KEY) throw new AiUnavailable("AI non configurata");
-  const { input, output } = rates();
+  const model =
+    options?.model ||
+    process.env.LLM_MODEL ||
+    "mistralai/Ministral-3-14B-Instruct-2512";
+  if (
+    options?.model &&
+    options.model !==
+      (process.env.LLM_MODEL || "mistralai/Ministral-3-14B-Instruct-2512") &&
+    !options.rates
+  )
+    throw new AiUnavailable(
+      "Le tariffe devono corrispondere al modello scelto",
+    );
+  const { input, output } = rates(options?.rates);
   const budget = Number(process.env.AI_MONTHLY_BUDGET_CHF || 40);
   if (!Number.isFinite(budget) || budget < 0)
     throw new AiUnavailable("Budget AI non valido");
   const reserve =
-    ((Buffer.byteLength(systemPrompt + prompt, "utf8") + 1000) * input +
+    ((Buffer.byteLength(
+      systemPrompt +
+        prompt +
+        (responseFormat ? JSON.stringify(responseFormat) : ""),
+      "utf8",
+    ) +
+      1000) *
+      input +
       maxTokens * output) /
     1e6;
   const reservedChf = recordedCost(reserve);
@@ -310,8 +354,7 @@ async function infer(
       await tx.insert(aiUsage).values({
         id,
         month,
-        model:
-          process.env.LLM_MODEL || "mistralai/Ministral-3-14B-Instruct-2512",
+        model,
         publicationId: p.id,
         purpose,
         status: "reserved",
@@ -329,7 +372,13 @@ async function infer(
   await getDb().delete(settings).where(eq(settings.key, "ai_budget_blocked"));
   let knownUsage: TokenUsage | null = null;
   try {
-    const result = await transport.complete(systemPrompt, prompt, maxTokens);
+    const result = await transport.complete(
+      systemPrompt,
+      prompt,
+      maxTokens,
+      responseFormat,
+      options,
+    );
     const usageResult = tokenUsageSchema.safeParse(result);
     if (!usageResult.success)
       throw new AiResponseRejected("Consumo AI non valido o assente", null);

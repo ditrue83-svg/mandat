@@ -18,6 +18,10 @@ import {
 } from "./lot-source-context";
 import { stableDocumentaryJson } from "./documentary-observation";
 import { plainText } from "@/sources/common";
+import {
+  AUTOMATIC_COMPARISON_VERSION,
+  type AutomaticComparisonRequest,
+} from "./automatic-comparison";
 
 export type LotNoticeScope = {
   kind: "positive" | "changed" | "removed" | "structure_changed";
@@ -26,7 +30,8 @@ export type LotNoticeScope = {
   sourceDependency: LotSourceDependency;
   evaluationId: string | null;
   evaluationHash: string | null;
-  assessmentDependency: LotEvaluationDependency | null;
+  assessmentDependency:
+    LotEvaluationDependency | AutomaticComparisonRequest["dependency"] | null;
   factHash: string;
   transition: { predecessor: string | null; hash: string };
   structure?: {
@@ -40,6 +45,7 @@ export type LotNoticeScope = {
     title: string;
     description: string;
     reason: string;
+    origin?: "human" | "ai";
     sourceUrl: string;
     reviewReasons: string[];
     sharedTexts: {
@@ -201,7 +207,7 @@ export function lotNoticeScope(
   if (
     kind === "positive" &&
     (!resolved?.signalEligible ||
-      !resolved.evaluation ||
+      (!resolved.evaluation && !resolved.automatic) ||
       !loaded.project.signalEligible)
   )
     throw new Error("The rendered lot is not currently approved");
@@ -360,14 +366,22 @@ export function lotNoticeScope(
     target,
     immutableEvidenceSnapshotId:
       kind === "positive"
-        ? resolved!.evaluation!.immutableEvidenceSnapshotId
+        ? (resolved!.evaluation?.immutableEvidenceSnapshotId ??
+          loaded.input.snapshot.observationId)
         : loaded.input.snapshot.observationId,
     sourceDependency: context.dependency,
-    evaluationId: kind === "positive" ? resolved!.evaluation!.id : null,
+    evaluationId:
+      kind === "positive"
+        ? (resolved!.evaluation?.id ?? resolved!.automatic!.id)
+        : null,
     evaluationHash:
-      kind === "positive" ? resolved!.evaluation!.entryHash : null,
+      kind === "positive"
+        ? (resolved!.evaluation?.entryHash ?? resolved!.automatic!.hash)
+        : null,
     assessmentDependency:
-      kind === "positive" ? resolved!.evaluation!.dependency : null,
+      kind === "positive"
+        ? (resolved!.evaluation?.dependency ?? resolved!.automatic!.dependency)
+        : null,
     factHash,
     transition: {
       predecessor,
@@ -375,20 +389,27 @@ export function lotNoticeScope(
     },
     ...(structure ? { structure } : {}),
     render: {
+      ...(kind === "positive" && !resolved!.evaluation
+        ? { origin: "ai" as const }
+        : {}),
       lotId: target.kind === "lot" ? target.lotId : null,
       number,
       title,
       description,
       reason:
         kind === "positive"
-          ? resolved!.evaluation!.reason
+          ? (resolved!.evaluation?.reason ?? resolved!.automatic!.reason)
           : kind === "structure_changed"
             ? "La struttura della gara già segnalata è cambiata. Questo avviso non attesta una nuova pertinenza né un annullamento."
             : kind === "removed"
               ? "Il lotto precedentemente segnalato non è più individuato: verificare la fonte, senza dedurne un annullamento."
               : `La fonte del ${target.kind === "project" ? "progetto" : "lotto"} precedentemente segnalato è cambiata. La precedente valutazione non ne attesta la pertinenza attuale.`,
       sourceUrl,
-      reviewReasons: [...(resolved?.preliminary?.reviewReasons ?? [])],
+      reviewReasons: [
+        ...(resolved?.automatic?.reviewReasons ??
+          resolved?.preliminary?.reviewReasons ??
+          []),
+      ],
       sharedTexts,
       operational: {
         country: resolved?.preliminary?.operational.country ?? null,
@@ -407,6 +428,15 @@ export function buildLotNotice(
   kind: LotNotice["kind"],
   automation: boolean,
 ): LotNotice {
+  if (
+    !automation &&
+    scope.some(
+      (item) => item.kind === "positive" && item.render.origin === "ai",
+    )
+  )
+    throw new Error(
+      "Automatic notice requires the company's enabled automation gate",
+    );
   if (
     !scope.length ||
     new Set(scope.map((s) => assessmentTargetKey(s.target))).size !==
@@ -528,7 +558,8 @@ export function validateLotNotice(notice: LotNotice): LotNotice {
         s.kind === "positive" &&
         (!notice.binding.shapeEpochToken ||
           !s.assessmentDependency ||
-          (s.assessmentDependency.version === "lot-evaluation-dependency-v2" &&
+          ((s.assessmentDependency.version === "lot-evaluation-dependency-v2" ||
+            s.assessmentDependency.version === AUTOMATIC_COMPARISON_VERSION) &&
             s.assessmentDependency.shapeEpochToken !==
               notice.binding.shapeEpochToken)),
     )

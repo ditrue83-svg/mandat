@@ -1,6 +1,12 @@
 import { and, eq, lte, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { feedback, matches, publications, settings } from "@/db/schema";
+import {
+  feedback,
+  matches,
+  publications,
+  settings,
+  automaticMatchRuns,
+} from "@/db/schema";
 import {
   readCanonicalMatch,
   presentLotOpportunity,
@@ -109,6 +115,19 @@ export async function getRadarStatus(
     const matchesByPublication = new Map(
       matchRows.map((match) => [match.publicationId, match]),
     );
+    const automaticPending = new Set(
+      (
+        await tx
+          .select({ publicationId: automaticMatchRuns.publicationId })
+          .from(automaticMatchRuns)
+          .where(
+            and(
+              eq(automaticMatchRuns.companyId, viewer.companyId),
+              inArray(automaticMatchRuns.status, ["queued", "running"]),
+            ),
+          )
+      ).map((row) => row.publicationId),
+    );
     const legacy = visible.filter(
       (publication) => !publication.documentarySnapshotId,
     );
@@ -118,7 +137,7 @@ export async function getRadarStatus(
     for (const row of visible) {
       const match = matchesByPublication.get(row.id);
       if (row.documentarySnapshotId) {
-        if (!match) count++;
+        if (!match || automaticPending.has(row.id)) count++;
         continue;
       }
       if (row.deadline && row.deadline <= now) continue;

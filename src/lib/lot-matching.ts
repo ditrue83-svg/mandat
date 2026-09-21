@@ -8,7 +8,7 @@ import {
 } from "./sector-classification";
 import { zoneForExactCity } from "./ticino-localities";
 
-export const PREFILTER_VERSION = "lot-operational-prefilter-v2";
+export const PREFILTER_VERSION = "lot-operational-prefilter-v3";
 export type LotOperationalEvidence = {
   scope: "publication" | "project_context" | "selected_lot";
   url: string;
@@ -30,6 +30,7 @@ export type PreliminaryLotMatch = {
   operationalInputHash: string;
   evidence: readonly LotOperationalEvidence[];
   reviewReasons: readonly string[];
+  automaticReviewReasons: readonly string[];
   signals: { sectors: readonly Sector[]; keyword: boolean };
   operational: {
     country: string | null;
@@ -148,13 +149,19 @@ export function preliminaryLotMatch({
     throw new Error("Invalid lot filter clock");
   const evidence: LotOperationalEvidence[] = [];
   const reviewReasons: string[] = [];
+  const automaticReviewReasons: string[] = [];
   const used: unknown[] = [];
   const add = (item: LotOperationalEvidence) => {
     evidence.push(item);
     used.push(item);
   };
-  const review = (reason: string) => {
+  const review = (reason: string, resolvedByServiceComparison = false) => {
     if (!reviewReasons.includes(reason)) reviewReasons.push(reason);
+    if (
+      !resolvedByServiceComparison &&
+      !automaticReviewReasons.includes(reason)
+    )
+      automaticReviewReasons.push(reason);
   };
   add({
     scope: "publication",
@@ -227,10 +234,10 @@ export function preliminaryLotMatch({
       const rawCode = object(item)?.code;
       if (typeof rawCode === "string" && /^\d{8}(?:-\d)?$/.test(rawCode))
         cpv.push(rawCode.slice(0, 8));
-      else review("Classificazione del lotto da verificare.");
+      else review("Classificazione del lotto da verificare.", true);
     }
     if (additional !== null && !Array.isArray(additional))
-      review("Classificazione del lotto da verificare.");
+      review("Classificazione del lotto da verificare.", true);
     const rawAddress = own(lot, "orderAddress"),
       descriptionOnly = own(lot, "orderAddressOnlyDescription");
     add({
@@ -334,6 +341,7 @@ export function preliminaryLotMatch({
   if (classification.needsClassification)
     review(
       "Settore del lotto da classificare: informazioni insufficienti o discordanti.",
+      true,
     );
   for (const source of texts) {
     // The stored raw string/path is exact; plainText is a declared lexical
@@ -380,8 +388,16 @@ export function preliminaryLotMatch({
         (term) => term.trim() && normalized.includes(term.toLowerCase()),
       )
     ) {
-      veto ||=
-        "I testi del progetto o del lotto contengono un’attività esclusa dal profilo.";
+      // A shared description can enumerate several lots. A lexical occurrence
+      // there does not attribute the excluded work to this selected lot. Keep
+      // the evidence and require review; only the lot's own text can veto it.
+      if (source.scope === "selected_lot")
+        veto ||=
+          "I testi del lotto contengono un’attività esclusa dal profilo.";
+      else
+        review(
+          "Il contesto del progetto contiene un’attività esclusa: verifica se riguarda il lotto selezionato.",
+        );
       add({
         scope: source.scope,
         url: source.url,
@@ -395,7 +411,10 @@ export function preliminaryLotMatch({
     ![...sectors].some((sector) => profile.sectors.includes(sector)) &&
     !keyword
   )
-    review("Le attività del lotto richiedono un confronto con il profilo.");
+    review(
+      "Le attività del lotto richiedono un confronto con il profilo.",
+      true,
+    );
   if (
     context.state !== "manual_source" ||
     context.form !== "defined_service" ||
@@ -403,6 +422,7 @@ export function preliminaryLotMatch({
   )
     review(
       "La fonte del lotto o il contesto condiviso richiedono una revisione.",
+      true,
     );
   // The verified lot fields currently expose execution/contract periods, not a
   // bid deadline or CHF value. Do not manufacture those mappings or inherit
@@ -445,6 +465,7 @@ export function preliminaryLotMatch({
     operationalInputHash,
     evidence,
     reviewReasons,
+    automaticReviewReasons,
     signals: { sectors: [...sectors], keyword },
     operational: {
       country,

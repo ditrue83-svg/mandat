@@ -4,6 +4,7 @@ import { companies, matches } from "@/db/schema";
 import { lockCanonicalPublications } from "@/lib/canonical-lock";
 import { readLotMatchReview } from "@/lib/lot-match-reviews";
 import { companyAllowsPilotProcessingSql } from "@/lib/pilot-processing";
+import { enqueueAutomaticComparisons } from "@/lib/automatic-comparison-queue";
 
 export const LOT_WORKER_REVIEW_VERSION = "lot-worker-review-v1";
 
@@ -76,6 +77,7 @@ export async function matchAdoptedPublication({
         match,
         now,
       );
+      await enqueueAutomaticComparisons(tx, loaded);
       signal?.throwIfAborted();
       // Preserve the exact earlier company decisions and their revision. A
       // change in source/profile invalidates consumption, not historical data.

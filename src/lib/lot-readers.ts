@@ -107,7 +107,9 @@ export function presentLotOpportunity(
         ? "reviewed"
         : project.quality === "rejected"
           ? "rejected"
-          : "uncertain",
+          : project.signalEligible
+            ? "ai"
+            : "uncertain",
     reason:
       project.signalEligible && project.shape.kind === "project"
         ? (dto.targets.find(

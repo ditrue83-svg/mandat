@@ -955,7 +955,7 @@ it("a real SQL pg-boss failure rolls back match, audit and jobs; the same draft 
   });
 });
 
-it("SQL audit is append-only, checks owner and JSON identity, and all 24 public tables retain RLS/client revocations", async () => {
+it("SQL audit is append-only, checks owner and JSON identity, and all 25 public tables retain RLS/client revocations", async () => {
   const f = await fixture(),
     saved = await appendLotMatchReview(
       assessmentDraft(await f.load(), f.aId),
@@ -1001,7 +1001,7 @@ it("SQL audit is append-only, checks owner and JSON identity, and all 24 public 
   const rls = await pg.query<{ count: number; protected: number }>(
     "SELECT count(*)::int AS count, count(*) FILTER (WHERE relrowsecurity)::int AS protected FROM pg_class JOIN pg_namespace n ON n.oid=relnamespace WHERE n.nspname='public' AND relkind='r'",
   );
-  expect(rls.rows[0]).toEqual({ count: 24, protected: 24 });
+  expect(rls.rows[0]).toEqual({ count: 25, protected: 25 });
   for (const role of ["anon", "authenticated", "service_role"]) {
     const privileges = await pg.query<{
       select: boolean;

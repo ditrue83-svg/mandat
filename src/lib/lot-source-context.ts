@@ -331,7 +331,9 @@ function targetInput(
       content: null,
     };
   try {
-    const comparison = buildLotComparisonCorpus(archive, selected.id);
+    const comparison = buildLotComparisonCorpus(archive, selected.id, {
+      complete: true,
+    });
     const raw = restoreSimapDetail(archive);
     return {
       sharedHash,

@@ -16,6 +16,7 @@ import {
   publicationDocumentarySnapshots,
   settings,
   user,
+  automaticMatchRuns,
 } from "@/db/schema";
 import {
   readLotMatchReview,
@@ -650,6 +651,7 @@ export async function reconcileLotNotices(
           sql`${publications.documentarySnapshotId} is not null`,
           or(
             isNotNull(matches.lotEvaluations),
+            sql`exists (select 1 from ${automaticMatchRuns} where ${automaticMatchRuns.matchId} = ${matches.id} and ${automaticMatchRuns.companyId} = ${companyId} and ${automaticMatchRuns.status} = 'completed')`,
             sql`exists (select 1 from ${notifications} where ${notifications.companyId} = ${companyId})`,
           ),
         ),
@@ -820,7 +822,9 @@ export async function reconcileLotNotices(
           reserved.has(row.status),
         );
         const newScopes = representative.project.targets
-          .filter((l) => l.signalEligible)
+          .filter(
+            (l) => l.signalEligible && (!!l.evaluation || context.automatic),
+          )
           .map((l) =>
             lotNoticeScope(
               representative,

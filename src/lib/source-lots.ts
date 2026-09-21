@@ -42,7 +42,10 @@ function copyJson(value: unknown): Json {
     bytes = 0;
   const parents = new Set<object>();
   function visit(v: unknown, path: string, depth: number): Json {
-    if (++nodes > SOURCE_LOT_LIMITS.maxNodes || depth > SOURCE_LOT_LIMITS.maxDepth)
+    if (
+      ++nodes > SOURCE_LOT_LIMITS.maxNodes ||
+      depth > SOURCE_LOT_LIMITS.maxDepth
+    )
       return bad("archive_limit", path);
     if (v === null || typeof v === "boolean") return v;
     if (typeof v === "number") {
@@ -51,7 +54,8 @@ function copyJson(value: unknown): Json {
     }
     if (typeof v === "string") {
       bytes += Buffer.byteLength(v, "utf8");
-      if (bytes > SOURCE_LOT_LIMITS.maxArchiveBytes) return bad("archive_limit", path);
+      if (bytes > SOURCE_LOT_LIMITS.maxArchiveBytes)
+        return bad("archive_limit", path);
       if (!v.isWellFormed()) return bad("invalid_unicode", path);
       // PostgreSQL JSONB cannot store U+0000, even though JSON.parse accepts it.
       if (v.includes("\u0000")) return bad("unsupported_jsonb_text", path);
@@ -84,7 +88,8 @@ function copyJson(value: unknown): Json {
       if (!("value" in d) || !d.enumerable)
         return bad("invalid_json", path + "/" + k);
       bytes += Buffer.byteLength(k, "utf8");
-      if (bytes > SOURCE_LOT_LIMITS.maxArchiveBytes) return bad("archive_limit", path);
+      if (bytes > SOURCE_LOT_LIMITS.maxArchiveBytes)
+        return bad("archive_limit", path);
       entries.push([
         k,
         visit(d.value, path + "/" + escapePointer(k), depth + 1),
@@ -201,20 +206,31 @@ function isReferencedLotAward(d: Obj, base: Obj): boolean {
   // It remains intact in projectSections, as metadata, using the existing v1
   // mapping/hash rules. No tender directory or open opportunity is synthesized.
   if (
-    d.type !== "award" || base.type !== "award" ||
-    base.lotsType !== "with" || has(d, "lots") || has(base, "lots") ||
-    !d.lot || typeof d.lot !== "object" || Array.isArray(d.lot) ||
-    !d.referencingPub || typeof d.referencingPub !== "object" ||
+    d.type !== "award" ||
+    base.type !== "award" ||
+    base.lotsType !== "with" ||
+    has(d, "lots") ||
+    has(base, "lots") ||
+    !d.lot ||
+    typeof d.lot !== "object" ||
+    Array.isArray(d.lot) ||
+    !d.referencingPub ||
+    typeof d.referencingPub !== "object" ||
     Array.isArray(d.referencingPub)
-  ) return false;
-  const lot = d.lot, reference = d.referencingPub;
+  )
+    return false;
+  const lot = d.lot,
+    reference = d.referencingPub;
   uuid(lot.id, "/lot/id");
   uuid(reference.publicationId, "/referencingPub/publicationId");
-  return typeof lot.lotNumber === "number" &&
-    Number.isSafeInteger(lot.lotNumber) && lot.lotNumber >= 1 &&
+  return (
+    typeof lot.lotNumber === "number" &&
+    Number.isSafeInteger(lot.lotNumber) &&
+    lot.lotNumber >= 1 &&
     base.referencingLotId === lot.id &&
     base.referencingPubId === reference.publicationId &&
-    reference.publicationId !== d.id;
+    reference.publicationId !== d.id
+  );
 }
 export function preserveSimapLots(
   detail: unknown,
@@ -288,7 +304,8 @@ export function preserveSimapLots(
   // The copy guard bounds allocation; this is the actual serialized archive
   // limit, including escaping, punctuation, identity, directory and hash.
   if (
-    Buffer.byteLength(JSON.stringify(archive), "utf8") > SOURCE_LOT_LIMITS.maxArchiveBytes
+    Buffer.byteLength(JSON.stringify(archive), "utf8") >
+    SOURCE_LOT_LIMITS.maxArchiveBytes
   )
     return bad("archive_serialized_limit", "archive");
   // The wrapper/directory also consume nodes and depth. Apply exactly the
@@ -467,6 +484,7 @@ function makeScope(
   fields: FieldEntry[],
   url: string,
   rawForHash: unknown,
+  complete = false,
 ): ScopeCorpus {
   const title = texts.filter((x) => x.channel === "title"),
     desc = texts.filter((x) => x.channel === "description");
@@ -488,7 +506,11 @@ function makeScope(
     documents: [],
   };
   const corpus = buildMatchingSourceCorpus(adapted);
-  if (!corpus.accepted && corpus.reason !== "no_readable_text")
+  if (
+    !corpus.accepted &&
+    corpus.reason !== "no_readable_text" &&
+    !(complete && ["source_limit", "unit_limit"].includes(corpus.reason))
+  )
     return bad("corpus_" + corpus.reason, scope + "/" + corpus.field);
   const mapping = corpus.accepted
     ? corpus.corpus.units.flatMap((u) =>
@@ -526,7 +548,7 @@ function makeScope(
     }),
   });
 }
-function comparisonSize(values: unknown[]) {
+function comparisonSize(values: unknown[], complete = false) {
   let size = 0,
     leaves = 0;
   function walk(v: unknown) {
@@ -538,7 +560,11 @@ function comparisonSize(values: unknown[]) {
     }
   }
   values.forEach(walk);
-  if (size > SOURCE_LOT_LIMITS.maxComparisonUtf16 || leaves > SOURCE_LOT_LIMITS.maxComparisonLeaves)
+  if (
+    !complete &&
+    (size > SOURCE_LOT_LIMITS.maxComparisonUtf16 ||
+      leaves > SOURCE_LOT_LIMITS.maxComparisonLeaves)
+  )
     return bad("comparison_limit", "selectedContext");
   return { inputUtf16: size, inputLeaves: leaves };
 }
@@ -563,6 +589,7 @@ export type LotComparison = DeepReadonly<{
 export function buildLotComparisonCorpus(
   archive: LotArchive,
   lotId: string,
+  options: { complete?: boolean } = {},
 ): LotComparison {
   const a = verifyArchive(archive);
   const item = a.directory.find((x) => x.id === lotId);
@@ -572,7 +599,10 @@ export function buildLotComparisonCorpus(
   const header = item.basePath ? (pointer(root, item.basePath) as Obj) : null;
   const sections = a.projectSections as Obj;
   const url = a.identity.detailUrl;
-  const counts = comparisonSize([sections, lot, header]);
+  // The full archive is already bounded and verified above. Complete mode
+  // preserves every field for the paged reader; it never feeds an oversized
+  // legacy corpus into a single inference request.
+  const counts = comparisonSize([sections, lot, header], options.complete);
   const projectTexts: TextEntry[] = [],
     projectFields: FieldEntry[] = [];
   const documentarySections = new Set(["project-info", "procurement", "base"]);
@@ -633,13 +663,25 @@ export function buildLotComparisonCorpus(
     projectFields,
     url,
     sections,
+    options.complete,
   );
-  const selected = makeScope("selected_lot", lotTexts, lotFields, url, {
-    identity: item,
-    lot,
-    header,
-  });
-  if (!selected.corpus.accepted) return bad("no_readable_lot_text", "lotId");
+  const selected = makeScope(
+    "selected_lot",
+    lotTexts,
+    lotFields,
+    url,
+    {
+      identity: item,
+      lot,
+      header,
+    },
+    options.complete,
+  );
+  if (
+    !selected.corpus.accepted &&
+    !(options.complete && lotTexts.some((entry) => entry.text.trim()))
+  )
+    return bad("no_readable_lot_text", "lotId");
   const directory = a.directory.map((x) => ({ id: x.id, number: x.number }));
   const target = {
     projectId: a.identity.projectId,

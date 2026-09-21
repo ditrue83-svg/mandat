@@ -10,6 +10,7 @@ import {
   matchLotReviewEvents,
   publications,
   settings,
+  automaticMatchRuns,
 } from "@/db/schema";
 import { readCanonicalFeedback } from "./canonical-feedback";
 import { lockCanonicalPublications } from "./canonical-lock";
@@ -432,6 +433,19 @@ export async function readLotMatchReview(
     ...source,
     evaluationSet: state.evaluations,
     evidenceSnapshots,
+    automaticComparisons: (
+      await tx
+        .select({ result: automaticMatchRuns.result })
+        .from(automaticMatchRuns)
+        .where(
+          and(
+            eq(automaticMatchRuns.matchId, match.id),
+            eq(automaticMatchRuns.companyId, company.id),
+            eq(automaticMatchRuns.publicationId, publication.id),
+            eq(automaticMatchRuns.status, "completed"),
+          ),
+        )
+    ).flatMap((row) => (row.result ? [row.result] : [])),
     now,
   };
   const project = resolveProjectLotAssessment({

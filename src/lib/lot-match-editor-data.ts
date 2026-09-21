@@ -5,6 +5,7 @@ import type {
   assessmentReviewTarget,
 } from "./lot-match-reviews";
 import type { LotSourceEditorData } from "./lot-source-editor-data";
+import { plainText } from "@/sources/common";
 
 type SelectedTarget = ReturnType<typeof assessmentReviewTarget>;
 export type LotMatchEditorData = {
@@ -36,6 +37,13 @@ export type LotMatchEditorData = {
     reviewReasons: string[];
     texts: LotSourceEditorData["texts"];
     original: string | null;
+    automatic?: {
+      reason: string;
+      result: LotAssessmentResult;
+      quotes: string[];
+      activities: string[];
+      chunks: number;
+    } | null;
   };
   history: {
     id: string;
@@ -58,6 +66,15 @@ export function lotMatchEditorData(
   const profile = loaded.company.profile;
   const content = selected?.context.targetContent;
   const shape = loaded.project.shape;
+  const automatic = selected
+    ? loaded.project.targets.find(
+        (item) =>
+          item.target.kind === selected.target.kind &&
+          (item.target.kind === "project" ||
+            (selected.target.kind === "lot" &&
+              item.target.lotId === selected.target.lotId)),
+      )?.automatic
+    : null;
   const currentTarget =
     !!selected &&
     loaded.input.shapeState.epochToken !== null &&
@@ -127,12 +144,31 @@ export function lotMatchEditorData(
       id: lot.target.lotId,
       number: lot.number,
       state: lot.state,
-      result: lot.state === "current" ? (lot.evaluation?.result ?? null) : null,
-      reason: lot.state === "current" ? (lot.evaluation?.reason ?? null) : null,
+      result:
+        lot.state === "current"
+          ? (lot.evaluation?.result ?? lot.automatic?.result ?? null)
+          : null,
+      reason:
+        lot.state === "current"
+          ? (lot.evaluation?.reason ?? lot.automatic?.reason ?? null)
+          : null,
     })),
     selected: selected
       ? {
           target: { ...selected.target },
+          automatic: automatic
+            ? {
+                reason: automatic.reason,
+                result: automatic.result,
+                quotes: [
+                  ...new Set(
+                    automatic.evidence.map((item) => plainText(item.text)),
+                  ),
+                ],
+                activities: automatic.companyEvidence.map((item) => item.text),
+                chunks: automatic.coverage.chunks,
+              }
+            : null,
           expected: {
             ...selected.expected,
             sourceDependency: {

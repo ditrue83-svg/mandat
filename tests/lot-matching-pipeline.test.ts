@@ -18,6 +18,14 @@ import {
   storeDocumentaryObservation,
 } from "../src/lib/documentary-store";
 import { LOT_RECONCILIATION_QUEUE } from "../src/lib/lot-reconciliation";
+import { AUTOMATIC_COMPARISON_QUEUE } from "../src/lib/automatic-comparison-queue";
+import { runAutomaticComparison } from "../src/worker/automatic-matching";
+import {
+  lotNoticeScope,
+  buildLotNotice,
+  validateLotNotice,
+} from "../src/lib/lot-notice";
+import { renderLotNoticeContent } from "../src/lib/notification-content";
 import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-participation";
 import {
   LOT_WORKER_REVIEW_VERSION,
@@ -40,13 +48,14 @@ vi.mock("@/worker/ai", async (original) => ({
   ...(await original<typeof import("../src/worker/ai")>()),
   summarize: vi.fn(),
   classify: vi.fn(),
+  infer: vi.fn(),
 }));
 vi.mock("@/worker/notifications", () => ({ queueChangeNotices: vi.fn() }));
 vi.mock("@/lib/source-reviews", async (original) => ({
   ...(await original<typeof import("../src/lib/source-reviews")>()),
   readSourceReviewContext: vi.fn(async () => null),
 }));
-import { summarize, classify } from "../src/worker/ai";
+import { summarize, classify, infer } from "../src/worker/ai";
 import { readSourceReviewContext } from "../src/lib/source-reviews";
 import { enrichAndMatch, storePublication } from "../src/worker/pipeline";
 import {
@@ -92,6 +101,7 @@ beforeAll(async () => {
   await migrate(db, { migrationsFolder: "drizzle" });
   await boss.start();
   await boss.createQueue(LOT_RECONCILIATION_QUEUE);
+  await boss.createQueue(AUTOMATIC_COMPARISON_QUEUE);
   await boss.stop();
   await db.insert(schema.user).values({
     id: viewer.userId,
@@ -101,6 +111,12 @@ beforeAll(async () => {
   await db.insert(schema.administrators).values({ userId: viewer.userId });
 }, 20000);
 beforeEach(async () => {
+  vi.stubEnv("DOCUMENTARY_COMPARISON_ENABLED", "false");
+  vi.stubEnv("LLM_INPUT_CHF_PER_MILLION", "1");
+  vi.stubEnv("LLM_OUTPUT_CHF_PER_MILLION", "2");
+  vi.mocked(infer)
+    .mockReset()
+    .mockRejectedValue(new Error("Unexpected documentary AI call"));
   injected.db = db;
   await db.update(schema.companies).set({ disabledAt: new Date() });
   vi.mocked(summarize)
@@ -112,8 +128,264 @@ beforeEach(async () => {
   vi.mocked(readSourceReviewContext).mockClear();
 });
 afterAll(async () => {
+  vi.unstubAllEnvs();
   await boss.stop();
   await pg.close();
+});
+
+function inventedAnswer(prompt: string) {
+  const data = JSON.parse(prompt);
+  const scope = data.target.kind === "lot" ? "selected_lot" : "project_context";
+  return {
+    comparison: "Risposta inventata per la sola verifica tecnica della coda.",
+    facts: {
+      sourceIdentifiesService: true,
+      companyIdentifiesService: true,
+      activitiesOverlap: true,
+      sameContractualRole: true,
+      mainScopeCovered: true,
+      conflictingSource: false,
+    },
+    targetRef: data.passages.find(
+      (p: { scope: string; role: string }) =>
+        p.scope === scope && p.role === "service",
+    ).id,
+    sourceRefs: [
+      data.passages.find(
+        (p: { scope: string; role: string }) =>
+          p.scope === scope && p.role === "service",
+      ).id,
+    ],
+    companyRefs: [data.company.activities[0].id],
+  };
+}
+async function automaticFixture(project = false) {
+  vi.stubEnv("DOCUMENTARY_COMPARISON_ENABLED", "true");
+  const f = await fixture({ empty: project, automaticProject: project }),
+    companyId = await company();
+  await matchAdoptedPublication({ publicationId: f.p.id, now });
+  const [run] = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(eq(schema.automaticMatchRuns.publicationId, f.p.id));
+  expect(run).toBeDefined();
+  const job = { runId: run.id, publicationId: f.p.id, companyId };
+  return { f, companyId, run, job };
+}
+
+it("Durably schedules once, completes a referenced comparison, and never creates a human quality vote", async () => {
+  const { f, companyId, job } = await automaticFixture();
+  await matchAdoptedPublication({ publicationId: f.p.id, now });
+  expect(
+    await db
+      .select()
+      .from(schema.automaticMatchRuns)
+      .where(eq(schema.automaticMatchRuns.publicationId, f.p.id)),
+  ).toHaveLength(1);
+  vi.mocked(infer).mockImplementation(async (_pub, _purpose, prompt) =>
+    inventedAnswer(prompt),
+  );
+  expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+    status: "completed",
+  });
+  expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+    status: "skipped",
+  });
+  expect(infer).toHaveBeenCalledTimes(1);
+  const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
+  expect(loaded.project.targets[0].automatic?.serviceRelation).toBe("direct");
+  expect(loaded.project.qualityEventIds).toEqual([]);
+  expect(loaded.project.quality).toBe("unresolved");
+  expect((await rows(f.p.id))[0].lotEvaluations).toBeNull();
+});
+
+it("A profile change while the provider runs supersedes its answer without holding an application transaction", async () => {
+  const { f, companyId, job } = await automaticFixture();
+  vi.mocked(infer).mockImplementation(async (_pub, _purpose, prompt) => {
+    await db
+      .update(schema.companies)
+      .set({ profile: { ...baseProfile, activities: "Vendita di mobili" } })
+      .where(eq(schema.companies.id, companyId));
+    return inventedAnswer(prompt);
+  });
+  expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+    status: "superseded",
+  });
+  const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
+  expect(loaded.project.signalEligible).toBe(false);
+  expect(loaded.project.targets[0].automatic).toBeNull();
+});
+
+it("Provider errors retry within the same durable input and stop after three attempts", async () => {
+  const { job } = await automaticFixture();
+  vi.mocked(infer).mockRejectedValue(new Error("Provider unavailable"));
+  for (let attempt = 1; attempt <= 3; attempt++)
+    await expect(
+      runAutomaticComparison(job, { now: () => now }),
+    ).rejects.toThrow("Provider unavailable");
+  expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+    status: "skipped",
+  });
+  expect(infer).toHaveBeenCalledTimes(3);
+  const [run] = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(eq(schema.automaticMatchRuns.id, job.runId));
+  expect(run.status).toBe("failed");
+  expect(run.issue).toBe("comparison_failed");
+});
+
+it("Revoking processing during a provider call discards the answer and clears its lease", async () => {
+  const { job, companyId } = await automaticFixture();
+  vi.mocked(infer).mockImplementation(async (_pub, _purpose, prompt) => {
+    await db
+      .update(schema.companies)
+      .set({ disabledAt: now })
+      .where(eq(schema.companies.id, companyId));
+    return inventedAnswer(prompt);
+  });
+  expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+    status: "superseded",
+  });
+  const [run] = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(eq(schema.automaticMatchRuns.id, job.runId));
+  expect(run.status).toBe("superseded");
+  expect(run.result).toBeNull();
+  expect(run.leaseUntil).toBeNull();
+});
+
+it("An expired lease can be recovered once, while a live lease prevents a duplicate paid request", async () => {
+  const { job } = await automaticFixture();
+  await db
+    .update(schema.automaticMatchRuns)
+    .set({
+      status: "running",
+      attempts: 1,
+      leaseUntil: new Date(now.getTime() + 60_000),
+    })
+    .where(eq(schema.automaticMatchRuns.id, job.runId));
+  await expect(runAutomaticComparison(job, { now: () => now })).rejects.toThrow(
+    "già in elaborazione",
+  );
+  expect(infer).not.toHaveBeenCalled();
+  await db
+    .update(schema.automaticMatchRuns)
+    .set({ leaseUntil: new Date(now.getTime() - 1) })
+    .where(eq(schema.automaticMatchRuns.id, job.runId));
+  vi.mocked(infer).mockImplementation(async (_pub, _purpose, prompt) =>
+    inventedAnswer(prompt),
+  );
+  expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+    status: "completed",
+  });
+  expect(infer).toHaveBeenCalledTimes(1);
+});
+
+it("Returning to a superseded profile requeues its input once and preserves the attempt ceiling", async () => {
+  const { job, companyId, f } = await automaticFixture();
+  await db
+    .update(schema.companies)
+    .set({
+      profile: { ...baseProfile, activities: "Servizi inventati diversi" },
+    })
+    .where(eq(schema.companies.id, companyId));
+  expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+    status: "skipped",
+  });
+  expect(infer).not.toHaveBeenCalled();
+  await db
+    .update(schema.automaticMatchRuns)
+    .set({ attempts: 2 })
+    .where(eq(schema.automaticMatchRuns.id, job.runId));
+  await db
+    .update(schema.companies)
+    .set({ profile: baseProfile })
+    .where(eq(schema.companies.id, companyId));
+  await matchAdoptedPublication({ publicationId: f.p.id, now });
+  await matchAdoptedPublication({ publicationId: f.p.id, now });
+  const runs = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(eq(schema.automaticMatchRuns.publicationId, f.p.id));
+  expect(runs).toHaveLength(1);
+  expect(runs[0]).toMatchObject({
+    id: job.runId,
+    status: "queued",
+    attempts: 2,
+  });
+  vi.mocked(infer).mockImplementation(async (_pub, _purpose, prompt) =>
+    inventedAnswer(prompt),
+  );
+  expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+    status: "completed",
+  });
+  await db
+    .update(schema.automaticMatchRuns)
+    .set({ status: "superseded", result: null })
+    .where(eq(schema.automaticMatchRuns.id, job.runId));
+  await matchAdoptedPublication({ publicationId: f.p.id, now });
+  const [exhausted] = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(eq(schema.automaticMatchRuns.id, job.runId));
+  expect(exhausted).toMatchObject({ status: "superseded", attempts: 3 });
+  expect(infer).toHaveBeenCalledTimes(1);
+});
+
+it("A job for another company cannot read, run or update the owner's comparison", async () => {
+  const { job, run } = await automaticFixture();
+  const other = await company();
+  expect(
+    await runAutomaticComparison(
+      { ...job, companyId: other },
+      { now: () => now },
+    ),
+  ).toEqual({ status: "skipped" });
+  expect(infer).not.toHaveBeenCalled();
+  expect(
+    (
+      await db
+        .select()
+        .from(schema.automaticMatchRuns)
+        .where(eq(schema.automaticMatchRuns.id, run.id))
+    )[0],
+  ).toEqual(run);
+  await expect(
+    db
+      .insert(schema.automaticMatchRuns)
+      .values({ ...run, id: randomUUID(), companyId: other }),
+  ).rejects.toThrow();
+});
+
+it("A current AI-positive project cannot produce an email while company automation remains disabled", async () => {
+  const { f, companyId, job } = await automaticFixture(true);
+  vi.mocked(infer).mockImplementation(async (_pub, _purpose, prompt) =>
+    inventedAnswer(prompt),
+  );
+  await runAutomaticComparison(job, { now: () => now });
+  const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
+  expect(loaded.project.signalEligible).toBe(true);
+  expect(loaded.project.quality).toBe("unresolved");
+  const scope = lotNoticeScope(
+    loaded,
+    loaded.project.targets[0].target,
+    "positive",
+  );
+  expect(() => buildLotNotice(loaded, [scope], "opportunity", false)).toThrow(
+    "automation gate",
+  );
+  const allowed = buildLotNotice(loaded, [scope], "opportunity", true);
+  const alteredStructure = structuredClone(allowed);
+  alteredStructure.binding.shapeEpochToken = "0".repeat(64);
+  expect(() => validateLotNotice(alteredStructure)).toThrow(
+    "Invalid positive assessment structure binding",
+  );
+  expect(
+    renderLotNoticeContent([allowed], "https://example.invalid").textBody,
+  ).toContain("Confronto automatico AI");
+  expect(await db.select().from(schema.notifications)).toEqual([]);
 });
 async function company(
   profile = baseProfile,
@@ -146,7 +418,12 @@ async function company(
   return id;
 }
 async function fixture(
-  options: { adopt?: boolean; empty?: boolean; canonicalId?: string } = {},
+  options: {
+    adopt?: boolean;
+    empty?: boolean;
+    canonicalId?: string;
+    automaticProject?: boolean;
+  } = {},
 ) {
   const projectId = randomUUID(),
     noticeId = randomUUID(),
@@ -203,10 +480,23 @@ async function fixture(
       procOfficeName: { it: "Ente inventato" },
     },
   };
+  if (options.automaticProject) {
+    raw.procurement.orderDescription.it = lotText;
+    raw.procurement.orderAddress = {
+      countryId: "CH",
+      cantonId: "TI",
+      city: { it: "Lugano" },
+    };
+    raw.base.processType = "open";
+    raw.dates = {
+      offerDeadline: "2031-12-01T12:00:00+01:00",
+      processType: "open",
+    };
+  }
   const normalized = normalizeSimap(entry, raw);
   const p = {
     ...normalized,
-    canton: "ZH",
+    canton: options.automaticProject ? "TI" : "ZH",
     sectors: ["impianti"] as ["impianti"],
     summary: null,
   };

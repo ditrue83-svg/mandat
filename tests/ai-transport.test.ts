@@ -19,6 +19,7 @@ const context = vi.hoisted(() => ({ db: undefined as unknown }));
 vi.mock("@/db", () => ({ getDb: () => context.db }));
 import {
   configuredTransport,
+  infer,
   recoverStaleAiReservations,
   summarize,
 } from "../src/worker/ai";
@@ -230,6 +231,91 @@ afterEach(() => {
 afterAll(async () => pg.close());
 
 describe("trasporto AI e consumo degli output respinti", () => {
+  it("registra e fattura il modello dedicato senza cambiare quello dei riassunti", async () => {
+    const body = payload();
+    body.model = "dedicated-comparison-model";
+    const fetch = mockResponse(body);
+    await expect(
+      infer(
+        publication,
+        "dedicated",
+        "prompt",
+        300,
+        undefined,
+        "system",
+        undefined,
+        {
+          model: "dedicated-comparison-model",
+        },
+      ),
+    ).rejects.toThrow("tariffe");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await db.select().from(schema.aiUsage)).toHaveLength(0);
+    await infer(
+      publication,
+      "dedicated",
+      "prompt",
+      300,
+      undefined,
+      "system",
+      undefined,
+      {
+        model: "dedicated-comparison-model",
+        reasoningEffort: "none",
+        rates: { input: 10, output: 20 },
+      },
+    );
+    const [, init] = fetch.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(JSON.parse(init.body as string).model).toBe(
+      "dedicated-comparison-model",
+    );
+    const [row] = await db.select().from(schema.aiUsage);
+    expect(row.model).toBe("dedicated-comparison-model");
+    expect(row.costChf).toBe("0.002000");
+    expect(process.env.LLM_MODEL).toBe(expectedModel);
+    expect(process.env.LLM_INPUT_CHF_PER_MILLION).toBe("1");
+  });
+  it("invia lo schema vincolante e ne include il costo nella riserva senza mutare le richieste precedenti", async () => {
+    vi.stubEnv("LLM_REASONING_EFFORT", "high");
+    const responseFormat = {
+      type: "json_schema" as const,
+      json_schema: {
+        name: "test_schema",
+        strict: true as const,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: { value: { type: "string" } },
+          required: ["value"],
+        },
+      },
+    };
+    const fetch = mockResponse(payload());
+    await infer(
+      publication,
+      "structured-test",
+      "prompt",
+      300,
+      undefined,
+      "system",
+      responseFormat,
+      { reasoningEffort: "none" },
+    );
+    const [, init] = fetch.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(JSON.parse(init.body as string).response_format).toEqual(
+      responseFormat,
+    );
+    expect(JSON.parse(init.body as string).reasoning_effort).toBe("none");
+    expect(process.env.LLM_REASONING_EFFORT).toBe("high");
+    const [row] = await db.select().from(schema.aiUsage);
+    const expected =
+      (Buffer.byteLength("systemprompt" + JSON.stringify(responseFormat)) +
+        1000 +
+        300 * 2) /
+      1e6;
+    expect(row.reservedChf).toBe(expected.toFixed(6));
+    expect(row.costChf).toBe("0.000200");
+  });
   it("accetta una sola risposta completa del modello esatto senza cambiare la richiesta", async () => {
     const body = payload();
     body.choices[0].message.refusal = null;

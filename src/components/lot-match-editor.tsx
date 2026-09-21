@@ -370,6 +370,26 @@ export function LotMatchEditor({ data }: { data: LotMatchEditorData }) {
             </p>
           )}
           <p className="notice">{selected.filterReason}</p>
+          {selected.automatic && (
+            <section className="notice">
+              <h3>Confronto automatico AI</h3>
+              <p>
+                <strong>{results[selected.automatic.result]}</strong> —{" "}
+                {selected.automatic.reason}
+              </p>
+              <p>
+                Attività dichiarata: {selected.automatic.activities.join(" ")}
+              </p>
+              {selected.automatic.quotes.map((quote, index) => (
+                <blockquote key={index}>{quote}</blockquote>
+              ))}
+              <p className="meta">
+                Testi pubblici elaborati in {selected.automatic.chunks}{" "}
+                {selected.automatic.chunks === 1 ? "parte" : "parti"}. Questo
+                confronto non conta come valutazione manuale.
+              </p>
+            </section>
+          )}
           {sourceUrl && (
             <p>
               <a
@@ -483,7 +503,7 @@ export function LotMatchEditor({ data }: { data: LotMatchEditorData }) {
             />
           </label>
           <p>
-            Descrivi il rapporto fra attività della ditta e prestazioni del
+            Descrivi il rapporto fra attività della ditta e prestazioni del{" "}
             {projectTarget ? "progetto" : "lotto"}. Mantieni le informazioni
             riservate nella nota privata.
           </p>

@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import { assessmentLocation } from "./assessment-location";
+import {
+  resolveAutomaticComparison,
+  type ResolvedAutomaticComparison,
+} from "./automatic-comparison";
 import { z } from "zod";
 import type { CompanyProfile, Publication } from "./domain";
 import {
@@ -368,6 +372,7 @@ export type LotAssessmentInput = {
   history: readonly MixedSourceReviewRecord[];
   shapeState: AssessmentShapeHistory;
   evaluationSet: LotEvaluationSet | null;
+  automaticComparisons?: readonly unknown[];
   evidenceSnapshots?: readonly LotSourceSnapshot[];
   now?: Date;
 };
@@ -733,6 +738,7 @@ export type ResolvedTargetAssessment = DeepReadonly<{
   state: "current" | "stale" | "missing" | "removed-or-unresolved";
   issue: string | null;
   evaluation: LotEvaluation | null;
+  automatic?: ResolvedAutomaticComparison | null;
   context: LotSourceContext | null;
   preliminary: PreliminaryTargetMatch | null;
   signalEligible: boolean;
@@ -870,24 +876,39 @@ export function resolveProjectLotAssessment(
         )
           issue = "operational_review_unconfirmed";
       }
+      // A recorded human judgment, even stale, always requires a human to
+      // reconsider it. AI never silently replaces that decision.
+      const automatic = evaluation
+        ? { comparison: null, issue: null }
+        : resolveAutomaticComparison(
+            { ...input, target, preliminary },
+            input.automaticComparisons ?? [],
+          );
       const state = evaluation
         ? issue
           ? ("stale" as const)
           : ("current" as const)
-        : ("missing" as const);
+        : automatic.comparison
+          ? ("current" as const)
+          : ("missing" as const);
       return {
         target,
         number,
         state,
-        issue: evaluation ? issue : "assessment_missing",
+        issue: evaluation
+          ? issue
+          : (automatic.issue ??
+            (automatic.comparison ? null : "assessment_missing")),
         evaluation,
+        automatic: automatic.comparison,
         context,
         preliminary,
         signalEligible:
           state === "current" &&
-          evaluation?.result === "direct" &&
           preliminary.eligible &&
-          sourceAllowsCertainty(context),
+          ((evaluation?.result === "direct" &&
+            sourceAllowsCertainty(context)) ||
+            automatic.comparison?.result === "direct"),
       };
     });
   const present = new Set(
@@ -913,7 +934,7 @@ export function resolveProjectLotAssessment(
     (lot) => lot.state !== "removed-or-unresolved",
   );
   const clear = checked.project.projectBarrier.state === "clear";
-  const allDifferent =
+  const manualAllDifferent =
     clear &&
     currentTargets.length > 0 &&
     currentTargets.every(
@@ -923,7 +944,21 @@ export function resolveProjectLotAssessment(
         lot.context &&
         sourceAllowsCertainty(lot.context),
     );
+  const allDifferent =
+    currentTargets.length > 0 &&
+    currentTargets.every(
+      (item) =>
+        item.state === "current" &&
+        ((item.evaluation?.result === "different" &&
+          !!item.context &&
+          sourceAllowsCertainty(item.context)) ||
+          item.automatic?.result === "different"),
+    );
   const relevant = currentTargets.filter((item) => item.signalEligible);
+  const manualRelevant = relevant.filter((item) => !!item.evaluation);
+  const automaticBindings = currentTargets.flatMap((item) =>
+    item.automatic ? [item.automatic.hash] : [],
+  );
   // Whole-project rejection is deliberately bound to the whole current set.
   // Unlike per-lot freshness, a concurrent change in B can invalidate this veto's
   // quality vote. The active veto still suppresses delivery until reconsidered.
@@ -933,6 +968,7 @@ export function resolveProjectLotAssessment(
     profileHash: checked.profileHash,
     project: checked.project.dependency,
     evaluationSetToken: checked.setToken,
+    ...(automaticBindings.length ? { automaticBindings } : {}),
     targets: currentTargets.map((lot) => ({
       target: lot.target,
       source: lot.context?.dependency,
@@ -956,13 +992,13 @@ export function resolveProjectLotAssessment(
     ? rejected
       ? ("rejected" as const)
       : ("unresolved" as const)
-    : relevant.length
+    : manualRelevant.length
       ? ("approved" as const)
-      : allDifferent
+      : manualAllDifferent
         ? ("rejected" as const)
         : ("unresolved" as const);
   const signalEligible =
-    relevant.length > 0 && clear && !suppressed && !feedback.dismissed;
+    relevant.length > 0 && !suppressed && !feedback.dismissed;
   const state =
     suppressed || feedback.dismissed
       ? ("suppressed" as const)
@@ -1015,7 +1051,7 @@ export function resolveProjectLotAssessment(
     quality,
     qualityEventIds:
       quality === "approved"
-        ? relevant.map((lot) => lot.evaluation!.id)
+        ? manualRelevant.map((lot) => lot.evaluation!.id)
         : quality === "rejected"
           ? rejected
             ? [suppression!.rejection!.eventId]
@@ -1035,17 +1071,45 @@ export function projectLotAssessmentDto(value: ProjectLotAssessment) {
     number: item.number,
     state: item.state,
     issue: item.issue,
-    result: item.state === "current" ? (item.evaluation?.result ?? null) : null,
-    reason: item.state === "current" ? (item.evaluation?.reason ?? null) : null,
+    origin:
+      item.state === "current"
+        ? item.evaluation
+          ? ("human" as const)
+          : item.automatic
+            ? ("ai" as const)
+            : null
+        : null,
+    result:
+      item.state === "current"
+        ? (item.evaluation?.result ?? item.automatic?.result ?? null)
+        : null,
+    reason:
+      item.state === "current"
+        ? (item.evaluation?.reason ?? item.automatic?.reason ?? null)
+        : null,
     evidence:
       item.state === "current"
-        ? (item.evaluation?.evidence ?? []).map((proof) => ({
-            quote: proof.quote,
-            url: proof.origin.url,
-            page: proof.origin.page,
-          }))
+        ? item.evaluation
+          ? item.evaluation.evidence.map((proof) => ({
+              quote: proof.quote,
+              url: proof.origin.url,
+              page: proof.origin.page,
+            }))
+          : (item.automatic?.evidence ?? []).map((proof) => ({
+              quote: proof.text,
+              url: proof.url,
+              page: null,
+            }))
         : [],
-    reviewReasons: [...(item.preliminary?.reviewReasons ?? [])],
+    companyEvidence:
+      item.state === "current"
+        ? (item.automatic?.companyEvidence ?? []).map((proof) => proof.text)
+        : [],
+    reviewReasons: [
+      ...(item.automatic?.reviewReasons ??
+        item.preliminary?.reviewReasons ??
+        []),
+    ],
     operational: item.preliminary
       ? {
           ...item.preliminary.operational,

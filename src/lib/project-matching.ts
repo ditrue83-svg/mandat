@@ -35,6 +35,7 @@ export type PreliminaryProjectMatch = {
   operationalInputHash: string;
   evidence: readonly ProjectOperationalEvidence[];
   reviewReasons: readonly string[];
+  automaticReviewReasons: readonly string[];
   signals: { sectors: readonly Sector[]; keyword: boolean };
   operational: {
     country: string | null;
@@ -124,9 +125,15 @@ export function preliminaryProjectMatch({
     throw new Error("Invalid project filter clock");
   const evidence: ProjectOperationalEvidence[] = [],
     used: unknown[] = [],
-    reviewReasons: string[] = [];
-  const review = (reason: string) => {
+    reviewReasons: string[] = [],
+    automaticReviewReasons: string[] = [];
+  const review = (reason: string, resolvedByServiceComparison = false) => {
     if (!reviewReasons.includes(reason)) reviewReasons.push(reason);
+    if (
+      !resolvedByServiceComparison &&
+      !automaticReviewReasons.includes(reason)
+    )
+      automaticReviewReasons.push(reason);
   };
   const add = (item: ProjectOperationalEvidence) => {
     evidence.push(item);
@@ -223,7 +230,7 @@ export function preliminaryProjectMatch({
           ? field(owner, "additionalCpvCodes", path, "classification")
           : null;
       if (additional !== null && !Array.isArray(additional))
-        review("Classificazione del progetto da verificare.");
+        review("Classificazione del progetto da verificare.", true);
       for (const value of [
         primary,
         ...(Array.isArray(additional) ? additional : []),
@@ -232,13 +239,14 @@ export function preliminaryProjectMatch({
         const raw = object(value).code;
         if (typeof raw === "string" && /^\d{8}(?:-\d)?$/.test(raw))
           cpv.add(raw.slice(0, 8));
-        else review("Classificazione del progetto da verificare.");
+        else review("Classificazione del progetto da verificare.", true);
       }
     }
     classification.sectors.forEach((sector) => sectors.add(sector));
     if (classification.needsClassification)
       review(
         "Settore del progetto da classificare: informazioni insufficienti o discordanti.",
+        true,
       );
 
     // All parent content stays in context. Only these documented title/service
@@ -457,13 +465,17 @@ export function preliminaryProjectMatch({
     ![...sectors].some((sector) => profile.sectors.includes(sector)) &&
     !keyword
   )
-    review("Le attività del progetto richiedono un confronto con il profilo.");
+    review(
+      "Le attività del progetto richiedono un confronto con il profilo.",
+      true,
+    );
   if (
     context.state !== "manual_source" ||
     context.form !== "defined_service" ||
     context.projectBarrier.state !== "clear"
   )
-    review("La fonte del progetto richiede una revisione.");
+    // Explicit human source doubts remain a separate automatic-comparison gate.
+    review("La fonte del progetto richiede una revisione.", true);
   const operationalInputHash = createHash("sha256")
     .update(
       stableDocumentaryJson({
@@ -497,6 +509,7 @@ export function preliminaryProjectMatch({
     operationalInputHash,
     evidence,
     reviewReasons,
+    automaticReviewReasons,
     signals: { sectors: [...sectors], keyword },
     operational: {
       country,

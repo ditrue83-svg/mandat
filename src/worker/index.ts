@@ -23,6 +23,12 @@ import { DOCUMENTARY_ADOPTION_CAPABILITY } from "@/lib/documentary-capability";
 import { loadDocumentaryRuntimeActivation } from "@/lib/documentary-runtime-config";
 import { recoverStaleAiReservations } from "./ai";
 import {
+  AUTOMATIC_COMPARISON_QUEUE,
+  automaticComparisonEnabled,
+  type AutomaticComparisonJob,
+} from "@/lib/automatic-comparison-queue";
+import { runAutomaticComparison } from "./automatic-matching";
+import {
   requestNotificationDelivery,
   requestNotificationSweeps,
 } from "./notification-scheduling";
@@ -53,6 +59,23 @@ async function main() {
       expireInSeconds: name === "ingest" ? 7200 : 1800,
     });
   await recoverUncertainDeliveries();
+  await boss.createQueue(AUTOMATIC_COMPARISON_QUEUE, {
+    retryLimit: 2,
+    retryDelay: 300,
+    retryBackoff: true,
+    expireInSeconds: 3600,
+  });
+  // Pausing the feature leaves durable jobs untouched for the next enabled
+  // worker; consuming and rejecting them would exhaust their retry budget.
+  if (automaticComparisonEnabled())
+    await boss.work<AutomaticComparisonJob>(
+      AUTOMATIC_COMPARISON_QUEUE,
+      { batchSize: 1 },
+      async ([job]) => {
+        await runAutomaticComparison(job.data, { signal: job.signal });
+        await requestNotificationSweeps(boss);
+      },
+    );
   await boss.createQueue(LOT_RECONCILIATION_QUEUE, {
     retryLimit: 2,
     retryDelay: 60,

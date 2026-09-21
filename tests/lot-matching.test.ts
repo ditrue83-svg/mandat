@@ -370,7 +370,14 @@ test("Keywords and exclusions use documentary project/lot text while ignoring ot
   );
   const shared = detail();
   shared.procurement.orderDescription.it += " Clausola inventata amianto.";
-  assert.equal(filter(shared, { exclusions: ["amianto"] }).eligible, false);
+  const sharedExclusion = filter(shared, { exclusions: ["amianto"] });
+  assert.equal(sharedExclusion.eligible, true);
+  assert.equal(sharedExclusion.requiresReview, true);
+  assert.ok(
+    sharedExclusion.reviewReasons.some((reason) =>
+      /contesto del progetto.*esclus.*lotto selezionato/.test(reason),
+    ),
+  );
   const keyword = filter(detail(), {
     sectors: ["sicurezza"],
     keywords: ["contesto condiviso"],
@@ -380,6 +387,49 @@ test("Keywords and exclusions use documentary project/lot text while ignoring ot
   assert.ok(
     keyword.evidence.some(
       (e) => e.purpose === "keyword" && e.scope === "project_context",
+    ),
+  );
+});
+
+test("An exclusion listed only in the parent must not discard an unrelated selected lot", () => {
+  const raw = detail();
+  raw.procurement.orderDescription.it =
+    "Lotto A: cura dei giardini. Lotto B: rimozione amianto.";
+  const result = filter(raw, { exclusions: ["amianto"] });
+  assert.equal(result.eligible, true);
+  assert.equal(result.requiresReview, true);
+  assert.ok(
+    result.reviewReasons.some((reason) =>
+      /contesto del progetto.*esclus.*lotto selezionato/.test(reason),
+    ),
+  );
+  assert.ok(
+    result.evidence.some(
+      (evidence) =>
+        evidence.purpose === "exclusion" &&
+        evidence.scope === "project_context" &&
+        evidence.rawPath === "/procurement/orderDescription/it" &&
+        evidence.value === raw.procurement.orderDescription.it,
+    ),
+  );
+  assert.equal(
+    result.evidence.some(
+      (evidence) =>
+        evidence.purpose === "exclusion" && evidence.scope === "selected_lot",
+    ),
+    false,
+  );
+
+  // Once the selected lot itself requires the excluded work, keep the veto.
+  raw.lots[0].orderDescription = {
+    it: "Cura del giardino con rimozione amianto.",
+  };
+  const selected = filter(raw, { exclusions: ["amianto"] });
+  assert.equal(selected.eligible, false);
+  assert.ok(
+    selected.evidence.some(
+      (evidence) =>
+        evidence.purpose === "exclusion" && evidence.scope === "selected_lot",
     ),
   );
 });
@@ -416,7 +466,7 @@ test("Operational hashes ignore time, project revision/summaries and an unrelate
     preliminaryLotMatch({ publication: p, profile: pr, context, now: clock });
   const baseline = run();
   assert.match(baseline.operationalInputHash, /^[a-f0-9]{64}$/);
-  assert.equal(PREFILTER_VERSION, "lot-operational-prefilter-v2");
+  assert.equal(PREFILTER_VERSION, "lot-operational-prefilter-v3");
   const unrelated: Publication = {
     ...publication,
     revision: "new-revision",

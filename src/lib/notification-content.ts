@@ -78,7 +78,7 @@ function lotNoticeBlocks(notices: readonly LotNotice[], appUrl: string) {
         seen.add(key);
         return true;
       });
-      const body = `${kind === "positive" ? "Interesse potenziale; non attesta l’idoneità a partecipare." : "Aggiornamento della fonte già segnalata."}\n${lot.reason}\n${lot.description}\n${sharedTexts.map((s) => `${s.label}: ${s.text}`).join("\n")}\nLuogo: ${[lot.operational.country, lot.operational.canton, lot.operational.zone].filter(Boolean).join(" · ") || "Non indicato"}\n${deadline}\n${lot.reviewReasons.join("\n")}\nFonte: ${lot.sourceUrl}`;
+      const body = `${kind === "positive" ? `${lot.origin === "ai" ? "Confronto automatico AI. " : ""}Interesse potenziale; non attesta l’idoneità a partecipare.` : "Aggiornamento della fonte già segnalata."}\n${lot.reason}\n${lot.description}\n${sharedTexts.map((s) => `${s.label}: ${s.text}`).join("\n")}\nLuogo: ${[lot.operational.country, lot.operational.canton, lot.operational.zone].filter(Boolean).join(" · ") || "Non indicato"}\n${deadline}\n${lot.reviewReasons.join("\n")}\nFonte: ${lot.sourceUrl}`;
       return {
         label,
         body,

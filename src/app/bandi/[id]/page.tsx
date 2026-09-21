@@ -123,13 +123,27 @@ export default async function Detail({
                     <p>
                       {lot.state === "current"
                         ? lot.result === "direct"
-                          ? "Interesse potenziale verificato"
+                          ? lot.origin === "ai"
+                            ? "Interesse potenziale individuato dall’AI"
+                            : "Interesse potenziale verificato"
                           : lot.result === "different"
                             ? "Attività diverse da quelle della ditta"
                             : "Pertinenza da verificare"
                         : "Valutazione da aggiornare"}
                     </p>
                     {lot.reason && <p>{lot.reason}</p>}
+                    {lot.origin === "ai" && (
+                      <p className="meta">
+                        Confronto automatico sui testi pubblici disponibili. Non
+                        attesta l’idoneità a partecipare.
+                      </p>
+                    )}
+                    {!!lot.companyEvidence.length && (
+                      <p>
+                        <strong>Attività dichiarata dalla ditta: </strong>
+                        {lot.companyEvidence.map(plainText).join(" ")}
+                      </p>
+                    )}
                     {lot.issue && (
                       <p className="notice">
                         {lot.issue === "assessment_missing"
@@ -151,7 +165,7 @@ export default async function Detail({
                     {!!lot.evidence.length && (
                       <details>
                         <summary>
-                          Passaggi della fonte usati nella revisione
+                          Passaggi della fonte usati nel confronto
                         </summary>
                         {lot.evidence.map((e, i) => (
                           <blockquote key={i}>

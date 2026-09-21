@@ -518,6 +518,45 @@ test("Human direct requires exact current operational confirmation, nonempty not
   );
 });
 
+test("A shared exclusion stays unresolved until the reviewer confirms its application to the lot", () => {
+  const initial = input();
+  const detail = raw();
+  detail.procurement.orderDescription.it =
+    "Lotto A: cura del verde. Lotto B: installazione quadri elettrici.";
+  const snap = snapshot(detail, "shared-exclusion-observation");
+  const parent = sourceRecord(snap, project, [], "broad_scope");
+  const selected = sourceRecord(snap, a, [parent]);
+  const i = withShape({
+    ...initial,
+    snapshot: snap,
+    history: [parent, selected],
+    profile: { ...initial.profile, exclusions: ["quadri elettrici"] },
+  });
+  const result = resolveProjectLotAssessment(i);
+  assert.equal(result.signalEligible, false);
+  assert.equal(result.lots[0].preliminary?.eligible, true);
+  assert.equal(result.lots[0].state, "missing");
+  const c = command(i);
+  const sharedWarning = c.confirmedReviewReasons.find((reason) =>
+    /contesto del progetto.*esclus.*lotto selezionato/.test(reason),
+  );
+  assert.ok(sharedWarning);
+  assert.throws(
+    () =>
+      createHumanLotAssessment(
+        {
+          ...c,
+          confirmedReviewReasons: c.confirmedReviewReasons.filter(
+            (reason) => reason !== sharedWarning,
+          ),
+        },
+        i,
+        metadata(),
+      ),
+    ReviewConflict,
+  );
+});
+
 test("A negative lot never rejects an unassessed project; all current human negatives yield one rejection", () => {
   const one = assess(input(), a, "different");
   const partial = resolveProjectLotAssessment(one);
@@ -855,15 +894,20 @@ test("Shared content, provenance, index, profile and operational changes cannot 
     resolveProjectLotAssessment(withEntry(i, version)).lots[0].issue,
     "stale_version",
   );
-  const oldTaxonomy = signed(i.evaluationSet!.entries[0], (entry) => {
-    entry.dependency.prefilterVersion = "lot-operational-prefilter-v1";
-  });
-  const withOldTaxonomy = withEntry(i, oldTaxonomy);
-  const preserved = JSON.stringify(withOldTaxonomy.evaluationSet);
-  const classificationUpdate = resolveProjectLotAssessment(withOldTaxonomy);
-  assert.equal(classificationUpdate.lots[0].issue, "stale_version");
-  assert.equal(classificationUpdate.signalEligible, false);
-  assert.equal(JSON.stringify(withOldTaxonomy.evaluationSet), preserved);
+  for (const previous of [
+    "lot-operational-prefilter-v1",
+    "lot-operational-prefilter-v2",
+  ]) {
+    const oldFilter = signed(i.evaluationSet!.entries[0], (entry) => {
+      entry.dependency.prefilterVersion = previous;
+    });
+    const withOldFilter = withEntry(i, oldFilter);
+    const preserved = JSON.stringify(withOldFilter.evaluationSet);
+    const updated = resolveProjectLotAssessment(withOldFilter);
+    assert.equal(updated.lots[0].issue, "stale_version");
+    assert.equal(updated.signalEligible, false);
+    assert.equal(JSON.stringify(withOldFilter.evaluationSet), preserved);
+  }
 });
 
 test("Project source barriers, broad or unclear lots, and operational vetoes cannot be bypassed by direct", () => {
