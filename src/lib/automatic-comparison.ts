@@ -21,7 +21,7 @@ import {
   documentaryAiReasoningEffort,
 } from "./documentary-ai-config";
 
-export const AUTOMATIC_COMPARISON_VERSION = "documentary-service-comparison-v6";
+export const AUTOMATIC_COMPARISON_VERSION = "documentary-service-comparison-v7";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -111,13 +111,13 @@ export const automaticComparisonResponseSchema = z
       companyIdentifiesService: z
         .boolean()
         .describe(
-          "Il profilo descrive servizi concreti, non solo un settore generico come 'spazi verdi' o 'servizi tecnici'.",
+          "Il profilo descrive servizi o prodotti concreti, non solo un settore o una famiglia generica. Il solo ruolo commerciale non identifica i prodotti trattati.",
         ),
       activitiesOverlap: z
         .boolean()
         .nullable()
         .describe(
-          "Esiste almeno una prestazione professionale comune, anche se il pacchetto del bando è più ampio. Null se non determinabile.",
+          "Esiste almeno un'attività o prodotto concretamente comune, anche se il pacchetto del bando è più ampio. Lo stesso settore o ruolo non basta. False richiede una differenza concreta, null se non determinabile.",
         ),
       sameContractualRole: z
         .boolean()
@@ -318,6 +318,65 @@ export function buildAutomaticComparisonRequest(
   }
   const targetScope =
     input.target.kind === "lot" ? "selected_lot" : "project_context";
+  // Pair the source's own code and labels; never translate a code, infer a
+  // product family, or inherit a project classification as the selected lot's.
+  // Values are reconstructed from the exact passages, including split labels.
+  type ClassificationField = { text: string; sourceRefs: string[] };
+  const classificationGroups = new Map<
+    string,
+    {
+      scope: ComparisonPassage["scope"];
+      appliesTo: "target" | "shared_project_context";
+      rawPath: string;
+      code: ClassificationField | null;
+      labels: (ClassificationField & { language: string | null })[];
+    }
+  >();
+  for (const passage of passages) {
+    const roots =
+      passage.scope === "project_context"
+        ? ["/base", "/procurement"]
+        : [content.selectedLot?.path, content.selectedLot?.basePath].filter(
+            (root): root is string => !!root,
+          );
+    const root = roots.find((path) => passage.rawPath.startsWith(path + "/"));
+    if (!root) continue;
+    const field =
+      /^(cpvCode|additionalCpvCodes\/(?:0|[1-9]\d*))\/(code|label(?:\/([^/]+))?)$/.exec(
+        passage.rawPath.slice(root.length + 1),
+      );
+    if (!field) continue;
+    const rawPath = `${root}/${field[1]}`;
+    const key = `${passage.scope}:${rawPath}`;
+    let group = classificationGroups.get(key);
+    if (!group) {
+      group = {
+        scope: passage.scope,
+        appliesTo:
+          passage.scope === targetScope ? "target" : "shared_project_context",
+        rawPath,
+        code: null,
+        labels: [],
+      };
+      classificationGroups.set(key, group);
+    }
+    let value: ClassificationField;
+    if (field[2] === "code")
+      value = group.code ??= { text: "", sourceRefs: [] };
+    else {
+      const language =
+        field[3]?.replaceAll("~1", "/").replaceAll("~0", "~") ?? null;
+      let label = group.labels.find((item) => item.language === language);
+      if (!label) {
+        label = { language, text: "", sourceRefs: [] };
+        group.labels.push(label);
+      }
+      value = label;
+    }
+    value.text += passage.text;
+    value.sourceRefs.push(passage.id);
+  }
+  const classifications = [...classificationGroups.values()];
   if (
     !passages.some(
       (passage) => passage.scope === targetScope && passage.role === "service",
@@ -376,10 +435,14 @@ export function buildAutomaticComparisonRequest(
       "partial_scope: esiste una sovrapposizione concreta ma la ditta dichiara solo una parte sostanziale del pacchetto richiesto. Non classificarla different_service. Gli obblighi accessori o opzionali non sono automaticamente un'altra attività principale.",
       "insufficient_detail: una descrizione generica potrebbe comprendere il servizio ma non basta a stabilirlo; oppure la fonte non chiarisce la prestazione. NON interpretare le informazioni mancanti come incapacità o attività diversa.",
       "different_service: le attività concretamente dichiarate sono estranee alla prestazione acquistata, senza una sovrapposizione professionale sostanziale. different_role: stesso oggetto ma ruolo esplicitamente diverso (per esempio vendere un prodotto rispetto a utilizzarlo per eseguire un lavoro).",
+      "Distingui il ruolo commerciale dalla specificità dei prodotti: dichiarare commercio o fornitura identifica il ruolo, non necessariamente i prodotti trattati. Se il profilo indica una famiglia generica che potrebbe comprendere il prodotto richiesto ma non lo precisa, companyIdentifiesService=false e mainScopeCovered=null; la mancata specificazione non prova activitiesOverlap=false.",
+      "Uno stesso settore generale o uno stesso ruolo non prova sovrapposizione: activitiesOverlap=true richiede almeno un'attività o un prodotto concretamente comune. Se le prestazioni descritte sono diverse, non inventare una componente condivisa per assegnare partial_scope. Una differenza concreta documentata consente activitiesOverlap=false; se le descrizioni non bastano, usa null.",
+      "Prima di scartare per different_service, spiega la differenza concreta fra ciò che la ditta dichiara e ciò che la fonte acquista. Una diversa parola, un nome ambiguo o l'assenza del prodotto preciso in una famiglia generica non bastano. Se non riesci a conciliare l'interpretazione con il contesto della fonte, non concludere uno scarto: usa sourceIdentifiesService=false o conflictingSource=true secondo il dubbio effettivo.",
       "conflicting_service: descrizioni materialmente incompatibili della prestazione del medesimo target. Traduzioni, ripetizioni, ordine dei lotti o spezzature del testo non sono conflitti.",
       "Per il lotto selezionato leggi titolo e descrizione insieme al contesto comune. Il titolo può identificarne l'ambito territoriale mentre la descrizione comune definisce il servizio. Non attribuire al target le prestazioni di altri lotti o di procedure separate.",
       "Distingui sempre l'oggetto acquistato dall'opera a cui serve: una consulenza su un cantiere resta consulenza, non esecuzione dei lavori. Prestazioni escluse o assegnate a terzi non sono richieste qui.",
       "Scadenze, territorio, importi e ammissibilità sono verificati separatamente: non usarli per cambiare il giudizio sui servizi. Usa le classificazioni della FONTE come contesto per disambiguare parole con più significati. Una categoria generale compatibile con una descrizione specifica non è un conflitto. Non dichiarare mai errato un codice o un testo della fonte per adattarlo alla ditta: se la tua interpretazione richiede una tale correzione, requiresSourceCorrection=true. Per la DITTA contano le attività concretamente dichiarate.",
+      "Leggi ogni blocco classifications insieme ai passaggi collegati: code e labels riportano valori originali e sourceRefs, senza traduzioni dedotte dal server. Le etichette chiariscono il contesto del codice; citare soltanto un numero non giustifica un'interpretazione contraria alle sue etichette. Un blocco shared_project_context riguarda il progetto complessivo, non sostituisce la classificazione del lotto e può includere attività di altri lotti. Anche una classificazione coerente non dimostra da sola una corrispondenza concreta.",
       "targetRef identifica SEMPRE un passaggio service del target selezionato, anche quando è un titolo geografico. sourceRefs aggiunge i passaggi che sostengono il confronto, inclusi limiti o controprove; companyRefs cita le attività della ditta. Le citazioni saranno recuperate dal server, non riscriverle.",
     ],
     target: {
@@ -392,13 +455,15 @@ export function buildAutomaticComparisonRequest(
           }
         : null,
     },
-    // Text exists once in passages, with exact references. Non-text fields are
-    // still supplied and all original fields remain bound by fieldsHash.
+    // Classification values are also grouped for disambiguation, with the same
+    // passage IDs. Their extra bytes count toward the existing prompt bounds.
+    classifications,
+    // All text and non-text fields remain supplied and bound by fieldsHash.
     fields: fields.filter((field) => typeof field.value !== "string"),
     passages: passages.map(({ url: _url, ...passage }) => passage),
     company: { activities: companyPassages },
     finalCheck:
-      "Rileggi le attività della ditta appena riportate. Non dichiarare assente un'attività che è già scritta. Un profilo che nomina solo un settore generico non identifica abbastanza i servizi: companyIdentifiesService=false e mainScopeCovered=null. Se il profilo copre solo una componente della commessa, mainScopeCovered=false anche se activitiesOverlap=true. Non confondere le competenze principali con quantità, certificazioni o dettagli tecnici: questi non modificano il mestiere. La spiegazione e ogni campo facts devono concordare.",
+      "Rileggi le attività della ditta appena riportate. Non dichiarare assente un'attività che è già scritta. Un profilo che nomina solo un settore o una famiglia generica non identifica abbastanza servizi o prodotti, anche se precisa il ruolo commerciale: companyIdentifiesService=false e mainScopeCovered=null. Per activitiesOverlap=true indica un'attività o prodotto concretamente comune, non il solo settore o ruolo. Per activitiesOverlap=false indica una differenza concreta, non informazioni mancanti; controlla che la tua interpretazione tenga conto delle etichette originali della classificazione nel loro ambito. Un dubbio irrisolto resta revisione. Se il profilo copre solo una componente della commessa, mainScopeCovered=false anche se activitiesOverlap=true. Non confondere le competenze principali con quantità, certificazioni o dettagli tecnici: questi non modificano il mestiere. La spiegazione e ogni campo facts devono concordare.",
   };
   const singlePrompt = JSON.stringify(promptBody, null, 2);
   const needsChunks =
@@ -551,6 +616,12 @@ function reducedPassageIds(
     ...request.passages
       .filter((passage) => passage.role === "service")
       .map((passage) => passage.id),
+    // A map selecting only service prose must not discard the classification
+    // labels needed to disambiguate it. Keep both scope and every exact span.
+    ...request.promptBody.classifications.flatMap((classification) => [
+      ...(classification.code?.sourceRefs ?? []),
+      ...classification.labels.flatMap((label) => label.sourceRefs),
+    ]),
     ...readings.flatMap((reading) => reading.sourceRefs),
   ]);
   const selected = new Set(ids);

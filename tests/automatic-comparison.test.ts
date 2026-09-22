@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test, vi } from "vitest";
 import {
   buildAutomaticComparisonRequest,
@@ -8,7 +9,9 @@ import {
   readAutomaticComparison,
   buildAutomaticReductionRequest,
   automaticComparisonModel,
+  resolveAutomaticComparison,
 } from "../src/lib/automatic-comparison";
+import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 import {
   captureLotSourceSnapshot,
   resolveLotSourceContext,
@@ -83,7 +86,10 @@ function raw(lots = false) {
       : [],
   };
 }
-function fixture(detail = raw(), overrides: Partial<CompanyProfile> = {}) {
+function fixture(
+  detail: Parameters<typeof normalizeSimap>[1] = raw(),
+  overrides: Partial<CompanyProfile> = {},
+) {
   const publication = normalizeSimap(
     {
       id: projectId,
@@ -300,6 +306,172 @@ test("Only the selected lot's own service text can establish a certain relation"
   );
 });
 
+test("CPV context pairs original codes and multilingual labels with their exact source passages", () => {
+  const base = raw();
+  const detail = {
+    ...base,
+    procurement: {
+      ...base.procurement,
+      cpvCode: {
+        code: "90910000",
+        label: {
+          it: "ETICHETTA_PRIMARIA_INVENTATA",
+          de: "ERFUNDENE_BEZEICHNUNG",
+        },
+      },
+      additionalCpvCodes: [
+        { code: "90911000", label: { it: "ETICHETTA_AGGIUNTIVA_INVENTATA" } },
+      ],
+    },
+  };
+  const input = fixture(detail, {
+    activities: "Commercio di prodotti per ambienti professionali.",
+  });
+  const request = buildAutomaticComparisonRequest(input);
+  const body = JSON.parse(request.prompt);
+  assert.equal(body.classifications.length, 2);
+  const primary = body.classifications.find(
+    (item: any) => item.rawPath === "/procurement/cpvCode",
+  );
+  assert.equal(primary.scope, "project_context");
+  assert.equal(primary.appliesTo, "target");
+  assert.equal(primary.code.text, detail.procurement.cpvCode.code);
+  assert.deepEqual(
+    primary.labels.map((label: any) => [label.language, label.text]),
+    [
+      ["de", detail.procurement.cpvCode.label.de],
+      ["it", detail.procurement.cpvCode.label.it],
+    ],
+  );
+  for (const classification of body.classifications)
+    for (const field of [classification.code, ...classification.labels]) {
+      const passages = field.sourceRefs.map((id: string) =>
+        request.passages.find((passage) => passage.id === id)!,
+      );
+      assert.ok(
+        passages.every(
+          (passage: any) =>
+            passage.scope === classification.scope &&
+            passage.rawPath.startsWith(classification.rawPath + "/"),
+        ),
+      );
+      assert.equal(
+        passages.map((passage: any) => passage.text).join(""),
+        field.text,
+      );
+    }
+  assert.equal(body.company.activities[0].text, input.profile.activities);
+  const rules = body.rules.join(" ") + " " + body.finalCheck;
+  assert.match(rules, /ruolo commerciale/);
+  assert.match(rules, /famiglia generica/);
+  assert.match(rules, /differenza concreta/);
+  const companyDescription = (
+    request.responseFormat.json_schema.schema.properties as any
+  ).facts.properties.companyIdentifiesService.description;
+  assert.match(companyDescription, /servizi o prodotti concreti/);
+  assert.match(companyDescription, /ruolo commerciale/);
+  const changed = {
+    ...detail,
+    procurement: {
+      ...detail.procurement,
+      cpvCode: {
+        ...detail.procurement.cpvCode,
+        label: {
+          ...detail.procurement.cpvCode.label,
+          it: "ETICHETTA_RETTIFICATA",
+        },
+      },
+    },
+  };
+  assert.notEqual(
+    request.inputHash,
+    buildAutomaticComparisonRequest(
+      fixture(changed, { activities: input.profile.activities }),
+    ).inputHash,
+  );
+});
+
+test("CPV blocks keep shared project context separate from the selected lot and omit other lots", () => {
+  const base = raw(true);
+  const detail = {
+    ...base,
+    procurement: {
+      ...base.procurement,
+      cpvCode: { code: "39100000", label: { it: "CONTESTO_COMUNE_INVENTATO" } },
+    },
+    lots: base.lots.map((lot, index) => ({
+      ...lot,
+      cpvCode: {
+        code: index === 0 ? "90910000" : "77310000",
+        label: {
+          it:
+            index === 0
+              ? "CLASSIFICAZIONE_LOTTO_SCELTO"
+              : "CLASSIFICAZIONE_ALTRO_LOTTO",
+        },
+      },
+    })),
+    metadata: {
+      ...base.metadata,
+      cpvCode: { code: "55520000", label: { it: "CLASSIFICAZIONE_METADATA" } },
+    },
+  };
+  const request = buildAutomaticComparisonRequest(fixture(detail));
+  const blocks = JSON.parse(request.prompt).classifications;
+  assert.equal(blocks.length, 2);
+  assert.deepEqual(
+    blocks.map((item: any) => [item.scope, item.appliesTo, item.code.text]),
+    [
+      ["project_context", "shared_project_context", "39100000"],
+      ["selected_lot", "target", "90910000"],
+    ],
+  );
+  assert.equal(
+    JSON.stringify(blocks).includes("CLASSIFICAZIONE_METADATA"),
+    false,
+  );
+  assert.equal(request.prompt.includes("CLASSIFICAZIONE_ALTRO_LOTTO"), false);
+});
+
+test("Long-source reduction preserves complete CPV labels even when the map selects no context", () => {
+  const base = raw();
+  const label = "CLASSIFICAZIONE_LUNGA_INVENTATA ".repeat(85);
+  const detail = {
+    ...base,
+    procurement: {
+      ...base.procurement,
+      cpvCode: { code: "90910000", label: { it: label } },
+    },
+    terms: {
+      qualificationCriteriaNote: {
+        it: "Condizioni amministrative inventate. ".repeat(900),
+      },
+    },
+  };
+  const request = buildAutomaticComparisonRequest(fixture(detail));
+  assert.ok(request.readingRequests.length > 1);
+  const readings = request.readingRequests.map((chunk) => ({
+    chunkId: chunk.id,
+    status: "complete",
+    sourceRefs: [],
+  }));
+  const reduced = buildAutomaticReductionRequest(readings, request);
+  const body = JSON.parse(reduced.prompt);
+  const classification = body.classifications[0];
+  assert.equal(classification.labels[0].text, label);
+  assert.ok(classification.labels[0].sourceRefs.length > 1);
+  for (const field of [classification.code, ...classification.labels])
+    for (const id of field.sourceRefs) {
+      assert.ok(reduced.selectedIds.includes(id));
+      assert.ok(body.passages.some((passage: any) => passage.id === id));
+    }
+  assert.ok(Buffer.byteLength(reduced.system + reduced.prompt) <= 160_000);
+  assert.deepEqual(
+    request.readingRequests.flatMap((chunk) => chunk.passageIds),
+    request.passages.map((passage) => passage.id),
+  );
+});
+
 test("Exact source spans reconstruct their complete field and preserve Unicode boundaries", () => {
   const detail = raw();
   detail.procurement.orderDescription.it =
@@ -435,6 +607,50 @@ test("Persisted responses cannot cross company boundaries or survive a changed p
       }),
     /model changed/,
   );
+});
+
+test("A historical v6 record is stale under v7 even with the same source, profile and model", () => {
+  const input = fixture();
+  const request = buildAutomaticComparisonRequest(input);
+  const stored = recordAutomaticComparison(response(request), request, {
+    id: "invented-version-regression",
+    at: "2030-01-20T12:00:00.000Z",
+    model: automaticComparisonModel(),
+  });
+  const digest = (value: unknown) =>
+    createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
+  const { hash: _hash, ...unsigned } = stored;
+  const v6Unsigned = {
+    ...unsigned,
+    version: "documentary-service-comparison-v6",
+    inputHash: digest({
+      ...request.dependency,
+      version: "documentary-service-comparison-v6",
+    }),
+  };
+  const historical = { ...v6Unsigned, hash: digest(v6Unsigned) };
+  const before = JSON.stringify(historical);
+  assert.equal(request.version, "documentary-service-comparison-v7");
+  assert.notEqual(historical.inputHash, request.inputHash);
+  assert.equal(readAutomaticComparison(historical, request), null);
+  assert.deepEqual(resolveAutomaticComparison(input, [historical]), {
+    comparison: null,
+    issue: "automatic_comparison_stale",
+  });
+  // Version itself must also prevent an old response being relabelled current
+  // merely because its input hash was copied from a freshly built request.
+  assert.equal(
+    readAutomaticComparison(
+      { ...historical, inputHash: request.inputHash },
+      request,
+    ),
+    null,
+  );
+  assert.equal(
+    resolveAutomaticComparison(input, [historical, stored]).comparison?.id,
+    stored.id,
+  );
+  assert.equal(JSON.stringify(historical), before);
 });
 
 test("A long-source reduction preserves all service text even when the map only selects an administrative limitation", () => {
