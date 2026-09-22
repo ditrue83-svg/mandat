@@ -27,7 +27,10 @@ import {
   automaticComparisonEnabled,
   type AutomaticComparisonJob,
 } from "@/lib/automatic-comparison-queue";
-import { runAutomaticComparison } from "./automatic-matching";
+import {
+  reconcileAutomaticComparisonLeases,
+  runAutomaticComparison,
+} from "./automatic-matching";
 import {
   requestNotificationDelivery,
   requestNotificationSweeps,
@@ -156,6 +159,8 @@ async function main() {
     await sendPending();
   });
   const heartbeat = async () => {
+    if (automaticComparisonEnabled())
+      await reconcileAutomaticComparisonLeases();
     const recoveredAiReservations = await recoverStaleAiReservations();
     if (recoveredAiReservations)
       console.warn("ai_usage_reservations_recovered", recoveredAiReservations);

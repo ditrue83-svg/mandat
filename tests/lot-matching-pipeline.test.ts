@@ -19,7 +19,10 @@ import {
 } from "../src/lib/documentary-store";
 import { LOT_RECONCILIATION_QUEUE } from "../src/lib/lot-reconciliation";
 import { AUTOMATIC_COMPARISON_QUEUE } from "../src/lib/automatic-comparison-queue";
-import { runAutomaticComparison } from "../src/worker/automatic-matching";
+import {
+  reconcileAutomaticComparisonLeases,
+  runAutomaticComparison,
+} from "../src/worker/automatic-matching";
 import {
   lotNoticeScope,
   buildLotNotice,
@@ -282,6 +285,190 @@ it("An expired lease can be recovered once, while a live lease prevents a duplic
     status: "completed",
   });
   expect(infer).toHaveBeenCalledTimes(1);
+});
+
+it("An abandoned third attempt is closed once without another provider call", async () => {
+  const { job } = await automaticFixture();
+  await db
+    .update(schema.automaticMatchRuns)
+    .set({
+      status: "running",
+      attempts: 3,
+      leaseUntil: new Date(now.getTime() - 1),
+    })
+    .where(eq(schema.automaticMatchRuns.id, job.runId));
+  for (let invocation = 0; invocation < 2; invocation++)
+    expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+      status: "skipped",
+    });
+  const [run] = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(eq(schema.automaticMatchRuns.id, job.runId));
+  expect(run).toMatchObject({
+    status: "failed",
+    attempts: 3,
+    leaseUntil: null,
+    issue: "comparison_failed",
+  });
+  const warnings = await db
+    .select()
+    .from(schema.issues)
+    .where(eq(schema.issues.key, `automatic-comparison:${job.runId}`));
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0].severity).toBe("warning");
+  expect(infer).not.toHaveBeenCalled();
+});
+
+it("A live third attempt remains owned by its current worker", async () => {
+  const { job } = await automaticFixture();
+  const [before] = await db
+    .update(schema.automaticMatchRuns)
+    .set({
+      status: "running",
+      attempts: 3,
+      leaseUntil: new Date(now.getTime() + 60_000),
+    })
+    .where(eq(schema.automaticMatchRuns.id, job.runId))
+    .returning();
+  await expect(runAutomaticComparison(job, { now: () => now })).rejects.toThrow(
+    "già in elaborazione",
+  );
+  const [after] = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(eq(schema.automaticMatchRuns.id, job.runId));
+  expect(after).toEqual(before);
+  expect(infer).not.toHaveBeenCalled();
+});
+
+for (const invalidation of ["revoked", "expired", "profile_changed"] as const)
+  for (const lease of ["expired", "live"] as const)
+    it(`An interrupted ${invalidation} input with a ${lease} lease is reconciled without stealing work`, async () => {
+      const { job, companyId } = await automaticFixture(true);
+      const clock =
+        invalidation === "expired" ? new Date("2032-01-10T10:00:00.000Z") : now;
+      const [before] = await db
+        .update(schema.automaticMatchRuns)
+        .set({
+          status: "running",
+          attempts: 1,
+          leaseUntil: new Date(
+            clock.getTime() + (lease === "live" ? 60_000 : -1),
+          ),
+        })
+        .where(eq(schema.automaticMatchRuns.id, job.runId))
+        .returning();
+      if (invalidation === "revoked")
+        await db
+          .update(schema.invitations)
+          .set({ revokedAt: now })
+          .where(eq(schema.invitations.companyId, companyId));
+      if (invalidation === "profile_changed")
+        await db
+          .update(schema.companies)
+          .set({ profile: { ...baseProfile, activities: "Vendita di mobili" } })
+          .where(eq(schema.companies.id, companyId));
+      if (lease === "live" && invalidation !== "revoked")
+        await expect(
+          runAutomaticComparison(job, { now: () => clock }),
+        ).rejects.toThrow("già in elaborazione");
+      else
+        expect(await runAutomaticComparison(job, { now: () => clock })).toEqual(
+          {
+            status: "skipped",
+          },
+        );
+      const [after] = await db
+        .select()
+        .from(schema.automaticMatchRuns)
+        .where(eq(schema.automaticMatchRuns.id, job.runId));
+      if (lease === "live") expect(after).toEqual(before);
+      else
+        expect(after).toMatchObject({
+          status: "superseded",
+          attempts: 1,
+          result: null,
+          leaseUntil: null,
+          issue: "inputs_changed",
+        });
+      expect(infer).not.toHaveBeenCalled();
+    });
+
+for (const input of ["current", "revoked", "expired"] as const)
+  it(`The lease reconciler closes an abandoned final ${input} attempt without retrying its job`, async () => {
+    const { job, companyId } = await automaticFixture(true);
+    const clock =
+      input === "expired" ? new Date("2032-01-10T10:00:00.000Z") : now;
+    await db
+      .update(schema.automaticMatchRuns)
+      .set({
+        status: "running",
+        attempts: 3,
+        leaseUntil: new Date(clock.getTime() - 1),
+      })
+      .where(eq(schema.automaticMatchRuns.id, job.runId));
+    if (input === "revoked")
+      await db
+        .update(schema.invitations)
+        .set({ revokedAt: now })
+        .where(eq(schema.invitations.companyId, companyId));
+    await reconcileAutomaticComparisonLeases(clock);
+    const [run] = await db
+      .select()
+      .from(schema.automaticMatchRuns)
+      .where(eq(schema.automaticMatchRuns.id, job.runId));
+    expect(run).toMatchObject({
+      status: input === "current" ? "failed" : "superseded",
+      attempts: 3,
+      leaseUntil: null,
+      result: null,
+    });
+    expect(await reconcileAutomaticComparisonLeases(clock)).toBe(0);
+    const warnings = await db
+      .select()
+      .from(schema.issues)
+      .where(eq(schema.issues.key, `automatic-comparison:${job.runId}`));
+    expect(warnings).toHaveLength(input === "current" ? 1 : 0);
+    expect(infer).not.toHaveBeenCalled();
+  });
+
+it("Lease reconciliation preserves a live attempt, ordinary retries and a paused feature", async () => {
+  const { job } = await automaticFixture();
+  const [live] = await db
+    .update(schema.automaticMatchRuns)
+    .set({
+      status: "running",
+      attempts: 3,
+      leaseUntil: new Date(now.getTime() + 60_000),
+    })
+    .where(eq(schema.automaticMatchRuns.id, job.runId))
+    .returning();
+  await reconcileAutomaticComparisonLeases(now);
+  const readRun = async () =>
+    (
+      await db
+        .select()
+        .from(schema.automaticMatchRuns)
+        .where(eq(schema.automaticMatchRuns.id, job.runId))
+    )[0];
+  expect(await readRun()).toEqual(live);
+  const [retryable] = await db
+    .update(schema.automaticMatchRuns)
+    .set({ attempts: 1, leaseUntil: new Date(now.getTime() - 1) })
+    .where(eq(schema.automaticMatchRuns.id, job.runId))
+    .returning();
+  await reconcileAutomaticComparisonLeases(now);
+  expect(await readRun()).toEqual(retryable);
+  const [paused] = await db
+    .update(schema.automaticMatchRuns)
+    .set({ attempts: 3 })
+    .where(eq(schema.automaticMatchRuns.id, job.runId))
+    .returning();
+  vi.stubEnv("DOCUMENTARY_COMPARISON_ENABLED", "false");
+  expect(await reconcileAutomaticComparisonLeases(now)).toBe(0);
+  expect(await readRun()).toEqual(paused);
+  expect(infer).not.toHaveBeenCalled();
 });
 
 it("Returning to a superseded profile requeues its input once and preserves the attempt ceiling", async () => {
