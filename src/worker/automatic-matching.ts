@@ -1,10 +1,13 @@
-import { and, eq, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { automaticMatchRuns, companies, matches, issues } from "@/db/schema";
 import { lockCanonicalPublications } from "@/lib/canonical-lock";
 import { readLotMatchReview } from "@/lib/lot-match-reviews";
 import { companyAllowsPilotProcessingSql } from "@/lib/pilot-processing";
-import { sameAssessmentTarget } from "@/lib/lot-assessment";
+import {
+  assessmentTargetKey,
+  sameAssessmentTarget,
+} from "@/lib/lot-assessment";
 import {
   buildAutomaticComparisonRequest,
   readAutomaticComparison,
@@ -295,6 +298,31 @@ export async function runAutomaticComparison(
           return true;
         });
         if (!currentInput) throw new ComparisonInputsChanged();
+      },
+      {
+        loadSourceInterpretations: async (sourceKey) => {
+          // Cross-company reuse projects only the independently validated
+          // public source record. No company, profile or comparison is read.
+          const rows = await getDb()
+            .select({
+              sourceInterpretation: sql<unknown>`${automaticMatchRuns.result}->'sourceInterpretation'`,
+            })
+            .from(automaticMatchRuns)
+            .where(
+              and(
+                eq(automaticMatchRuns.publicationId, job.publicationId),
+                eq(
+                  automaticMatchRuns.targetKey,
+                  assessmentTargetKey(claimed.input.target),
+                ),
+                eq(automaticMatchRuns.status, "completed"),
+                sql`${automaticMatchRuns.result}->'sourceInterpretation'->>'sourceKey' = ${sourceKey}`,
+              ),
+            )
+            .orderBy(automaticMatchRuns.createdAt, automaticMatchRuns.id)
+            .limit(20);
+          return rows.map((row) => row.sourceInterpretation);
+        },
       },
     );
     options.signal?.throwIfAborted();

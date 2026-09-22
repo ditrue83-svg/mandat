@@ -10,7 +10,14 @@ import {
   buildAutomaticReductionRequest,
   automaticComparisonModel,
   resolveAutomaticComparison,
+  buildAutomaticSourceRequest,
+  buildInterpretedComparisonRequest,
+  readAutomaticSourceInterpretation,
 } from "../src/lib/automatic-comparison";
+import {
+  recordSourceInterpretation,
+  type SourceInterpretationRecord,
+} from "../src/lib/source-interpretation";
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 import {
   captureLotSourceSnapshot,
@@ -149,30 +156,74 @@ function fixture(
     preliminary,
   };
 }
+function sourceResponse(
+  request: ReturnType<typeof buildAutomaticComparisonRequest>,
+  status: "resolved" | "uncertain" | "conflicting" = "resolved",
+) {
+  const targetRef = request.passages.find(
+    (p) => p.scope === request.targetScope && p.role === "service",
+  )!.id;
+  const other = request.passages.find(
+    (p) => p.id !== targetRef && p.text.trim(),
+  )!.id;
+  return {
+    status,
+    summary:
+      "Servizi inventati, interpretazione simulata per verificare il contratto.",
+    components: [
+      {
+        description: "Pulizia degli uffici inventati.",
+        role: "execute" as const,
+        importance: "main" as const,
+        sourceRefs: [targetRef],
+      },
+    ],
+    issues:
+      status === "resolved"
+        ? []
+        : [
+            {
+              explanation:
+                "Dubbio inventato, non una verifica semantica del modello.",
+              sourceRefs:
+                status === "conflicting" ? [targetRef, other] : [targetRef],
+            },
+          ],
+    targetRef,
+  };
+}
+function sourceRecord(
+  request: ReturnType<typeof buildAutomaticComparisonRequest>,
+  readings: readonly unknown[] = [],
+  status: "resolved" | "uncertain" | "conflicting" = "resolved",
+) {
+  return recordSourceInterpretation(
+    sourceResponse(request, status),
+    buildAutomaticSourceRequest(request, readings),
+    {
+      id: "invented-source-interpretation",
+      at: "2030-01-20T12:00:00.000Z",
+      model: automaticComparisonModel(),
+    },
+  );
+}
 function response(
   request: ReturnType<typeof buildAutomaticComparisonRequest>,
+  interpretation: SourceInterpretationRecord,
   relation: "direct" | "different" | "review" = "direct",
 ) {
   return {
     comparison:
       "Confronto inventato per verificare il contratto, non la qualità semantica del modello.",
     facts: {
-      sourceIdentifiesService: true,
       companyIdentifiesService: true,
       activitiesOverlap: relation !== "different",
       sameContractualRole: true,
       mainScopeCovered: relation === "direct",
-      conflictingSource: false,
-      requiresSourceCorrection: false,
+      comparisonUncertain: false,
     },
-    targetRef: request.passages.find(
-      (p) => p.scope === request.targetScope && p.role === "service",
-    )!.id,
-    sourceRefs: [
-      request.passages.find(
-        (p) => p.scope === request.targetScope && p.role === "service",
-      )!.id,
-    ],
+    interpretationHash: interpretation.hash,
+    componentRefs: ["u1"],
     companyRefs: [request.companyPassages[0].id],
   };
 }
@@ -180,7 +231,12 @@ function response(
 test("An unreviewed complete source supports a referenced AI comparison without creating a human judgment", () => {
   const input = fixture();
   const request = buildAutomaticComparisonRequest(input);
-  const result = validateAutomaticComparison(response(request), request);
+  const source = sourceRecord(request);
+  const result = validateAutomaticComparison(
+    response(request, source),
+    request,
+    source,
+  );
   assert.equal(request.sourceBlocked, false);
   assert.equal(result.relation, "direct");
   assert.equal(result.origin, "ai");
@@ -190,6 +246,8 @@ test("An unreviewed complete source supports a referenced AI comparison without 
   assert.equal(result.companyEvidence[0].text, input.profile.activities);
   assert.equal(request.prompt.includes(input.profile.name), false);
   assert.ok(request.prompt.includes("CONDIZIONE_INVENTATA"));
+  assert.equal(result.sourceInterpretation.hash, source.hash);
+  assert.equal(result.dependency.sourceInterpretationHash, source.hash);
   assert.ok(Object.isFrozen(request.passages));
   assert.ok(Object.isFrozen(result.evidence[0]));
 });
@@ -213,20 +271,310 @@ test("Dedicated model configuration preserves the verified provider input and bi
   }
 });
 
+test("Source interpretation is identical across companies and only the final comparison receives the profile", () => {
+  const input = fixture();
+  const first = buildAutomaticComparisonRequest(input);
+  const other = buildAutomaticComparisonRequest({
+    ...fixture(raw(), {
+      name: "ALTRO_NOME_PRIVATO",
+      activities: "ATTIVITA_AZIENDALE_DIVERSA: fornitura di mobili.",
+      sectors: ["arredi"],
+      keywords: ["PAROLA_PRIVATA"],
+      exclusions: ["ESCLUSIONE_PRIVATA"],
+      employees: 3,
+      emailEnabled: true,
+    }),
+    companyId: "another-private-company",
+  });
+  assert.notEqual(first.inputHash, other.inputHash);
+  assert.equal(first.sourceKey, other.sourceKey);
+  const sourceRequest = buildAutomaticSourceRequest(first);
+  const otherSourceRequest = buildAutomaticSourceRequest(other);
+  assert.deepEqual(sourceRequest, otherSourceRequest);
+  const serialized = JSON.stringify(sourceRequest);
+  for (const privateValue of [
+    input.companyId,
+    input.profile.name,
+    input.profile.activities,
+    "another-private-company",
+    "ALTRO_NOME_PRIVATO",
+    "ATTIVITA_AZIENDALE_DIVERSA",
+    "PAROLA_PRIVATA",
+    "ESCLUSIONE_PRIVATA",
+  ])
+    assert.equal(serialized.includes(privateValue), false);
+  const source = sourceRecord(first);
+  assert.deepEqual(readAutomaticSourceInterpretation(source, other), source);
+  const final = JSON.parse(
+    buildInterpretedComparisonRequest(other, source).prompt,
+  );
+  assert.equal(final.sourceInterpretation.hash, source.hash);
+  assert.equal(final.company.activities[0].text, other.companyPassages[0].text);
+  assert.equal("passages" in final, false);
+  assert.equal("targetRef" in final, false);
+});
+
+test("Missing, stale or tampered source interpretations cannot be replaced by an implicit interpretation", () => {
+  const request = buildAutomaticComparisonRequest(fixture());
+  const source = sourceRecord(request);
+  const final = response(request, source);
+  for (const missing of [undefined, null, {}])
+    assert.throws(() => validateAutomaticComparison(final, request, missing));
+  assert.throws(
+    () => validateAutomaticComparison(null, request, source),
+    /Resolved source/,
+  );
+  assert.throws(
+    () =>
+      buildInterpretedComparisonRequest(request, { ...source, id: "tampered" }),
+    /Altered source/,
+  );
+  assert.throws(
+    () =>
+      validateAutomaticComparison(final, request, {
+        ...source,
+        id: "tampered",
+      }),
+    /Altered source/,
+  );
+  const changed = raw();
+  changed.procurement.orderDescription.it += " Un'altra prestazione materiale.";
+  const stale = sourceRecord(buildAutomaticComparisonRequest(fixture(changed)));
+  assert.throws(
+    () => validateAutomaticComparison(final, request, stale),
+    /Stale source/,
+  );
+  assert.equal(
+    readAutomaticSourceInterpretation(
+      { ...source, version: "old-source-version" },
+      request,
+    ),
+    null,
+  );
+  const stored = recordAutomaticComparison(final, request, {
+    id: "invented-nested-integrity",
+    at: "2030-01-20T12:00:00.000Z",
+    model: automaticComparisonModel(),
+    sourceInterpretation: source,
+  });
+  const { hash: _hash, ...unsigned } = stored;
+  const changedEnvelope = {
+    ...unsigned,
+    sourceInterpretation: { ...source, id: "tampered" },
+  };
+  const hash = createHash("sha256")
+    .update(stableDocumentaryJson(changedEnvelope))
+    .digest("hex");
+  assert.throws(
+    () => readAutomaticComparison({ ...changedEnvelope, hash }, request),
+    /Altered source/,
+  );
+});
+
+test("An unresolved source rejects a final comparison and exposes issue evidence in its review result", () => {
+  const request = buildAutomaticComparisonRequest(fixture());
+  const issueRef = request.passages.find((passage) =>
+    passage.text.includes("CONDIZIONE_INVENTATA"),
+  )!.id;
+  for (const status of ["uncertain", "conflicting"] as const) {
+    const interpretationResponse = sourceResponse(request, status);
+    assert.notEqual(issueRef, interpretationResponse.targetRef);
+    assert.equal(
+      interpretationResponse.components.some((component) =>
+        component.sourceRefs.includes(issueRef),
+      ),
+      false,
+    );
+    const interpretation = recordSourceInterpretation(
+      {
+        ...interpretationResponse,
+        issues: [
+          {
+            explanation: "Condizione inventata che richiede chiarimento.",
+            sourceRefs: [interpretationResponse.targetRef, issueRef],
+          },
+        ],
+      },
+      buildAutomaticSourceRequest(request),
+      {
+        id: `invented-${status}`,
+        at: "2030-01-20T12:00:00.000Z",
+        model: automaticComparisonModel(),
+      },
+    );
+    assert.throws(
+      () => buildInterpretedComparisonRequest(request, interpretation),
+      /requires review/,
+    );
+    assert.throws(
+      () =>
+        validateAutomaticComparison(
+          response(request, interpretation),
+          request,
+          interpretation,
+        ),
+      /Uncertain source/,
+    );
+    const review = validateAutomaticComparison(null, request, interpretation);
+    assert.equal(review.relation, "review");
+    assert.equal(review.comparisonOrigin, "source_interpretation");
+    assert.equal(review.response, null);
+    assert.deepEqual(review.companyEvidence, []);
+    assert.ok(review.evidence.some((passage) => passage.id === issueRef));
+    const stored = recordAutomaticComparison(null, request, {
+      id: `invented-review-${status}`,
+      at: "2030-01-20T12:00:00.000Z",
+      model: automaticComparisonModel(),
+      sourceInterpretation: interpretation,
+    });
+    assert.equal(
+      readAutomaticComparison(stored, request)!.sourceInterpretation.status,
+      status,
+    );
+  }
+});
+
+test("A claimed full match must cite every main interpreted component while partial scope may cite one", () => {
+  const detail = raw();
+  detail.procurement.orderDescription.it =
+    "Pulizia degli uffici e manutenzione degli impianti inventati.";
+  const request = buildAutomaticComparisonRequest(
+    fixture(detail, { activities: detail.procurement.orderDescription.it }),
+  );
+  const interpreted = sourceResponse(request);
+  const source = recordSourceInterpretation(
+    {
+      ...interpreted,
+      components: [
+        ...interpreted.components,
+        {
+          description: "Manutenzione degli impianti inventati.",
+          role: "maintain",
+          importance: "main",
+          sourceRefs: [interpreted.targetRef],
+        },
+      ],
+    },
+    buildAutomaticSourceRequest(request),
+    {
+      id: "invented-two-main",
+      at: "2030-01-20T12:00:00.000Z",
+      model: automaticComparisonModel(),
+    },
+  );
+  assert.throws(
+    () =>
+      validateAutomaticComparison(response(request, source), request, source),
+    /main|principali|component/i,
+  );
+  assert.equal(
+    validateAutomaticComparison(
+      { ...response(request, source), componentRefs: ["u1", "u2"] },
+      request,
+      source,
+    ).relation,
+    "direct",
+  );
+  assert.equal(
+    validateAutomaticComparison(
+      response(request, source, "review"),
+      request,
+      source,
+    ).relation,
+    "review",
+  );
+});
+
+test("An excluded component alone cannot justify a service rejection but remains valid counterevidence with requested work", () => {
+  const detail = raw();
+  detail.procurement.orderDescription.it =
+    "Pulizia degli uffici, con fornitura accessoria dei detergenti. Ristorazione esclusa.";
+  const request = buildAutomaticComparisonRequest(
+    fixture(detail, { activities: "Servizi di ristorazione inventati." }),
+  );
+  const interpreted = sourceResponse(request);
+  const serviceRef = request.passages.find(
+    (passage) => passage.rawPath === "/procurement/orderDescription/it",
+  )!.id;
+  const source = recordSourceInterpretation(
+    {
+      ...interpreted,
+      components: [
+        {
+          description: "Pulizia degli uffici.",
+          role: "execute",
+          importance: "main",
+          sourceRefs: [serviceRef],
+        },
+        {
+          description: "Fornitura dei detergenti.",
+          role: "supply",
+          importance: "accessory",
+          sourceRefs: [serviceRef],
+        },
+        {
+          description: "Ristorazione.",
+          role: "execute",
+          importance: "excluded",
+          sourceRefs: [serviceRef],
+        },
+      ],
+    },
+    buildAutomaticSourceRequest(request),
+    {
+      id: "invented-excluded-component",
+      at: "2030-01-20T12:00:00.000Z",
+      model: automaticComparisonModel(),
+    },
+  );
+  const negative = response(request, source, "different");
+  assert.throws(
+    () =>
+      validateAutomaticComparison(
+        { ...negative, componentRefs: ["u3"] },
+        request,
+        source,
+      ),
+    /Service comparison requires evidence of a requested component/,
+  );
+  for (const requestedRef of ["u1", "u2"])
+    assert.equal(
+      validateAutomaticComparison(
+        { ...negative, componentRefs: [requestedRef, "u3"] },
+        request,
+        source,
+      ).relation,
+      "different",
+    );
+  assert.equal(
+    validateAutomaticComparison(
+      {
+        ...negative,
+        componentRefs: ["u3"],
+        facts: { ...negative.facts, comparisonUncertain: true },
+      },
+      request,
+      source,
+    ).relation,
+    "review",
+  );
+});
+
 test("A shared component or a vague profile cannot be promoted to a positive by a model label", () => {
   const request = buildAutomaticComparisonRequest(fixture());
-  const full = response(request);
+  const source = sourceRecord(request);
+  const full = response(request, source);
   for (const change of [
     { mainScopeCovered: false },
     { mainScopeCovered: false, sameContractualRole: false },
     { companyIdentifiesService: false, mainScopeCovered: null },
     { activitiesOverlap: null, mainScopeCovered: null },
-    { conflictingSource: true },
-    { requiresSourceCorrection: true },
+    { comparisonUncertain: true },
   ]) {
     const value = validateAutomaticComparison(
       { ...full, facts: { ...full.facts, ...change } },
       request,
+      source,
     );
     assert.equal(value.relation, "review");
   }
@@ -235,6 +583,7 @@ test("A shared component or a vague profile cannot be promoted to a positive by 
       validateAutomaticComparison(
         { ...full, facts: { ...full.facts, activitiesOverlap: false } },
         request,
+        source,
       ),
     /Contradictory/,
   );
@@ -242,14 +591,23 @@ test("A shared component or a vague profile cannot be promoted to a positive by 
 
 test("Each relation has a consistent basis and exact bilateral evidence, never arbitrary prose or scores", () => {
   const request = buildAutomaticComparisonRequest(fixture());
+  const source = sourceRecord(request);
   for (const relation of ["direct", "different", "review"] as const)
     assert.equal(
-      validateAutomaticComparison(response(request, relation), request)
-        .relation,
+      validateAutomaticComparison(
+        response(request, source, relation),
+        request,
+        source,
+      ).relation,
       relation,
     );
   for (const changed of [
     { sourceRefs: ["s99999"] },
+    { targetRef: source.response.targetRef },
+    { componentRefs: ["u99999"] },
+    { componentRefs: [] },
+    { componentRefs: ["u1", "u1"] },
+    { interpretationHash: "0".repeat(64) },
     { companyRefs: ["c99999"] },
     { companyRefs: [] },
     { basis: "invented_basis" },
@@ -259,15 +617,17 @@ test("Each relation has a consistent basis and exact bilateral evidence, never a
   ])
     assert.throws(() =>
       validateAutomaticComparison(
-        { ...response(request), ...changed },
+        { ...response(request, source), ...changed },
         request,
+        source,
       ),
     );
   assert.throws(
     () =>
       validateAutomaticComparison(
-        response(request),
+        response(request, source),
         JSON.parse(JSON.stringify(request)),
+        source,
       ),
     /Unverified/,
   );
@@ -275,10 +635,12 @@ test("Each relation has a consistent basis and exact bilateral evidence, never a
 
 test("Only the selected lot's own service text can establish a certain relation", () => {
   const request = buildAutomaticComparisonRequest(fixture(raw(true)));
+  const source = sourceRecord(request);
   assert.equal(request.prompt.includes("SOLO_LOTTO_B"), false);
   assert.equal(request.targetScope, "selected_lot");
   assert.equal(
-    validateAutomaticComparison(response(request), request).relation,
+    validateAutomaticComparison(response(request, source), request, source)
+      .relation,
     "direct",
   );
   for (const passage of request.passages.filter(
@@ -286,13 +648,17 @@ test("Only the selected lot's own service text can establish a certain relation"
   ))
     assert.throws(
       () =>
-        validateAutomaticComparison(
+        recordSourceInterpretation(
           {
-            ...response(request),
+            ...sourceResponse(request),
             targetRef: passage.id,
-            sourceRefs: [passage.id],
           },
-          request,
+          buildAutomaticSourceRequest(request),
+          {
+            id: "invented-invalid-target",
+            at: "2030-01-20T12:00:00.000Z",
+            model: automaticComparisonModel(),
+          },
         ),
       /selected-target/,
     );
@@ -360,13 +726,20 @@ test("CPV context pairs original codes and multilingual labels with their exact 
         field.text,
       );
     }
-  assert.equal(body.company.activities[0].text, input.profile.activities);
-  const rules = body.rules.join(" ") + " " + body.finalCheck;
+  assert.equal("company" in body, false);
+  const source = sourceRecord(request);
+  const final = buildInterpretedComparisonRequest(request, source);
+  const finalBody = JSON.parse(final.prompt);
+  assert.equal(finalBody.company.activities[0].text, input.profile.activities);
+  assert.equal(finalBody.sourceInterpretation.hash, source.hash);
+  assert.equal("passages" in finalBody, false);
+  assert.equal("classifications" in finalBody, false);
+  const rules = finalBody.task + " " + finalBody.rules.join(" ");
   assert.match(rules, /ruolo commerciale/);
-  assert.match(rules, /famiglia generica/);
+  assert.match(rules, /famiglia di prodotti generica/);
   assert.match(rules, /differenza concreta/);
   const companyDescription = (
-    request.responseFormat.json_schema.schema.properties as any
+    final.responseFormat.json_schema.schema.properties as any
   ).facts.properties.companyIdentifiesService.description;
   assert.match(companyDescription, /servizi o prodotti concreti/);
   assert.match(companyDescription, /ruolo commerciale/);
@@ -531,10 +904,13 @@ test("Long sources cover every exact passage once, including a decisive conditio
   }));
   const reduced = buildAutomaticReductionRequest(readings, request);
   assert.ok(reduced.prompt.includes("CODA_DA_VERIFICARE"));
-  assert.throws(
-    () => validateAutomaticComparison(response(request), request),
-    /Incomplete/,
+  const source = sourceRecord(request, readings);
+  assert.equal(
+    validateAutomaticComparison(response(request, source), request, source)
+      .relation,
+    "direct",
   );
+  assert.throws(() => buildAutomaticSourceRequest(request), /Incomplete/);
   assert.throws(
     () => buildAutomaticReductionRequest(readings.slice(1), request),
     /Incomplete/,
@@ -552,11 +928,17 @@ test("Long sources cover every exact passage once, including a decisive conditio
     /outside/,
   );
   readings[readings.length - 1].status = "unreadable";
-  const result = validateAutomaticComparison(
-    response(request),
-    request,
-    readings,
+  const uncertain = sourceRecord(request, readings, "uncertain");
+  assert.throws(
+    () =>
+      validateAutomaticComparison(
+        response(request, source),
+        request,
+        uncertain,
+      ),
+    /Uncertain source/,
   );
+  const result = validateAutomaticComparison(null, request, uncertain);
   assert.equal(result.relation, "review");
   assert.equal(result.coverage.linkedDocumentsRead, false);
 });
@@ -564,13 +946,15 @@ test("Long sources cover every exact passage once, including a decisive conditio
 test("Persisted responses cannot cross company boundaries or survive a changed profile or altered record", () => {
   const input = fixture(),
     request = buildAutomaticComparisonRequest(input);
+  const source = sourceRecord(request);
   const metadata = {
     id: "invented-result",
     at: "2030-01-20T12:00:00.000Z",
     model: automaticComparisonModel(),
+    sourceInterpretation: source,
   };
   const stored = recordAutomaticComparison(
-    response(request),
+    response(request, source),
     request,
     metadata,
   );
@@ -601,7 +985,7 @@ test("Persisted responses cannot cross company boundaries or survive a changed p
   );
   assert.throws(
     () =>
-      recordAutomaticComparison(response(request), request, {
+      recordAutomaticComparison(response(request, source), request, {
         ...metadata,
         model: "different-model",
       }),
@@ -609,28 +993,30 @@ test("Persisted responses cannot cross company boundaries or survive a changed p
   );
 });
 
-test("A historical v6 record is stale under v7 even with the same source, profile and model", () => {
+test("A historical v7 record is stale under v8 even with the same source, profile and model", () => {
   const input = fixture();
   const request = buildAutomaticComparisonRequest(input);
-  const stored = recordAutomaticComparison(response(request), request, {
+  const source = sourceRecord(request);
+  const stored = recordAutomaticComparison(response(request, source), request, {
     id: "invented-version-regression",
     at: "2030-01-20T12:00:00.000Z",
     model: automaticComparisonModel(),
+    sourceInterpretation: source,
   });
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
   const { hash: _hash, ...unsigned } = stored;
-  const v6Unsigned = {
+  const v7Unsigned = {
     ...unsigned,
-    version: "documentary-service-comparison-v6",
+    version: "documentary-service-comparison-v7",
     inputHash: digest({
       ...request.dependency,
-      version: "documentary-service-comparison-v6",
+      version: "documentary-service-comparison-v7",
     }),
   };
-  const historical = { ...v6Unsigned, hash: digest(v6Unsigned) };
+  const historical = { ...v7Unsigned, hash: digest(v7Unsigned) };
   const before = JSON.stringify(historical);
-  assert.equal(request.version, "documentary-service-comparison-v7");
+  assert.equal(request.version, "documentary-service-comparison-v8");
   assert.notEqual(historical.inputHash, request.inputHash);
   assert.equal(readAutomaticComparison(historical, request), null);
   assert.deepEqual(resolveAutomaticComparison(input, [historical]), {
@@ -673,8 +1059,10 @@ test("A long-source reduction preserves all service text even when the map only 
   ))
     assert.ok(reduced.selectedIds.includes(passage.id));
   assert.ok(reduced.prompt.includes("VINCOLO_FINALE"));
+  const source = sourceRecord(request, readings);
   assert.equal(
-    validateAutomaticComparison(response(request), request, readings).relation,
+    validateAutomaticComparison(response(request, source), request, source)
+      .relation,
     "direct",
   );
   assert.ok(
@@ -687,10 +1075,12 @@ test("A long-source reduction preserves all service text even when the map only 
 test("Automatic positives are visible as AI but never count as human quality votes", () => {
   const input = fixture(),
     request = buildAutomaticComparisonRequest(input);
-  const stored = recordAutomaticComparison(response(request), request, {
+  const source = sourceRecord(request);
+  const stored = recordAutomaticComparison(response(request, source), request, {
     id: "invented-positive",
     at: "2030-01-20T12:00:00.000Z",
     model: automaticComparisonModel(),
+    sourceInterpretation: source,
   });
   const result = resolveProjectLotAssessment({
     ...input,
@@ -771,7 +1161,12 @@ test("Explicit source doubt cannot be closed by a positive AI response", () => {
     ...input,
     history: [record],
   });
-  const result = validateAutomaticComparison(response(request), request);
+  const source = sourceRecord(request);
+  const result = validateAutomaticComparison(
+    response(request, source),
+    request,
+    source,
+  );
   assert.equal(result.serviceRelation, "direct");
   assert.equal(result.relation, "review");
   assert.equal(result.sourceBlocked, true);

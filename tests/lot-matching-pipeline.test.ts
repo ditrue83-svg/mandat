@@ -3,10 +3,11 @@ import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { PgBoss, fromPglite } from "pg-boss";
 import * as schema from "../src/db/schema";
 import type { CompanyProfile } from "../src/lib/domain";
+import type { StoredAutomaticComparison } from "../src/lib/automatic-comparison";
 import { normalizeSimap } from "../src/sources/simap";
 import {
   SIMAP_ACQUISITION_VERSION,
@@ -115,6 +116,8 @@ beforeAll(async () => {
 }, 20000);
 beforeEach(async () => {
   vi.stubEnv("DOCUMENTARY_COMPARISON_ENABLED", "false");
+  vi.stubEnv("DOCUMENTARY_LLM_MODEL", "");
+  vi.stubEnv("LLM_MODEL", "invented-documentary-model");
   vi.stubEnv("LLM_INPUT_CHF_PER_MILLION", "1");
   vi.stubEnv("LLM_OUTPUT_CHF_PER_MILLION", "2");
   vi.mocked(infer)
@@ -138,35 +141,53 @@ afterAll(async () => {
 
 function inventedAnswer(prompt: string) {
   const data = JSON.parse(prompt);
-  const scope = data.target.kind === "lot" ? "selected_lot" : "project_context";
+  if (!data.company) {
+    const target = data.passages.find(
+      (passage: { scope: string; role: string }) =>
+        passage.scope === data.targetScope && passage.role === "service",
+    );
+    return {
+      status: "resolved",
+      summary:
+        "Potatura degli alberi, fonte inventata per la verifica della coda.",
+      components: [
+        {
+          description: "Potatura degli alberi",
+          role: "execute",
+          importance: "main",
+          sourceRefs: [target.id],
+        },
+      ],
+      issues: [],
+      targetRef: target.id,
+    };
+  }
   return {
     comparison: "Risposta inventata per la sola verifica tecnica della coda.",
+    interpretationHash: data.sourceInterpretation.hash,
+    componentRefs: [data.sourceInterpretation.components[0].id],
+    companyRefs: [data.company.activities[0].id],
     facts: {
-      sourceIdentifiesService: true,
       companyIdentifiesService: true,
       activitiesOverlap: true,
       sameContractualRole: true,
       mainScopeCovered: true,
-      conflictingSource: false,
-      requiresSourceCorrection: false,
+      comparisonUncertain: false,
     },
-    targetRef: data.passages.find(
-      (p: { scope: string; role: string }) =>
-        p.scope === scope && p.role === "service",
-    ).id,
-    sourceRefs: [
-      data.passages.find(
-        (p: { scope: string; role: string }) =>
-          p.scope === scope && p.role === "service",
-      ).id,
-    ],
-    companyRefs: [data.company.activities[0].id],
   };
 }
-async function automaticFixture(project = false) {
+async function automaticFixture(
+  project = false,
+  profile = baseProfile,
+  sourceText?: string,
+) {
   vi.stubEnv("DOCUMENTARY_COMPARISON_ENABLED", "true");
-  const f = await fixture({ empty: project, automaticProject: project }),
-    companyId = await company();
+  const f = await fixture({
+      empty: project,
+      automaticProject: project,
+      sourceText,
+    }),
+    companyId = await company(profile);
   await matchAdoptedPublication({ publicationId: f.p.id, now });
   const [run] = await db
     .select()
@@ -175,6 +196,30 @@ async function automaticFixture(project = false) {
   expect(run).toBeDefined();
   const job = { runId: run.id, publicationId: f.p.id, companyId };
   return { f, companyId, run, job };
+}
+
+async function automaticJob(publicationId: string, companyId: string) {
+  await matchAdoptedPublication({ publicationId, now });
+  const [run] = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(
+      and(
+        eq(schema.automaticMatchRuns.publicationId, publicationId),
+        eq(schema.automaticMatchRuns.companyId, companyId),
+      ),
+    );
+  expect(run).toBeDefined();
+  return { runId: run.id, publicationId, companyId };
+}
+
+async function storedAutomaticResult(runId: string) {
+  const [run] = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(eq(schema.automaticMatchRuns.id, runId));
+  expect(run.status).toBe("completed");
+  return run.result as StoredAutomaticComparison;
 }
 
 it("Durably schedules once, completes a referenced comparison, and never creates a human quality vote", async () => {
@@ -195,13 +240,198 @@ it("Durably schedules once, completes a referenced comparison, and never creates
   expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
     status: "skipped",
   });
-  expect(infer).toHaveBeenCalledTimes(1);
+  expect(infer).toHaveBeenCalledTimes(2);
   const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
   expect(loaded.project.targets[0].automatic?.serviceRelation).toBe("direct");
   expect(loaded.project.qualityEventIds).toEqual([]);
   expect(loaded.project.quality).toBe("unresolved");
   expect((await rows(f.p.id))[0].lotEvaluations).toBeNull();
 });
+
+it("Reuses only the public interpretation for another company and creates a fresh private comparison", async () => {
+  const activityA =
+    "Potatura e cura degli alberi, dettaglio riservato impresa A";
+  const activityB = "Manutenzione di alberi, dettaglio riservato impresa B";
+  const { f, job } = await automaticFixture(false, {
+    ...baseProfile,
+    activities: activityA,
+  });
+  vi.mocked(infer).mockImplementation(async (_pub, _purpose, prompt) =>
+    inventedAnswer(prompt),
+  );
+  await runAutomaticComparison(job, { now: () => now });
+  const first = await storedAutomaticResult(job.runId);
+  const firstCalls = vi.mocked(infer).mock.calls;
+  expect(firstCalls.map((call) => call[1])).toEqual([
+    "documentary-source-interpretation",
+    "documentary-service-comparison",
+  ]);
+  const sourcePrompt = firstCalls[0][2];
+  expect(JSON.parse(sourcePrompt).company).toBeUndefined();
+  expect(sourcePrompt).not.toContain(activityA);
+  expect(sourcePrompt).not.toContain(activityB);
+  expect(JSON.stringify(first.sourceInterpretation)).not.toContain(activityA);
+
+  vi.mocked(infer).mockClear();
+  const other = await company({ ...baseProfile, activities: activityB });
+  const nextJob = await automaticJob(f.p.id, other);
+  expect(await runAutomaticComparison(nextJob, { now: () => now })).toEqual({
+    status: "completed",
+  });
+  const second = await storedAutomaticResult(nextJob.runId);
+  expect(second.sourceInterpretation).toEqual(first.sourceInterpretation);
+  expect(second.id).not.toBe(first.id);
+  expect(second.companyId).toBe(other);
+  expect(infer).toHaveBeenCalledTimes(1);
+  const [comparison] = vi.mocked(infer).mock.calls;
+  expect(comparison[1]).toBe("documentary-service-comparison");
+  expect(comparison[2]).toContain(activityB);
+  expect(comparison[2]).not.toContain(activityA);
+});
+
+it("An uncertain source is cached as review without ever asking for a company comparison", async () => {
+  const { f, companyId, job } = await automaticFixture();
+  vi.mocked(infer).mockImplementation(async (_pub, purpose, prompt) => {
+    expect(purpose).toBe("documentary-source-interpretation");
+    const answer = inventedAnswer(prompt);
+    if (!("status" in answer)) throw new Error("Expected source-only request");
+    return {
+      ...answer,
+      status: "uncertain",
+      components: [],
+      issues: [
+        {
+          explanation: "L'oggetto inventato non è determinabile.",
+          sourceRefs: [answer.targetRef],
+        },
+      ],
+    };
+  });
+  await runAutomaticComparison(job, { now: () => now });
+  expect((await storedAutomaticResult(job.runId)).response).toBeNull();
+  const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
+  expect(loaded.project.targets[0].automatic).toMatchObject({
+    serviceRelation: "review",
+    comparisonOrigin: "source_interpretation",
+  });
+  const other = await company();
+  const nextJob = await automaticJob(f.p.id, other);
+  await runAutomaticComparison(nextJob, { now: () => now });
+  expect((await storedAutomaticResult(nextJob.runId)).response).toBeNull();
+  expect(infer).toHaveBeenCalledTimes(1);
+});
+
+it("Reads every long-source chunk before interpretation and reuses those readings for the next company", async () => {
+  const sourceText = `${"Potatura degli alberi, prestazione inventata. ".repeat(600)}ULTIMA PRESTAZIONE INVENTATA.`;
+  const { f, job } = await automaticFixture(false, baseProfile, sourceText);
+  vi.mocked(infer).mockImplementation(async (_pub, purpose, prompt) => {
+    if (purpose === "documentary-source-reading") {
+      const reading = JSON.parse(prompt);
+      expect(reading.company).toBeUndefined();
+      return {
+        chunkId: reading.chunkId,
+        status: "complete",
+        sourceRefs: reading.items.flatMap(
+          (item: { passage?: { id: string } }) =>
+            item.passage ? [item.passage.id] : [],
+        ),
+      };
+    }
+    return inventedAnswer(prompt);
+  });
+  await runAutomaticComparison(job, { now: () => now });
+  const first = await storedAutomaticResult(job.runId);
+  const calls = vi.mocked(infer).mock.calls;
+  const readingCalls = calls.filter(
+    (call) => call[1] === "documentary-source-reading",
+  );
+  expect(readingCalls.length).toBeGreaterThan(1);
+  expect(calls.map((call) => call[1])).toEqual([
+    ...readingCalls.map(() => "documentary-source-reading"),
+    "documentary-source-interpretation",
+    "documentary-service-comparison",
+  ]);
+  expect(first.sourceInterpretation.readings).toHaveLength(readingCalls.length);
+  const interpretationPrompt = JSON.parse(calls.at(-2)![2]);
+  expect(interpretationPrompt.coverage.completeProvidedSource).toBe(true);
+  expect(interpretationPrompt.coverage.linkedDocumentsRead).toBe(false);
+  const described = interpretationPrompt.passages
+    .filter(
+      (passage: { rawPath: string }) =>
+        passage.rawPath === "/lots/0/orderDescription/it",
+    )
+    .map((passage: { text: string }) => passage.text)
+    .join("");
+  expect(described).toBe(sourceText);
+  const other = await company();
+  const nextJob = await automaticJob(f.p.id, other);
+  vi.mocked(infer).mockClear();
+  await runAutomaticComparison(nextJob, { now: () => now });
+  const second = await storedAutomaticResult(nextJob.runId);
+  expect(second.sourceInterpretation).toEqual(first.sourceInterpretation);
+  expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
+    "documentary-service-comparison",
+  ]);
+});
+
+it("A corrupted current public interpretation fails closed before any provider fallback", async () => {
+  const { f, job } = await automaticFixture();
+  vi.mocked(infer).mockImplementation(async (_pub, _purpose, prompt) =>
+    inventedAnswer(prompt),
+  );
+  await runAutomaticComparison(job, { now: () => now });
+  const altered = structuredClone(await storedAutomaticResult(job.runId));
+  altered.sourceInterpretation.response.summary =
+    "Sintesi alterata dopo la firma.";
+  await db
+    .update(schema.automaticMatchRuns)
+    .set({ result: altered })
+    .where(eq(schema.automaticMatchRuns.id, job.runId));
+  const other = await company();
+  const nextJob = await automaticJob(f.p.id, other);
+  vi.mocked(infer).mockClear();
+  await expect(
+    runAutomaticComparison(nextJob, { now: () => now }),
+  ).rejects.toThrow("Altered source interpretation record");
+  expect(infer).not.toHaveBeenCalled();
+  const [failed] = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(eq(schema.automaticMatchRuns.id, nextJob.runId));
+  expect(failed).toMatchObject({
+    status: "failed",
+    result: null,
+    leaseUntil: null,
+  });
+});
+
+for (const changed of ["source", "model"] as const)
+  it(`A changed ${changed} creates a new public interpretation instead of reusing the old cache`, async () => {
+    const { f, job } = await automaticFixture();
+    vi.mocked(infer).mockImplementation(async (_pub, _purpose, prompt) =>
+      inventedAnswer(prompt),
+    );
+    await runAutomaticComparison(job, { now: () => now });
+    const first = await storedAutomaticResult(job.runId);
+    if (changed === "source") {
+      const corrected = structuredClone(f.raw);
+      corrected.lots[0].orderDescription.it = `${lotText} Rettifica inventata: manutenzione stagionale.`;
+      const observation = await f.observation(corrected);
+      await f.adopt(observation.id);
+    } else vi.stubEnv("LLM_MODEL", "another-invented-documentary-model");
+    const other = await company();
+    const nextJob = await automaticJob(f.p.id, other);
+    vi.mocked(infer).mockClear();
+    await runAutomaticComparison(nextJob, { now: () => now });
+    const second = await storedAutomaticResult(nextJob.runId);
+    expect(second.sourceInterpretation.sourceKey).not.toBe(
+      first.sourceInterpretation.sourceKey,
+    );
+    expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
+      "documentary-source-interpretation",
+      "documentary-service-comparison",
+    ]);
+  });
 
 it("A profile change while the provider runs supersedes its answer without holding an application transaction", async () => {
   const { f, companyId, job } = await automaticFixture();
@@ -218,6 +448,35 @@ it("A profile change while the provider runs supersedes its answer without holdi
   const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
   expect(loaded.project.signalEligible).toBe(false);
   expect(loaded.project.targets[0].automatic).toBeNull();
+  expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
+    "documentary-source-interpretation",
+  ]);
+});
+
+it("A source correction during interpretation prevents the old source from reaching the company comparison", async () => {
+  const { f, job } = await automaticFixture();
+  vi.mocked(infer).mockImplementation(async (_pub, purpose, prompt) => {
+    expect(purpose).toBe("documentary-source-interpretation");
+    const corrected = structuredClone(f.raw);
+    corrected.lots[0].orderDescription.it =
+      "Rettifica inventata: fornitura di alberi.";
+    const observation = await f.observation(corrected);
+    await f.adopt(observation.id);
+    return inventedAnswer(prompt);
+  });
+  expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+    status: "superseded",
+  });
+  expect(infer).toHaveBeenCalledTimes(1);
+  const [run] = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(eq(schema.automaticMatchRuns.id, job.runId));
+  expect(run).toMatchObject({
+    status: "superseded",
+    result: null,
+    leaseUntil: null,
+  });
 });
 
 it("Provider errors retry within the same durable input and stop after three attempts", async () => {
@@ -258,6 +517,9 @@ it("Revoking processing during a provider call discards the answer and clears it
   expect(run.status).toBe("superseded");
   expect(run.result).toBeNull();
   expect(run.leaseUntil).toBeNull();
+  expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
+    "documentary-source-interpretation",
+  ]);
 });
 
 it("An expired lease can be recovered once, while a live lease prevents a duplicate paid request", async () => {
@@ -284,7 +546,7 @@ it("An expired lease can be recovered once, while a live lease prevents a duplic
   expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
     status: "completed",
   });
-  expect(infer).toHaveBeenCalledTimes(1);
+  expect(infer).toHaveBeenCalledTimes(2);
 });
 
 it("An abandoned third attempt is closed once without another provider call", async () => {
@@ -519,7 +781,7 @@ it("Returning to a superseded profile requeues its input once and preserves the 
     .from(schema.automaticMatchRuns)
     .where(eq(schema.automaticMatchRuns.id, job.runId));
   expect(exhausted).toMatchObject({ status: "superseded", attempts: 3 });
-  expect(infer).toHaveBeenCalledTimes(1);
+  expect(infer).toHaveBeenCalledTimes(2);
 });
 
 it("A job for another company cannot read, run or update the owner's comparison", async () => {
@@ -611,6 +873,7 @@ async function fixture(
     empty?: boolean;
     canonicalId?: string;
     automaticProject?: boolean;
+    sourceText?: string;
   } = {},
 ) {
   const projectId = randomUUID(),
@@ -644,7 +907,7 @@ async function fixture(
             id: lotId,
             lotNumber: 1,
             title: { it: "Alberi" },
-            orderDescription: { it: lotText },
+            orderDescription: { it: options.sourceText ?? lotText },
             cpvCode: { code: "77310000" },
             orderAddressOnlyDescription: "no",
             orderAddress: {
