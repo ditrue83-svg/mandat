@@ -89,14 +89,183 @@ function recordedCost(cost: number): string | null {
   // NUMERIC(12,6), as declared for cost_chf and reserved_chf.
   return Number(rounded) <= 999_999.999999 ? rounded : null;
 }
+const rejectionDetails = {
+  response_invalid: "formato della risposta non valido",
+  response_unreadable: "risposta non leggibile",
+  http_error: "errore HTTP del servizio",
+  usage_invalid: "consumo non valido o assente",
+  model_missing: "modello della risposta assente",
+  model_invalid: "modello della risposta non valido",
+  model_mismatch: "modello diverso da quello richiesto",
+  choices_invalid: "numero o formato delle risposte non valido",
+  choice_invalid: "formato della risposta selezionata non valido",
+  message_invalid: "messaggio della risposta non valido",
+  output_limit: "limite di output raggiunto",
+  content_filtered: "risposta filtrata dal servizio",
+  unexpected_tool_call: "richiesta di strumenti non ammessa",
+  finish_invalid: "motivo di conclusione non valido o assente",
+  provider_refusal: "risposta rifiutata dal servizio",
+  content_empty: "contenuto della risposta vuoto",
+  content_invalid: "contenuto della risposta non testuale o assente",
+} as const;
+type RejectionCode = keyof typeof rejectionDetails;
+type ModelState = "matches" | "different" | "missing" | "invalid";
+type ChoicesState = "one" | "none" | "multiple" | "invalid";
+type ContentState = "present" | "empty" | "missing" | "null" | "invalid";
+type RefusalState = "absent" | "null" | "present";
+const knownFinishReasons = [
+  "stop",
+  "length",
+  "content_filter",
+  "tool_calls",
+  "function_call",
+] as const;
+type FinishReason =
+  (typeof knownFinishReasons)[number] | "missing" | "null" | "other";
+export type AiResponseDiagnostic = Readonly<{
+  code: RejectionCode;
+  reasons: readonly RejectionCode[];
+  httpStatus: number;
+  requestedMaxTokens: number | null;
+  modelState: ModelState;
+  choicesState: ChoicesState;
+  finishReason: FinishReason;
+  contentState: ContentState;
+  refusalState: RefusalState;
+  usage: Readonly<TokenUsage> | null;
+}>;
+
+// This projection never retains the provider body, content, reasoning, model
+// name, refusal text, unknown finish strings or parser errors. The acceptance
+// schema below remains the sole gate; these observations only explain rejection.
+function responseDiagnostic(
+  value: unknown,
+  expectedModel: string,
+  maxTokens: number,
+  httpStatus: number,
+  usage: TokenUsage | null,
+  override?: RejectionCode,
+): AiResponseDiagnostic {
+  const object = (item: unknown): Record<string, unknown> | null =>
+    item !== null && typeof item === "object" && !Array.isArray(item)
+      ? (item as Record<string, unknown>)
+      : null;
+  const body = object(value);
+  const modelState: ModelState =
+    body?.model === undefined
+      ? "missing"
+      : typeof body.model !== "string"
+        ? "invalid"
+        : body.model === expectedModel
+          ? "matches"
+          : "different";
+  const choices = Array.isArray(body?.choices) ? body.choices : null;
+  const choicesState: ChoicesState = !choices
+    ? "invalid"
+    : choices.length === 0
+      ? "none"
+      : choices.length === 1
+        ? "one"
+        : "multiple";
+  const choice = choicesState === "one" ? object(choices![0]) : null;
+  const message = object(choice?.message);
+  const finish = choice?.finish_reason;
+  const finishReason: FinishReason =
+    finish === undefined
+      ? "missing"
+      : finish === null
+        ? "null"
+        : knownFinishReasons.includes(
+              finish as (typeof knownFinishReasons)[number],
+            )
+          ? (finish as (typeof knownFinishReasons)[number])
+          : "other";
+  const contentState: ContentState =
+    message?.content === undefined
+      ? "missing"
+      : message.content === null
+        ? "null"
+        : typeof message.content !== "string"
+          ? "invalid"
+          : message.content.trim()
+            ? "present"
+            : "empty";
+  const refusalState: RefusalState =
+    message?.refusal === undefined
+      ? "absent"
+      : message.refusal === null
+        ? "null"
+        : "present";
+  const reasons: RejectionCode[] = [];
+  if (override) reasons.push(override);
+  else {
+    if (!body) reasons.push("response_invalid");
+    if (modelState !== "matches")
+      reasons.push(
+        modelState === "different" ? "model_mismatch" : `model_${modelState}`,
+      );
+    if (choicesState !== "one") reasons.push("choices_invalid");
+    else if (!choice) reasons.push("choice_invalid");
+    else {
+      // A reported length finish is evidence of truncation; token counts alone
+      // never establish that reason, even when they equal the requested limit.
+      if (finishReason !== "stop")
+        reasons.push(
+          finishReason === "length"
+            ? "output_limit"
+            : finishReason === "content_filter"
+              ? "content_filtered"
+              : finishReason === "tool_calls" ||
+                  finishReason === "function_call"
+                ? "unexpected_tool_call"
+                : "finish_invalid",
+        );
+      if (!message) reasons.push("message_invalid");
+      else {
+        if (refusalState === "present") reasons.push("provider_refusal");
+        if (contentState !== "present")
+          reasons.push(
+            contentState === "empty" ? "content_empty" : "content_invalid",
+          );
+      }
+    }
+  }
+  if (!reasons.length) reasons.push("response_invalid");
+  return Object.freeze({
+    code: reasons[0],
+    reasons: Object.freeze(reasons),
+    httpStatus,
+    requestedMaxTokens:
+      Number.isSafeInteger(maxTokens) && maxTokens >= 0 ? maxTokens : null,
+    modelState,
+    choicesState,
+    finishReason,
+    contentState,
+    refusalState,
+    usage: usage
+      ? Object.freeze({
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+        })
+      : null,
+  });
+}
 // An unusable answer may still have a known, billable token consumption.
 class AiResponseRejected extends Error {
   constructor(
     message: string,
     readonly usage: TokenUsage | null,
+    readonly diagnostic: AiResponseDiagnostic | null = null,
   ) {
     super(message);
   }
+}
+// Consumers can persist this immutable allowlist even when complete() throws.
+// Arbitrary exceptions, stacks and causes are deliberately not projected.
+export function readAiResponseDiagnostic(
+  error: unknown,
+): AiResponseDiagnostic | null {
+  return error instanceof AiResponseRejected ? error.diagnostic : null;
 }
 const aiLedgerRetryDelaysMs = [0, 250, 1000] as const;
 const aiReservationStaleAfterMs = 10 * 60 * 1000;
@@ -230,6 +399,14 @@ export const configuredTransport: AiTransport = {
           ? "Risposta AI non leggibile"
           : `Servizio AI: HTTP ${response.status}`,
         null,
+        responseDiagnostic(
+          undefined,
+          expectedModel,
+          maxTokens,
+          response.status,
+          null,
+          response.ok ? "response_unreadable" : "http_error",
+        ),
       );
     }
     // Read usage independently: model, content and finish errors must not
@@ -252,9 +429,28 @@ export const configuredTransport: AiTransport = {
       throw new AiResponseRejected(
         `Servizio AI: HTTP ${response.status}`,
         usage,
+        responseDiagnostic(
+          value,
+          expectedModel,
+          maxTokens,
+          response.status,
+          usage,
+          "http_error",
+        ),
       );
     if (!usage)
-      throw new AiResponseRejected("Consumo AI non valido o assente", null);
+      throw new AiResponseRejected(
+        "Consumo AI non valido o assente",
+        null,
+        responseDiagnostic(
+          value,
+          expectedModel,
+          maxTokens,
+          response.status,
+          null,
+          "usage_invalid",
+        ),
+      );
     const payload = z
       .object({
         model: z.literal(expectedModel),
@@ -271,11 +467,20 @@ export const configuredTransport: AiTransport = {
           .length(1),
       })
       .safeParse(value);
-    if (!payload.success)
-      throw new AiResponseRejected(
-        "Risposta AI incompleta o non utilizzabile",
+    if (!payload.success) {
+      const diagnostic = responseDiagnostic(
+        value,
+        expectedModel,
+        maxTokens,
+        response.status,
         usage,
       );
+      throw new AiResponseRejected(
+        `Risposta AI incompleta o non utilizzabile: ${rejectionDetails[diagnostic.code]} [${diagnostic.code}]`,
+        usage,
+        diagnostic,
+      );
+    }
     return {
       text: payload.data.choices[0].message.content,
       ...usage,

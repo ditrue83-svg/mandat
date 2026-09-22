@@ -8,7 +8,9 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v2";
+  "documentary-source-interpretation-v3";
+// Structured source output keeps its full allowance even without thinking.
+export const SOURCE_INTERPRETATION_MAX_TOKENS = 8192;
 const digest = (value: unknown) =>
   createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
@@ -51,7 +53,8 @@ const bindingSchema = z.strictObject({
   fieldsHash: sha256,
   shapeEpochToken: text(256),
   model: text(200),
-  reasoningEffort: z.enum(["none", "low", "medium", "high"]).nullable(),
+  reasoningEffort: z.enum(["none", "low", "medium", "high"]),
+  maxTokens: z.literal(SOURCE_INTERPRETATION_MAX_TOKENS),
 });
 export type SourceInterpretationBinding = {
   readonly target: LotSourceTarget;
@@ -59,7 +62,8 @@ export type SourceInterpretationBinding = {
   readonly fieldsHash: string;
   readonly shapeEpochToken: string;
   readonly model: string;
-  readonly reasoningEffort: "none" | "low" | "medium" | "high" | null;
+  readonly reasoningEffort: "none" | "low" | "medium" | "high";
+  readonly maxTokens: typeof SOURCE_INTERPRETATION_MAX_TOKENS;
 };
 const readingSchema = z.strictObject({
   chunkId: z.string().regex(/^chunk\d+$/),
@@ -383,8 +387,7 @@ export function buildSourceInterpretationRequest(
   )
     throw new Error("source_interpretation_prompt_capacity");
   const sourceKey = sourceInterpretationKey(binding);
-  const maxTokens =
-    binding.reasoningEffort && binding.reasoningEffort !== "none" ? 8192 : 1600;
+  const maxTokens = binding.maxTokens;
   const request = freeze({
     ...context,
     selectedIds: body.passages.map((passage) => passage.id),

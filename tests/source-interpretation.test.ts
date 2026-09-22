@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { test } from "vitest";
 import {
   SOURCE_INTERPRETATION_VERSION,
+  SOURCE_INTERPRETATION_MAX_TOKENS,
   buildSourceInterpretationRequest,
   sourceInterpretationKey,
   validateSourceInterpretation,
@@ -42,6 +43,7 @@ function context(): SourceInterpretationContext {
       shapeEpochToken: "invented-epoch",
       model: "invented-model",
       reasoningEffort: "high",
+      maxTokens: SOURCE_INTERPRETATION_MAX_TOKENS,
     },
     targetScope: "project_context",
     coverage: {
@@ -776,18 +778,18 @@ test("A real purchased classification or cataloguing service is not rejected by 
   );
 });
 
-test("A source v1 record is stale under v2 without rewriting its historical response", () => {
+test("A source v2 record is stale under v3 before parsing its historical schema", () => {
   const request = buildSourceInterpretationRequest(context());
-  assert.equal(request.version, "documentary-source-interpretation-v2");
+  assert.equal(request.version, "documentary-source-interpretation-v3");
   const current = recordSourceInterpretation(response(), request, metadata);
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
   const { hash: _hash, ...unsigned } = current;
   const historicalBody = {
     ...unsigned,
-    version: "documentary-source-interpretation-v1",
+    version: "documentary-source-interpretation-v2",
     sourceKey: digest({
-      version: "documentary-source-interpretation-v1",
+      version: "documentary-source-interpretation-v2",
       binding: request.binding,
     }),
   };
@@ -795,6 +797,13 @@ test("A source v1 record is stale under v2 without rewriting its historical resp
   const before = JSON.stringify(historical);
   assert.notEqual(historical.sourceKey, current.sourceKey);
   assert.equal(readSourceInterpretation(historical, request), null);
+  assert.equal(
+    readSourceInterpretation(
+      { ...historical, response: { oldSchema: true } },
+      request,
+    ),
+    null,
+  );
   assert.equal(
     readSourceInterpretation(
       {
@@ -808,4 +817,29 @@ test("A source v1 record is stale under v2 without rewriting its historical resp
   );
   assert.equal(JSON.stringify(historical), before);
   assert.equal(readSourceInterpretation(current, request)!.status, "resolved");
+});
+
+test("Source output allowance remains 8192 with or without thinking and is bound to the request", () => {
+  const input = context();
+  const high = buildSourceInterpretationRequest(input);
+  const none = buildSourceInterpretationRequest({
+    ...input,
+    binding: { ...input.binding, reasoningEffort: "none" },
+  });
+  assert.equal(high.maxTokens, 8192);
+  assert.equal(none.maxTokens, 8192);
+  assert.equal(none.binding.maxTokens, none.maxTokens);
+  assert.notEqual(high.sourceKey, none.sourceKey);
+  assert.notEqual(high.inputHash, none.inputHash);
+  assert.deepEqual(none.body, high.body);
+  assert.deepEqual(none.responseFormat, high.responseFormat);
+  const { maxTokens: _maxTokens, ...unbound } = input.binding;
+  for (const binding of [unbound, { ...input.binding, maxTokens: 1600 }])
+    assert.throws(() =>
+      buildSourceInterpretationRequest(
+        JSON.parse(JSON.stringify({ ...input, binding })),
+      ),
+    );
+  const stored = recordSourceInterpretation(response(), high, metadata);
+  assert.equal(readSourceInterpretation(stored, none), null);
 });

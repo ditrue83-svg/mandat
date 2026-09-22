@@ -68,7 +68,11 @@ export async function compareDocumentaryTarget(
       transport,
       sourceRequest.system,
       sourceRequest.responseFormat,
-      configuration,
+      {
+        ...configuration,
+        model: sourceRequest.model,
+        reasoningEffort: sourceRequest.binding.reasoningEffort,
+      },
     );
     sourceInterpretation = recordSourceInterpretation(
       sourceResponse,
@@ -76,7 +80,7 @@ export async function compareDocumentaryTarget(
       {
         id: randomUUID(),
         at: new Date().toISOString(),
-        model: configuration.model,
+        model: sourceRequest.model,
       },
     );
   }

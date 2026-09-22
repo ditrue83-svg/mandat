@@ -19,18 +19,22 @@ import { plainText } from "@/sources/common";
 import {
   documentaryAiModel,
   documentaryAiReasoningEffort,
+  documentarySourceReasoningEffort,
 } from "./documentary-ai-config";
 
 import {
   SOURCE_INTERPRETATION_VERSION,
+  SOURCE_INTERPRETATION_MAX_TOKENS,
   buildSourceInterpretationRequest,
   sourceInterpretationKey,
   sourceInterpretationRecordSchema,
   readSourceInterpretation,
+  type SourceInterpretationBinding,
   type SourceInterpretationRecord,
 } from "./source-interpretation";
 
-export const AUTOMATIC_COMPARISON_VERSION = "documentary-service-comparison-v9";
+export const AUTOMATIC_COMPARISON_VERSION =
+  "documentary-service-comparison-v10";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -396,8 +400,9 @@ export function buildAutomaticComparisonRequest(
     fieldsHash: digest(fields),
     shapeEpochToken: input.shapeState.epochToken,
     model: automaticComparisonModel(),
-    reasoningEffort: documentaryAiReasoningEffort() ?? null,
-  };
+    reasoningEffort: documentarySourceReasoningEffort(),
+    maxTokens: SOURCE_INTERPRETATION_MAX_TOKENS,
+  } satisfies SourceInterpretationBinding;
   const sourceKey = sourceInterpretationKey(sourceBinding);
   const dependency = {
     version: AUTOMATIC_COMPARISON_VERSION,

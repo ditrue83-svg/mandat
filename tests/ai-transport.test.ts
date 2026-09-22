@@ -20,8 +20,10 @@ vi.mock("@/db", () => ({ getDb: () => context.db }));
 import {
   configuredTransport,
   infer,
+  readAiResponseDiagnostic,
   recoverStaleAiReservations,
   summarize,
+  type AiResponseDiagnostic,
 } from "../src/worker/ai";
 
 const expectedModel = "mistralai/Ministral-3-14B-Instruct-2512";
@@ -103,84 +105,101 @@ function withFailingAiUsageUpdates(failures: number) {
   });
   return { value, calls: () => calls };
 }
-const rejectedAnswers: [string, (body: ProviderPayload) => void][] = [
+const rejectedAnswers: [
+  string,
+  (body: ProviderPayload) => void,
+  Partial<AiResponseDiagnostic>,
+][] = [
   [
     "troncata",
     (p) => {
       p.choices[0].finish_reason = "length";
     },
+    { code: "output_limit", finishReason: "length" },
   ],
   [
     "filtrata",
     (p) => {
       p.choices[0].finish_reason = "content_filter";
     },
+    { code: "content_filtered", finishReason: "content_filter" },
   ],
   [
     "tool call",
     (p) => {
       p.choices[0].finish_reason = "tool_calls";
     },
+    { code: "unexpected_tool_call", finishReason: "tool_calls" },
   ],
   [
     "finish nullo",
     (p) => {
       p.choices[0].finish_reason = null;
     },
+    { code: "finish_invalid", finishReason: "null" },
   ],
   [
     "finish assente",
     (p) => {
       delete p.choices[0].finish_reason;
     },
+    { code: "finish_invalid", finishReason: "missing" },
   ],
   [
     "modello diverso",
     (p) => {
       p.model = "unexpected-provider-model";
     },
+    { code: "model_mismatch", modelState: "different" },
   ],
   [
     "modello assente",
     (p) => {
       delete p.model;
     },
+    { code: "model_missing", modelState: "missing" },
   ],
   [
     "nessuna choice",
     (p) => {
       p.choices = [];
     },
+    { code: "choices_invalid", choicesState: "none" },
   ],
   [
     "due choice",
     (p) => {
       p.choices.push(p.choices[0]);
     },
+    { code: "choices_invalid", choicesState: "multiple" },
   ],
   [
     "contenuto nullo",
     (p) => {
       p.choices[0].message.content = null;
     },
+    { code: "content_invalid", contentState: "null" },
   ],
   [
     "contenuto vuoto",
     (p) => {
       p.choices[0].message.content = " \n\t";
     },
+    { code: "content_empty", contentState: "empty" },
   ],
   [
     "contenuto strutturato",
     (p) => {
       p.choices[0].message.content = [{ text: "answer" }];
     },
+    { code: "content_invalid", contentState: "invalid" },
   ],
   [
     "rifiuto",
     (p) => {
       p.choices[0].message.refusal = privateResponseText;
     },
+    { code: "provider_refusal", refusalState: "present" },
   ],
 ];
 const invalidUsage: [string, unknown][] = [
@@ -347,13 +366,21 @@ describe("trasporto AI e consumo degli output respinti", () => {
 
   it.each(rejectedAnswers)(
     "salda il consumo noto ma respinge una risposta %s",
-    async (_name, mutate) => {
+    async (_name, mutate, diagnostic) => {
       const body = payload();
       mutate(body);
       const fetch = mockResponse(body);
-      await expect(summarize(publication)).rejects.toThrow(
+      const error = await summarize(publication).catch(
+        (rejected: unknown) => rejected,
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain(
         "Risposta AI incompleta o non utilizzabile",
       );
+      expect(readAiResponseDiagnostic(error)).toMatchObject({
+        ...diagnostic,
+        usage: { inputTokens: 100, outputTokens: 50 },
+      });
       expect(fetch).toHaveBeenCalledTimes(1);
       const rows = await db.select().from(schema.aiUsage);
       expect(rows).toHaveLength(1);
@@ -370,6 +397,123 @@ describe("trasporto AI e consumo degli output respinti", () => {
       expect(await db.select().from(schema.publications)).toHaveLength(0);
     },
   );
+
+  it.each([
+    ["limite di output", "length", expectedModel, "output_limit"],
+    ["modello diverso", "stop", privateResponseText, "model_mismatch"],
+  ])(
+    "distingue la causa %s senza perdere il consumo noto",
+    async (_name, finishReason, model, code) => {
+      const body = payload();
+      body.model = model;
+      body.choices[0].finish_reason = finishReason;
+      const fetch = mockResponse(body);
+      const error = await infer(publication, "diagnostic", "prompt", 8192).then(
+        () => null,
+        (rejected: unknown) => rejected,
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain(`[${code}]`);
+      expect((error as Error).message).not.toContain(privateResponseText);
+      const diagnostic = readAiResponseDiagnostic(error);
+      expect(diagnostic).toMatchObject({
+        code,
+        reasons: [code],
+        requestedMaxTokens: 8192,
+        finishReason,
+        usage: { inputTokens: 100, outputTokens: 50 },
+      });
+      expect(Object.isFrozen(diagnostic)).toBe(true);
+      expect(Object.isFrozen(diagnostic?.reasons)).toBe(true);
+      expect(Object.isFrozen(diagnostic?.usage)).toBe(true);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      const [row] = await db.select().from(schema.aiUsage);
+      expect(row).toMatchObject({
+        status: "uncertain",
+        inputTokens: 100,
+        outputTokens: 50,
+        costChf: "0.000200",
+      });
+      expect(row.error).toContain(`[${code}]`);
+      expect(row.error).not.toContain(privateResponseText);
+    },
+  );
+
+  it("non deduce il limite dai soli token e non conserva un finish sconosciuto", async () => {
+    const body = payload();
+    body.choices[0].finish_reason = privateResponseText;
+    body.usage = { prompt_tokens: 100, completion_tokens: 8192 };
+    const fetch = mockResponse(body);
+    const error = await infer(publication, "diagnostic", "prompt", 8192).catch(
+      (rejected: unknown) => rejected,
+    );
+    expect(readAiResponseDiagnostic(error)).toMatchObject({
+      code: "finish_invalid",
+      reasons: ["finish_invalid"],
+      finishReason: "other",
+      requestedMaxTokens: 8192,
+      usage: { inputTokens: 100, outputTokens: 8192 },
+    });
+    expect(JSON.stringify(error)).not.toContain(privateResponseText);
+    expect((error as Error).message).not.toContain(privateResponseText);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [row] = await db.select().from(schema.aiUsage);
+    expect(row).toMatchObject({ status: "uncertain", costChf: "0.016484" });
+    expect(row.error).not.toContain("output_limit");
+  });
+
+  it("espone solo diagnostica ammessa anche con più difetti e contenuti privati", async () => {
+    const secrets = [
+      "private-model",
+      "private-content",
+      "private-refusal",
+      "private-reasoning",
+      "private-body",
+      "private-secret",
+    ];
+    const body = {
+      ...payload(),
+      model: secrets[0],
+      choices: [
+        {
+          finish_reason: "length",
+          message: {
+            content: secrets[1],
+            refusal: secrets[2],
+            reasoning_content: secrets[3],
+          },
+        },
+      ],
+      error: { message: secrets[4], token: secrets[5] },
+    };
+    mockResponse(body);
+    const error = await infer(publication, "diagnostic", "prompt", 8192).catch(
+      (rejected: unknown) => rejected,
+    );
+    const diagnostic = readAiResponseDiagnostic(error);
+    expect(diagnostic).toEqual({
+      code: "model_mismatch",
+      reasons: ["model_mismatch", "output_limit", "provider_refusal"],
+      httpStatus: 200,
+      requestedMaxTokens: 8192,
+      modelState: "different",
+      choicesState: "one",
+      finishReason: "length",
+      contentState: "present",
+      refusalState: "present",
+      usage: { inputTokens: 100, outputTokens: 50 },
+    });
+    const [row] = await db.select().from(schema.aiUsage);
+    for (const secret of secrets) {
+      expect((error as Error).message).not.toContain(secret);
+      expect(JSON.stringify(error)).not.toContain(secret);
+      expect(JSON.stringify(diagnostic)).not.toContain(secret);
+      expect(row.error).not.toContain(secret);
+    }
+    expect(error).not.toHaveProperty("cause");
+    expect(readAiResponseDiagnostic(new Error(privateResponseText))).toBeNull();
+    expect(readAiResponseDiagnostic({ diagnostic })).toBeNull();
+  });
 
   it.each(invalidUsage)(
     "mantiene la riserva quando il consumo è %s",

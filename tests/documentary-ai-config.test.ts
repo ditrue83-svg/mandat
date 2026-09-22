@@ -1,5 +1,8 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { documentaryAiConfiguration } from "../src/lib/documentary-ai-config";
+import {
+  documentaryAiConfiguration,
+  documentarySourceReasoningEffort,
+} from "../src/lib/documentary-ai-config";
 afterEach(() => vi.unstubAllEnvs());
 it("requires dedicated prices and preserves the legacy model configuration", () => {
   vi.stubEnv("LLM_MODEL", "legacy-model");
@@ -19,4 +22,22 @@ it("requires dedicated prices and preserves the legacy model configuration", () 
   });
   expect(process.env.LLM_MODEL).toBe("legacy-model");
   expect(process.env.LLM_OUTPUT_CHF_PER_MILLION).toBe("2");
+});
+
+it("keeps source thinking off independently of comparison and legacy settings", () => {
+  vi.stubEnv("DOCUMENTARY_SOURCE_REASONING_EFFORT", "");
+  vi.stubEnv("DOCUMENTARY_LLM_REASONING_EFFORT", "high");
+  vi.stubEnv("LLM_REASONING_EFFORT", "high");
+  expect(documentarySourceReasoningEffort()).toBe("none");
+  vi.stubEnv("DOCUMENTARY_LLM_REASONING_EFFORT", "low");
+  expect(documentarySourceReasoningEffort()).toBe("none");
+  vi.stubEnv("DOCUMENTARY_SOURCE_REASONING_EFFORT", "high");
+  expect(documentarySourceReasoningEffort()).toBe("high");
+  expect(process.env.DOCUMENTARY_LLM_REASONING_EFFORT).toBe("low");
+  expect(process.env.LLM_REASONING_EFFORT).toBe("high");
+});
+
+it("rejects invalid source settings without treating them as provider defaults", () => {
+  vi.stubEnv("DOCUMENTARY_SOURCE_REASONING_EFFORT", "disabled");
+  expect(() => documentarySourceReasoningEffort()).toThrow("fonte non valida");
 });

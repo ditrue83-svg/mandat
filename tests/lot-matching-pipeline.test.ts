@@ -117,6 +117,9 @@ beforeAll(async () => {
 beforeEach(async () => {
   vi.stubEnv("DOCUMENTARY_COMPARISON_ENABLED", "false");
   vi.stubEnv("DOCUMENTARY_LLM_MODEL", "");
+  vi.stubEnv("DOCUMENTARY_LLM_REASONING_EFFORT", "");
+  vi.stubEnv("DOCUMENTARY_SOURCE_REASONING_EFFORT", "");
+  vi.stubEnv("LLM_REASONING_EFFORT", "");
   vi.stubEnv("LLM_MODEL", "invented-documentary-model");
   vi.stubEnv("LLM_INPUT_CHF_PER_MILLION", "1");
   vi.stubEnv("LLM_OUTPUT_CHF_PER_MILLION", "2");
@@ -322,6 +325,8 @@ it("An uncertain source is cached as review without ever asking for a company co
 });
 
 it("Reads every long-source chunk before interpretation and reuses those readings for the next company", async () => {
+  vi.stubEnv("DOCUMENTARY_LLM_REASONING_EFFORT", "high");
+  vi.stubEnv("LLM_REASONING_EFFORT", "high");
   const sourceText = `${"Potatura degli alberi, prestazione inventata. ".repeat(600)}ULTIMA PRESTAZIONE INVENTATA.`;
   const { f, job } = await automaticFixture(false, baseProfile, sourceText);
   vi.mocked(infer).mockImplementation(async (_pub, purpose, prompt) => {
@@ -346,12 +351,24 @@ it("Reads every long-source chunk before interpretation and reuses those reading
     (call) => call[1] === "documentary-source-reading",
   );
   expect(readingCalls.length).toBeGreaterThan(1);
+  for (const reading of readingCalls) {
+    expect(reading[3]).toBe(2400);
+    expect(reading[7]?.reasoningEffort).toBe("none");
+  }
   expect(calls.map((call) => call[1])).toEqual([
     ...readingCalls.map(() => "documentary-source-reading"),
     "documentary-source-interpretation",
     "documentary-service-comparison",
   ]);
   expect(first.sourceInterpretation.readings).toHaveLength(readingCalls.length);
+  const interpretationCall = calls.at(-2)!;
+  expect(interpretationCall[3]).toBe(8192);
+  expect(interpretationCall[7]).toMatchObject({
+    model: first.sourceInterpretation.model,
+    reasoningEffort: "none",
+  });
+  expect(calls.at(-1)![3]).toBe(8192);
+  expect(calls.at(-1)![7]?.reasoningEffort).toBe("high");
   const interpretationPrompt = JSON.parse(calls.at(-2)![2]);
   expect(interpretationPrompt.coverage.completeProvidedSource).toBe(true);
   expect(interpretationPrompt.coverage.linkedDocumentsRead).toBe(false);
@@ -372,6 +389,7 @@ it("Reads every long-source chunk before interpretation and reuses those reading
   expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
     "documentary-service-comparison",
   ]);
+  expect(vi.mocked(infer).mock.calls[0][7]?.reasoningEffort).toBe("high");
 });
 
 it("A corrupted current public interpretation fails closed before any provider fallback", async () => {
@@ -405,7 +423,7 @@ it("A corrupted current public interpretation fails closed before any provider f
   });
 });
 
-for (const changed of ["source", "model"] as const)
+for (const changed of ["source", "model", "source_reasoning"] as const)
   it(`A changed ${changed} creates a new public interpretation instead of reusing the old cache`, async () => {
     const { f, job } = await automaticFixture();
     vi.mocked(infer).mockImplementation(async (_pub, _purpose, prompt) =>
@@ -418,7 +436,9 @@ for (const changed of ["source", "model"] as const)
       corrected.lots[0].orderDescription.it = `${lotText} Rettifica inventata: manutenzione stagionale.`;
       const observation = await f.observation(corrected);
       await f.adopt(observation.id);
-    } else vi.stubEnv("LLM_MODEL", "another-invented-documentary-model");
+    } else if (changed === "model")
+      vi.stubEnv("LLM_MODEL", "another-invented-documentary-model");
+    else vi.stubEnv("DOCUMENTARY_SOURCE_REASONING_EFFORT", "high");
     const other = await company();
     const nextJob = await automaticJob(f.p.id, other);
     vi.mocked(infer).mockClear();
@@ -431,6 +451,10 @@ for (const changed of ["source", "model"] as const)
       "documentary-source-interpretation",
       "documentary-service-comparison",
     ]);
+    if (changed === "source_reasoning") {
+      expect(vi.mocked(infer).mock.calls[0][7]?.reasoningEffort).toBe("high");
+      expect(vi.mocked(infer).mock.calls[0][3]).toBe(8192);
+    }
   });
 
 it("A profile change while the provider runs supersedes its answer without holding an application transaction", async () => {

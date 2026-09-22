@@ -22,6 +22,20 @@ export function documentaryAiReasoningEffort():
     throw new Error("Modalità di ragionamento del confronto non valida");
   return value;
 }
+// Source extraction has its own setting: it must never inherit thinking from
+// the final company comparison or from the legacy summary configuration.
+export function documentarySourceReasoningEffort():
+  "none" | "low" | "medium" | "high" {
+  const value = process.env.DOCUMENTARY_SOURCE_REASONING_EFFORT || "none";
+  if (
+    value !== "none" &&
+    value !== "low" &&
+    value !== "medium" &&
+    value !== "high"
+  )
+    throw new Error("Modalità di ragionamento della fonte non valida");
+  return value;
+}
 export function documentaryAiConfiguration() {
   const dedicated = Boolean(process.env.DOCUMENTARY_LLM_MODEL);
   const input = Number(

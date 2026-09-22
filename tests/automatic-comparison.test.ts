@@ -314,6 +314,69 @@ test("Source interpretation is identical across companies and only the final com
   assert.equal("targetRef" in final, false);
 });
 
+test("Source configuration is bound independently from the final comparison and leaves map requests unchanged", () => {
+  try {
+    vi.stubEnv("DOCUMENTARY_SOURCE_REASONING_EFFORT", "");
+    vi.stubEnv("DOCUMENTARY_LLM_REASONING_EFFORT", "high");
+    vi.stubEnv("LLM_REASONING_EFFORT", "high");
+    const input = fixture();
+    const first = buildAutomaticComparisonRequest(input);
+    const source = sourceRecord(first);
+    const sourceRequest = buildAutomaticSourceRequest(first);
+    assert.equal(first.sourceBinding.reasoningEffort, "none");
+    assert.equal(first.sourceBinding.maxTokens, 8192);
+    assert.equal(sourceRequest.maxTokens, 8192);
+    assert.equal(first.maxTokens, 8192);
+    vi.stubEnv("DOCUMENTARY_LLM_REASONING_EFFORT", "none");
+    const finalChanged = buildAutomaticComparisonRequest(input);
+    assert.equal(first.sourceKey, finalChanged.sourceKey);
+    assert.notEqual(first.inputHash, finalChanged.inputHash);
+    assert.deepEqual(buildAutomaticSourceRequest(finalChanged), sourceRequest);
+    assert.deepEqual(
+      readAutomaticSourceInterpretation(source, finalChanged),
+      source,
+    );
+
+    vi.stubEnv("DOCUMENTARY_SOURCE_REASONING_EFFORT", "high");
+    const sourceChanged = buildAutomaticComparisonRequest(input);
+    assert.notEqual(sourceChanged.sourceKey, first.sourceKey);
+    assert.notEqual(sourceChanged.inputHash, finalChanged.inputHash);
+    assert.equal(buildAutomaticSourceRequest(sourceChanged).maxTokens, 8192);
+    assert.equal(
+      readAutomaticSourceInterpretation(source, sourceChanged),
+      null,
+    );
+    assert.equal(
+      readAutomaticSourceInterpretation(
+        {
+          version: "documentary-source-interpretation-v2",
+          sourceKey: sourceChanged.sourceKey,
+          response: { obsoleteSchema: true },
+        },
+        sourceChanged,
+      ),
+      null,
+    );
+
+    const detail = raw();
+    detail.terms.qualificationCriteriaNote.it = "Condizione inventata. ".repeat(
+      1500,
+    );
+    const longInput = fixture(detail);
+    const high = buildAutomaticComparisonRequest(longInput);
+    vi.stubEnv("DOCUMENTARY_SOURCE_REASONING_EFFORT", "none");
+    const none = buildAutomaticComparisonRequest(longInput);
+    assert.ok(high.readingRequests.length > 1);
+    assert.deepEqual(high.readingRequests, none.readingRequests);
+    assert.deepEqual(high.passages, none.passages);
+    assert.ok(
+      none.readingRequests.every((chunk) => chunk.reasoningEffort === "none"),
+    );
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
 test("Missing, stale or tampered source interpretations cannot be replaced by an implicit interpretation", () => {
   const request = buildAutomaticComparisonRequest(fixture());
   const source = sourceRecord(request);
@@ -993,7 +1056,7 @@ test("Persisted responses cannot cross company boundaries or survive a changed p
   );
 });
 
-test("A historical v8 comparison with a v1 source is stale under v9 without rewriting evidence", () => {
+test("A historical v9 comparison with a v2 source is stale under v10 without rewriting evidence", () => {
   const input = fixture();
   const request = buildAutomaticComparisonRequest(input);
   const source = sourceRecord(request);
@@ -1006,23 +1069,30 @@ test("A historical v8 comparison with a v1 source is stale under v9 without rewr
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
   const { hash: _hash, ...unsigned } = stored;
-  const v8Unsigned = {
+  const oldUnsigned = {
     ...unsigned,
     sourceInterpretation: {
       ...unsigned.sourceInterpretation,
-      version: "documentary-source-interpretation-v1",
+      version: "documentary-source-interpretation-v2",
     },
-    version: "documentary-service-comparison-v8",
+    version: "documentary-service-comparison-v9",
     inputHash: digest({
       ...request.dependency,
-      version: "documentary-service-comparison-v8",
+      version: "documentary-service-comparison-v9",
     }),
   };
-  const historical = { ...v8Unsigned, hash: digest(v8Unsigned) };
+  const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
   const before = JSON.stringify(historical);
-  assert.equal(request.version, "documentary-service-comparison-v9");
+  assert.equal(request.version, "documentary-service-comparison-v10");
   assert.notEqual(historical.inputHash, request.inputHash);
   assert.equal(readAutomaticComparison(historical, request), null);
+  assert.equal(
+    readAutomaticComparison(
+      { ...historical, response: { oldSchema: true } },
+      request,
+    ),
+    null,
+  );
   assert.deepEqual(resolveAutomaticComparison(input, [historical]), {
     comparison: null,
     issue: "automatic_comparison_stale",
