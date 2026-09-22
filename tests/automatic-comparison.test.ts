@@ -3,21 +3,27 @@ import { createHash } from "node:crypto";
 import { test, vi } from "vitest";
 import {
   buildAutomaticComparisonRequest,
-  validateAutomaticComparison,
+  validateAutomaticComparison as validateWithRequiredReview,
   AutomaticComparisonUnavailable,
-  recordAutomaticComparison,
+  recordAutomaticComparison as recordWithRequiredReview,
   readAutomaticComparison,
   buildAutomaticReductionRequest,
   automaticComparisonModel,
   resolveAutomaticComparison,
   buildAutomaticSourceRequest,
-  buildInterpretedComparisonRequest,
+  buildInterpretedComparisonRequest as buildWithRequiredReview,
+  buildAutomaticSourceSemanticReviewRequest,
+  readAutomaticSourceSemanticReview,
   readAutomaticSourceInterpretation,
 } from "../src/lib/automatic-comparison";
 import {
   recordSourceInterpretation,
   type SourceInterpretationRecord,
 } from "../src/lib/source-interpretation";
+import {
+  recordSourceSemanticReview,
+  type SourceSemanticReviewRecord,
+} from "../src/lib/source-semantic-review";
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 import {
   captureLotSourceSnapshot,
@@ -263,6 +269,88 @@ function sourceRecord(
     },
   );
 }
+
+// Existing comparison fixtures explicitly simulate a favorable review. These
+// invented answers test plumbing, not semantic quality. The gate tests below
+// call the production functions directly without this fixture convenience.
+function sourceReview(
+  request: ReturnType<typeof buildAutomaticComparisonRequest>,
+  source: SourceInterpretationRecord,
+  verdict: "supported" | "contradicted" | "not_verifiable" = "supported",
+) {
+  const plan = buildAutomaticSourceSemanticReviewRequest(request, source);
+  return recordSourceSemanticReview(
+    plan.requests.map((chunk) => {
+      const body = JSON.parse(chunk.prompt);
+      return {
+        chunkId: body.chunkId,
+        coverage: "complete",
+        checks: body.assignedClaims.map(
+          (claim: { id: string; sourceRefs: string[] }) => ({
+            claimId: claim.id,
+            verdict,
+            reason:
+              "Giudizio inventato per verificare il flusso, non la qualità AI.",
+            sourceRefs: claim.sourceRefs.length
+              ? claim.sourceRefs
+              : [body.passages[0].id],
+          }),
+        ),
+        findings: [],
+      };
+    }),
+    plan,
+    {
+      id: "invented-semantic-review",
+      at: "2030-01-20T12:01:00.000Z",
+      model: plan.model,
+    },
+  );
+}
+function fixtureReview(
+  request: ReturnType<typeof buildAutomaticComparisonRequest>,
+  source: unknown,
+): SourceSemanticReviewRecord | null {
+  const draft = source as SourceInterpretationRecord | null | undefined;
+  return draft?.response?.status === "resolved"
+    ? sourceReview(request, draft)
+    : null;
+}
+function validateAutomaticComparison(
+  response: unknown,
+  request: ReturnType<typeof buildAutomaticComparisonRequest>,
+  source: unknown,
+) {
+  return validateWithRequiredReview(
+    response,
+    request,
+    source,
+    fixtureReview(request, source),
+  );
+}
+function buildInterpretedComparisonRequest(
+  request: ReturnType<typeof buildAutomaticComparisonRequest>,
+  source: SourceInterpretationRecord,
+) {
+  return buildWithRequiredReview(
+    request,
+    source,
+    fixtureReview(request, source)!,
+  );
+}
+function recordAutomaticComparison(
+  response: unknown,
+  request: ReturnType<typeof buildAutomaticComparisonRequest>,
+  metadata: Omit<
+    Parameters<typeof recordWithRequiredReview>[2],
+    "sourceReview"
+  >,
+) {
+  return recordWithRequiredReview(response, request, {
+    ...metadata,
+    sourceReview: fixtureReview(request, metadata.sourceInterpretation),
+  });
+}
 function response(
   request: ReturnType<typeof buildAutomaticComparisonRequest>,
   interpretation: SourceInterpretationRecord,
@@ -279,12 +367,200 @@ function response(
       comparisonUncertain: false,
     },
     interpretationHash: interpretation.hash,
+    reviewHash: fixtureReview(request, interpretation)?.hash ?? "0".repeat(64),
     componentRefs: ["u1"],
     companyRefs: [request.companyPassages[0].id],
   };
 }
 
-test("An unreviewed complete source supports a referenced AI comparison without creating a human judgment", () => {
+test("A resolved interpretation cannot bypass the separate semantic review", () => {
+  const request = buildAutomaticComparisonRequest(fixture());
+  const source = sourceRecord(request);
+  for (const missing of [undefined, null]) {
+    assert.throws(
+      () =>
+        validateWithRequiredReview(
+          response(request, source),
+          request,
+          source,
+          missing,
+        ),
+      /Missing source semantic review/,
+    );
+    assert.throws(() =>
+      buildWithRequiredReview(request, source, missing as never),
+    );
+  }
+  const review = sourceReview(request, source);
+  assert.equal(
+    validateWithRequiredReview(
+      response(request, source),
+      request,
+      source,
+      review,
+    ).relation,
+    "direct",
+  );
+  assert.throws(
+    () =>
+      validateWithRequiredReview(
+        { ...response(request, source), reviewHash: "0".repeat(64) },
+        request,
+        source,
+        review,
+      ),
+    /another source semantic review/,
+  );
+  assert.equal(
+    JSON.parse(buildWithRequiredReview(request, source, review).prompt)
+      .sourceInterpretation.reviewHash,
+    review.hash,
+  );
+});
+
+test.each(["contradicted", "not_verifiable"] as const)(
+  "A %s source review is persisted without a final company judgment",
+  (verdict) => {
+    const input = fixture();
+    const request = buildAutomaticComparisonRequest(input);
+    const source = sourceRecord(request);
+    const review = sourceReview(request, source, verdict);
+    assert.throws(
+      () => buildWithRequiredReview(request, source, review),
+      /semantic review/,
+    );
+    assert.throws(
+      () =>
+        validateWithRequiredReview(
+          response(request, source),
+          request,
+          source,
+          review,
+        ),
+      /Uncertain source/,
+    );
+    const stored = recordWithRequiredReview(null, request, {
+      id: "invented-negative-source-review",
+      at: "2030-01-20T12:02:00.000Z",
+      model: automaticComparisonModel(),
+      sourceInterpretation: source,
+      sourceReview: review,
+    });
+    const current = readAutomaticComparison(stored, request)!;
+    assert.equal(current.comparisonOrigin, "source_semantic_review");
+    assert.equal(current.sourceBlocked, true);
+    assert.equal(current.sourceReview?.accepted, false);
+    assert.equal(current.relation, "review");
+    assert.equal(current.response, null);
+    assert.equal(current.companyEvidence.length, 0);
+    assert.equal(stored.sourceInterpretation.hash, source.hash);
+    assert.equal(stored.sourceReview?.hash, review.hash);
+    assert.equal(
+      resolveAutomaticComparison(input, [stored]).comparison?.result,
+      "review",
+    );
+    assert.throws(
+      () => readAutomaticComparison({ ...stored, sourceReview: null }, request),
+      /Altered automatic comparison/,
+    );
+  },
+);
+
+test("Semantic reviews use the full original source and never company data", () => {
+  const detail = raw();
+  detail.terms.qualificationCriteriaNote.it =
+    "Condizione inventata completa. ".repeat(1500) +
+    " CLAUSOLA_FINALE_ORIGINALE";
+  const input = fixture(detail);
+  const request = buildAutomaticComparisonRequest(input);
+  const readings = request.readingRequests.map((chunk) => ({
+    chunkId: chunk.id,
+    status: "complete",
+    sourceRefs: chunk.passageIds.filter(
+      (id) => request.passages.find((p) => p.id === id)?.role === "service",
+    ),
+  }));
+  const source = sourceRecord(request, readings);
+  const reduced = buildAutomaticSourceRequest(request, readings);
+  assert.ok(reduced.body.passages.length < request.passages.length);
+  const plan = buildAutomaticSourceSemanticReviewRequest(request, source);
+  const bodies = plan.requests.map((chunk) => JSON.parse(chunk.prompt));
+  const covered = new Set(bodies.flatMap((body) => body.coverage.passageIds));
+  assert.deepEqual(
+    [...covered].sort(),
+    request.passages.map((p) => p.id).sort(),
+  );
+  const serialized = JSON.stringify(bodies);
+  assert.ok(serialized.includes("CLAUSOLA_FINALE_ORIGINALE"));
+  for (const privateText of [
+    input.companyId,
+    input.profile.name,
+    input.profile.activities,
+  ])
+    assert.equal(serialized.includes(privateText), false);
+  const another = buildAutomaticComparisonRequest({
+    ...input,
+    companyId: "ANOTHER_PRIVATE_ID",
+    profile: { ...input.profile, activities: "PRIVATE_OTHER_ACTIVITY" },
+  });
+  assert.deepEqual(
+    buildAutomaticSourceSemanticReviewRequest(another, source),
+    plan,
+  );
+});
+
+test("Semantic approval is bound to the exact draft and reviewer configuration", () => {
+  try {
+    vi.stubEnv("DOCUMENTARY_LLM_REASONING_EFFORT", "none");
+    const request = buildAutomaticComparisonRequest(fixture());
+    const source = sourceRecord(request);
+    const review = sourceReview(request, source);
+    assert.deepEqual(
+      readAutomaticSourceSemanticReview(review, source, request),
+      review,
+    );
+    const changedDraft = recordSourceInterpretation(
+      { ...source.response, summary: "Altra sintesi inventata." },
+      buildAutomaticSourceRequest(request),
+      { id: "another-draft", at: source.at, model: source.model },
+    );
+    assert.equal(
+      readAutomaticSourceSemanticReview(review, changedDraft, request),
+      null,
+    );
+    assert.throws(
+      () =>
+        validateWithRequiredReview(
+          response(request, changedDraft),
+          request,
+          changedDraft,
+          review,
+        ),
+      /Stale source semantic review/,
+    );
+    assert.throws(
+      () =>
+        readAutomaticSourceSemanticReview(
+          { ...review, id: "altered" },
+          source,
+          request,
+        ),
+      /Altered/,
+    );
+    vi.stubEnv("DOCUMENTARY_LLM_REASONING_EFFORT", "high");
+    const changedConfiguration = buildAutomaticComparisonRequest(fixture());
+    assert.equal(
+      readAutomaticSourceSemanticReview(review, source, changedConfiguration),
+      null,
+    );
+    assert.equal(changedConfiguration.sourceKey, request.sourceKey);
+    assert.notEqual(changedConfiguration.inputHash, request.inputHash);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+test("A source with a separate AI review supports a referenced comparison without creating a human judgment", () => {
   const input = fixture();
   const request = buildAutomaticComparisonRequest(input);
   const source = sourceRecord(request);
@@ -1451,8 +1727,12 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v12",
     sourceVersion: "documentary-source-interpretation-v5",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v13",
+    sourceVersion: "documentary-source-interpretation-v6",
+  },
 ])(
-  "Historical $comparisonVersion / $sourceVersion stays stale under v13 without rewriting evidence",
+  "Historical $comparisonVersion / $sourceVersion stays stale under v14 without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
     const input = fixture();
     const request = buildAutomaticComparisonRequest(input);
@@ -1484,7 +1764,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v13");
+    assert.equal(request.version, "documentary-service-comparison-v14");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(

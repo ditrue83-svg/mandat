@@ -425,7 +425,9 @@ export function sourceInterpretationKey(binding: SourceInterpretationBinding) {
   });
 }
 
-export function buildSourceInterpretationRequest(
+// Pure validation shared with the independent review of the complete source.
+// It does not build a prompt, reduce passages or impose a single-request limit.
+export function validateSourceInterpretationContext(
   input: SourceInterpretationContext,
 ) {
   // Clone before parsing/freezing: neither the caller's source nor its readings
@@ -502,6 +504,22 @@ export function buildSourceInterpretationRequest(
         throw new Error("Classification does not match exact source passages");
     }
   }
+  return context;
+}
+
+export function buildSourceInterpretationRequest(
+  input: SourceInterpretationContext,
+) {
+  const context = validateSourceInterpretationContext(input);
+  const { body, binding, targetScope, readings } = context;
+  const targets = body.passages
+    .filter(
+      (passage) =>
+        passage.scope === targetScope &&
+        passage.role === "service" &&
+        passage.text.trim(),
+    )
+    .map((passage) => passage.id);
   const classificationContext = body.classifications.map((item, index) => ({
     id: `c${index + 1}`,
     ...item,

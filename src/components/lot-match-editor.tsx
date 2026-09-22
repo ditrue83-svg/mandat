@@ -377,9 +377,21 @@ export function LotMatchEditor({ data }: { data: LotMatchEditorData }) {
                 <strong>{results[selected.automatic.result]}</strong> —{" "}
                 {selected.automatic.reason}
               </p>
-              <p>
-                Attività dichiarata: {selected.automatic.activities.join(" ")}
-              </p>
+              {!!selected.automatic.reviewNotes?.length && (
+                <>
+                  <p>Rilievi automatici sulla lettura del bando:</p>
+                  <ul>
+                    {selected.automatic.reviewNotes.map((note, index) => (
+                      <li key={index}>{note}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {!!selected.automatic.activities.length && (
+                <p>
+                  Attività dichiarata: {selected.automatic.activities.join(" ")}
+                </p>
+              )}
               {selected.automatic.quotes.map((quote, index) => (
                 <blockquote key={index}>{quote}</blockquote>
               ))}

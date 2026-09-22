@@ -301,11 +301,12 @@ export async function runAutomaticComparison(
       },
       {
         loadSourceInterpretations: async (sourceKey) => {
-          // Cross-company reuse projects only the independently validated
-          // public source record. No company, profile or comparison is read.
+          // Cross-company reuse projects only the public draft and its review.
+          // No company, profile or comparison payload is read.
           const rows = await getDb()
             .select({
               sourceInterpretation: sql<unknown>`${automaticMatchRuns.result}->'sourceInterpretation'`,
+              sourceReview: sql<unknown>`${automaticMatchRuns.result}->'sourceReview'`,
             })
             .from(automaticMatchRuns)
             .where(
@@ -321,7 +322,30 @@ export async function runAutomaticComparison(
             )
             .orderBy(automaticMatchRuns.createdAt, automaticMatchRuns.id)
             .limit(20);
-          return rows.map((row) => row.sourceInterpretation);
+          return rows;
+        },
+        loadSourceSemanticReviews: async (reviewInputHash) => {
+          // Search the complete history for the selected draft's exact current
+          // review plan. Old source-only rows must not hide a later rejection.
+          const rows = await getDb()
+            .select({
+              sourceReview: sql<unknown>`${automaticMatchRuns.result}->'sourceReview'`,
+            })
+            .from(automaticMatchRuns)
+            .where(
+              and(
+                eq(automaticMatchRuns.publicationId, job.publicationId),
+                eq(
+                  automaticMatchRuns.targetKey,
+                  assessmentTargetKey(claimed.input.target),
+                ),
+                eq(automaticMatchRuns.status, "completed"),
+                sql`${automaticMatchRuns.result}->'sourceReview'->>'inputHash' = ${reviewInputHash}`,
+              ),
+            )
+            .orderBy(automaticMatchRuns.createdAt, automaticMatchRuns.id)
+            .limit(1);
+          return rows.map((row) => row.sourceReview);
         },
       },
     );

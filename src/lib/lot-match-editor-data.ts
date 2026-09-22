@@ -43,6 +43,7 @@ export type LotMatchEditorData = {
       quotes: string[];
       activities: string[];
       chunks: number;
+      reviewNotes?: string[];
     } | null;
   };
   history: {
@@ -167,6 +168,17 @@ export function lotMatchEditorData(
                 ],
                 activities: automatic.companyEvidence.map((item) => item.text),
                 chunks: automatic.coverage.chunks,
+                reviewNotes:
+                  automatic.sourceReview && !automatic.sourceReview.accepted
+                    ? [
+                        ...new Set([
+                          plainText(automatic.sourceReview.reason),
+                          ...automatic.sourceReview.findings.map((item) =>
+                            plainText(item.reason),
+                          ),
+                        ]),
+                      ]
+                    : [],
               }
             : null,
           expected: {

@@ -32,9 +32,16 @@ import {
   type SourceInterpretationBinding,
   type SourceInterpretationRecord,
 } from "./source-interpretation";
+import {
+  SOURCE_SEMANTIC_REVIEW_VERSION,
+  buildSourceSemanticReviewRequest,
+  readSourceSemanticReview,
+  sourceSemanticReviewRecordSchema,
+  type SourceSemanticReviewRecord,
+} from "./source-semantic-review";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v13";
+  "documentary-service-comparison-v14";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -50,6 +57,10 @@ const digest = (value: unknown) =>
 const pointerPart = (value: string) =>
   value.replaceAll("~", "~0").replaceAll("/", "~1");
 const builtRequests = new WeakSet<object>();
+const semanticReviewPlans = new WeakMap<
+  object,
+  Map<string, ReturnType<typeof buildSourceSemanticReviewRequest>>
+>();
 function freeze<T>(value: T): T {
   if (value && typeof value === "object") {
     Object.values(value).forEach(freeze);
@@ -146,6 +157,7 @@ export const automaticComparisonResponseSchema = z
         ),
     }),
     interpretationHash: z.string().regex(/^[a-f0-9]{64}$/),
+    reviewHash: z.string().regex(/^[a-f0-9]{64}$/),
     componentRefs: z
       .array(z.string().regex(/^u[1-9]\d*$/))
       .min(1)
@@ -410,6 +422,11 @@ export function buildAutomaticComparisonRequest(
     companyId: input.companyId,
     model: automaticComparisonModel(),
     reasoningEffort: documentaryAiReasoningEffort() ?? null,
+    sourceReview: {
+      version: SOURCE_SEMANTIC_REVIEW_VERSION,
+      model: automaticComparisonModel(),
+      reasoningEffort: documentaryAiReasoningEffort() ?? "none",
+    },
     target: input.target,
     source: context.dependency,
     profileHash,
@@ -697,18 +714,72 @@ function interpretedSource(
   return { record, source };
 }
 
+// Review sees every original passage and field, including those not selected
+// by the long-document interpretation maps. The company never enters this plan.
+export function buildAutomaticSourceSemanticReviewRequest(
+  request: AutomaticComparisonRequest,
+  sourceRecord: SourceInterpretationRecord,
+) {
+  const { record, source } = interpretedSource(sourceRecord, request);
+  if (source.status !== "resolved")
+    throw new Error("Only a resolved source can receive semantic review");
+  const cached = semanticReviewPlans.get(request)?.get(record.hash);
+  if (cached) return cached;
+  const plan = buildSourceSemanticReviewRequest(
+    {
+      binding: request.sourceBinding,
+      targetScope: request.targetScope,
+      coverage: request.coverage,
+      readings: record.readings,
+      body: {
+        target: request.promptBody.target,
+        classifications: request.promptBody.classifications,
+        fields: request.promptBody.fields,
+        passages: request.passages,
+      },
+    },
+    record,
+    {
+      model: request.dependency.sourceReview.model,
+      reasoningEffort: request.dependency.sourceReview.reasoningEffort,
+    },
+  );
+  const plans = semanticReviewPlans.get(request) ?? new Map();
+  plans.set(record.hash, plan);
+  semanticReviewPlans.set(request, plans);
+  return plan;
+}
+
+export function readAutomaticSourceSemanticReview(
+  value: unknown,
+  sourceRecord: SourceInterpretationRecord,
+  request: AutomaticComparisonRequest,
+): SourceSemanticReviewRecord | null {
+  const plan = buildAutomaticSourceSemanticReviewRequest(request, sourceRecord);
+  const resolved = readSourceSemanticReview(value, plan);
+  return resolved ? sourceSemanticReviewRecordSchema.parse(value) : null;
+}
+
 export function buildInterpretedComparisonRequest(
   request: AutomaticComparisonRequest,
   sourceRecord: SourceInterpretationRecord,
+  sourceReview: SourceSemanticReviewRecord,
 ) {
   const { source } = interpretedSource(sourceRecord, request);
   if (source.status !== "resolved")
     throw new Error("Source interpretation requires review");
+  const review = readSourceSemanticReview(
+    sourceReview,
+    buildAutomaticSourceSemanticReviewRequest(request, sourceRecord),
+  );
+  if (!review?.accepted)
+    throw new Error("Source semantic review must be current and accepted");
   const componentIds = source.components.map((component) => component.id);
   const responseFormat = structuredFormat(
     "interpreted_service_comparison",
     automaticComparisonResponseSchema.safeExtend({
       interpretationHash: z.literal(sourceRecord.hash),
+      reviewHash: z.literal(sourceReview.hash),
       componentRefs: z.array(z.enum(componentIds)).min(1).max(64),
       companyRefs: z
         .array(z.enum(request.companyPassages.map((passage) => passage.id)))
@@ -733,6 +804,7 @@ export function buildInterpretedComparisonRequest(
       ],
       sourceInterpretation: {
         hash: sourceRecord.hash,
+        reviewHash: sourceReview.hash,
         status: source.status,
         summary: source.summary,
         classificationContext: source.classificationContext,
@@ -772,6 +844,7 @@ export function validateAutomaticComparison(
   response: unknown,
   request: AutomaticComparisonRequest,
   interpretation: unknown,
+  sourceReview: unknown,
 ) {
   if (!builtRequests.has(request))
     throw new Error("Unverified comparison request");
@@ -783,7 +856,20 @@ export function validateAutomaticComparison(
   const uncertainReading = readings.some(
     (reading) => reading.status !== "complete",
   );
-  const sourceUncertain = source.status !== "resolved" || uncertainReading;
+  let review: ReturnType<typeof readSourceSemanticReview> = null;
+  if (source.status === "resolved" && !uncertainReading) {
+    if (!sourceReview) throw new Error("Missing source semantic review");
+    review = readSourceSemanticReview(
+      sourceReview,
+      buildAutomaticSourceSemanticReviewRequest(request, sourceRecord),
+    );
+    if (!review) throw new Error("Stale source semantic review");
+  } else if (sourceReview !== null) {
+    throw new Error("Unresolved source cannot receive semantic review");
+  }
+  const rejectedReview = review !== null && !review.accepted;
+  const sourceUncertain =
+    source.status !== "resolved" || uncertainReading || rejectedReview;
   if (sourceUncertain && response !== null)
     throw new Error("Uncertain source cannot receive a company comparison");
   if (!sourceUncertain && response === null)
@@ -794,6 +880,8 @@ export function validateAutomaticComparison(
       : automaticComparisonResponseSchema.parse(response);
   if (value && value.interpretationHash !== sourceRecord.hash)
     throw new Error("Comparison used another source interpretation");
+  if (value && value.reviewHash !== review?.hash)
+    throw new Error("Comparison used another source semantic review");
   if (
     value?.facts.mainScopeCovered === true &&
     source.components.some(
@@ -835,7 +923,8 @@ export function validateAutomaticComparison(
     ),
     ...(!value ? source.issues.flatMap((issue) => issue.sourceRefs) : []),
   ]);
-  const evidence = source.evidence.filter((passage) =>
+  for (const passage of review?.evidence ?? []) sourceIds.add(passage.id);
+  const evidence = request.passages.filter((passage) =>
     sourceIds.has(passage.id),
   );
   const companyEvidence = value
@@ -857,25 +946,31 @@ export function validateAutomaticComparison(
     origin: "ai" as const,
     comparisonOrigin: value
       ? ("company_comparison" as const)
-      : ("source_interpretation" as const),
+      : rejectedReview
+        ? ("source_semantic_review" as const)
+        : ("source_interpretation" as const),
     inputHash: request.inputHash,
     dependency: {
       ...request.dependency,
       sourceInterpretationHash: sourceRecord.hash,
+      sourceReviewHash: review?.hash ?? null,
     },
     relation: request.sourceBlocked ? ("review" as const) : relation,
     serviceRelation: relation,
     basis,
     reason: request.sourceBlocked
       ? "La fonte ha una revisione aperta: il confronto automatico resta da verificare."
-      : uncertainReading
-        ? "La lettura di una parte del documento richiede verifica prima di concludere il confronto."
-        : reasonByBasis[basis],
+      : rejectedReview
+        ? "Il controllo della lettura del bando ha rilevato dubbi o incongruenze: serve una verifica prima del confronto con la ditta."
+        : uncertainReading
+          ? "La lettura di una parte del documento richiede verifica prima di concludere il confronto."
+          : reasonByBasis[basis],
     evidence,
     companyEvidence,
     response: value,
     sourceInterpretation: source,
-    sourceBlocked: request.sourceBlocked,
+    sourceReview: review,
+    sourceBlocked: request.sourceBlocked || rejectedReview,
     coverage: request.coverage,
     readings,
   });
@@ -894,6 +989,7 @@ const storedComparisonSchema = z.strictObject({
   model: z.string().min(1).max(200),
   response: automaticComparisonResponseSchema.nullable(),
   sourceInterpretation: sourceInterpretationRecordSchema,
+  sourceReview: sourceSemanticReviewRecordSchema.nullable(),
   hash: z.string().regex(/^[a-f0-9]{64}$/),
 });
 export type StoredAutomaticComparison = z.infer<typeof storedComparisonSchema>;
@@ -906,6 +1002,7 @@ export function recordAutomaticComparison(
     at: string;
     model: string;
     sourceInterpretation: SourceInterpretationRecord;
+    sourceReview: SourceSemanticReviewRecord | null;
   },
 ): StoredAutomaticComparison {
   if (metadata.model !== request.dependency.model)
@@ -914,6 +1011,7 @@ export function recordAutomaticComparison(
     response,
     request,
     metadata.sourceInterpretation,
+    metadata.sourceReview,
   );
   const unsigned = {
     version: AUTOMATIC_COMPARISON_VERSION,
@@ -925,6 +1023,7 @@ export function recordAutomaticComparison(
     inputHash: request.inputHash,
     response: result.response,
     sourceInterpretation: metadata.sourceInterpretation,
+    sourceReview: metadata.sourceReview,
   };
   return freeze(
     storedComparisonSchema.parse({ ...unsigned, hash: digest(unsigned) }),
@@ -974,6 +1073,7 @@ export function readAutomaticComparison(
       record.response,
       request,
       record.sourceInterpretation,
+      record.sourceReview,
     ),
     id: record.id,
     hash: record.hash,
