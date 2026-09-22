@@ -153,12 +153,39 @@ function inventedAnswer(prompt: string) {
       status: "resolved",
       summary:
         "Potatura degli alberi, fonte inventata per la verifica della coda.",
+      classificationReadings: data.classificationContext.map(
+        (classification: {
+          id: string;
+          appliesTo: string;
+          code: { sourceRefs: string[] } | null;
+          labels: { sourceRefs: string[] }[];
+        }) => ({
+          classificationId: classification.id,
+          use:
+            classification.appliesTo === "shared_project_context"
+              ? "shared_project_only"
+              : "broad_context",
+          explanation:
+            "Contesto inventato; il lavoro è esplicito nella descrizione.",
+          sourceRefs: [
+            ...(classification.code?.sourceRefs ?? []),
+            ...classification.labels.flatMap((label) => label.sourceRefs),
+          ],
+        }),
+      ),
       components: [
         {
           description: "Potatura degli alberi",
           role: "execute",
           importance: "main",
           sourceRefs: [target.id],
+          meaning: {
+            state: "identified",
+            statement: "Potatura degli alberi",
+            basis: "explicit_text",
+            objectRefs: [target.id],
+            classificationContextIds: [],
+          },
         },
       ],
       issues: [],
@@ -301,7 +328,23 @@ it("An uncertain source is cached as review without ever asking for a company co
     return {
       ...answer,
       status: "uncertain",
-      components: [],
+      classificationReadings: answer.classificationReadings.map(
+        (
+          reading: StoredAutomaticComparison["sourceInterpretation"]["response"]["classificationReadings"][number],
+        ) => ({
+          ...reading,
+          use: "unresolved",
+        }),
+      ),
+      components: answer.components!.map((component) => ({
+        ...component,
+        meaning: {
+          ...component.meaning,
+          state: "ambiguous",
+          basis: "unresolved",
+          statement: "Il servizio inventato richiede chiarimento.",
+        },
+      })),
       issues: [
         {
           explanation: "L'oggetto inventato non è determinabile.",
@@ -311,7 +354,11 @@ it("An uncertain source is cached as review without ever asking for a company co
     };
   });
   await runAutomaticComparison(job, { now: () => now });
-  expect((await storedAutomaticResult(job.runId)).response).toBeNull();
+  const stored = await storedAutomaticResult(job.runId);
+  expect(stored.response).toBeNull();
+  expect(stored.sourceInterpretation.response.components[0].meaning.state).toBe(
+    "ambiguous",
+  );
   const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
   expect(loaded.project.targets[0].automatic).toMatchObject({
     serviceRelation: "review",

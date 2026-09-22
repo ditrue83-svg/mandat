@@ -156,10 +156,21 @@ function fixture(
     preliminary,
   };
 }
+function explicitMeaning(statement: string, objectRefs: string[]) {
+  return {
+    state: "identified" as const,
+    statement,
+    basis: "explicit_text" as const,
+    objectRefs,
+    classificationContextIds: [] as string[],
+  };
+}
 function sourceResponse(
   request: ReturnType<typeof buildAutomaticComparisonRequest>,
   status: "resolved" | "uncertain" | "conflicting" = "resolved",
+  readings: readonly unknown[] = [],
 ) {
+  const sourceRequest = buildAutomaticSourceRequest(request, readings);
   const targetRef = request.passages.find(
     (p) => p.scope === request.targetScope && p.role === "service",
   )!.id;
@@ -170,12 +181,30 @@ function sourceResponse(
     status,
     summary:
       "Servizi inventati, interpretazione simulata per verificare il contratto.",
+    classificationReadings: sourceRequest.classificationContext.map(
+      (classification) => ({
+        classificationId: classification.id,
+        use:
+          classification.appliesTo === "shared_project_context"
+            ? ("shared_project_only" as const)
+            : ("broad_context" as const),
+        explanation:
+          "Contesto inventato, il servizio è descritto nel testo dell'oggetto.",
+        sourceRefs: [
+          ...(classification.code?.sourceRefs ?? []),
+          ...classification.labels.flatMap((label) => label.sourceRefs),
+        ],
+      }),
+    ),
     components: [
       {
         description: "Pulizia degli uffici inventati.",
         role: "execute" as const,
         importance: "main" as const,
         sourceRefs: [targetRef],
+        meaning: explicitMeaning("Pulizia degli uffici inventati.", [
+          targetRef,
+        ]),
       },
     ],
     issues:
@@ -198,7 +227,7 @@ function sourceRecord(
   status: "resolved" | "uncertain" | "conflicting" = "resolved",
 ) {
   return recordSourceInterpretation(
-    sourceResponse(request, status),
+    sourceResponse(request, status, readings),
     buildAutomaticSourceRequest(request, readings),
     {
       id: "invented-source-interpretation",
@@ -349,7 +378,7 @@ test("Source configuration is bound independently from the final comparison and 
     assert.equal(
       readAutomaticSourceInterpretation(
         {
-          version: "documentary-source-interpretation-v2",
+          version: "documentary-source-interpretation-v3",
           sourceKey: sourceChanged.sourceKey,
           response: { obsoleteSchema: true },
         },
@@ -515,6 +544,9 @@ test("A claimed full match must cite every main interpreted component while part
           role: "maintain",
           importance: "main",
           sourceRefs: [interpreted.targetRef],
+          meaning: explicitMeaning("Manutenzione degli impianti inventati.", [
+            interpreted.targetRef,
+          ]),
         },
       ],
     },
@@ -568,18 +600,21 @@ test("An excluded component alone cannot justify a service rejection but remains
           role: "execute",
           importance: "main",
           sourceRefs: [serviceRef],
+          meaning: explicitMeaning("Pulizia degli uffici.", [serviceRef]),
         },
         {
           description: "Fornitura dei detergenti.",
           role: "supply",
           importance: "accessory",
           sourceRefs: [serviceRef],
+          meaning: explicitMeaning("Fornitura dei detergenti.", [serviceRef]),
         },
         {
           description: "Ristorazione.",
           role: "execute",
           importance: "excluded",
           sourceRefs: [serviceRef],
+          meaning: explicitMeaning("Ristorazione esclusa.", [serviceRef]),
         },
       ],
     },
@@ -790,13 +825,74 @@ test("CPV context pairs original codes and multilingual labels with their exact 
       );
     }
   assert.equal("company" in body, false);
-  const source = sourceRecord(request);
+  const sourceAnswer = sourceResponse(request);
+  const contextOnlyRef = request.passages.find((passage) =>
+    passage.text.includes("CONDIZIONE_INVENTATA"),
+  )!.id;
+  sourceAnswer.classificationReadings[0].sourceRefs.push(contextOnlyRef);
+  sourceAnswer.classificationReadings[0].explanation =
+    "La classificazione resta generale; la clausola sulle referenze non cambia il servizio acquistato.";
+  const source = recordSourceInterpretation(
+    sourceAnswer,
+    buildAutomaticSourceRequest(request),
+    {
+      id: "invented-classification-clause",
+      at: "2030-01-20T12:00:00.000Z",
+      model: automaticComparisonModel(),
+    },
+  );
   const final = buildInterpretedComparisonRequest(request, source);
   const finalBody = JSON.parse(final.prompt);
   assert.equal(finalBody.company.activities[0].text, input.profile.activities);
   assert.equal(finalBody.sourceInterpretation.hash, source.hash);
   assert.equal("passages" in finalBody, false);
   assert.equal("classifications" in finalBody, false);
+  assert.deepEqual(
+    finalBody.sourceInterpretation.classificationContext,
+    source.classificationContext,
+  );
+  assert.deepEqual(
+    finalBody.sourceInterpretation.classificationReadings,
+    source.response.classificationReadings,
+  );
+  assert.deepEqual(
+    finalBody.sourceInterpretation.components[0].meaning,
+    source.response.components[0].meaning,
+  );
+  const compared = validateAutomaticComparison(
+    response(request, source),
+    request,
+    source,
+  );
+  assert.equal(
+    source.response.components.some((component) =>
+      component.sourceRefs.includes(contextOnlyRef),
+    ),
+    false,
+  );
+  assert.equal(
+    source.classificationContext.some((classification) =>
+      [classification.code, ...classification.labels].some((field) =>
+        field?.sourceRefs.includes(contextOnlyRef),
+      ),
+    ),
+    false,
+  );
+  assert.ok(compared.evidence.some((passage) => passage.id === contextOnlyRef));
+  for (const classification of source.classificationContext)
+    for (const field of [classification.code, ...classification.labels])
+      for (const id of field?.sourceRefs ?? [])
+        assert.ok(compared.evidence.some((passage) => passage.id === id));
+  assert.throws(() =>
+    validateAutomaticComparison(
+      {
+        ...response(request, source),
+        componentRefs: [source.classificationContext[0].id],
+      },
+      request,
+      source,
+    ),
+  );
   const rules = finalBody.task + " " + finalBody.rules.join(" ");
   assert.match(rules, /ruolo commerciale/);
   assert.match(rules, /famiglia di prodotti generica/);
@@ -867,6 +963,31 @@ test("CPV blocks keep shared project context separate from the selected lot and 
     false,
   );
   assert.equal(request.prompt.includes("CLASSIFICAZIONE_ALTRO_LOTTO"), false);
+  const source = sourceRecord(request);
+  const final = JSON.parse(
+    buildInterpretedComparisonRequest(request, source).prompt,
+  );
+  assert.deepEqual(
+    final.sourceInterpretation.classificationContext.map((item: any) => [
+      item.scope,
+      item.appliesTo,
+      item.code.text,
+    ]),
+    [
+      ["project_context", "shared_project_context", "39100000"],
+      ["selected_lot", "target", "90910000"],
+    ],
+  );
+  assert.deepEqual(
+    final.sourceInterpretation.classificationReadings.map(
+      (item: any) => item.use,
+    ),
+    ["shared_project_only", "broad_context"],
+  );
+  assert.equal(
+    JSON.stringify(final).includes("CLASSIFICAZIONE_ALTRO_LOTTO"),
+    false,
+  );
 });
 
 test("Long-source reduction preserves complete CPV labels even when the map selects no context", () => {
@@ -893,7 +1014,7 @@ test("Long-source reduction preserves complete CPV labels even when the map sele
   }));
   const reduced = buildAutomaticReductionRequest(readings, request);
   const body = JSON.parse(reduced.prompt);
-  const classification = body.classifications[0];
+  const classification = body.classificationContext[0];
   assert.equal(classification.labels[0].text, label);
   assert.ok(classification.labels[0].sourceRefs.length > 1);
   for (const field of [classification.code, ...classification.labels])
@@ -905,6 +1026,138 @@ test("Long-source reduction preserves complete CPV labels even when the map sele
   assert.deepEqual(
     request.readingRequests.flatMap((chunk) => chunk.passageIds),
     request.passages.map((passage) => passage.id),
+  );
+  const source = sourceRecord(request, readings);
+  const final = JSON.parse(
+    buildInterpretedComparisonRequest(request, source).prompt,
+  );
+  assert.equal(
+    final.sourceInterpretation.classificationContext[0].labels[0].text,
+    label,
+  );
+  assert.deepEqual(
+    final.sourceInterpretation.classificationContext[0].labels[0].sourceRefs,
+    classification.labels[0].sourceRefs,
+  );
+});
+
+test("A concise source summary cannot erase the original domain context and grounded component from the final comparison", () => {
+  const detail = {
+    ...raw(),
+    procurement: {
+      ...raw().procurement,
+      orderDescription: { it: "Fornitura del prodotto inventato X." },
+      cpvCode: {
+        code: "00000000",
+        label: {
+          it: "FAMIGLIA_DI_PRODOTTI_INVENTATA",
+          de: "ERFUNDENE_PRODUKTFAMILIE",
+        },
+      },
+    },
+  };
+  const request = buildAutomaticComparisonRequest(fixture(detail));
+  const sourceRequest = buildAutomaticSourceRequest(request);
+  const classification = sourceRequest.classificationContext[0];
+  const classRefs = [
+    ...(classification.code?.sourceRefs ?? []),
+    ...classification.labels.flatMap((label) => label.sourceRefs),
+  ];
+  const answer = sourceResponse(request);
+  const source = recordSourceInterpretation(
+    {
+      ...answer,
+      summary: "Fornitura del prodotto inventato X.",
+      classificationReadings: [
+        {
+          classificationId: classification.id,
+          use: "clarifies_domain",
+          explanation:
+            "La famiglia inventata contestualizza il prodotto richiesto.",
+          sourceRefs: classRefs,
+        },
+      ],
+      components: [
+        {
+          description: "Fornitura del prodotto inventato X.",
+          role: "supply",
+          importance: "main",
+          sourceRefs: [answer.targetRef, ...classRefs],
+          meaning: {
+            state: "identified",
+            statement:
+              "Prodotto X della famiglia di prodotti inventata dichiarata dalla fonte.",
+            basis: "text_with_classification_context",
+            objectRefs: [answer.targetRef],
+            classificationContextIds: [classification.id],
+          },
+        },
+      ],
+    },
+    sourceRequest,
+    {
+      id: "invented-domain-context",
+      at: "2030-01-20T12:00:00.000Z",
+      model: automaticComparisonModel(),
+    },
+  );
+  const final = JSON.parse(
+    buildInterpretedComparisonRequest(request, source).prompt,
+  );
+  assert.equal(
+    final.sourceInterpretation.summary,
+    "Fornitura del prodotto inventato X.",
+  );
+  assert.deepEqual(
+    final.sourceInterpretation.classificationContext,
+    sourceRequest.classificationContext,
+  );
+  assert.equal(
+    final.sourceInterpretation.classificationContext[0].labels[1].text,
+    "FAMIGLIA_DI_PRODOTTI_INVENTATA",
+  );
+  assert.equal(
+    final.sourceInterpretation.classificationReadings[0].use,
+    "clarifies_domain",
+  );
+  assert.deepEqual(
+    final.sourceInterpretation.components[0].meaning.classificationContextIds,
+    [classification.id],
+  );
+  const otherInput = fixture(detail, {
+    activities: "Attività diverse inventate.",
+  });
+  const other = buildAutomaticComparisonRequest({
+    ...otherInput,
+    companyId: "other-invented-company",
+  });
+  const otherFinal = JSON.parse(
+    buildInterpretedComparisonRequest(other, source).prompt,
+  );
+  assert.deepEqual(otherFinal.sourceInterpretation, final.sourceInterpretation);
+  assert.notDeepEqual(otherFinal.company, final.company);
+});
+
+test("An explicit service without classification remains resolved without invented codes or forced doubt", () => {
+  const base = raw();
+  const { cpvCode: _cpvCode, ...procurement } = base.procurement;
+  const request = buildAutomaticComparisonRequest(
+    fixture({ ...base, procurement }),
+  );
+  const source = sourceRecord(request);
+  const final = JSON.parse(
+    buildInterpretedComparisonRequest(request, source).prompt,
+  );
+  assert.deepEqual(final.sourceInterpretation.classificationContext, []);
+  assert.deepEqual(final.sourceInterpretation.classificationReadings, []);
+  assert.equal(
+    final.sourceInterpretation.components[0].meaning.basis,
+    "explicit_text",
+  );
+  assert.equal(
+    validateAutomaticComparison(response(request, source), request, source)
+      .relation,
+    "direct",
   );
 });
 
@@ -1056,7 +1309,7 @@ test("Persisted responses cannot cross company boundaries or survive a changed p
   );
 });
 
-test("A historical v9 comparison with a v2 source is stale under v10 without rewriting evidence", () => {
+test("A historical v10 comparison with a v3 source is stale under v11 without rewriting evidence", () => {
   const input = fixture();
   const request = buildAutomaticComparisonRequest(input);
   const source = sourceRecord(request);
@@ -1073,17 +1326,17 @@ test("A historical v9 comparison with a v2 source is stale under v10 without rew
     ...unsigned,
     sourceInterpretation: {
       ...unsigned.sourceInterpretation,
-      version: "documentary-source-interpretation-v2",
+      version: "documentary-source-interpretation-v3",
     },
-    version: "documentary-service-comparison-v9",
+    version: "documentary-service-comparison-v10",
     inputHash: digest({
       ...request.dependency,
-      version: "documentary-service-comparison-v9",
+      version: "documentary-service-comparison-v10",
     }),
   };
   const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
   const before = JSON.stringify(historical);
-  assert.equal(request.version, "documentary-service-comparison-v10");
+  assert.equal(request.version, "documentary-service-comparison-v11");
   assert.notEqual(historical.inputHash, request.inputHash);
   assert.equal(readAutomaticComparison(historical, request), null);
   assert.equal(

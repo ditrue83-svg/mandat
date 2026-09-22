@@ -87,29 +87,54 @@ function context(): SourceInterpretationContext {
     readings: [],
   };
 }
-function response() {
+function meaning(statement: string, objectRefs: string[]) {
+  return {
+    state: "identified" as const,
+    statement,
+    basis: "explicit_text" as const,
+    objectRefs,
+    classificationContextIds: [] as string[],
+  };
+}
+function response(input = context()) {
   return {
     status: "resolved" as const,
     summary:
       "Fornitura di prodotti inventati con posa accessoria, senza trasporto.",
+    classificationReadings: input.body.classifications.map((item, index) => ({
+      classificationId: `c${index + 1}`,
+      use:
+        item.appliesTo === "target"
+          ? ("broad_context" as const)
+          : ("shared_project_only" as const),
+      explanation:
+        "Contesto classificatorio distinto dalla prestazione concreta.",
+      sourceRefs: [
+        ...(item.code?.sourceRefs ?? []),
+        ...item.labels.flatMap((label) => label.sourceRefs),
+      ],
+    })),
     components: [
       {
         description: "Prodotti inventati",
         role: "supply" as const,
         importance: "main" as const,
         sourceRefs: ["s1", "s3"],
+        meaning: meaning("Prodotti inventati esplicitamente descritti", ["s1"]),
       },
       {
         description: "Posa",
         role: "install" as const,
         importance: "accessory" as const,
         sourceRefs: ["s4"],
+        meaning: meaning("Posa accessoria", ["s4"]),
       },
       {
         description: "Trasporto",
         role: "execute" as const,
         importance: "excluded" as const,
         sourceRefs: ["s4"],
+        meaning: meaning("Trasporto escluso", ["s4"]),
       },
     ],
     issues: [],
@@ -121,6 +146,20 @@ const metadata = {
   at: "2030-01-01T12:00:00.000Z",
   model: "invented-model",
 };
+
+test("A resolved paraphrase cannot omit classification accounting and meaning grounding", () => {
+  const request = buildSourceInterpretationRequest(context());
+  const { classificationReadings: _readings, ...current } = response();
+  const legacy = {
+    ...current,
+    components: current.components.map(
+      ({ meaning: _meaning, ...item }) => item,
+    ),
+  };
+  // This was a valid v3 record despite dropping the available context. This
+  // checks an information-loss contract, not whether an LLM understands it.
+  assert.throws(() => recordSourceInterpretation(legacy, request, metadata));
+});
 
 test("Source-only API rejects company/profile fields instead of sending or binding them", () => {
   const input = context();
@@ -218,6 +257,7 @@ test("Source records retain exact source evidence, all component roles, stable s
   assert.deepEqual(result.readings, []);
   assert.deepEqual(Object.keys(record).sort(), [
     "at",
+    "classificationContext",
     "hash",
     "id",
     "inputHash",
@@ -579,6 +619,7 @@ test("Compact source JSON preserves every long-source value and reference within
     ...large.body,
     passages: passages.map(({ url: _url, ...passage }) => passage),
   };
+  delete expected.classifications;
   const before = JSON.stringify(large);
   // This exact payload exceeds the bound only with pretty-print whitespace.
   const request = buildSourceInterpretationRequest(large);
@@ -641,7 +682,8 @@ test("Classification-only components reject the entire interpretation regardless
     },
   });
   assert.equal(
-    recordSourceInterpretation(response(), request, metadata).response.status,
+    recordSourceInterpretation(response(request), request, metadata).response
+      .status,
     "resolved",
   );
   for (const importance of ["main", "accessory", "excluded"] as const)
@@ -653,7 +695,7 @@ test("Classification-only components reject the entire interpretation regardless
       ["s2", "s3", "s5", "s6"],
     ]) {
       const invalid = {
-        ...response(),
+        ...response(request),
         components: [
           {
             ...response().components[0],
@@ -665,6 +707,7 @@ test("Classification-only components reject the entire interpretation regardless
             role: "supply",
             importance,
             sourceRefs: refs,
+            meaning: meaning("Classificazione CPV", refs),
           },
         ],
       };
@@ -706,18 +749,21 @@ test("Concrete main accessory and excluded activities may be supported entirely 
           role: "operate",
           importance: "main",
           sourceRefs: ["s4"],
+          meaning: meaning("Gestione del deposito", ["s4"]),
         },
         {
           description: "Pulizia del deposito.",
           role: "execute",
           importance: "accessory",
           sourceRefs: ["s4"],
+          meaning: meaning("Pulizia del deposito", ["s4"]),
         },
         {
           description: "Manutenzione dei mezzi.",
           role: "maintain",
           importance: "excluded",
           sourceRefs: ["s4"],
+          meaning: meaning("Manutenzione dei mezzi", ["s4"]),
         },
       ],
     },
@@ -766,6 +812,7 @@ test("A real purchased classification or cataloguing service is not rejected by 
           role: "execute",
           importance: "main",
           sourceRefs: ["s1"],
+          meaning: meaning(serviceText, ["s1"]),
         },
       ],
     },
@@ -778,18 +825,18 @@ test("A real purchased classification or cataloguing service is not rejected by 
   );
 });
 
-test("A source v2 record is stale under v3 before parsing its historical schema", () => {
+test("A source v3 record is stale under v4 before parsing its historical schema", () => {
   const request = buildSourceInterpretationRequest(context());
-  assert.equal(request.version, "documentary-source-interpretation-v3");
+  assert.equal(request.version, "documentary-source-interpretation-v4");
   const current = recordSourceInterpretation(response(), request, metadata);
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
   const { hash: _hash, ...unsigned } = current;
   const historicalBody = {
     ...unsigned,
-    version: "documentary-source-interpretation-v2",
+    version: "documentary-source-interpretation-v3",
     sourceKey: digest({
-      version: "documentary-source-interpretation-v2",
+      version: "documentary-source-interpretation-v3",
       binding: request.binding,
     }),
   };
@@ -842,4 +889,504 @@ test("Source output allowance remains 8192 with or without thinking and is bound
     );
   const stored = recordSourceInterpretation(response(), high, metadata);
   assert.equal(readSourceInterpretation(stored, none), null);
+});
+
+test("Server classification context retains every original label and reference independently of model citations", () => {
+  const input = context();
+  const request = buildSourceInterpretationRequest(input);
+  const value = response();
+  value.components[0].sourceRefs = ["s1"];
+  value.classificationReadings[0].sourceRefs = ["s2"];
+  const record = recordSourceInterpretation(value, request, metadata);
+  const result = readSourceInterpretation(record, request)!;
+  assert.deepEqual(record.classificationContext, [
+    { id: "c1", ...input.body.classifications[0] },
+  ]);
+  assert.deepEqual(result.classificationContext, record.classificationContext);
+  assert.equal(
+    result.evidence.find((item) => item.id === "s3")!.text,
+    input.body.classifications[0].labels[0].text,
+  );
+  assert.ok(Object.isFrozen(record.classificationContext[0].labels[0]));
+  const prompt = JSON.parse(request.prompt);
+  assert.deepEqual(prompt.classificationContext, record.classificationContext);
+  assert.equal("classifications" in prompt, false);
+  assert.equal("classificationContext" in value, false);
+  assert.throws(() =>
+    recordSourceInterpretation(
+      { ...value, classificationContext: [] },
+      request,
+      metadata,
+    ),
+  );
+});
+
+test("Omitted duplicate invented or ungrounded classification readings reject the whole response", () => {
+  const request = buildSourceInterpretationRequest(context());
+  const valid = response();
+  for (const classificationReadings of [
+    [],
+    [...valid.classificationReadings, ...valid.classificationReadings],
+    [{ ...valid.classificationReadings[0], classificationId: "c99" }],
+    [{ ...valid.classificationReadings[0], sourceRefs: ["s1"] }],
+    [{ ...valid.classificationReadings[0], use: "shared_project_only" }],
+  ]) {
+    assert.throws(() =>
+      recordSourceInterpretation(
+        { ...valid, classificationReadings },
+        request,
+        metadata,
+      ),
+    );
+  }
+  for (const grounding of [
+    { ...valid.components[0].meaning, objectRefs: ["s3"] },
+    { ...valid.components[0].meaning, objectRefs: ["s4"] },
+    { ...valid.components[0].meaning, classificationContextIds: ["c99"] },
+  ])
+    assert.throws(() =>
+      recordSourceInterpretation(
+        {
+          ...valid,
+          components: [{ ...valid.components[0], meaning: grounding }],
+        },
+        request,
+        metadata,
+      ),
+    );
+});
+
+test("Exact classification binding rejects rehashed label scope and provenance tampering", () => {
+  const request = buildSourceInterpretationRequest(context());
+  const record = recordSourceInterpretation(response(), request, metadata);
+  const { hash: _hash, ...unsigned } = record;
+  for (const classificationContext of [
+    [],
+    [
+      {
+        ...record.classificationContext[0],
+        appliesTo: "shared_project_context",
+      },
+    ],
+    [{ ...record.classificationContext[0], rawPath: "/invented/cpvCode" }],
+    [
+      {
+        ...record.classificationContext[0],
+        labels: [
+          { ...record.classificationContext[0].labels[0], text: "Substitute" },
+        ],
+      },
+    ],
+    [
+      {
+        ...record.classificationContext[0],
+        code: { text: "00000000", sourceRefs: ["s3"] },
+      },
+    ],
+  ]) {
+    const altered = { ...unsigned, classificationContext };
+    const hash = createHash("sha256")
+      .update(stableDocumentaryJson(altered))
+      .digest("hex");
+    assert.throws(
+      () => readSourceInterpretation({ ...altered, hash }, request),
+      /classification context mismatch/,
+    );
+  }
+});
+
+test("Domain grounding requires a target label; unknown code meanings and material ambiguity cannot be resolved", () => {
+  const request = buildSourceInterpretationRequest(context());
+  const value = response();
+  const classified = {
+    ...value,
+    components: [
+      {
+        ...value.components[0],
+        meaning: {
+          ...value.components[0].meaning,
+          basis: "text_with_classification_context",
+          classificationContextIds: ["c1"],
+        },
+      },
+    ],
+    classificationReadings: [
+      {
+        ...value.classificationReadings[0],
+        use: "clarifies_domain",
+        sourceRefs: ["s3"],
+      },
+    ],
+  };
+  assert.equal(
+    validateSourceInterpretation(classified, request).status,
+    "resolved",
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        {
+          ...classified,
+          classificationReadings: [
+            { ...classified.classificationReadings[0], sourceRefs: ["s2"] },
+          ],
+        },
+        request,
+      ),
+    /original label/,
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        { ...classified, components: value.components },
+        request,
+      ),
+    /grounded component/,
+  );
+  const ambiguous = {
+    ...value,
+    components: [
+      {
+        ...value.components[0],
+        meaning: {
+          ...value.components[0].meaning,
+          state: "ambiguous",
+          basis: "unresolved",
+        },
+      },
+    ],
+  };
+  assert.throws(
+    () => validateSourceInterpretation(ambiguous, request),
+    /identified meaning/,
+  );
+  const unresolved = {
+    ...ambiguous,
+    status: "uncertain",
+    classificationReadings: [
+      { ...value.classificationReadings[0], use: "unresolved" },
+    ],
+    issues: [
+      {
+        explanation: "Il testo lascia indeterminato il prodotto concreto.",
+        sourceRefs: ["s1", "s3"],
+      },
+    ],
+  };
+  const uncertain = readSourceInterpretation(
+    recordSourceInterpretation(unresolved, request, metadata),
+    request,
+  )!;
+  assert.equal(uncertain.status, "uncertain");
+  assert.equal(uncertain.response.status, "uncertain");
+  assert.equal(uncertain.components[0].meaning.state, "ambiguous");
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        { ...value, classificationReadings: unresolved.classificationReadings },
+        request,
+      ),
+    /settled classification context/,
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        { ...unresolved, status: "resolved", issues: [] },
+        request,
+      ),
+    /identified meaning/,
+  );
+  const input = context();
+  const codeOnly = {
+    ...input,
+    body: {
+      ...input.body,
+      classifications: [{ ...input.body.classifications[0], labels: [] }],
+    },
+  };
+  const codeOnlyValue = response(codeOnly);
+  codeOnlyValue.components[0].sourceRefs = ["s1"];
+  const codeRequest = buildSourceInterpretationRequest(codeOnly);
+  assert.equal(
+    validateSourceInterpretation(codeOnlyValue, codeRequest).status,
+    "resolved",
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        {
+          ...classified,
+          classificationReadings: [
+            { ...classified.classificationReadings[0], sourceRefs: ["s2"] },
+          ],
+        },
+        codeRequest,
+      ),
+    /original label/,
+  );
+});
+
+test("Classification conflicts retain both source assertions and cannot be declared resolved", () => {
+  const request = buildSourceInterpretationRequest(context());
+  const value = response();
+  const reading = {
+    ...value.classificationReadings[0],
+    use: "conflicting",
+    sourceRefs: ["s1", "s3"],
+  };
+  const conflict = {
+    ...value,
+    status: "conflicting",
+    classificationReadings: [reading],
+    issues: [
+      {
+        explanation:
+          "Due asserzioni inventate incompatibili sullo stesso acquisto.",
+        sourceRefs: ["s1", "s3"],
+      },
+    ],
+  };
+  assert.equal(
+    validateSourceInterpretation(conflict, request).status,
+    "conflicting",
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        { ...conflict, status: "resolved", issues: [] },
+        request,
+      ),
+    /settled classification context/,
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        {
+          ...conflict,
+          classificationReadings: [{ ...reading, sourceRefs: ["s3"] }],
+        },
+        request,
+      ),
+    /two references/,
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        {
+          ...conflict,
+          issues: [{ ...conflict.issues[0], sourceRefs: ["s1", "s4"] }],
+        },
+        request,
+      ),
+    /two references/,
+  );
+  // Structure records the asserted conflict; no test pretends these invented
+  // statements establish a real semantic contradiction.
+});
+
+test("Clear prose without classifications remains usable and has no synthetic domain context", () => {
+  const input = context();
+  const noCpv: SourceInterpretationContext = {
+    ...input,
+    body: {
+      ...input.body,
+      classifications: [],
+      passages: input.body.passages.filter(
+        (item) => item.id === "s1" || item.id === "s4",
+      ),
+    },
+  };
+  const value = response(noCpv);
+  value.components[0].sourceRefs = ["s1"];
+  const request = buildSourceInterpretationRequest(noCpv);
+  const record = recordSourceInterpretation(value, request, metadata);
+  assert.deepEqual(record.classificationContext, []);
+  assert.deepEqual(record.response.classificationReadings, []);
+  assert.equal(readSourceInterpretation(record, request)!.status, "resolved");
+});
+
+test("Shared classification can clarify only an unclassified lot with its own object evidence", () => {
+  const input = context();
+  const lot: SourceInterpretationContext = {
+    ...input,
+    binding: {
+      ...input.binding,
+      target: {
+        kind: "lot",
+        publicationId: "invented-publication",
+        sourceProjectId: "invented-project",
+        lotId: "invented-lot",
+      },
+    },
+    targetScope: "selected_lot",
+    body: {
+      ...input.body,
+      target: {
+        kind: "lot",
+        lot: { id: "invented-lot", path: "/lots/0", headerPath: null },
+      },
+      classifications: input.body.classifications.map((item) => ({
+        ...item,
+        appliesTo: "shared_project_context",
+      })),
+      passages: [
+        ...input.body.passages,
+        {
+          ...input.body.passages[0],
+          id: "s5",
+          scope: "selected_lot",
+          rawPath: "/lots/0/description/it",
+        },
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(lot);
+  const valid = { ...response(lot), targetRef: "s5" };
+  assert.equal(validateSourceInterpretation(valid, request).status, "resolved");
+  const clarified = {
+    ...valid,
+    classificationReadings: [
+      { ...valid.classificationReadings[0], use: "clarifies_domain" },
+    ],
+    components: [
+      {
+        ...valid.components[0],
+        sourceRefs: ["s5", "s3"],
+        meaning: {
+          ...valid.components[0].meaning,
+          basis: "text_with_classification_context",
+          objectRefs: ["s5"],
+          classificationContextIds: ["c1"],
+        },
+      },
+    ],
+  };
+  assert.equal(
+    validateSourceInterpretation(clarified, request).status,
+    "resolved",
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        {
+          ...clarified,
+          components: [
+            {
+              ...clarified.components[0],
+              sourceRefs: ["s1", "s3"],
+              meaning: {
+                ...clarified.components[0].meaning,
+                objectRefs: ["s1"],
+              },
+            },
+          ],
+        },
+        request,
+      ),
+    /target domain clarification/,
+  );
+  const ownClassification: SourceInterpretationContext = {
+    ...lot,
+    body: {
+      ...lot.body,
+      classifications: [
+        ...lot.body.classifications,
+        {
+          ...input.body.classifications[0],
+          scope: "selected_lot",
+          rawPath: "/lots/0/cpvCode",
+          code: { text: "00000000", sourceRefs: ["s6"] },
+          labels: [
+            {
+              language: "it",
+              text: "FAMIGLIA_INVENTATA 🌳",
+              sourceRefs: ["s7"],
+            },
+          ],
+        },
+      ],
+      passages: [
+        ...lot.body.passages,
+        {
+          ...input.body.passages[1],
+          id: "s6",
+          scope: "selected_lot",
+          rawPath: "/lots/0/cpvCode/code",
+        },
+        {
+          ...input.body.passages[2],
+          id: "s7",
+          scope: "selected_lot",
+          rawPath: "/lots/0/cpvCode/label/it",
+        },
+      ],
+    },
+  };
+  const localRequest = buildSourceInterpretationRequest(ownClassification);
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        {
+          ...clarified,
+          classificationReadings: [
+            ...clarified.classificationReadings,
+            response(ownClassification).classificationReadings[1],
+          ],
+        },
+        localRequest,
+      ),
+    /target domain clarification/,
+  );
+  assert.equal(
+    request.classificationContext[0].appliesTo,
+    "shared_project_context",
+  );
+});
+
+test("Multilingual classification labels spanning passages retain exact ordered provenance", () => {
+  const input = context();
+  const parts = ["Invented ", "family 🌳"];
+  const split: SourceInterpretationContext = {
+    ...input,
+    body: {
+      ...input.body,
+      classifications: [
+        {
+          ...input.body.classifications[0],
+          labels: [
+            ...input.body.classifications[0].labels,
+            { language: "en", text: parts.join(""), sourceRefs: ["s5", "s6"] },
+          ],
+        },
+      ],
+      passages: [
+        ...input.body.passages,
+        ...parts.map((text, index) => ({
+          ...input.body.passages[2],
+          id: `s${index + 5}`,
+          rawPath: "/procurement/cpvCode/label/en",
+          startUtf16: index ? parts[0].length : 0,
+          endUtf16: index ? parts.join("").length : parts[0].length,
+          text,
+        })),
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(split);
+  const value = response(split);
+  value.classificationReadings[0].sourceRefs = ["s2"];
+  const read = readSourceInterpretation(
+    recordSourceInterpretation(value, request, metadata),
+    request,
+  )!;
+  assert.deepEqual(
+    read.classificationContext[0].labels,
+    split.body.classifications[0].labels,
+  );
+  assert.deepEqual(
+    ["s5", "s6"].map(
+      (id) => read.evidence.find((item) => item.id === id)!.text,
+    ),
+    parts,
+  );
 });
