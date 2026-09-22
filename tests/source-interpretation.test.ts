@@ -519,6 +519,92 @@ test("Provider context is bounded with schema bytes included, never silently tru
   );
 });
 
+test("Compact source JSON preserves every long-source value and reference within the byte limit", () => {
+  const input = context();
+  const base = buildSourceInterpretationRequest(input);
+  const tail = "ULTIMA CLAUSOLA: trasporto escluso, pulizia accessoria 🌳";
+  const passages = [
+    ...input.body.passages,
+    ...Array.from({ length: 380 }, (_, index) => {
+      const text =
+        index === 379
+          ? tail
+          : `Prestazione inventata numero ${index}: `.padEnd(230, "x");
+      return {
+        id: `s${index + 5}`,
+        scope: "project_context" as const,
+        role: "context" as const,
+        rawPath: `/terms/clauses/${index}/it`,
+        startUtf16: 0,
+        endUtf16: text.length,
+        text,
+        url: "https://example.invalid/source",
+      };
+    }),
+  ];
+  const large: SourceInterpretationContext = {
+    ...input,
+    coverage: {
+      ...input.coverage,
+      sourceUtf16: passages.reduce(
+        (total, passage) => total + passage.text.length,
+        0,
+      ),
+      fields: passages.length + 3,
+      chunks: 19,
+    },
+    body: {
+      ...input.body,
+      passages,
+      fields: [
+        ...input.body.fields,
+        { scope: "project_context", rawPath: "/terms/optional", value: false },
+        { scope: "project_context", rawPath: "/terms/quantity", value: 0 },
+      ],
+    },
+    readings: Array.from({ length: 19 }, (_, index) => ({
+      chunkId: `chunk${index + 1}`,
+      status: "complete" as const,
+      sourceRefs: passages
+        .slice(index * 21, (index + 1) * 21)
+        .map((passage) => passage.id),
+    })),
+  };
+  const expected = {
+    ...JSON.parse(base.prompt),
+    coverage: large.coverage,
+    readings: large.readings,
+    ...large.body,
+    passages: passages.map(({ url: _url, ...passage }) => passage),
+  };
+  const before = JSON.stringify(large);
+  // This exact payload exceeds the bound only with pretty-print whitespace.
+  const request = buildSourceInterpretationRequest(large);
+  const schemaBytes = JSON.stringify(request.responseFormat);
+  assert.ok(
+    Buffer.byteLength(
+      request.system + JSON.stringify(expected, null, 2) + schemaBytes,
+    ) > 160_000,
+  );
+  assert.ok(
+    Buffer.byteLength(request.system + request.prompt + schemaBytes) <= 160_000,
+  );
+  const decoded = JSON.parse(request.prompt);
+  assert.deepEqual(decoded, expected);
+  assert.equal(decoded.passages.at(-1).text, tail);
+  assert.deepEqual(
+    decoded.readings.flatMap(
+      (reading: { sourceRefs: string[] }) => reading.sourceRefs,
+    ),
+    passages.map((passage) => passage.id),
+  );
+  assert.deepEqual(
+    request.selectedIds,
+    passages.map((passage) => passage.id),
+  );
+  assert.equal(JSON.stringify(large), before);
+});
+
 test("Classification-only components reject the entire interpretation regardless of importance or duplicated classification paths", () => {
   const input = context();
   const duplicate = input.body.classifications[0];
