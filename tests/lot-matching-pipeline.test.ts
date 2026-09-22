@@ -151,6 +151,7 @@ function inventedAnswer(prompt: string) {
     );
     return {
       status: "resolved",
+      details: [],
       summary:
         "Potatura degli alberi, fonte inventata per la verifica della coda.",
       classificationReadings: data.classificationContext.map(
@@ -177,6 +178,14 @@ function inventedAnswer(prompt: string) {
         {
           description: "Potatura degli alberi",
           role: "execute",
+          roleEvidence: {
+            state: "identified",
+            actionText: Array.from(target.text as string)
+              .slice(0, 80)
+              .join(""),
+            sourceRefs: [target.id],
+            scope: target.scope,
+          },
           importance: "main",
           sourceRefs: [target.id],
           meaning: {
@@ -348,6 +357,9 @@ it("An uncertain source is cached as review without ever asking for a company co
       issues: [
         {
           explanation: "L'oggetto inventato non è determinabile.",
+          kind: "object_identity",
+          scope: JSON.parse(prompt).targetScope,
+          componentIndexes: [0],
           sourceRefs: [answer.targetRef],
         },
       ],

@@ -165,6 +165,18 @@ function explicitMeaning(statement: string, objectRefs: string[]) {
     classificationContextIds: [] as string[],
   };
 }
+function roleEvidence(
+  request: ReturnType<typeof buildAutomaticComparisonRequest>,
+  ref: string,
+) {
+  const passage = request.passages.find((item) => item.id === ref)!;
+  return {
+    state: "identified" as const,
+    actionText: Array.from(passage.text).slice(0, 80).join(""),
+    sourceRefs: [ref],
+    scope: passage.scope,
+  };
+}
 function sourceResponse(
   request: ReturnType<typeof buildAutomaticComparisonRequest>,
   status: "resolved" | "uncertain" | "conflicting" = "resolved",
@@ -179,6 +191,7 @@ function sourceResponse(
   )!.id;
   return {
     status,
+    details: [],
     summary:
       "Servizi inventati, interpretazione simulata per verificare il contratto.",
     classificationReadings: sourceRequest.classificationContext.map(
@@ -200,11 +213,19 @@ function sourceResponse(
       {
         description: "Pulizia degli uffici inventati.",
         role: "execute" as const,
+        roleEvidence: roleEvidence(request, targetRef),
         importance: "main" as const,
         sourceRefs: [targetRef],
-        meaning: explicitMeaning("Pulizia degli uffici inventati.", [
-          targetRef,
-        ]),
+        meaning:
+          status === "uncertain"
+            ? {
+                state: "ambiguous" as const,
+                statement: "Oggetto inventato non identificabile.",
+                basis: "unresolved" as const,
+                objectRefs: [targetRef],
+                classificationContextIds: [],
+              }
+            : explicitMeaning("Pulizia degli uffici inventati.", [targetRef]),
       },
     ],
     issues:
@@ -212,6 +233,12 @@ function sourceResponse(
         ? []
         : [
             {
+              kind:
+                status === "conflicting"
+                  ? ("source_conflict" as const)
+                  : ("object_identity" as const),
+              scope: request.targetScope,
+              componentIndexes: [0],
               explanation:
                 "Dubbio inventato, non una verifica semantica del modello.",
               sourceRefs:
@@ -482,6 +509,7 @@ test("An unresolved source rejects a final comparison and exposes issue evidence
         ...interpretationResponse,
         issues: [
           {
+            ...interpretationResponse.issues[0],
             explanation: "Condizione inventata che richiede chiarimento.",
             sourceRefs: [interpretationResponse.targetRef, issueRef],
           },
@@ -526,6 +554,102 @@ test("An unresolved source rejects a final comparison and exposes issue evidence
   }
 });
 
+test("Missing specifications remain visible through comparison without becoming purchased components", () => {
+  const detail = raw();
+  detail.terms.qualificationCriteriaNote.it =
+    "La quantità definitiva sarà comunicata nel capitolato inventato.";
+  const request = buildAutomaticComparisonRequest(fixture(detail));
+  const note = request.passages.find((passage) =>
+    passage.text.includes("quantità definitiva"),
+  )!;
+  const answer = sourceResponse(request);
+  const details = [
+    {
+      kind: "missing_specification",
+      explanation: "Quantità definitiva non disponibile nel testo fornito.",
+      sourceRefs: [note.id],
+      scope: note.scope,
+    },
+  ];
+  const source = recordSourceInterpretation(
+    { ...answer, details },
+    buildAutomaticSourceRequest(request),
+    {
+      id: "invented-nonblocking-detail",
+      at: "2030-01-20T12:00:00.000Z",
+      model: automaticComparisonModel(),
+    },
+  );
+  const body = JSON.parse(
+    buildInterpretedComparisonRequest(request, source).prompt,
+  );
+  assert.deepEqual(body.sourceInterpretation.details, details);
+  assert.equal(body.sourceInterpretation.components.length, 1);
+  assert.deepEqual(
+    body.sourceInterpretation.components[0].roleEvidence,
+    answer.components[0].roleEvidence,
+  );
+  const outcome = validateAutomaticComparison(
+    response(request, source),
+    request,
+    source,
+  );
+  assert.equal(outcome.relation, "direct");
+  assert.ok(outcome.evidence.some((passage) => passage.id === note.id));
+  assert.throws(
+    () =>
+      validateAutomaticComparison(
+        { ...response(request, source), componentRefs: ["u1", "u2"] },
+        request,
+        source,
+      ),
+    /Unknown interpreted-component/,
+  );
+});
+
+test("An identified object with an unresolved role stays in review without a company comparison", () => {
+  const request = buildAutomaticComparisonRequest(fixture());
+  const answer = sourceResponse(request);
+  const source = recordSourceInterpretation(
+    {
+      ...answer,
+      status: "uncertain",
+      components: answer.components.map((component) => ({
+        ...component,
+        role: null,
+        roleEvidence: { ...component.roleEvidence, state: "unresolved" },
+      })),
+      issues: [
+        {
+          kind: "role_identity",
+          scope: request.targetScope,
+          componentIndexes: [0],
+          explanation: "Ruolo indeterminato nella risposta inventata.",
+          sourceRefs: [answer.targetRef],
+        },
+      ],
+    },
+    buildAutomaticSourceRequest(request),
+    {
+      id: "invented-unresolved-role",
+      at: "2030-01-20T12:00:00.000Z",
+      model: automaticComparisonModel(),
+    },
+  );
+  assert.throws(
+    () => buildInterpretedComparisonRequest(request, source),
+    /requires review/,
+  );
+  const outcome = validateAutomaticComparison(null, request, source);
+  assert.equal(outcome.relation, "review");
+  assert.equal(outcome.sourceInterpretation.components[0].role, null);
+  assert.equal(
+    outcome.sourceInterpretation.components[0].meaning.state,
+    "identified",
+  );
+  assert.deepEqual(outcome.companyEvidence, []);
+});
+
 test("A claimed full match must cite every main interpreted component while partial scope may cite one", () => {
   const detail = raw();
   detail.procurement.orderDescription.it =
@@ -542,6 +666,7 @@ test("A claimed full match must cite every main interpreted component while part
         {
           description: "Manutenzione degli impianti inventati.",
           role: "maintain",
+          roleEvidence: roleEvidence(request, interpreted.targetRef),
           importance: "main",
           sourceRefs: [interpreted.targetRef],
           meaning: explicitMeaning("Manutenzione degli impianti inventati.", [
@@ -598,6 +723,7 @@ test("An excluded component alone cannot justify a service rejection but remains
         {
           description: "Pulizia degli uffici.",
           role: "execute",
+          roleEvidence: roleEvidence(request, serviceRef),
           importance: "main",
           sourceRefs: [serviceRef],
           meaning: explicitMeaning("Pulizia degli uffici.", [serviceRef]),
@@ -605,6 +731,7 @@ test("An excluded component alone cannot justify a service rejection but remains
         {
           description: "Fornitura dei detergenti.",
           role: "supply",
+          roleEvidence: roleEvidence(request, serviceRef),
           importance: "accessory",
           sourceRefs: [serviceRef],
           meaning: explicitMeaning("Fornitura dei detergenti.", [serviceRef]),
@@ -612,6 +739,7 @@ test("An excluded component alone cannot justify a service rejection but remains
         {
           description: "Ristorazione.",
           role: "execute",
+          roleEvidence: roleEvidence(request, serviceRef),
           importance: "excluded",
           sourceRefs: [serviceRef],
           meaning: explicitMeaning("Ristorazione esclusa.", [serviceRef]),
@@ -1081,6 +1209,7 @@ test("A concise source summary cannot erase the original domain context and grou
         {
           description: "Fornitura del prodotto inventato X.",
           role: "supply",
+          roleEvidence: roleEvidence(request, answer.targetRef),
           importance: "main",
           sourceRefs: [answer.targetRef, ...classRefs],
           meaning: {
@@ -1318,8 +1447,12 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v11",
     sourceVersion: "documentary-source-interpretation-v4",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v12",
+    sourceVersion: "documentary-source-interpretation-v5",
+  },
 ])(
-  "Historical $comparisonVersion / $sourceVersion stays stale under v12 without rewriting evidence",
+  "Historical $comparisonVersion / $sourceVersion stays stale under v13 without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
     const input = fixture();
     const request = buildAutomaticComparisonRequest(input);
@@ -1351,7 +1484,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v12");
+    assert.equal(request.version, "documentary-service-comparison-v13");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(

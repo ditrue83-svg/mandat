@@ -34,7 +34,7 @@ import {
 } from "./source-interpretation";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v12";
+  "documentary-service-comparison-v13";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -729,6 +729,7 @@ export function buildInterpretedComparisonRequest(
         "Il significato della fonte è già fissato: non puoi correggerlo o cambiare stato. Se non sai stabilire il confronto, comparisonUncertain=true e i fatti non determinabili null. Territorio, scadenze e importi sono controllati separatamente.",
         "classificationContext conserva classificazioni originali e ambito; classificationReadings e meaning spiegano come sono state usate per identificare ogni componente. Mantieni quel significato senza reinterpretarlo secondo la ditta. Un contesto ampio o condiviso non sostituisce il servizio concreto del target e non prevale sul lotto selezionato.",
         "Le classificazioni non sono prestazioni: non trasformarle in componenti o in prova sufficiente di sovrapposizione. componentRefs accetta soltanto gli id delle componenti; i codici senza etichette non autorizzano decodifiche inventate.",
+        "details conserva specifiche non indicate, condizioni di esecuzione e contesto condiviso: non sono componenti acquistate o motivi per cambiare l'identità già accertata dell'oggetto. Non trasformarli in requisiti aziendali mancanti. roleEvidence conserva il testo dell'azione richiesto dalla fonte: mantieni il ruolo registrato, senza confondere esecuzione, fornitura, gestione e manutenzione.",
       ],
       sourceInterpretation: {
         hash: sourceRecord.hash,
@@ -737,6 +738,7 @@ export function buildInterpretedComparisonRequest(
         classificationContext: source.classificationContext,
         classificationReadings: source.response.classificationReadings,
         components: source.components,
+        details: source.details,
         issues: source.issues,
       },
       company: { activities: request.companyPassages },
@@ -822,6 +824,8 @@ export function validateAutomaticComparison(
   const sourceIds = new Set([
     source.targetRef,
     ...components.flatMap((component) => component.sourceRefs),
+    ...components.flatMap((component) => component.roleEvidence.sourceRefs),
+    ...source.details.flatMap((detail) => detail.sourceRefs),
     ...source.classificationContext.flatMap((classification) => [
       ...(classification.code?.sourceRefs ?? []),
       ...classification.labels.flatMap((label) => label.sourceRefs),

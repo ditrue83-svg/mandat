@@ -97,11 +97,33 @@ function meaning(statement: string, objectRefs: string[]) {
     classificationContextIds: [] as string[],
   };
 }
+function roleEvidence(input: SourceInterpretationContext, id: string) {
+  const passage = input.body.passages.find((item) => item.id === id)!;
+  return {
+    state: "identified" as const,
+    actionText: [...passage.text].slice(0, 100).join(""),
+    sourceRefs: [id],
+    scope: passage.scope,
+  };
+}
+function issueFields(
+  kind:
+    | "object_identity"
+    | "role_identity"
+    | "target_scope"
+    | "source_conflict"
+    | "unreadable_source"
+    | "representation_incomplete",
+  componentIndexes: number[] = [],
+) {
+  return { kind, scope: "project_context" as const, componentIndexes };
+}
 function response(input = context()) {
   return {
     status: "resolved" as const,
     summary:
       "Fornitura di prodotti inventati con posa accessoria, senza trasporto.",
+    details: [],
     classificationReadings: input.body.classifications.map((item, index) => ({
       classificationId: `c${index + 1}`,
       use:
@@ -119,6 +141,7 @@ function response(input = context()) {
       {
         description: "Prodotti inventati",
         role: "supply" as const,
+        roleEvidence: roleEvidence(input, "s1"),
         importance: "main" as const,
         sourceRefs: ["s1", "s3"],
         meaning: meaning("Prodotti inventati esplicitamente descritti", ["s1"]),
@@ -126,6 +149,7 @@ function response(input = context()) {
       {
         description: "Posa",
         role: "install" as const,
+        roleEvidence: roleEvidence(input, "s4"),
         importance: "accessory" as const,
         sourceRefs: ["s4"],
         meaning: meaning("Posa accessoria", ["s4"]),
@@ -133,6 +157,7 @@ function response(input = context()) {
       {
         description: "Trasporto",
         role: "execute" as const,
+        roleEvidence: roleEvidence(input, "s4"),
         importance: "excluded" as const,
         sourceRefs: ["s4"],
         meaning: meaning("Trasporto escluso", ["s4"]),
@@ -147,6 +172,313 @@ const metadata = {
   at: "2030-01-01T12:00:00.000Z",
   model: "invented-model",
 };
+
+test("An untyped issue cannot make a fully identified source uncertain", () => {
+  const request = buildSourceInterpretationRequest(context());
+  const value = {
+    ...response(),
+    status: "uncertain",
+    issues: [
+      {
+        explanation:
+          "Nessuna incertezza materiale: mancano solo misure esatte.",
+        sourceRefs: ["s1"],
+      },
+    ],
+  };
+  // No lexical detector: an issue needs an explicit, grounded blocking kind.
+  assert.throws(() => validateSourceInterpretation(value, request));
+});
+
+test("Known object and action retain missing specifications as details without creating components", () => {
+  const input = context();
+  const clause =
+    "La quantità sarà precisata: il documento non indica il numero di pezzi.";
+  const request = buildSourceInterpretationRequest({
+    ...input,
+    body: {
+      ...input.body,
+      passages: [
+        ...input.body.passages,
+        {
+          ...input.body.passages[3],
+          id: "s5",
+          rawPath: "/terms/quantity/it",
+          text: clause,
+          endUtf16: clause.length,
+        },
+      ],
+    },
+  });
+  const detail = {
+    kind: "missing_specification",
+    explanation: "Numero di pezzi non precisato.",
+    sourceRefs: ["s5"],
+    scope: "project_context",
+  };
+  const value = { ...response(), details: [detail] };
+  const provider = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  assert.equal(provider(value), true);
+  const record = recordSourceInterpretation(value, request, metadata);
+  const read = readSourceInterpretation(record, request)!;
+  assert.equal(read.status, "resolved");
+  assert.deepEqual(read.details, [detail]);
+  assert.equal(read.components.length, 3);
+  assert.equal(read.evidence.find((item) => item.id === "s5")!.text, clause);
+  const unsupported = {
+    ...value,
+    status: "uncertain",
+    issues: [
+      {
+        ...issueFields("object_identity", [0]),
+        explanation: "Manca il numero di pezzi.",
+        sourceRefs: ["s1", "s5"],
+      },
+    ],
+  };
+  assert.throws(
+    () => validateSourceInterpretation(unsupported, request),
+    /ambiguous component/,
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        { ...value, details: [{ ...detail, scope: "selected_lot" }] },
+        request,
+      ),
+    /Detail scope/,
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        { ...value, details: [{ ...detail, sourceRefs: ["s999"] }] },
+        request,
+      ),
+    /Unknown or empty/,
+  );
+  const untypedBlockingDetail = {
+    ...value,
+    status: "uncertain",
+    issues: [{ ...detail, componentIndexes: [] }],
+  };
+  assert.equal(provider(untypedBlockingDetail), false);
+  assert.throws(() =>
+    validateSourceInterpretation(untypedBlockingDetail, request),
+  );
+  const tampered = structuredClone(record);
+  tampered.response.details[0].explanation =
+    "Quantità inventata dopo registrazione.";
+  assert.throws(() => readSourceInterpretation(tampered, request), /Altered/);
+});
+
+test("Role identity requires a quoted action or an explicitly unresolved role with its own issue", () => {
+  const request = buildSourceInterpretationRequest(context());
+  const base = response();
+  const component = base.components[0];
+  const unresolved = {
+    ...base,
+    status: "uncertain",
+    components: [
+      {
+        ...component,
+        role: null,
+        roleEvidence: { ...component.roleEvidence, state: "unresolved" },
+      },
+    ],
+    issues: [
+      {
+        ...issueFields("role_identity", [0]),
+        explanation:
+          "Il testo non consente di attribuire un'azione contrattuale precisa.",
+        sourceRefs: ["s1"],
+      },
+    ],
+  };
+  const provider = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  assert.equal(provider(unresolved), true);
+  const before = JSON.stringify(unresolved);
+  const read = readSourceInterpretation(
+    recordSourceInterpretation(unresolved, request, metadata),
+    request,
+  )!;
+  assert.equal(read.status, "uncertain");
+  assert.equal(read.components[0].role, null);
+  assert.equal(JSON.stringify(unresolved), before);
+  for (const value of [
+    { ...unresolved, status: "resolved", issues: [] },
+    { ...base, components: [{ ...component, role: null }] },
+    {
+      ...unresolved,
+      components: [{ ...unresolved.components[0], role: "maintain" }],
+    },
+  ]) {
+    assert.equal(provider(value), false);
+    assert.throws(() => validateSourceInterpretation(value, request));
+  }
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        { ...unresolved, components: [component] },
+        request,
+      ),
+    /unresolved role/,
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        {
+          ...unresolved,
+          issues: [{ ...unresolved.issues[0], componentIndexes: [1] }],
+        },
+        request,
+      ),
+    /unknown component/,
+  );
+  for (const role of [
+    {
+      ...component.roleEvidence,
+      actionText: "Una parafrasi non presente nella fonte.",
+    },
+    {
+      ...component.roleEvidence,
+      sourceRefs: ["s3"],
+      actionText: "FAMIGLIA_INVENTATA 🌳",
+    },
+    {
+      ...component.roleEvidence,
+      sourceRefs: ["s4"],
+      actionText: "La posa è accessoria.",
+    },
+    { ...component.roleEvidence, scope: "selected_lot" },
+  ])
+    assert.throws(
+      () =>
+        validateSourceInterpretation(
+          { ...base, components: [{ ...component, roleEvidence: role }] },
+          request,
+        ),
+      /Role/,
+    );
+});
+
+test("Role action quotations preserve contiguous long-source fragments and never bridge gaps or fields", () => {
+  const input = context();
+  const first = "Gestione continuativa ",
+    second = "del deposito 🌳.";
+  const request = buildSourceInterpretationRequest({
+    ...input,
+    body: {
+      ...input.body,
+      passages: [
+        ...input.body.passages.filter((item) => item.id !== "s1"),
+        { ...input.body.passages[0], text: first, endUtf16: first.length },
+        {
+          ...input.body.passages[0],
+          id: "s5",
+          text: second,
+          startUtf16: first.length,
+          endUtf16: first.length + second.length,
+        },
+      ],
+    },
+  });
+  const value = {
+    ...response(),
+    components: [
+      {
+        ...response().components[0],
+        sourceRefs: ["s1", "s5"],
+        role: "operate",
+        roleEvidence: {
+          state: "identified",
+          actionText: first + second,
+          sourceRefs: ["s5", "s1"],
+          scope: "project_context",
+        },
+      },
+    ],
+  };
+  assert.equal(validateSourceInterpretation(value, request).status, "resolved");
+  for (const change of [
+    {
+      startUtf16: first.length + 1,
+      endUtf16: first.length + second.length + 1,
+    },
+    { rawPath: "/other/field/it" },
+  ]) {
+    const changed = buildSourceInterpretationRequest({
+      ...input,
+      body: {
+        ...request.body,
+        passages: request.body.passages.map((item) =>
+          item.id === "s5" ? { ...item, ...change } : item,
+        ),
+      },
+    });
+    assert.throws(
+      () => validateSourceInterpretation(value, changed),
+      /exact quotation/,
+    );
+  }
+});
+
+test("Unreadability and incomplete representation retain distinct evidenced blocking reasons", () => {
+  const request = buildSourceInterpretationRequest(context());
+  const value = {
+    ...response(),
+    status: "uncertain",
+    issues: [
+      {
+        ...issueFields("representation_incomplete"),
+        explanation:
+          "Una prestazione nella clausola non è rappresentata compiutamente.",
+        sourceRefs: ["s4"],
+      },
+    ],
+  };
+  // This records an admission requiring review, not proof that something is
+  // actually missing. Textual entailment is not asserted by a mocked response.
+  assert.equal(
+    validateSourceInterpretation(value, request).status,
+    "uncertain",
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        { ...value, issues: [{ ...value.issues[0], sourceRefs: ["s3"] }] },
+        request,
+      ),
+    /non-classification/,
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        {
+          ...value,
+          issues: [{ ...value.issues[0], kind: "unreadable_source" }],
+        },
+        request,
+      ),
+    /unreadable source reading/,
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation({ ...value, status: "resolved" }, request),
+    /no issues/,
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        { ...value, issues: [{ ...value.issues[0], scope: "selected_lot" }] },
+        request,
+      ),
+    /Issue scope/,
+  );
+});
 
 test("Provider JSON Schema rejects the resolved ambiguous combination already rejected locally", () => {
   const request = buildSourceInterpretationRequest(context());
@@ -168,6 +500,7 @@ test("Provider JSON Schema rejects the resolved ambiguous combination already re
     ],
     issues: [
       {
+        ...issueFields("object_identity", [0]),
         explanation: "Ambiguità inventata, non una lettura semantica reale.",
         sourceRefs: ["s1"],
       },
@@ -200,6 +533,7 @@ test("Serialized provider schema and local validator agree on tagged states with
     ],
     issues: [
       {
+        ...issueFields("object_identity", [0]),
         explanation: "Oggetto non identificabile dai dati inventati.",
         sourceRefs: ["s1"],
       },
@@ -210,6 +544,7 @@ test("Serialized provider schema and local validator agree on tagged states with
     status: "conflicting",
     issues: [
       {
+        ...issueFields("source_conflict", [0]),
         explanation: "Asserzioni inventate da sottoporre a revisione.",
         sourceRefs: ["s1", "s3"],
       },
@@ -218,11 +553,6 @@ test("Serialized provider schema and local validator agree on tagged states with
   const examples: Array<[string, unknown, boolean]> = [
     ["resolved", resolved, true],
     ["uncertain ambiguous", uncertain, true],
-    [
-      "uncertain identified with issue",
-      { ...uncertain, components: resolved.components },
-      true,
-    ],
     ["conflicting", conflicting, true],
     ["resolved with issue", { ...resolved, issues: uncertain.issues }, false],
     [
@@ -307,6 +637,18 @@ test("Cross-reference and main-component guarantees remain server checks beyond 
     { ...resolved, components: [resolved.components[1]] },
     {
       ...resolved,
+      status: "uncertain",
+      issues: [
+        {
+          ...issueFields("object_identity", [0]),
+          explanation:
+            "Identità dichiarata incerta ma componenti tutte identificate.",
+          sourceRefs: ["s1"],
+        },
+      ],
+    },
+    {
+      ...resolved,
       components: [
         {
           ...resolved.components[0],
@@ -326,6 +668,7 @@ test("Cross-reference and main-component guarantees remain server checks beyond 
       status: "conflicting",
       issues: [
         {
+          ...issueFields("source_conflict", [0]),
           explanation: "Una sola asserzione non prova un conflitto.",
           sourceRefs: ["s1"],
         },
@@ -554,6 +897,80 @@ test("A selected lot keeps shared classification contextual and requires its own
       .targetRef,
     "s5",
   );
+  const scopeQuestion = {
+    ...response(lot),
+    status: "uncertain",
+    targetRef: "s5",
+    issues: [
+      {
+        ...issueFields("target_scope", [0]),
+        scope: "selected_lot",
+        explanation:
+          "Il progetto e il lotto non delimitano chiaramente la medesima prestazione.",
+        sourceRefs: ["s1", "s5"],
+      },
+    ],
+    details: [
+      {
+        kind: "shared_project_context",
+        explanation: "Condizioni condivise mantenute come contesto.",
+        sourceRefs: ["s4"],
+        scope: "project_context",
+      },
+    ],
+  };
+  assert.equal(
+    validateSourceInterpretation(scopeQuestion, request).status,
+    "uncertain",
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        {
+          ...scopeQuestion,
+          issues: [{ ...scopeQuestion.issues[0], sourceRefs: ["s1"] }],
+        },
+        request,
+      ),
+    /both scopes/,
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        {
+          ...scopeQuestion,
+          details: [
+            {
+              ...scopeQuestion.details[0],
+              sourceRefs: ["s5"],
+              scope: "selected_lot",
+            },
+          ],
+        },
+        request,
+      ),
+    /Shared project detail/,
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        {
+          ...scopeQuestion,
+          targetRef: "s1",
+          classificationReadings: response(input).classificationReadings,
+          details: [],
+          issues: [
+            {
+              ...scopeQuestion.issues[0],
+              scope: "project_context",
+              sourceRefs: ["s1", "s4"],
+            },
+          ],
+        },
+        buildSourceInterpretationRequest(input),
+      ),
+    /lot and evidence/,
+  );
   assert.throws(
     () =>
       buildSourceInterpretationRequest({
@@ -580,6 +997,7 @@ test("A selected lot keeps shared classification contextual and requires its own
 test("Resolved, uncertain and conflicting states enforce evidence contracts without claiming semantic entailment", () => {
   const request = buildSourceInterpretationRequest(context());
   const issue = {
+    ...issueFields("source_conflict"),
     explanation: "Dubbio inventato per verificare il contratto.",
     sourceRefs: ["s1"],
   };
@@ -601,12 +1019,13 @@ test("Resolved, uncertain and conflicting states enforce evidence contracts with
       ),
     /requires an evidenced/,
   );
-  assert.equal(
-    validateSourceInterpretation(
-      { ...response(), status: "uncertain", issues: [issue] },
-      request,
-    ).status,
-    "uncertain",
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        { ...response(), status: "uncertain", issues: [issue] },
+        request,
+      ),
+    /Source conflict/,
   );
   assert.throws(
     () =>
@@ -672,12 +1091,82 @@ test("Readings remain bound and incomplete or unreadable coverage cannot silentl
   const uncertain = {
     ...response(),
     status: "uncertain",
-    issues: [{ explanation: "Una parte non è leggibile.", sourceRefs: ["s1"] }],
+    issues: [
+      {
+        ...issueFields("unreadable_source"),
+        explanation: "Una parte non è leggibile.",
+        sourceRefs: ["s1"],
+      },
+    ],
   };
   const record = recordSourceInterpretation(uncertain, request, metadata);
   assert.deepEqual(
     readSourceInterpretation(record, request)!.readings,
     request.readings,
+  );
+});
+
+test("Unreadability issues must cite localized unreadable readings even when another reading has no references", () => {
+  const input = context();
+  const complete = {
+    chunkId: "chunk1",
+    status: "complete" as const,
+    sourceRefs: ["s1"],
+  };
+  const localized = {
+    chunkId: "chunk2",
+    status: "unreadable" as const,
+    sourceRefs: ["s4"],
+  };
+  const unlocalized = {
+    chunkId: "chunk3",
+    status: "unreadable" as const,
+    sourceRefs: [],
+  };
+  const answer = (sourceRefs: string[]) => ({
+    ...response(),
+    status: "uncertain",
+    issues: [
+      {
+        ...issueFields("unreadable_source"),
+        explanation: "Una parte del testo non è leggibile.",
+        sourceRefs,
+      },
+    ],
+  });
+  for (const readings of [
+    [complete, localized],
+    [complete, localized, unlocalized],
+  ]) {
+    const request = buildSourceInterpretationRequest({
+      ...input,
+      coverage: { ...input.coverage, chunks: readings.length },
+      readings,
+    });
+    assert.throws(
+      () => validateSourceInterpretation(answer(["s1"]), request),
+      /Unreadable issue must cite/,
+    );
+    const recorded = recordSourceInterpretation(
+      answer(["s4"]),
+      request,
+      metadata,
+    );
+    const result = readSourceInterpretation(recorded, request)!;
+    assert.equal(result.status, "uncertain");
+    assert.deepEqual(result.issues[0].sourceRefs, ["s4"]);
+  }
+  // When no unreadable reading can be localized, retain the historical
+  // conservative review outcome; no cited passage is declared unreadable.
+  const readings = [complete, unlocalized];
+  const request = buildSourceInterpretationRequest({
+    ...input,
+    coverage: { ...input.coverage, chunks: readings.length },
+    readings,
+  });
+  assert.equal(
+    validateSourceInterpretation(answer(["s1"]), request).status,
+    "uncertain",
   );
 });
 
@@ -896,6 +1385,7 @@ test("Classification-only components reject the entire interpretation regardless
           {
             description: "Classificazione CPV",
             role: "supply",
+            roleEvidence: roleEvidence(request, "s1"),
             importance,
             sourceRefs: refs,
             meaning: meaning("Classificazione CPV", refs),
@@ -938,6 +1428,7 @@ test("Concrete main accessory and excluded activities may be supported entirely 
         {
           description: "Gestione del deposito.",
           role: "operate",
+          roleEvidence: roleEvidence(request, "s4"),
           importance: "main",
           sourceRefs: ["s4"],
           meaning: meaning("Gestione del deposito", ["s4"]),
@@ -945,6 +1436,7 @@ test("Concrete main accessory and excluded activities may be supported entirely 
         {
           description: "Pulizia del deposito.",
           role: "execute",
+          roleEvidence: roleEvidence(request, "s4"),
           importance: "accessory",
           sourceRefs: ["s4"],
           meaning: meaning("Pulizia del deposito", ["s4"]),
@@ -952,6 +1444,7 @@ test("Concrete main accessory and excluded activities may be supported entirely 
         {
           description: "Manutenzione dei mezzi.",
           role: "maintain",
+          roleEvidence: roleEvidence(request, "s4"),
           importance: "excluded",
           sourceRefs: ["s4"],
           meaning: meaning("Manutenzione dei mezzi", ["s4"]),
@@ -1001,6 +1494,7 @@ test("A real purchased classification or cataloguing service is not rejected by 
         {
           description: serviceText,
           role: "execute",
+          roleEvidence: roleEvidence(request, "s1"),
           importance: "main",
           sourceRefs: ["s1"],
           meaning: meaning(serviceText, ["s1"]),
@@ -1016,18 +1510,18 @@ test("A real purchased classification or cataloguing service is not rejected by 
   );
 });
 
-test("A source v4 record is stale under v5 before parsing its historical schema", () => {
+test("A source v5 record is stale under v6 before parsing its historical schema", () => {
   const request = buildSourceInterpretationRequest(context());
-  assert.equal(request.version, "documentary-source-interpretation-v5");
+  assert.equal(request.version, "documentary-source-interpretation-v6");
   const current = recordSourceInterpretation(response(), request, metadata);
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
   const { hash: _hash, ...unsigned } = current;
   const historicalBody = {
     ...unsigned,
-    version: "documentary-source-interpretation-v4",
+    version: "documentary-source-interpretation-v5",
     sourceKey: digest({
-      version: "documentary-source-interpretation-v4",
+      version: "documentary-source-interpretation-v5",
       binding: request.binding,
     }),
   };
@@ -1259,6 +1753,7 @@ test("Domain grounding requires a target label; unknown code meanings and materi
     ],
     issues: [
       {
+        ...issueFields("object_identity", [0]),
         explanation: "Il testo lascia indeterminato il prodotto concreto.",
         sourceRefs: ["s1", "s3"],
       },
@@ -1331,6 +1826,7 @@ test("Classification conflicts retain both source assertions and cannot be decla
     classificationReadings: [reading],
     issues: [
       {
+        ...issueFields("source_conflict"),
         explanation:
           "Due asserzioni inventate incompatibili sullo stesso acquisto.",
         sourceRefs: ["s1", "s3"],
@@ -1443,6 +1939,7 @@ test("Shared classification can clarify only an unclassified lot with its own ob
       {
         ...valid.components[0],
         sourceRefs: ["s5", "s3"],
+        roleEvidence: roleEvidence(lot, "s5"),
         meaning: {
           ...valid.components[0].meaning,
           basis: "text_with_classification_context",
@@ -1465,6 +1962,7 @@ test("Shared classification can clarify only an unclassified lot with its own ob
             {
               ...clarified.components[0],
               sourceRefs: ["s1", "s3"],
+              roleEvidence: roleEvidence(lot, "s1"),
               meaning: {
                 ...clarified.components[0].meaning,
                 objectRefs: ["s1"],
