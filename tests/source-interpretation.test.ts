@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "vitest";
+import Ajv2020 from "ajv/dist/2020.js";
 import {
   SOURCE_INTERPRETATION_VERSION,
   SOURCE_INTERPRETATION_MAX_TOKENS,
@@ -146,6 +147,196 @@ const metadata = {
   at: "2030-01-01T12:00:00.000Z",
   model: "invented-model",
 };
+
+test("Provider JSON Schema rejects the resolved ambiguous combination already rejected locally", () => {
+  const request = buildSourceInterpretationRequest(context());
+  const validate = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  const original = response();
+  const incoherent = {
+    ...original,
+    components: [
+      {
+        ...original.components[0],
+        meaning: {
+          ...original.components[0].meaning,
+          state: "ambiguous",
+          basis: "text_with_classification_context",
+        },
+      },
+    ],
+    issues: [
+      {
+        explanation: "Ambiguità inventata, non una lettura semantica reale.",
+        sourceRefs: ["s1"],
+      },
+    ],
+  };
+  assert.throws(() => validateSourceInterpretation(incoherent, request));
+  assert.equal(validate(incoherent), false);
+});
+
+test("Serialized provider schema and local validator agree on tagged states without coercing responses", () => {
+  const request = buildSourceInterpretationRequest(context());
+  // Validate what is actually sent, independently of the Zod parser/refinements.
+  const schema = JSON.parse(
+    JSON.stringify(request.responseFormat.json_schema.schema),
+  );
+  const providerAccepts = new Ajv2020({ strict: false }).compile(schema);
+  const resolved = response();
+  const uncertain = {
+    ...resolved,
+    status: "uncertain",
+    components: [
+      {
+        ...resolved.components[0],
+        meaning: {
+          ...resolved.components[0].meaning,
+          state: "ambiguous",
+          basis: "unresolved",
+        },
+      },
+    ],
+    issues: [
+      {
+        explanation: "Oggetto non identificabile dai dati inventati.",
+        sourceRefs: ["s1"],
+      },
+    ],
+  };
+  const conflicting = {
+    ...uncertain,
+    status: "conflicting",
+    issues: [
+      {
+        explanation: "Asserzioni inventate da sottoporre a revisione.",
+        sourceRefs: ["s1", "s3"],
+      },
+    ],
+  };
+  const examples: Array<[string, unknown, boolean]> = [
+    ["resolved", resolved, true],
+    ["uncertain ambiguous", uncertain, true],
+    [
+      "uncertain identified with issue",
+      { ...uncertain, components: resolved.components },
+      true,
+    ],
+    ["conflicting", conflicting, true],
+    ["resolved with issue", { ...resolved, issues: uncertain.issues }, false],
+    [
+      "resolved with ambiguous meaning",
+      { ...uncertain, status: "resolved", issues: [] },
+      false,
+    ],
+    [
+      "resolved with unresolved classification",
+      {
+        ...resolved,
+        classificationReadings: [
+          { ...resolved.classificationReadings[0], use: "unresolved" },
+        ],
+      },
+      false,
+    ],
+    [
+      "resolved with conflicting classification",
+      {
+        ...resolved,
+        classificationReadings: [
+          { ...resolved.classificationReadings[0], use: "conflicting" },
+        ],
+      },
+      false,
+    ],
+    [
+      "identified with unresolved basis",
+      {
+        ...resolved,
+        components: [
+          {
+            ...resolved.components[0],
+            meaning: { ...resolved.components[0].meaning, basis: "unresolved" },
+          },
+        ],
+      },
+      false,
+    ],
+    [
+      "ambiguous with explicit basis",
+      {
+        ...uncertain,
+        components: [
+          {
+            ...uncertain.components[0],
+            meaning: {
+              ...uncertain.components[0].meaning,
+              basis: "explicit_text",
+            },
+          },
+        ],
+      },
+      false,
+    ],
+    ["uncertain without issue", { ...uncertain, issues: [] }, false],
+    ["conflicting without issue", { ...conflicting, issues: [] }, false],
+  ];
+  for (const [name, value, wanted] of examples) {
+    const before = JSON.stringify(value);
+    assert.equal(providerAccepts(value), wanted, name);
+    if (wanted)
+      assert.deepEqual(
+        validateSourceInterpretation(value, request).response,
+        value,
+        name,
+      );
+    else
+      assert.throws(() => validateSourceInterpretation(value, request), name);
+    assert.equal(JSON.stringify(value), before, name);
+  }
+});
+
+test("Cross-reference and main-component guarantees remain server checks beyond the tagged provider schema", () => {
+  const request = buildSourceInterpretationRequest(context());
+  const providerAccepts = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  const resolved = response();
+  const malformed = [
+    { ...resolved, components: [resolved.components[1]] },
+    {
+      ...resolved,
+      components: [
+        {
+          ...resolved.components[0],
+          meaning: {
+            ...resolved.components[0].meaning,
+            objectRefs: ["s3"],
+          },
+        },
+      ],
+    },
+    {
+      ...resolved,
+      components: [{ ...resolved.components[0], sourceRefs: ["s1", "s1"] }],
+    },
+    {
+      ...resolved,
+      status: "conflicting",
+      issues: [
+        {
+          explanation: "Una sola asserzione non prova un conflitto.",
+          sourceRefs: ["s1"],
+        },
+      ],
+    },
+  ];
+  for (const value of malformed) {
+    assert.equal(providerAccepts(value), true);
+    assert.throws(() => validateSourceInterpretation(value, request));
+  }
+});
 
 test("A resolved paraphrase cannot omit classification accounting and meaning grounding", () => {
   const request = buildSourceInterpretationRequest(context());
@@ -825,18 +1016,18 @@ test("A real purchased classification or cataloguing service is not rejected by 
   );
 });
 
-test("A source v3 record is stale under v4 before parsing its historical schema", () => {
+test("A source v4 record is stale under v5 before parsing its historical schema", () => {
   const request = buildSourceInterpretationRequest(context());
-  assert.equal(request.version, "documentary-source-interpretation-v4");
+  assert.equal(request.version, "documentary-source-interpretation-v5");
   const current = recordSourceInterpretation(response(), request, metadata);
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
   const { hash: _hash, ...unsigned } = current;
   const historicalBody = {
     ...unsigned,
-    version: "documentary-source-interpretation-v3",
+    version: "documentary-source-interpretation-v4",
     sourceKey: digest({
-      version: "documentary-source-interpretation-v3",
+      version: "documentary-source-interpretation-v4",
       binding: request.binding,
     }),
   };

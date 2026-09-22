@@ -8,7 +8,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v4";
+  "documentary-source-interpretation-v5";
 // Structured source output keeps its full allowance even without thinking.
 export const SOURCE_INTERPRETATION_MAX_TOKENS = 8192;
 const digest = (value: unknown) =>
@@ -181,128 +181,166 @@ const contextSchema = z.strictObject({
   readings: z.array(readingSchema).max(32),
 });
 
-const meaningSchema = z.strictObject({
-  state: z.enum(["identified", "ambiguous"]),
-  statement: text(600).describe(
-    "Significato concreto dell'oggetto nel suo dominio, non la sola ripetizione o traduzione di un termine polisemico. Non inventare dettagli assenti né decodificare codici da conoscenze esterne.",
-  ),
-  basis: z.enum([
-    "explicit_text",
-    "text_with_classification_context",
-    "unresolved",
-  ]),
-  objectRefs: sourceRefs.describe(
-    "Passaggi non classificatori che nominano l'oggetto o la prestazione; devono essere anche nelle sourceRefs della componente. Sono ammesse clausole di contesto.",
-  ),
-  classificationContextIds: z
-    .array(classificationId)
-    .max(1024)
-    .refine((ids) => new Set(ids).size === ids.length)
-    .describe(
-      "ID delle classificazioni usate per questo significato. Il contesto condiviso del progetto non può da solo disambiguare l'oggetto di un lotto.",
+const meaningStatement = text(600).describe(
+  "Significato concreto dell'oggetto nel suo dominio, non la sola ripetizione o traduzione di un termine polisemico. Non inventare dettagli assenti né decodificare codici da conoscenze esterne.",
+);
+const componentDescription = text(600).describe(
+  "Prestazione concreta: nomina l'azione e il prodotto o servizio acquistato, comprensibili senza leggere la sintesi. Riporta solo caratteristiche attestate dalla fonte. Non scrivere il nome di un campo, un'intestazione o la funzione di un dato nel documento.",
+);
+const componentRole = z.enum([
+  "supply",
+  "execute",
+  "design",
+  "install",
+  "maintain",
+  "operate",
+  "advise",
+  "other",
+]);
+const componentImportance = z
+  .enum(["main", "accessory", "excluded"])
+  .describe(
+    "Posizione della prestazione nel contratto: principale, accessoria oppure esplicitamente esclusa. Non indica l'importanza di un dato o di una sezione del documento.",
+  );
+const componentRefsDescription =
+  "Cita il testo che identifica la prestazione, anche se si trova in una clausola o nel contesto del progetto. Codici ed etichette classificatorie possono chiarire questo stesso oggetto, ma non sono da soli una prestazione distinta.";
+const componentsDescription =
+  "Una componente per ciascuna prestazione o prodotto realmente acquistato, accessorio o esplicitamente escluso. Descrizione e classificazione dello stesso acquisto non sono due prestazioni. Dati amministrativi, codici, traduzioni e intestazioni non creano componenti aggiuntive.";
+
+// The same tagged shapes build the local contract and the provider schema.
+// Refinements below retain relational checks that JSON Schema does not encode.
+function buildResponseSchema(bounds?: {
+  refs: z.ZodType<string[]>;
+  classificationId: z.ZodType<string>;
+  classificationCount: number;
+  targetRef: z.ZodType<string>;
+}) {
+  const refs = bounds?.refs ?? sourceRefs;
+  const contextId = bounds?.classificationId ?? classificationId;
+  const meaningFields = {
+    statement: meaningStatement,
+    objectRefs: refs.describe(
+      "Passaggi non classificatori che nominano l'oggetto o la prestazione; devono essere anche nelle sourceRefs della componente. Sono ammesse clausole di contesto.",
     ),
-});
-const classificationReadingSchema = z.strictObject({
-  classificationId,
-  use: z.enum([
-    "clarifies_domain",
-    "broad_context",
-    "shared_project_only",
-    "unresolved",
-    "conflicting",
-  ]),
-  explanation: text(600),
-  sourceRefs: sourceRefs.describe(
-    "Cita la classificazione valutata; clarifies_domain richiede almeno un'etichetta originale. Un conflitto richiede due asserzioni della fonte incompatibili, non una tua inferenza.",
-  ),
-});
-const componentSchema = z.strictObject({
-  description: text(600).describe(
-    "Prestazione concreta: nomina l'azione e il prodotto o servizio acquistato, comprensibili senza leggere la sintesi. Riporta solo caratteristiche attestate dalla fonte. Non scrivere il nome di un campo, un'intestazione o la funzione di un dato nel documento.",
-  ),
-  role: z.enum([
-    "supply",
-    "execute",
-    "design",
-    "install",
-    "maintain",
-    "operate",
-    "advise",
-    "other",
-  ]),
-  importance: z
-    .enum(["main", "accessory", "excluded"])
-    .describe(
-      "Posizione della prestazione nel contratto: principale, accessoria oppure esplicitamente esclusa. Non indica l'importanza di un dato o di una sezione del documento.",
-    ),
-  sourceRefs: sourceRefs.describe(
-    "Cita il testo che identifica la prestazione, anche se si trova in una clausola o nel contesto del progetto. Codici ed etichette classificatorie possono chiarire questo stesso oggetto, ma non sono da soli una prestazione distinta.",
-  ),
-  meaning: meaningSchema,
-});
-const issueSchema = z.strictObject({ explanation: text(600), sourceRefs });
-export const sourceInterpretationResponseSchema = z
-  .strictObject({
-    status: z.enum(["resolved", "uncertain", "conflicting"]),
-    summary: text(1200),
-    classificationReadings: z.array(classificationReadingSchema).max(1024),
-    components: z
-      .array(componentSchema)
-      .max(64)
+    classificationContextIds: z
+      .array(contextId)
+      .max(bounds?.classificationCount ?? 1024)
+      .refine((ids) => new Set(ids).size === ids.length)
       .describe(
-        "Una componente per ciascuna prestazione o prodotto realmente acquistato, accessorio o esplicitamente escluso. Descrizione e classificazione dello stesso acquisto non sono due prestazioni. Dati amministrativi, codici, traduzioni e intestazioni non creano componenti aggiuntive.",
+        "ID delle classificazioni usate per questo significato. Il contesto condiviso del progetto non può da solo disambiguare l'oggetto di un lotto.",
       ),
-    issues: z.array(issueSchema).max(32),
-    targetRef: sourceId,
-  })
-  .superRefine((value, context) => {
-    if (
-      value.status === "resolved" &&
-      (value.components.some((item) => item.meaning.state !== "identified") ||
-        value.classificationReadings.some(
-          (item) => item.use === "unresolved" || item.use === "conflicting",
-        ))
-    )
-      context.addIssue({
-        code: "custom",
-        message:
-          "Resolved source requires identified meaning and settled classification context",
-      });
-    if (
-      value.components.some(
-        (item) =>
-          (item.meaning.state === "ambiguous") !==
-          (item.meaning.basis === "unresolved"),
-      )
-    )
-      context.addIssue({
-        code: "custom",
-        message: "Meaning state and basis disagree",
-      });
-    if (
-      value.status === "resolved" &&
-      (!value.components.some((item) => item.importance === "main") ||
-        value.issues.length)
-    )
-      context.addIssue({
-        code: "custom",
-        message: "Resolved source requires a main component and no issues",
-      });
-    if (value.status !== "resolved" && !value.issues.length)
-      context.addIssue({
-        code: "custom",
-        message: "Unresolved source requires an evidenced issue",
-      });
-    if (
-      value.status === "conflicting" &&
-      !value.issues.some((item) => item.sourceRefs.length >= 2)
-    )
-      context.addIssue({
-        code: "custom",
-        message:
-          "Conflicting source requires two distinct references in an issue",
-      });
+  };
+  const identifiedMeaning = z.strictObject({
+    state: z.literal("identified", {
+      error: "Resolved source requires identified meaning",
+    }),
+    ...meaningFields,
+    basis: z.enum(["explicit_text", "text_with_classification_context"]),
   });
+  const ambiguousMeaning = z.strictObject({
+    state: z.literal("ambiguous"),
+    ...meaningFields,
+    basis: z.literal("unresolved"),
+  });
+  const anyMeaning = z.discriminatedUnion("state", [
+    identifiedMeaning,
+    ambiguousMeaning,
+  ]);
+  const componentFields = {
+    description: componentDescription,
+    role: componentRole,
+    importance: componentImportance,
+    sourceRefs: refs.describe(componentRefsDescription),
+  };
+  const identifiedComponent = z.strictObject({
+    ...componentFields,
+    meaning: identifiedMeaning,
+  });
+  const anyComponent = z.strictObject({
+    ...componentFields,
+    meaning: anyMeaning,
+  });
+  const readingFields = {
+    classificationId: contextId,
+    explanation: text(600),
+    sourceRefs: refs.describe(
+      "Cita la classificazione valutata; clarifies_domain richiede almeno un'etichetta originale. Un conflitto richiede due asserzioni della fonte incompatibili, non una tua inferenza.",
+    ),
+  };
+  const settledReading = z.strictObject({
+    ...readingFields,
+    use: z.enum(["clarifies_domain", "broad_context", "shared_project_only"], {
+      error: "Resolved source requires settled classification context",
+    }),
+  });
+  const anyReading = z.strictObject({
+    ...readingFields,
+    use: z.enum([
+      "clarifies_domain",
+      "broad_context",
+      "shared_project_only",
+      "unresolved",
+      "conflicting",
+    ]),
+  });
+  const issue = z.strictObject({ explanation: text(600), sourceRefs: refs });
+  const classificationReadings = <T extends z.ZodType>(item: T) =>
+    bounds
+      ? z.array(item).length(bounds.classificationCount)
+      : z.array(item).max(1024);
+  const commonFields = {
+    summary: text(1200),
+    targetRef: bounds?.targetRef ?? sourceId,
+  };
+  const resolved = z.strictObject({
+    ...commonFields,
+    status: z.literal("resolved"),
+    classificationReadings: classificationReadings(settledReading),
+    components: z
+      .array(identifiedComponent)
+      .min(1, "Resolved source requires a main component")
+      .max(64)
+      .describe(componentsDescription),
+    issues: z
+      .array(issue)
+      .max(0, "Resolved source requires a main component and no issues"),
+  });
+  const unresolvedFields = {
+    ...commonFields,
+    classificationReadings: classificationReadings(anyReading),
+    components: z.array(anyComponent).max(64).describe(componentsDescription),
+    issues: z
+      .array(issue)
+      .min(1, "Unresolved source requires an evidenced issue")
+      .max(32),
+  };
+  return z
+    .discriminatedUnion("status", [
+      resolved,
+      z.strictObject({ ...unresolvedFields, status: z.literal("uncertain") }),
+      z.strictObject({ ...unresolvedFields, status: z.literal("conflicting") }),
+    ])
+    .superRefine((value, context) => {
+      if (
+        value.status === "resolved" &&
+        !value.components.some((item) => item.importance === "main")
+      )
+        context.addIssue({
+          code: "custom",
+          message: "Resolved source requires a main component",
+        });
+      if (
+        value.status === "conflicting" &&
+        !value.issues.some((item) => item.sourceRefs.length >= 2)
+      )
+        context.addIssue({
+          code: "custom",
+          message:
+            "Conflicting source requires two distinct references in an issue",
+        });
+    });
+}
+export const sourceInterpretationResponseSchema = buildResponseSchema();
 function freeze<T>(value: T): T {
   if (value && typeof value === "object") {
     Object.values(value).forEach(freeze);
@@ -437,37 +475,11 @@ export function buildSourceInterpretationRequest(
       name: "documentary_source_interpretation",
       strict: true,
       schema: z.toJSONSchema(
-        sourceInterpretationResponseSchema.safeExtend({
+        buildResponseSchema({
+          refs: boundedRefs,
+          classificationId: boundedClassificationId,
+          classificationCount: classificationContext.length,
           targetRef: z.enum(targets),
-          classificationReadings: z
-            .array(
-              classificationReadingSchema.safeExtend({
-                classificationId: boundedClassificationId,
-                sourceRefs: boundedRefs,
-              }),
-            )
-            .length(classificationContext.length),
-          components: z
-            .array(
-              componentSchema.safeExtend({
-                sourceRefs: boundedRefs.describe(
-                  componentSchema.shape.sourceRefs.description!,
-                ),
-                meaning: meaningSchema.safeExtend({
-                  objectRefs: boundedRefs,
-                  classificationContextIds: z
-                    .array(boundedClassificationId)
-                    .max(classificationContext.length),
-                }),
-              }),
-            )
-            .max(64)
-            .describe(
-              sourceInterpretationResponseSchema.shape.components.description!,
-            ),
-          issues: z
-            .array(issueSchema.safeExtend({ sourceRefs: boundedRefs }))
-            .max(32),
         }),
         // Repeated reference enums share a JSON Schema definition. Preserve
         // their exact bounds without charging the long source multiple copies.

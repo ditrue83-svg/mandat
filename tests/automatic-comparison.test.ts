@@ -1309,62 +1309,78 @@ test("Persisted responses cannot cross company boundaries or survive a changed p
   );
 });
 
-test("A historical v10 comparison with a v3 source is stale under v11 without rewriting evidence", () => {
-  const input = fixture();
-  const request = buildAutomaticComparisonRequest(input);
-  const source = sourceRecord(request);
-  const stored = recordAutomaticComparison(response(request, source), request, {
-    id: "invented-version-regression",
-    at: "2030-01-20T12:00:00.000Z",
-    model: automaticComparisonModel(),
-    sourceInterpretation: source,
-  });
-  const digest = (value: unknown) =>
-    createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
-  const { hash: _hash, ...unsigned } = stored;
-  const oldUnsigned = {
-    ...unsigned,
-    sourceInterpretation: {
-      ...unsigned.sourceInterpretation,
-      version: "documentary-source-interpretation-v3",
-    },
-    version: "documentary-service-comparison-v10",
-    inputHash: digest({
-      ...request.dependency,
-      version: "documentary-service-comparison-v10",
-    }),
-  };
-  const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
-  const before = JSON.stringify(historical);
-  assert.equal(request.version, "documentary-service-comparison-v11");
-  assert.notEqual(historical.inputHash, request.inputHash);
-  assert.equal(readAutomaticComparison(historical, request), null);
-  assert.equal(
-    readAutomaticComparison(
-      { ...historical, response: { oldSchema: true } },
+test.each([
+  {
+    comparisonVersion: "documentary-service-comparison-v10",
+    sourceVersion: "documentary-source-interpretation-v3",
+  },
+  {
+    comparisonVersion: "documentary-service-comparison-v11",
+    sourceVersion: "documentary-source-interpretation-v4",
+  },
+])(
+  "Historical $comparisonVersion / $sourceVersion stays stale under v12 without rewriting evidence",
+  ({ comparisonVersion, sourceVersion }) => {
+    const input = fixture();
+    const request = buildAutomaticComparisonRequest(input);
+    const source = sourceRecord(request);
+    const stored = recordAutomaticComparison(
+      response(request, source),
       request,
-    ),
-    null,
-  );
-  assert.deepEqual(resolveAutomaticComparison(input, [historical]), {
-    comparison: null,
-    issue: "automatic_comparison_stale",
-  });
-  // Version itself must also prevent an old response being relabelled current
-  // merely because its input hash was copied from a freshly built request.
-  assert.equal(
-    readAutomaticComparison(
-      { ...historical, inputHash: request.inputHash },
-      request,
-    ),
-    null,
-  );
-  assert.equal(
-    resolveAutomaticComparison(input, [historical, stored]).comparison?.id,
-    stored.id,
-  );
-  assert.equal(JSON.stringify(historical), before);
-});
+      {
+        id: "invented-version-regression",
+        at: "2030-01-20T12:00:00.000Z",
+        model: automaticComparisonModel(),
+        sourceInterpretation: source,
+      },
+    );
+    const digest = (value: unknown) =>
+      createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
+    const { hash: _hash, ...unsigned } = stored;
+    const oldUnsigned = {
+      ...unsigned,
+      sourceInterpretation: {
+        ...unsigned.sourceInterpretation,
+        version: sourceVersion,
+      },
+      version: comparisonVersion,
+      inputHash: digest({
+        ...request.dependency,
+        version: comparisonVersion,
+      }),
+    };
+    const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
+    const before = JSON.stringify(historical);
+    assert.equal(request.version, "documentary-service-comparison-v12");
+    assert.notEqual(historical.inputHash, request.inputHash);
+    assert.equal(readAutomaticComparison(historical, request), null);
+    assert.equal(
+      readAutomaticComparison(
+        { ...historical, response: { oldSchema: true } },
+        request,
+      ),
+      null,
+    );
+    assert.deepEqual(resolveAutomaticComparison(input, [historical]), {
+      comparison: null,
+      issue: "automatic_comparison_stale",
+    });
+    // Version itself must also prevent an old response being relabelled current
+    // merely because its input hash was copied from a freshly built request.
+    assert.equal(
+      readAutomaticComparison(
+        { ...historical, inputHash: request.inputHash },
+        request,
+      ),
+      null,
+    );
+    assert.equal(
+      resolveAutomaticComparison(input, [historical, stored]).comparison?.id,
+      stored.id,
+    );
+    assert.equal(JSON.stringify(historical), before);
+  },
+);
 
 test("A long-source reduction preserves all service text even when the map only selects an administrative limitation", () => {
   const detail = raw();

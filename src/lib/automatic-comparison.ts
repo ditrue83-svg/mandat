@@ -34,7 +34,7 @@ import {
 } from "./source-interpretation";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v11";
+  "documentary-service-comparison-v12";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
