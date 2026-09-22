@@ -39,9 +39,10 @@ import {
   sourceSemanticReviewRecordSchema,
   type SourceSemanticReviewRecord,
 } from "./source-semantic-review";
+import { SOURCE_EVIDENCE_READING_VERSION } from "./source-evidence-reading";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v14";
+  "documentary-service-comparison-v15";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -424,6 +425,7 @@ export function buildAutomaticComparisonRequest(
     reasoningEffort: documentaryAiReasoningEffort() ?? null,
     sourceReview: {
       version: SOURCE_SEMANTIC_REVIEW_VERSION,
+      evidenceVersion: SOURCE_EVIDENCE_READING_VERSION,
       model: automaticComparisonModel(),
       reasoningEffort: documentaryAiReasoningEffort() ?? "none",
     },

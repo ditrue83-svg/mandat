@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { stableDocumentaryJson } from "./documentary-observation";
 import {
+  buildSourceEvidenceReadingRequest,
+  readSourceEvidenceReading,
+  sourceEvidenceReadingRecordSchema,
+  type SourceEvidenceReadingRecord,
+} from "./source-evidence-reading";
+import {
   sourceInterpretationKey,
   sourceInterpretationRecordSchema,
   validateSourceInterpretationContext,
@@ -14,8 +20,11 @@ import type {
 } from "./automatic-comparison";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v1";
+  "documentary-source-semantic-review-v2";
 const MAX_BYTES = 160_000;
+// Leave room for the separately recorded evidence before constructing the
+// final comparison request; that request is still checked at its actual size.
+const READING_CONTEXT_RESERVE_BYTES = 32_000;
 const MAX_REQUESTS = 32;
 const MAX_CHECKS = 32;
 const MAX_TOKENS = 8192;
@@ -51,6 +60,8 @@ function responseSchema(bounds?: {
   id: string;
   claimIds: string[];
   sourceIds: string[];
+  evidenceHash?: string;
+  readingIds?: string[];
 }) {
   const references = bounds
     ? z.array(z.enum(bounds.sourceIds)).min(1).max(1024)
@@ -61,9 +72,18 @@ function responseSchema(bounds?: {
     verdict,
     reason: text(600),
     sourceRefs: references,
+    readingRefs: bounds?.readingIds?.length
+      ? z.array(z.enum(bounds.readingIds)).min(1).max(1024)
+      : z
+          .array(z.string().regex(/^(e[1-9]\d*-[1-9]\d*|c[1-9]\d*)$/))
+          .min(1)
+          .max(1024),
   });
   return z.strictObject({
     chunkId: bounds ? z.literal(bounds.id) : chunkId,
+    sourceEvidenceHash: bounds?.evidenceHash
+      ? z.literal(bounds.evidenceHash)
+      : hash,
     coverage: z.enum(["complete", "unreadable"]),
     checks: bounds
       ? z.array(check).length(bounds.claimIds.length)
@@ -115,6 +135,7 @@ export function buildSourceSemanticReviewRequest(
 ) {
   const context = validateSourceInterpretationContext(input);
   const config = configurationSchema.parse(configuration);
+  const evidencePlan = buildSourceEvidenceReadingRequest(context, config);
   const draft = sourceInterpretationRecordSchema.parse(
     structuredClone(draftValue),
   );
@@ -246,9 +267,10 @@ export function buildSourceSemanticReviewRequest(
       },
     };
     const prompt = JSON.stringify({
-      task: "Controlla le affermazioni assignedClaims contro le prove originali, senza assumere corretto il draft. Individua inoltre prestazioni omesse o contraddizioni nei passaggi di coverage. La mancanza di una prestazione in un altro frammento non la confuta.",
+      task: "Confronta assignedClaims con independentReading, già registrata senza vedere questo draft, e con le prove originali. Non riscrivere la lettura indipendente per conformarla al draft. Individua omissioni o contraddizioni nei passaggi di coverage. La mancanza di una prestazione in un altro frammento non la confuta.",
       rules: [
         "Per ogni claim assegnato restituisci esattamente un check. supported richiede sostegno reale nella fonte; contradicted richiede controprova; not_verifiable indica sostegno insufficiente. Un riferimento esatto non rende vero il significato affermato. Leggi insieme oggetto, classificazioni originali e relativo ambito.",
+        "Ogni check cita readingRefs della lettura indipendente oltre agli estratti originali. Un draft che introduce un dominio incompatibile, una correzione della fonte o una discrepanza non presente nella lettura indipendente non può essere supported solo perché ripete il nome del prodotto. Per classification_reading cita la corrispondente classificazione indipendente cN.",
         "Controlla dominio dell'oggetto, azione contrattuale, applicabilità al target e importanza main/accessory/excluded separatamente. Non scambiare un settore, luogo o destinatario per un ruolo. Contesto generale, classificazioni ampie e opere di altri lotti non provano una prestazione locale.",
         "Una famiglia di prodotti identificata può non specificare sottotipi, quantità o requisiti: non inventarli e non usare la loro assenza come ambiguità del mestiere. Verifica che details riporti soltanto condizioni o dettagli, non prestazioni espulse dalle componenti.",
         "Ogni claim è affidato a una sola richiesta con tutte le sue citazioni; i passaggi aggiunti sono contesto, non una selezione che sostituisce coverage. Esamina tutti i passaggi e campi di coverage per omissioni o contraddizioni rispetto al draft completo. Non richiedere che tutti gli acquisti siano ripetuti in ogni frammento. Usa findings quando le prove del gruppo mostrano un problema materiale; nessuna autocorrezione.",
@@ -299,7 +321,8 @@ export function buildSourceSemanticReviewRequest(
           request.system +
             request.prompt +
             JSON.stringify(request.responseFormat),
-        ) <= MAX_BYTES
+        ) <=
+        MAX_BYTES - READING_CONTEXT_RESERVE_BYTES
       );
     })();
   const flush = () => {
@@ -360,6 +383,7 @@ export function buildSourceSemanticReviewRequest(
     maxTokens: MAX_TOKENS,
     claims,
     requests,
+    evidenceInputHash: evidencePlan.inputHash,
   });
   const plan = freeze({
     version: SOURCE_SEMANTIC_REVIEW_VERSION,
@@ -372,6 +396,7 @@ export function buildSourceSemanticReviewRequest(
     context,
     claims,
     requests,
+    evidencePlan,
   });
   verifiedPlans.add(plan);
   return plan;
@@ -380,17 +405,93 @@ export type SourceSemanticReviewPlan = ReturnType<
   typeof buildSourceSemanticReviewRequest
 >;
 
-function validateResponses(values: unknown[], plan: SourceSemanticReviewPlan) {
+export function buildGroundedSourceReviewRequests(
+  plan: SourceSemanticReviewPlan,
+  sourceEvidence: SourceEvidenceReadingRecord,
+) {
   if (!verifiedPlans.has(plan))
     throw new Error("Unverified source semantic review plan");
-  if (values.length !== plan.requests.length)
+  const independent = readSourceEvidenceReading(
+    sourceEvidence,
+    plan.evidencePlan,
+  );
+  if (!independent?.accepted)
+    throw new Error("Independent source reading must be current and accepted");
+  const classifications = independent.responses.flatMap((r) =>
+    r.classifications.map((c) => ({ id: c.classificationId, ...c })),
+  );
+  return freeze(
+    plan.requests.map((request) => {
+      const observations = independent.observations.filter((o) =>
+        o.evidence.some((q) => request.sourceIds.includes(q.sourceRef)),
+      );
+      const readingIds = [
+        ...observations.map((o) => o.id),
+        ...classifications.map((c) => c.id),
+      ];
+      const responseFormat: AutomaticResponseFormat = {
+        type: "json_schema",
+        json_schema: {
+          name: "source_semantic_review",
+          strict: true,
+          schema: z.toJSONSchema(
+            responseSchema({
+              id: request.id,
+              claimIds: request.assignedClaimIds,
+              sourceIds: request.sourceIds,
+              evidenceHash: independent.hash,
+              readingIds,
+            }),
+            { reused: "ref" },
+          ),
+        },
+      };
+      const prompt = JSON.stringify({
+        ...JSON.parse(request.prompt),
+        sourceEvidenceHash: independent.hash,
+        independentReading: { observations, classifications },
+      });
+      if (
+        Buffer.byteLength(
+          request.system + prompt + JSON.stringify(responseFormat),
+        ) > MAX_BYTES
+      )
+        throw new Error("source_semantic_review_grounded_capacity");
+      return { ...request, prompt, responseFormat, readingIds };
+    }),
+  );
+}
+
+function validateResponses(
+  values: unknown[],
+  plan: SourceSemanticReviewPlan,
+  sourceEvidence: SourceEvidenceReadingRecord,
+) {
+  if (!verifiedPlans.has(plan))
+    throw new Error("Unverified source semantic review plan");
+  const independent = readSourceEvidenceReading(
+    sourceEvidence,
+    plan.evidencePlan,
+  );
+  if (!independent) throw new Error("Stale independent source reading");
+  if (!independent.accepted) {
+    if (values.length)
+      throw new Error(
+        "A blocked independent reading cannot receive claim approval",
+      );
+    return [];
+  }
+  const grounded = buildGroundedSourceReviewRequests(plan, sourceEvidence);
+  if (values.length !== grounded.length)
     throw new Error("Incomplete source semantic review coverage");
   const responses = values.map((value) => responseShape.parse(value));
   const claims = new Map(plan.claims.map((claim) => [claim.id, claim]));
   for (const [index, response] of responses.entries()) {
-    const request = plan.requests[index];
+    const request = grounded[index];
     if (response.chunkId !== request.id)
       throw new Error("Source review chunk identity mismatch");
+    if (response.sourceEvidenceHash !== independent.hash)
+      throw new Error("Source review independent evidence mismatch");
     if (
       response.checks.length !== request.assignedClaimIds.length ||
       new Set(response.checks.map((item) => item.claimId)).size !==
@@ -406,6 +507,55 @@ function validateResponses(values: unknown[], plan: SourceSemanticReviewPlan) {
     if (allRefs.some((id) => !request.sourceIds.includes(id)))
       throw new Error("Source review cites evidence outside its request");
     for (const check of response.checks) {
+      if (
+        new Set(check.readingRefs).size !== check.readingRefs.length ||
+        check.readingRefs.some((id) => !request.readingIds.includes(id))
+      )
+        throw new Error("Source review cites unknown independent reading");
+      const claim = claims.get(check.claimId)!;
+      const independentRefs = (id: string) =>
+        independent.observations
+          .find((o) => o.id === id)
+          ?.evidence.map((q) => q.sourceRef) ??
+        independent.responses
+          .flatMap((r) => r.classifications)
+          .find((c) => c.classificationId === id)
+          ?.evidence.map((q) => q.sourceRef) ??
+        [];
+      if (
+        check.verdict === "supported" &&
+        !check.readingRefs.some((id) =>
+          independentRefs(id).some((ref) => claim.sourceRefs.includes(ref)),
+        )
+      )
+        throw new Error(
+          "Supported claim requires its own independent evidence",
+        );
+      if (
+        check.verdict === "supported" &&
+        (claim.kind === "summary" || claim.kind.startsWith("component_")) &&
+        !check.readingRefs.some((id) =>
+          independent.observations.some(
+            (o) =>
+              o.id === id &&
+              o.kind === "performance" &&
+              o.evidence.some((q) => claim.sourceRefs.includes(q.sourceRef)),
+          ),
+        )
+      )
+        throw new Error(
+          "A component claim requires an independent performance observation",
+        );
+      if (claim.kind === "classification_reading") {
+        const index = Number(claim.subject.split("/").at(-1));
+        const classId = JSON.parse(request.prompt).draft.classificationReadings[
+          index
+        ].classificationId;
+        if (!check.readingRefs.includes(classId))
+          throw new Error(
+            "Classification claim requires its independent classification reading",
+          );
+      }
       if (
         check.verdict === "supported" &&
         !check.sourceRefs.some((id) =>
@@ -428,7 +578,8 @@ export const sourceSemanticReviewRecordSchema = z.strictObject({
   at: z.iso.datetime(),
   model: text(200),
   reasoningEffort: reasoning.nullable(),
-  responses: z.array(responseShape).min(1).max(MAX_REQUESTS),
+  sourceEvidence: sourceEvidenceReadingRecordSchema,
+  responses: z.array(responseShape).max(MAX_REQUESTS),
   hash,
 });
 export type SourceSemanticReviewRecord = z.infer<
@@ -437,9 +588,14 @@ export type SourceSemanticReviewRecord = z.infer<
 export function recordSourceSemanticReview(
   responses: unknown[],
   plan: SourceSemanticReviewPlan,
-  metadata: { id: string; at: string; model: string },
+  metadata: {
+    id: string;
+    at: string;
+    model: string;
+    sourceEvidence: SourceEvidenceReadingRecord;
+  },
 ): SourceSemanticReviewRecord {
-  const validated = validateResponses(responses, plan);
+  const validated = validateResponses(responses, plan, metadata.sourceEvidence);
   if (metadata.model !== plan.model)
     throw new Error("Source review model changed during inference");
   const unsigned = {
@@ -451,6 +607,7 @@ export function recordSourceSemanticReview(
     at: metadata.at,
     model: metadata.model,
     reasoningEffort: plan.reasoningEffort ?? null,
+    sourceEvidence: metadata.sourceEvidence,
     responses: validated,
   };
   return freeze(
@@ -497,8 +654,22 @@ export function readSourceSemanticReview(
   const { hash: recordedHash, ...unsigned } = record;
   if (digest(unsigned) !== recordedHash)
     throw new Error("Altered source semantic review record");
-  const responses = validateResponses(record.responses, plan);
-  const findings = responses.flatMap((response) => [
+  const responses = validateResponses(
+    record.responses,
+    plan,
+    record.sourceEvidence,
+  );
+  const independent = readSourceEvidenceReading(
+    record.sourceEvidence,
+    plan.evidencePlan,
+  )!;
+  const findings: {
+    chunkId: string;
+    kind: string;
+    reason: string;
+    sourceRefs: string[];
+    claimId?: string;
+  }[] = responses.flatMap((response) => [
     ...response.findings.map((finding) => ({
       chunkId: response.chunkId,
       ...finding,
@@ -513,10 +684,13 @@ export function readSourceSemanticReview(
         claimId: check.claimId,
       })),
   ]);
-  const complete = responses.every(
-    (response) => response.coverage === "complete",
+  findings.push(
+    ...independent.findings.map((f) => ({ chunkId: "source-evidence", ...f })),
   );
-  const accepted = complete && findings.length === 0;
+  const complete =
+    independent.complete &&
+    responses.every((response) => response.coverage === "complete");
+  const accepted = independent.accepted && complete && findings.length === 0;
   const ids = new Set(
     responses.flatMap((response) =>
       [...response.checks, ...response.findings].flatMap(
@@ -525,7 +699,11 @@ export function readSourceSemanticReview(
     ),
   );
   const evidence: ComparisonPassage[] = plan.context.body.passages
-    .filter((item) => ids.has(item.id))
+    .filter(
+      (item) =>
+        ids.has(item.id) ||
+        independent.findings.some((f) => f.sourceRefs.includes(item.id)),
+    )
     .map((item) => ({ ...item }));
   return freeze({
     ...record,

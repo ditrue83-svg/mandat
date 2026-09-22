@@ -1,3 +1,8 @@
+import {
+  inventedSourceEvidence,
+  inventedGroundedReviewRequests,
+  inventedReadingRefs,
+} from "./helpers/source-evidence-fixture";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test, vi } from "vitest";
@@ -280,14 +285,16 @@ function sourceReview(
 ) {
   const plan = buildAutomaticSourceSemanticReviewRequest(request, source);
   return recordSourceSemanticReview(
-    plan.requests.map((chunk) => {
+    inventedGroundedReviewRequests(plan).map((chunk) => {
       const body = JSON.parse(chunk.prompt);
       return {
         chunkId: body.chunkId,
+        sourceEvidenceHash: body.sourceEvidenceHash,
         coverage: "complete",
         checks: body.assignedClaims.map(
           (claim: { id: string; sourceRefs: string[] }) => ({
             claimId: claim.id,
+            readingRefs: inventedReadingRefs(body, claim),
             verdict,
             reason:
               "Giudizio inventato per verificare il flusso, non la qualità AI.",
@@ -304,6 +311,7 @@ function sourceReview(
       id: "invented-semantic-review",
       at: "2030-01-20T12:01:00.000Z",
       model: plan.model,
+      sourceEvidence: inventedSourceEvidence(plan),
     },
   );
 }
@@ -1732,7 +1740,7 @@ test.each([
     sourceVersion: "documentary-source-interpretation-v6",
   },
 ])(
-  "Historical $comparisonVersion / $sourceVersion stays stale under v14 without rewriting evidence",
+  "Historical $comparisonVersion / $sourceVersion stays stale under v15 without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
     const input = fixture();
     const request = buildAutomaticComparisonRequest(input);
@@ -1764,7 +1772,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v14");
+    assert.equal(request.version, "documentary-service-comparison-v15");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(

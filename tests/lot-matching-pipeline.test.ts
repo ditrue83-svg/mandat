@@ -1,3 +1,7 @@
+import {
+  inventedSourceEvidenceAnswer,
+  inventedReadingRefs,
+} from "./helpers/source-evidence-fixture";
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
@@ -144,13 +148,17 @@ afterAll(async () => {
 
 function inventedAnswer(prompt: string) {
   const data = JSON.parse(prompt);
+  if (data.stage === "original_source_evidence")
+    return inventedSourceEvidenceAnswer(data);
   if (data.assignedClaims) {
     return {
       chunkId: data.chunkId,
+      sourceEvidenceHash: data.sourceEvidenceHash,
       coverage: "complete",
       checks: data.assignedClaims.map(
         (claim: { id: string; sourceRefs: string[] }) => ({
           claimId: claim.id,
+          readingRefs: inventedReadingRefs(data, claim),
           verdict: "supported",
           reason:
             "Riscontro inventato per verificare il flusso, non il modello.",
@@ -298,7 +306,7 @@ it("Durably schedules once, completes a referenced comparison, and never creates
   expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
     status: "skipped",
   });
-  expect(infer).toHaveBeenCalledTimes(3);
+  expect(infer).toHaveBeenCalledTimes(4);
   const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
   expect(loaded.project.targets[0].automatic?.serviceRelation).toBe("direct");
   expect(loaded.project.qualityEventIds).toEqual([]);
@@ -322,6 +330,7 @@ it("Reuses only the public interpretation for another company and creates a fres
   const firstCalls = vi.mocked(infer).mock.calls;
   expect(firstCalls.map((call) => call[1])).toEqual([
     "documentary-source-interpretation",
+    "documentary-source-evidence",
     "documentary-source-semantic-review",
     "documentary-service-comparison",
   ]);
@@ -435,6 +444,7 @@ it("A rejected semantic review beyond twenty older source-only rows is reused ac
   expect(first.response).toBeNull();
   expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
     "documentary-source-interpretation",
+    "documentary-source-evidence",
     "documentary-source-semantic-review",
   ]);
   const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
@@ -519,6 +529,7 @@ for (const changed of ["missing", "version", "reasoning"] as const)
     expect(second.sourceInterpretation).toEqual(first.sourceInterpretation);
     expect(second.sourceReview).not.toEqual(first.sourceReview);
     expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
+      "documentary-source-evidence",
       "documentary-source-semantic-review",
       "documentary-service-comparison",
     ]);
@@ -548,6 +559,8 @@ it("An older row without review cannot hide a later rejection for the same exact
     .set({ result: { ...first, sourceReview: null } })
     .where(eq(schema.automaticMatchRuns.id, job.runId));
   vi.mocked(infer).mockImplementation(async (_pub, purpose, prompt) => {
+    if (purpose === "documentary-source-evidence")
+      return inventedAnswer(prompt);
     expect(purpose).toBe("documentary-source-semantic-review");
     const answer = inventedAnswer(prompt);
     if (!("checks" in answer)) throw new Error("Expected semantic review");
@@ -633,11 +646,21 @@ it("Reads every long-source chunk before interpretation and reuses those reading
   const readingCalls = calls.filter(
     (call) => call[1] === "documentary-source-reading",
   );
+  const evidenceCalls = calls.filter(
+    (call) => call[1] === "documentary-source-evidence",
+  );
   const reviewCalls = calls.filter(
     (call) => call[1] === "documentary-source-semantic-review",
   );
   expect(readingCalls.length).toBeGreaterThan(1);
   expect(reviewCalls.length).toBeGreaterThan(0);
+  expect(evidenceCalls.length).toBeGreaterThan(0);
+  for (const call of evidenceCalls) {
+    const body = JSON.parse(call[2]);
+    expect(body.draft).toBeUndefined();
+    expect(body.company).toBeUndefined();
+    expect(body.readings).toBeUndefined();
+  }
   for (const reading of readingCalls) {
     expect(reading[3]).toBe(2400);
     expect(reading[7]?.reasoningEffort).toBe("none");
@@ -645,6 +668,7 @@ it("Reads every long-source chunk before interpretation and reuses those reading
   expect(calls.map((call) => call[1])).toEqual([
     ...readingCalls.map(() => "documentary-source-reading"),
     "documentary-source-interpretation",
+    ...evidenceCalls.map(() => "documentary-source-evidence"),
     ...reviewCalls.map(() => "documentary-source-semantic-review"),
     "documentary-service-comparison",
   ]);
@@ -782,6 +806,7 @@ for (const changed of ["source", "model", "source_reasoning"] as const)
     );
     expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
       "documentary-source-interpretation",
+      "documentary-source-evidence",
       "documentary-source-semantic-review",
       "documentary-service-comparison",
     ]);
@@ -853,6 +878,7 @@ it("A source correction during semantic review prevents the final company compar
   });
   expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
     "documentary-source-interpretation",
+    "documentary-source-evidence",
     "documentary-source-semantic-review",
   ]);
   const [run] = await db
@@ -883,6 +909,7 @@ it("Semantic-review transport errors retain bounded technical retry and never be
   expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual(
     Array.from({ length: 3 }).flatMap(() => [
       "documentary-source-interpretation",
+      "documentary-source-evidence",
       "documentary-source-semantic-review",
     ]),
   );
@@ -965,7 +992,7 @@ it("An expired lease can be recovered once, while a live lease prevents a duplic
   expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
     status: "completed",
   });
-  expect(infer).toHaveBeenCalledTimes(3);
+  expect(infer).toHaveBeenCalledTimes(4);
 });
 
 it("An abandoned third attempt is closed once without another provider call", async () => {
@@ -1200,7 +1227,7 @@ it("Returning to a superseded profile requeues its input once and preserves the 
     .from(schema.automaticMatchRuns)
     .where(eq(schema.automaticMatchRuns.id, job.runId));
   expect(exhausted).toMatchObject({ status: "superseded", attempts: 3 });
-  expect(infer).toHaveBeenCalledTimes(3);
+  expect(infer).toHaveBeenCalledTimes(4);
 });
 
 it("A job for another company cannot read, run or update the owner's comparison", async () => {
@@ -1872,3 +1899,69 @@ it.each(["summary", "classification"] as const)(
     expect(classify).toHaveBeenCalledTimes(stage === "classification" ? 1 : 0);
   },
 );
+
+it("Independent source conflicts stop before draft approval and are reused across companies", async () => {
+  const { f, job } = await automaticFixture();
+  vi.mocked(infer).mockImplementation(async (_pub, purpose, prompt) => {
+    const answer = inventedAnswer(prompt);
+    if (purpose !== "documentary-source-evidence") return answer;
+    const data = JSON.parse(prompt);
+    expect(data.draft).toBeUndefined();
+    expect(data.assignedClaims).toBeUndefined();
+    if (!("observations" in answer))
+      throw new Error("Expected independent evidence");
+    return {
+      ...answer,
+      issues: [
+        {
+          kind: "source_conflict",
+          reason:
+            "Contraddizione inventata per verificare l'arresto prima del draft.",
+          evidence: answer.observations[0].evidence,
+        },
+      ],
+    };
+  });
+  expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+    status: "completed",
+  });
+  const first = await storedAutomaticResult(job.runId);
+  expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
+    "documentary-source-interpretation",
+    "documentary-source-evidence",
+  ]);
+  expect(first.sourceReview?.responses).toEqual([]);
+  expect(first.sourceReview?.sourceEvidence.responses[0].issues).toHaveLength(
+    1,
+  );
+  expect(first.response).toBeNull();
+  const secondJob = await automaticJob(f.p.id, await company());
+  vi.mocked(infer).mockClear();
+  expect(await runAutomaticComparison(secondJob, { now: () => now })).toEqual({
+    status: "completed",
+  });
+  expect((await storedAutomaticResult(secondJob.runId)).sourceReview).toEqual(
+    first.sourceReview,
+  );
+  expect(infer).not.toHaveBeenCalled();
+});
+
+it("A source correction during independent reading prevents exposing the draft to the reviewer", async () => {
+  const { f, job } = await automaticFixture();
+  vi.mocked(infer).mockImplementation(async (_pub, purpose, prompt) => {
+    if (purpose === "documentary-source-evidence") {
+      const corrected = structuredClone(f.raw);
+      corrected.lots[0].orderDescription.it =
+        "Rettifica inventata: fornitura di alberi.";
+      await f.adopt((await f.observation(corrected)).id);
+    }
+    return inventedAnswer(prompt);
+  });
+  expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+    status: "superseded",
+  });
+  expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
+    "documentary-source-interpretation",
+    "documentary-source-evidence",
+  ]);
+});

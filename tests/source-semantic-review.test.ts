@@ -11,11 +11,28 @@ import {
 import {
   SOURCE_SEMANTIC_REVIEW_VERSION,
   buildSourceSemanticReviewRequest,
-  recordSourceSemanticReview,
+  recordSourceSemanticReview as productionRecordSourceSemanticReview,
   readSourceSemanticReview,
   sourceSemanticReviewRecordSchema,
   type SourceSemanticReviewPlan,
 } from "../src/lib/source-semantic-review";
+
+import {
+  inventedSourceEvidence,
+  inventedGroundedReviewRequests,
+  inventedReadingRefs,
+} from "./helpers/source-evidence-fixture";
+import { recordSourceEvidenceReading } from "../src/lib/source-evidence-reading";
+function recordSourceSemanticReview(
+  responses: unknown[],
+  plan: SourceSemanticReviewPlan,
+  metadata: { id: string; at: string; model: string },
+) {
+  return productionRecordSourceSemanticReview(responses, plan, {
+    ...metadata,
+    sourceEvidence: inventedSourceEvidence(plan),
+  });
+}
 
 const config = {
   model: "invented-review-model",
@@ -155,21 +172,29 @@ function draft(input = context()) {
   );
 }
 function answers(plan: SourceSemanticReviewPlan) {
-  return plan.requests.map((request) => ({
-    chunkId: request.id,
-    coverage: "complete" as const,
-    checks: request.assignedClaimIds.map((id) => ({
-      claimId: id,
-      verdict: "supported" as const,
-      reason: "Supporto inventato per verificare soltanto il contratto.",
-      sourceRefs: plan.claims.find((claim) => claim.id === id)!.sourceRefs,
-    })),
-    findings: [] as {
-      kind: "omitted_scope" | "contradiction" | "unverifiable";
-      reason: string;
-      sourceRefs: string[];
-    }[],
-  }));
+  return inventedGroundedReviewRequests(plan).map((request) => {
+    const body = JSON.parse(request.prompt);
+    return {
+      chunkId: request.id,
+      sourceEvidenceHash: body.sourceEvidenceHash,
+      coverage: "complete" as const,
+      checks: request.assignedClaimIds.map((id) => {
+        const claim = plan.claims.find((c) => c.id === id)!;
+        return {
+          claimId: id,
+          verdict: "supported" as const,
+          reason: "Supporto inventato per verificare soltanto il contratto.",
+          sourceRefs: claim.sourceRefs,
+          readingRefs: inventedReadingRefs(body, claim),
+        };
+      }),
+      findings: [] as {
+        kind: "omitted_scope" | "contradiction" | "unverifiable";
+        reason: string;
+        sourceRefs: string[];
+      }[],
+    };
+  });
 }
 
 test("Independent review is source-only and binds every server claim without changing the draft", () => {
@@ -559,7 +584,107 @@ test("Review capacity fails explicitly without truncating an indivisible origina
   const before = JSON.stringify(oversized);
   assert.throws(
     () => buildSourceSemanticReviewRequest(oversized, original, config),
-    /source_semantic_review_prompt_capacity/,
+    /source_(semantic_review|evidence)_prompt_capacity/,
   );
   assert.equal(JSON.stringify(oversized), before);
+});
+
+test("Changing the proposed draft never changes the independent source request", () => {
+  const input = context(),
+    first = draft(input);
+  const request = buildSourceInterpretationRequest(input);
+  const changed = recordSourceInterpretation(
+    {
+      ...first.response,
+      summary:
+        "UNA LETTURA DIFFERENTE CHE NON DEVE ENTRARE NEL PRIMO PASSAGGIO.",
+    },
+    request,
+    { ...metadata, id: "other-draft", model: request.model },
+  );
+  const a = buildSourceSemanticReviewRequest(input, first, config),
+    b = buildSourceSemanticReviewRequest(input, changed, config);
+  assert.deepEqual(a.evidencePlan.requests, b.evidencePlan.requests);
+  assert.equal(a.evidencePlan.inputHash, b.evidencePlan.inputHash);
+  assert.notEqual(a.inputHash, b.inputHash);
+  assert(!JSON.stringify(a.evidencePlan.requests).includes(first.hash));
+  assert(
+    !JSON.stringify(b.evidencePlan.requests).includes(changed.response.summary),
+  );
+});
+
+test("A v1 approval without independent evidence is obsolete and cannot be promoted", () => {
+  const plan = buildSourceSemanticReviewRequest(context(), draft(), config);
+  const old = {
+    version: "documentary-source-semantic-review-v1",
+    sourceKey: plan.sourceKey,
+    responses: [
+      {
+        coverage: "complete",
+        checks: [{ claimId: "q1", verdict: "supported" }],
+        findings: [],
+      },
+    ],
+  };
+  assert.equal(readSourceSemanticReview(old, plan), null);
+  assert.throws(() =>
+    productionRecordSourceSemanticReview(answers(plan), plan, {
+      ...metadata,
+      sourceEvidence: undefined as never,
+    }),
+  );
+  const responses = answers(plan);
+  responses[0].sourceEvidenceHash = "f".repeat(64);
+  assert.throws(
+    () => recordSourceSemanticReview(responses, plan, metadata),
+    /independent evidence mismatch/,
+  );
+});
+
+test("An independent classification conflict blocks even unanimous draft approval and persists its cause", () => {
+  const plan = buildSourceSemanticReviewRequest(context(), draft(), config);
+  const oldEvidence = inventedSourceEvidence(plan),
+    responses = structuredClone(oldEvidence.responses);
+  responses[0].classifications[0].relationship = "conflicting";
+  responses[0].classifications[0].explanation =
+    "Contraddizione inventata fra due affermazioni originali.";
+  responses[0].classifications[0].evidence.push({
+    sourceRef: "s1",
+    text: context().body.passages[0].text,
+  });
+  const evidence = recordSourceEvidenceReading(responses, plan.evidencePlan, {
+    ...metadata,
+    id: "invented-conflict",
+  });
+  assert.throws(
+    () =>
+      productionRecordSourceSemanticReview(answers(plan), plan, {
+        ...metadata,
+        sourceEvidence: evidence,
+      }),
+    /blocked independent reading/,
+  );
+  const saved = productionRecordSourceSemanticReview([], plan, {
+    ...metadata,
+    sourceEvidence: evidence,
+  });
+  const resolved = readSourceSemanticReview(saved, plan)!;
+  assert.equal(resolved.accepted, false);
+  assert(resolved.findings.some((f) => f.kind === "classification_conflict"));
+  assert.equal(saved.responses.length, 0);
+  assert.deepEqual(saved.sourceEvidence, evidence);
+});
+
+test("Classification references alone cannot approve the component's contractual role", () => {
+  const plan = buildSourceSemanticReviewRequest(context(), draft(), config),
+    response = answers(plan);
+  const role = plan.claims.find((c) => c.kind === "component_role")!;
+  for (const part of response) {
+    const check = part.checks.find((c) => c.claimId === role.id);
+    if (check) check.readingRefs = ["c1"];
+  }
+  assert.throws(
+    () => recordSourceSemanticReview(response, plan, metadata),
+    /independent performance/,
+  );
 });

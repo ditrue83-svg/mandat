@@ -17,8 +17,13 @@ import {
 import {
   recordSourceSemanticReview,
   readSourceSemanticReview,
+  buildGroundedSourceReviewRequests,
   type SourceSemanticReviewRecord,
 } from "@/lib/source-semantic-review";
+import {
+  recordSourceEvidenceReading,
+  readSourceEvidenceReading,
+} from "@/lib/source-evidence-reading";
 import { infer, type AiTransport } from "./ai";
 import { documentaryAiConfiguration } from "@/lib/documentary-ai-config";
 
@@ -145,8 +150,43 @@ export async function compareDocumentaryTarget(
       }
     }
     if (!sourceReview) {
+      const evidenceResponses: unknown[] = [];
+      for (const part of reviewPlan.evidencePlan.requests) {
+        await beforeRequest?.();
+        evidenceResponses.push(
+          await infer(
+            input.publication,
+            "documentary-source-evidence",
+            part.prompt,
+            part.maxTokens,
+            transport,
+            part.system,
+            part.responseFormat,
+            {
+              ...configuration,
+              model: reviewPlan.model,
+              reasoningEffort: reviewPlan.reasoningEffort,
+            },
+          ),
+        );
+      }
+      const sourceEvidence = recordSourceEvidenceReading(
+        evidenceResponses,
+        reviewPlan.evidencePlan,
+        {
+          id: randomUUID(),
+          at: new Date().toISOString(),
+          model: reviewPlan.model,
+        },
+      );
+      const independent = readSourceEvidenceReading(
+        sourceEvidence,
+        reviewPlan.evidencePlan,
+      )!;
       const responses: unknown[] = [];
-      for (const part of reviewPlan.requests) {
+      for (const part of independent.accepted
+        ? buildGroundedSourceReviewRequests(reviewPlan, sourceEvidence)
+        : []) {
         await beforeRequest?.();
         responses.push(
           await infer(
@@ -169,6 +209,7 @@ export async function compareDocumentaryTarget(
         id: randomUUID(),
         at: new Date().toISOString(),
         model: reviewPlan.model,
+        sourceEvidence,
       });
     }
     const review = readSourceSemanticReview(sourceReview, reviewPlan);
