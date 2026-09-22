@@ -8,7 +8,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v1";
+  "documentary-source-interpretation-v2";
 const digest = (value: unknown) =>
   createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
@@ -172,7 +172,9 @@ const contextSchema = z.strictObject({
 });
 
 const componentSchema = z.strictObject({
-  description: text(600),
+  description: text(600).describe(
+    "Prestazione concreta: nomina l'azione e il prodotto o servizio acquistato, comprensibili senza leggere la sintesi. Riporta solo caratteristiche attestate dalla fonte. Non scrivere il nome di un campo, un'intestazione o la funzione di un dato nel documento.",
+  ),
   role: z.enum([
     "supply",
     "execute",
@@ -183,15 +185,26 @@ const componentSchema = z.strictObject({
     "advise",
     "other",
   ]),
-  importance: z.enum(["main", "accessory", "excluded"]),
-  sourceRefs,
+  importance: z
+    .enum(["main", "accessory", "excluded"])
+    .describe(
+      "Posizione della prestazione nel contratto: principale, accessoria oppure esplicitamente esclusa. Non indica l'importanza di un dato o di una sezione del documento.",
+    ),
+  sourceRefs: sourceRefs.describe(
+    "Cita il testo che identifica la prestazione, anche se si trova in una clausola o nel contesto del progetto. Codici ed etichette classificatorie possono chiarire questo stesso oggetto, ma non sono da soli una prestazione distinta.",
+  ),
 });
 const issueSchema = z.strictObject({ explanation: text(600), sourceRefs });
 export const sourceInterpretationResponseSchema = z
   .strictObject({
     status: z.enum(["resolved", "uncertain", "conflicting"]),
     summary: text(1200),
-    components: z.array(componentSchema).max(64),
+    components: z
+      .array(componentSchema)
+      .max(64)
+      .describe(
+        "Una componente per ciascuna prestazione o prodotto realmente acquistato, accessorio o esplicitamente escluso. Descrizione e classificazione dello stesso acquisto non sono due prestazioni. Dati amministrativi, codici, traduzioni e intestazioni non creano componenti aggiuntive.",
+      ),
     issues: z.array(issueSchema).max(32),
     targetRef: sourceId,
   })
@@ -323,6 +336,8 @@ export function buildSourceInterpretationRequest(
         "uncertain significa che il significato o l'ambito professionale resta indeterminabile dai dati forniti. Spiega l'incertezza citando i passaggi che la lasciano aperta. Se una lettura è unreadable, lo stato non può essere resolved.",
         "conflicting richiede due asserzioni materialmente incompatibili della fonte sul medesimo target, con almeno due riferimenti distinti nello stesso issue. La tua interpretazione preferita non è un'asserzione della fonte. Una categoria generale coerente con una descrizione specifica o polisemica non è un conflitto; traduzioni, ripetizioni e segmenti spezzati non lo sono.",
         "Distingui sempre oggetto acquistato, ruolo professionale e opera a cui serve. Conserva separatamente ogni prestazione principale, accessoria e dichiaratamente esclusa; non promuovere prestazioni di terzi a servizi richiesti. Non ridurre un pacchetto a una sola componente.",
+        "Ogni componente deve rispondere a cosa viene fornito o svolto: descrivila con un'azione e il prodotto o servizio concreto. Non usare intestazioni come descrizione. La sintesi e le componenti devono esprimere lo stesso acquisto; ciascuna componente deve essere comprensibile da sola.",
+        "Un codice, una sua etichetta e le traduzioni spiegano l'oggetto: non sono ulteriori prestazioni da fornire. Non duplicare un acquisto per la sua classificazione. Per ogni componente cita almeno il testo dell'oggetto o di una clausola che la descrive; aggiungi le classificazioni utili a disambiguarla agli stessi riferimenti. Se la fonte acquista davvero servizi di classificazione o catalogazione, descrivi quei servizi e cita il testo che li richiede.",
         "Il contesto condiviso del progetto non sostituisce la classificazione del lotto selezionato. Usa solo le prestazioni applicabili al target; non assegnargli lavori di altri lotti. targetRef deve identificare un passaggio service del target, anche se il titolo è geografico e il servizio è nel contesto comune.",
         "Ricongiungi i passaggi della stessa rawPath secondo startUtf16. Tutti i segmenti previsti sono stati considerati a monte; nessun limite di risposta autorizza a omettere una prestazione. Se non puoi conservarle, usa uncertain con un issue esplicito. Le sourceRefs citano solo ID forniti; testi e citazioni originali saranno recuperati dal server.",
       ],
@@ -348,8 +363,17 @@ export function buildSourceInterpretationRequest(
         sourceInterpretationResponseSchema.safeExtend({
           targetRef: z.enum(targets),
           components: z
-            .array(componentSchema.safeExtend({ sourceRefs: boundedRefs }))
-            .max(64),
+            .array(
+              componentSchema.safeExtend({
+                sourceRefs: boundedRefs.describe(
+                  componentSchema.shape.sourceRefs.description!,
+                ),
+              }),
+            )
+            .max(64)
+            .describe(
+              sourceInterpretationResponseSchema.shape.components.description!,
+            ),
           issues: z
             .array(issueSchema.safeExtend({ sourceRefs: boundedRefs }))
             .max(32),
@@ -421,6 +445,23 @@ export function validateSourceInterpretation(
     throw new Error(
       "Source interpretation requires selected-target service evidence",
     );
+  const classificationIds = new Set(
+    request.body.classifications.flatMap((classification) => [
+      ...(classification.code?.sourceRefs ?? []),
+      ...classification.labels.flatMap((label) => label.sourceRefs),
+    ]),
+  );
+  if (
+    value.components.some((component) =>
+      component.sourceRefs.every((id) => classificationIds.has(id)),
+    )
+  )
+    throw new Error(
+      "A component cannot be supported only by classification metadata",
+    );
+  // This is a structural evidence check, not a semantic proof. Clauses can
+  // describe real services even when their passage role is 'context'. Never
+  // remove an invalid component to make an incomplete response look resolved.
   return freeze({
     response: value,
     status: value.status,

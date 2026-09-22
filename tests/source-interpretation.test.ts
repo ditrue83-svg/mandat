@@ -518,3 +518,208 @@ test("Provider context is bounded with schema bytes included, never silently tru
     ) <= 160_000,
   );
 });
+
+test("Classification-only components reject the entire interpretation regardless of importance or duplicated classification paths", () => {
+  const input = context();
+  const duplicate = input.body.classifications[0];
+  const request = buildSourceInterpretationRequest({
+    ...input,
+    body: {
+      ...input.body,
+      classifications: [
+        ...input.body.classifications,
+        {
+          ...duplicate,
+          rawPath: "/base/cpvCode",
+          code: { text: "00000000", sourceRefs: ["s5"] },
+          labels: [
+            {
+              language: "it",
+              text: "FAMIGLIA_INVENTATA 🌳",
+              sourceRefs: ["s6"],
+            },
+          ],
+        },
+      ],
+      passages: [
+        ...input.body.passages,
+        { ...input.body.passages[1], id: "s5", rawPath: "/base/cpvCode/code" },
+        {
+          ...input.body.passages[2],
+          id: "s6",
+          rawPath: "/base/cpvCode/label/it",
+        },
+      ],
+    },
+  });
+  assert.equal(
+    recordSourceInterpretation(response(), request, metadata).response.status,
+    "resolved",
+  );
+  for (const importance of ["main", "accessory", "excluded"] as const)
+    for (const refs of [
+      ["s2"],
+      ["s3"],
+      ["s5"],
+      ["s2", "s5"],
+      ["s2", "s3", "s5", "s6"],
+    ]) {
+      const invalid = {
+        ...response(),
+        components: [
+          {
+            ...response().components[0],
+            description: "Oggetto acquistato",
+            sourceRefs: ["s1"],
+          },
+          {
+            description: "Classificazione CPV",
+            role: "supply",
+            importance,
+            sourceRefs: refs,
+          },
+        ],
+      };
+      const before = JSON.stringify(invalid);
+      // Reject the record as a whole. Returning just the first component would
+      // rewrite the model's interpretation and conceal the invalid second one.
+      assert.throws(() =>
+        recordSourceInterpretation(invalid, request, metadata),
+      );
+      assert.equal(JSON.stringify(invalid), before);
+    }
+});
+
+test("Concrete main accessory and excluded activities may be supported entirely by clause context", () => {
+  const input = context();
+  const clauseText =
+    "Il servizio comprende gestione del deposito, con pulizia accessoria; manutenzione dei mezzi esclusa.";
+  const request = buildSourceInterpretationRequest({
+    ...input,
+    body: {
+      ...input.body,
+      passages: input.body.passages.map((passage) =>
+        passage.id === "s4"
+          ? { ...passage, text: clauseText, endUtf16: clauseText.length }
+          : passage,
+      ),
+    },
+  });
+  assert.equal(
+    request.body.passages.find((passage) => passage.id === "s4")!.role,
+    "context",
+  );
+  const record = recordSourceInterpretation(
+    {
+      ...response(),
+      components: [
+        {
+          description: "Gestione del deposito.",
+          role: "operate",
+          importance: "main",
+          sourceRefs: ["s4"],
+        },
+        {
+          description: "Pulizia del deposito.",
+          role: "execute",
+          importance: "accessory",
+          sourceRefs: ["s4"],
+        },
+        {
+          description: "Manutenzione dei mezzi.",
+          role: "maintain",
+          importance: "excluded",
+          sourceRefs: ["s4"],
+        },
+      ],
+    },
+    request,
+    metadata,
+  );
+  const resolved = readSourceInterpretation(record, request)!;
+  assert.deepEqual(
+    resolved.components.map((component) => component.importance),
+    ["main", "accessory", "excluded"],
+  );
+  assert.ok(
+    resolved.components.every(
+      (component) =>
+        component.sourceRefs.length === 1 && component.sourceRefs[0] === "s4",
+    ),
+  );
+  assert.equal(
+    resolved.evidence.find((passage) => passage.id === "s4")!.text,
+    clauseText,
+  );
+});
+
+test("A real purchased classification or cataloguing service is not rejected by its vocabulary", () => {
+  const input = context();
+  const serviceText =
+    "Servizi di classificazione CPV, catalogazione e correzione dei metadati del catalogo acquisti.";
+  const request = buildSourceInterpretationRequest({
+    ...input,
+    body: {
+      ...input.body,
+      passages: input.body.passages.map((passage) =>
+        passage.id === "s1"
+          ? { ...passage, text: serviceText, endUtf16: serviceText.length }
+          : passage,
+      ),
+    },
+  });
+  const record = recordSourceInterpretation(
+    {
+      ...response(),
+      summary: serviceText,
+      components: [
+        {
+          description: serviceText,
+          role: "execute",
+          importance: "main",
+          sourceRefs: ["s1"],
+        },
+      ],
+    },
+    request,
+    metadata,
+  );
+  assert.equal(
+    readSourceInterpretation(record, request)!.components[0].description,
+    serviceText,
+  );
+});
+
+test("A source v1 record is stale under v2 without rewriting its historical response", () => {
+  const request = buildSourceInterpretationRequest(context());
+  assert.equal(request.version, "documentary-source-interpretation-v2");
+  const current = recordSourceInterpretation(response(), request, metadata);
+  const digest = (value: unknown) =>
+    createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
+  const { hash: _hash, ...unsigned } = current;
+  const historicalBody = {
+    ...unsigned,
+    version: "documentary-source-interpretation-v1",
+    sourceKey: digest({
+      version: "documentary-source-interpretation-v1",
+      binding: request.binding,
+    }),
+  };
+  const historical = { ...historicalBody, hash: digest(historicalBody) };
+  const before = JSON.stringify(historical);
+  assert.notEqual(historical.sourceKey, current.sourceKey);
+  assert.equal(readSourceInterpretation(historical, request), null);
+  assert.equal(
+    readSourceInterpretation(
+      {
+        ...historical,
+        sourceKey: current.sourceKey,
+        inputHash: current.inputHash,
+      },
+      request,
+    ),
+    null,
+  );
+  assert.equal(JSON.stringify(historical), before);
+  assert.equal(readSourceInterpretation(current, request)!.status, "resolved");
+});

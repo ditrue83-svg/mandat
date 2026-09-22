@@ -993,7 +993,7 @@ test("Persisted responses cannot cross company boundaries or survive a changed p
   );
 });
 
-test("A historical v7 record is stale under v8 even with the same source, profile and model", () => {
+test("A historical v8 comparison with a v1 source is stale under v9 without rewriting evidence", () => {
   const input = fixture();
   const request = buildAutomaticComparisonRequest(input);
   const source = sourceRecord(request);
@@ -1006,17 +1006,21 @@ test("A historical v7 record is stale under v8 even with the same source, profil
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
   const { hash: _hash, ...unsigned } = stored;
-  const v7Unsigned = {
+  const v8Unsigned = {
     ...unsigned,
-    version: "documentary-service-comparison-v7",
+    sourceInterpretation: {
+      ...unsigned.sourceInterpretation,
+      version: "documentary-source-interpretation-v1",
+    },
+    version: "documentary-service-comparison-v8",
     inputHash: digest({
       ...request.dependency,
-      version: "documentary-service-comparison-v7",
+      version: "documentary-service-comparison-v8",
     }),
   };
-  const historical = { ...v7Unsigned, hash: digest(v7Unsigned) };
+  const historical = { ...v8Unsigned, hash: digest(v8Unsigned) };
   const before = JSON.stringify(historical);
-  assert.equal(request.version, "documentary-service-comparison-v8");
+  assert.equal(request.version, "documentary-service-comparison-v9");
   assert.notEqual(historical.inputHash, request.inputHash);
   assert.equal(readAutomaticComparison(historical, request), null);
   assert.deepEqual(resolveAutomaticComparison(input, [historical]), {
