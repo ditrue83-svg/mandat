@@ -27,6 +27,7 @@ const reasoning = z.enum(["none", "low", "medium", "high"]);
 const configSchema = z.strictObject({
   model: text(200),
   reasoningEffort: reasoning.optional(),
+  maxTokens: z.number().int().min(1).max(16_384).optional(),
 });
 const quote = z.strictObject({
   sourceRef: z.string().regex(/^s\d+$/),
@@ -87,10 +88,12 @@ export function buildSourceEvidenceReadingRequest(
   configuration: {
     model: string;
     reasoningEffort?: "none" | "low" | "medium" | "high";
+    maxTokens?: number;
   },
 ) {
   const context = validateSourceInterpretationContext(input);
   const config = configSchema.parse(configuration);
+  const maxTokens = config.maxTokens ?? MAX_TOKENS;
   const classifications = context.body.classifications.map((item, index) => ({
     id: `c${index + 1}`,
     ...item,
@@ -176,7 +179,7 @@ export function buildSourceEvidenceReadingRequest(
       system,
       prompt,
       responseFormat,
-      maxTokens: MAX_TOKENS,
+      maxTokens,
       sourceIds,
       coverage: group,
       classificationIds: group.classificationIds,
@@ -239,12 +242,17 @@ export function buildSourceEvidenceReadingRequest(
   flush();
   if (!requests.length) throw new Error("Empty source evidence reading");
   const sourceKey = sourceInterpretationKey(context.binding);
+  const { maxTokens: _configuredMaxTokens, ...identityConfig } = config;
   const inputHash = digest({
     version: SOURCE_EVIDENCE_READING_VERSION,
     sourceKey,
     body: context.body,
     targetScope: context.targetScope,
-    config: { ...config, reasoningEffort: config.reasoningEffort ?? null },
+    config: {
+      ...identityConfig,
+      reasoningEffort: config.reasoningEffort ?? null,
+      ...(maxTokens === MAX_TOKENS ? {} : { maxTokens }),
+    },
     requests,
   });
   const plan = freeze({
@@ -254,6 +262,7 @@ export function buildSourceEvidenceReadingRequest(
     context,
     classifications,
     ...config,
+    maxTokens,
     requests,
   });
   verified.add(plan);
@@ -375,6 +384,7 @@ export const sourceEvidenceReadingRecordSchema = z.strictObject({
   at: z.iso.datetime(),
   model: text(200),
   reasoningEffort: reasoning.nullable(),
+  maxTokens: z.number().int().min(1).max(16_384).optional(),
   responses: z.array(responseSchema).min(1).max(MAX_PARTS),
   hash,
 });
@@ -395,6 +405,7 @@ export function recordSourceEvidenceReading(
     inputHash: plan.inputHash,
     ...metadata,
     reasoningEffort: plan.reasoningEffort ?? null,
+    ...(plan.maxTokens === MAX_TOKENS ? {} : { maxTokens: plan.maxTokens }),
     responses,
   };
   return freeze(
@@ -416,6 +427,7 @@ export function readSourceEvidenceReading(
       inputHash: hash,
       model: z.string(),
       reasoningEffort: reasoning.nullable(),
+      maxTokens: z.number().int().min(1).max(16_384).optional(),
     })
     .parse(value);
   if (
@@ -423,7 +435,9 @@ export function readSourceEvidenceReading(
     header.sourceKey !== plan.sourceKey ||
     header.inputHash !== plan.inputHash ||
     header.model !== plan.model ||
-    header.reasoningEffort !== (plan.reasoningEffort ?? null)
+    header.reasoningEffort !== (plan.reasoningEffort ?? null) ||
+    header.maxTokens !==
+      (plan.maxTokens === MAX_TOKENS ? undefined : plan.maxTokens)
   )
     return null;
   const record = sourceEvidenceReadingRecordSchema.parse(value);

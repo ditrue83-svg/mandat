@@ -100,6 +100,48 @@ const responses = (
 ) =>
   plan.requests.map((r) => inventedSourceEvidenceAnswer(JSON.parse(r.prompt)));
 
+test("An explicit output limit binds requests, plan, record and hash without changing the default", () => {
+  const input = context();
+  const standard = buildSourceEvidenceReadingRequest(input, config);
+  const explicitDefault = buildSourceEvidenceReadingRequest(input, {
+    ...config,
+    maxTokens: 8192,
+  });
+  const expanded = buildSourceEvidenceReadingRequest(input, {
+    ...config,
+    maxTokens: 16_384,
+  });
+  assert.equal(standard.maxTokens, 8192);
+  assert(standard.requests.every((request) => request.maxTokens === 8192));
+  assert.equal(explicitDefault.inputHash, standard.inputHash);
+  assert.deepEqual(explicitDefault.requests, standard.requests);
+  assert.equal(expanded.maxTokens, 16_384);
+  assert(expanded.requests.every((request) => request.maxTokens === 16_384));
+  assert.notEqual(expanded.inputHash, standard.inputHash);
+  const standardRecord = recordSourceEvidenceReading(
+    responses(standard),
+    standard,
+    metadata,
+  );
+  const expandedRecord = recordSourceEvidenceReading(
+    responses(expanded),
+    expanded,
+    metadata,
+  );
+  assert.equal("maxTokens" in standardRecord, false);
+  assert.equal(expandedRecord.maxTokens, 16_384);
+  assert.equal(
+    readSourceEvidenceReading(expandedRecord, expanded)?.accepted,
+    true,
+  );
+  assert.equal(readSourceEvidenceReading(standardRecord, expanded), null);
+  assert.equal(readSourceEvidenceReading(expandedRecord, standard), null);
+  for (const maxTokens of [0, 16_385, NaN])
+    assert.throws(() =>
+      buildSourceEvidenceReadingRequest(input, { ...config, maxTokens }),
+    );
+});
+
 test("Independent reading contains original source only and preserves label evidence in its strict schema", () => {
   const input = context(),
     plan = buildSourceEvidenceReadingRequest(input, config),

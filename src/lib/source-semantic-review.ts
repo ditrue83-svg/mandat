@@ -46,6 +46,7 @@ const reasoning = z.enum(["none", "low", "medium", "high"]);
 const configurationSchema = z.strictObject({
   model: text(200),
   reasoningEffort: reasoning.optional(),
+  maxTokens: z.number().int().min(1).max(16_384).optional(),
 });
 const refs = z
   .array(z.string().regex(/^s\d+$/))
@@ -131,10 +132,12 @@ export function buildSourceSemanticReviewRequest(
   configuration: {
     model: string;
     reasoningEffort?: "none" | "low" | "medium" | "high";
+    maxTokens?: number;
   },
 ) {
   const context = validateSourceInterpretationContext(input);
   const config = configurationSchema.parse(configuration);
+  const maxTokens = config.maxTokens ?? MAX_TOKENS;
   const evidencePlan = buildSourceEvidenceReadingRequest(context, config);
   const draft = sourceInterpretationRecordSchema.parse(
     structuredClone(draftValue),
@@ -298,7 +301,7 @@ export function buildSourceSemanticReviewRequest(
       system,
       prompt,
       responseFormat,
-      maxTokens: MAX_TOKENS,
+      maxTokens,
       assignedClaimIds: group.claims.map((claim) => claim.id),
       sourceIds: passages.map((passage) => passage.id),
       coverage: {
@@ -371,16 +374,18 @@ export function buildSourceSemanticReviewRequest(
   flush();
   if (!requests.length) throw new Error("Empty source semantic review");
   const sourceKey = draft.sourceKey;
+  const { maxTokens: _configuredMaxTokens, ...identityConfig } = config;
   const inputHash = digest({
     version: SOURCE_SEMANTIC_REVIEW_VERSION,
     sourceKey,
     draftHash,
     context,
     configuration: {
-      ...config,
+      ...identityConfig,
       reasoningEffort: config.reasoningEffort ?? null,
+      ...(maxTokens === MAX_TOKENS ? {} : { maxTokens }),
     },
-    maxTokens: MAX_TOKENS,
+    maxTokens,
     claims,
     requests,
     evidenceInputHash: evidencePlan.inputHash,
@@ -392,7 +397,7 @@ export function buildSourceSemanticReviewRequest(
     inputHash,
     model: config.model,
     reasoningEffort: config.reasoningEffort,
-    maxTokens: MAX_TOKENS,
+    maxTokens,
     context,
     claims,
     requests,
@@ -578,6 +583,7 @@ export const sourceSemanticReviewRecordSchema = z.strictObject({
   at: z.iso.datetime(),
   model: text(200),
   reasoningEffort: reasoning.nullable(),
+  maxTokens: z.number().int().min(1).max(16_384).optional(),
   sourceEvidence: sourceEvidenceReadingRecordSchema,
   responses: z.array(responseShape).max(MAX_REQUESTS),
   hash,
@@ -607,6 +613,7 @@ export function recordSourceSemanticReview(
     at: metadata.at,
     model: metadata.model,
     reasoningEffort: plan.reasoningEffort ?? null,
+    ...(plan.maxTokens === MAX_TOKENS ? {} : { maxTokens: plan.maxTokens }),
     sourceEvidence: metadata.sourceEvidence,
     responses: validated,
   };
@@ -639,6 +646,7 @@ export function readSourceSemanticReview(
       inputHash: hash,
       model: z.string(),
       reasoningEffort: reasoning.nullable(),
+      maxTokens: z.number().int().min(1).max(16_384).optional(),
     })
     .parse(value);
   if (
@@ -647,7 +655,9 @@ export function readSourceSemanticReview(
     header.draftHash !== plan.draftHash ||
     header.inputHash !== plan.inputHash ||
     header.model !== plan.model ||
-    header.reasoningEffort !== (plan.reasoningEffort ?? null)
+    header.reasoningEffort !== (plan.reasoningEffort ?? null) ||
+    header.maxTokens !==
+      (plan.maxTokens === MAX_TOKENS ? undefined : plan.maxTokens)
   )
     return null;
   const record = sourceSemanticReviewRecordSchema.parse(value);

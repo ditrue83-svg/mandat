@@ -197,6 +197,66 @@ function answers(plan: SourceSemanticReviewPlan) {
   });
 }
 
+test("An explicit output limit binds the review and independent evidence while preserving the default hash", () => {
+  const input = context();
+  const original = draft(input);
+  const standard = buildSourceSemanticReviewRequest(input, original, config);
+  const explicitDefault = buildSourceSemanticReviewRequest(input, original, {
+    ...config,
+    maxTokens: 8192,
+  });
+  const expanded = buildSourceSemanticReviewRequest(input, original, {
+    ...config,
+    maxTokens: 16_384,
+  });
+  assert.equal(standard.maxTokens, 8192);
+  assert(standard.requests.every((request) => request.maxTokens === 8192));
+  assert.equal(explicitDefault.inputHash, standard.inputHash);
+  assert.equal(
+    explicitDefault.evidencePlan.inputHash,
+    standard.evidencePlan.inputHash,
+  );
+  assert.deepEqual(explicitDefault.requests, standard.requests);
+  assert.equal(expanded.maxTokens, 16_384);
+  assert.equal(expanded.evidencePlan.maxTokens, 16_384);
+  assert(expanded.requests.every((request) => request.maxTokens === 16_384));
+  assert(
+    expanded.evidencePlan.requests.every(
+      (request) => request.maxTokens === 16_384,
+    ),
+  );
+  assert.notEqual(expanded.inputHash, standard.inputHash);
+  assert.notEqual(
+    expanded.evidencePlan.inputHash,
+    standard.evidencePlan.inputHash,
+  );
+  const standardRecord = recordSourceSemanticReview(
+    answers(standard),
+    standard,
+    metadata,
+  );
+  const expandedRecord = recordSourceSemanticReview(
+    answers(expanded),
+    expanded,
+    metadata,
+  );
+  assert.equal("maxTokens" in standardRecord, false);
+  assert.equal(expandedRecord.maxTokens, 16_384);
+  assert.equal(
+    readSourceSemanticReview(expandedRecord, expanded)?.accepted,
+    true,
+  );
+  assert.equal(readSourceSemanticReview(standardRecord, expanded), null);
+  assert.equal(readSourceSemanticReview(expandedRecord, standard), null);
+  for (const maxTokens of [0, 16_385, NaN])
+    assert.throws(() =>
+      buildSourceSemanticReviewRequest(input, original, {
+        ...config,
+        maxTokens,
+      }),
+    );
+});
+
 test("Independent review is source-only and binds every server claim without changing the draft", () => {
   const input = context(),
     original = draft(input),
