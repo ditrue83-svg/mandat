@@ -277,6 +277,67 @@ describe("trasporto AI e consumo degli output respinti", () => {
     });
   });
 
+  it("mantiene 90 secondi come default e applica il timeout richiesto alla singola inferenza", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const fetch = mockResponse(payload());
+    try {
+      await configuredTransport.complete("system", "prompt", 300);
+      await infer(
+        publication,
+        "long-reasoning-test",
+        "prompt",
+        300,
+        undefined,
+        "system",
+        undefined,
+        { timeoutMs: 300_000 },
+      );
+      expect(timeout).toHaveBeenNthCalledWith(1, 90_000);
+      expect(timeout).toHaveBeenNthCalledWith(2, 300_000);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(await db.select().from(schema.aiUsage)).toHaveLength(1);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it.each([
+    ["sotto il minimo", 999],
+    ["oltre il massimo", 300_001],
+    ["frazionario", 1_000.5],
+    ["infinito", Infinity],
+    ["NaN", NaN],
+  ] as const)(
+    "respinge un timeout %s prima del fornitore e del registro",
+    async (_name, timeoutMs) => {
+      const fetch = mockResponse(payload());
+      const options = { timeoutMs };
+      await expect(
+        infer(
+          publication,
+          "invalid-timeout",
+          "prompt",
+          300,
+          undefined,
+          "system",
+          undefined,
+          options,
+        ),
+      ).rejects.toThrow("Timeout AI non valido");
+      await expect(
+        configuredTransport.complete(
+          "system",
+          "prompt",
+          300,
+          undefined,
+          options,
+        ),
+      ).rejects.toThrow("Timeout AI non valido");
+      expect(fetch).not.toHaveBeenCalled();
+      expect(await db.select().from(schema.aiUsage)).toHaveLength(0);
+    },
+  );
+
   it.each([
     ["temperatura negativa", { temperature: -0.1 }, "Temperatura"],
     ["temperatura oltre due", { temperature: 2.1 }, "Temperatura"],

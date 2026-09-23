@@ -343,9 +343,20 @@ export type AiRequestOptions = {
   reasoningEffort?: "none" | "low" | "medium" | "high";
   temperature?: number;
   topP?: number;
+  timeoutMs?: number;
   model?: string;
   rates?: { input: number; output: number };
 };
+function requestTimeoutMs(options?: AiRequestOptions) {
+  const timeoutMs = options?.timeoutMs ?? 90_000;
+  if (
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs < 1_000 ||
+    timeoutMs > 300_000
+  )
+    throw new AiUnavailable("Timeout AI non valido");
+  return timeoutMs;
+}
 function samplingOptions(options?: AiRequestOptions) {
   const temperature =
     options?.temperature === undefined ? 0 : options.temperature;
@@ -371,6 +382,7 @@ export type AiResponseFormat = {
 export const configuredTransport: AiTransport = {
   async complete(system, prompt, maxTokens, responseFormat, options) {
     const { temperature, topP } = samplingOptions(options);
+    const timeoutMs = requestTimeoutMs(options);
     if (!process.env.LLM_API_KEY) throw new AiUnavailable("AI non configurata");
     const reasoningEffort =
       options?.reasoningEffort ??
@@ -410,7 +422,7 @@ export const configuredTransport: AiTransport = {
         ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       }),
       redirect: "error",
-      signal: AbortSignal.timeout(90000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     let value: unknown;
     try {
@@ -530,6 +542,7 @@ export async function infer(
   options?: AiRequestOptions,
 ) {
   samplingOptions(options);
+  requestTimeoutMs(options);
   if (!process.env.LLM_API_KEY) throw new AiUnavailable("AI non configurata");
   const model =
     options?.model ||
