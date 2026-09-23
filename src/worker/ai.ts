@@ -128,6 +128,7 @@ export type AiResponseDiagnostic = Readonly<{
   httpStatus: number;
   requestedMaxTokens: number | null;
   modelState: ModelState;
+  reportedModelId: string | null;
   choicesState: ChoicesState;
   finishReason: FinishReason;
   contentState: ContentState;
@@ -135,9 +136,11 @@ export type AiResponseDiagnostic = Readonly<{
   usage: Readonly<TokenUsage> | null;
 }>;
 
-// This projection never retains the provider body, content, reasoning, model
-// name, refusal text, unknown finish strings or parser errors. The acceptance
-// schema below remains the sole gate; these observations only explain rejection.
+// This projection never retains the provider body, content, reasoning, refusal
+// text, unknown finish strings or parser errors. A mismatched model identifier
+// is retained only when it has the strictly limited shape below. The acceptance
+// schema remains the sole gate; these observations only explain rejection.
+const safeReportedModelId = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
 function responseDiagnostic(
   value: unknown,
   expectedModel: string,
@@ -238,6 +241,12 @@ function responseDiagnostic(
     requestedMaxTokens:
       Number.isSafeInteger(maxTokens) && maxTokens >= 0 ? maxTokens : null,
     modelState,
+    reportedModelId:
+      reasons.includes("model_mismatch") &&
+      typeof body?.model === "string" &&
+      safeReportedModelId.test(body.model)
+        ? body.model
+        : null,
     choicesState,
     finishReason,
     contentState,

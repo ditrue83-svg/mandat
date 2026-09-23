@@ -525,6 +525,59 @@ describe("trasporto AI e consumo degli output respinti", () => {
     },
   );
 
+  it.each(["Qwen/Qwen3.5-397B-A17B-FP8", "A".repeat(128)])(
+    "espone solo l'identificativo di modello difforme ammesso: %s",
+    async (model) => {
+      const body = payload();
+      body.model = model;
+      mockResponse(body);
+      const error = await infer(
+        publication,
+        "diagnostic",
+        "prompt",
+        8192,
+      ).catch((rejected: unknown) => rejected);
+      expect(readAiResponseDiagnostic(error)).toMatchObject({
+        code: "model_mismatch",
+        modelState: "different",
+        reportedModelId: model,
+      });
+      expect((error as Error).message).not.toContain(model);
+      const [row] = await db.select().from(schema.aiUsage);
+      expect(row.error).not.toContain(model);
+    },
+  );
+
+  it.each([
+    "private-model\nprivate-content",
+    "private model",
+    "privaté-model",
+    "A".repeat(129),
+  ])(
+    "non espone identificativi difformi fuori allowlist: %s",
+    async (model) => {
+      const body = payload();
+      body.model = model;
+      mockResponse(body);
+      const error = await infer(
+        publication,
+        "diagnostic",
+        "prompt",
+        8192,
+      ).catch((rejected: unknown) => rejected);
+      const diagnostic = readAiResponseDiagnostic(error);
+      expect(diagnostic).toMatchObject({
+        code: "model_mismatch",
+        modelState: "different",
+        reportedModelId: null,
+      });
+      expect(JSON.stringify(diagnostic)).not.toContain(model);
+      expect(JSON.stringify(error)).not.toContain(model);
+      const [row] = await db.select().from(schema.aiUsage);
+      expect(row.error).not.toContain(model);
+    },
+  );
+
   it.each([
     ["limite di output", "length", expectedModel, "output_limit"],
     ["modello diverso", "stop", privateResponseText, "model_mismatch"],
@@ -591,7 +644,7 @@ describe("trasporto AI e consumo degli output respinti", () => {
 
   it("espone solo diagnostica ammessa anche con più difetti e contenuti privati", async () => {
     const secrets = [
-      "private-model",
+      "private-model\nprivate-content",
       "private-content",
       "private-refusal",
       "private-reasoning",
@@ -624,6 +677,7 @@ describe("trasporto AI e consumo degli output respinti", () => {
       httpStatus: 200,
       requestedMaxTokens: 8192,
       modelState: "different",
+      reportedModelId: null,
       choicesState: "one",
       finishReason: "length",
       contentState: "present",
