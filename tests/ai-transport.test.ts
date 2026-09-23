@@ -250,6 +250,72 @@ afterEach(() => {
 afterAll(async () => pg.close());
 
 describe("trasporto AI e consumo degli output respinti", () => {
+  it("invia temperatura e top-p richiesti e registra il consumo", async () => {
+    const fetch = mockResponse(payload());
+    await expect(
+      infer(
+        publication,
+        "sampling-test",
+        "prompt",
+        300,
+        undefined,
+        "system",
+        undefined,
+        { temperature: 0.6, topP: 0.95 },
+      ),
+    ).resolves.toEqual(summary);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [, init] = fetch.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      temperature: 0.6,
+      top_p: 0.95,
+    });
+    const [row] = await db.select().from(schema.aiUsage);
+    expect(row).toMatchObject({
+      status: "completed",
+      costChf: "0.000200",
+    });
+  });
+
+  it.each([
+    ["temperatura negativa", { temperature: -0.1 }, "Temperatura"],
+    ["temperatura oltre due", { temperature: 2.1 }, "Temperatura"],
+    ["temperatura infinita", { temperature: Infinity }, "Temperatura"],
+    ["temperatura NaN", { temperature: NaN }, "Temperatura"],
+    ["top-p negativo", { topP: -0.1 }, "Top-p"],
+    ["top-p oltre uno", { topP: 1.1 }, "Top-p"],
+    ["top-p infinito", { topP: Infinity }, "Top-p"],
+    ["top-p NaN", { topP: NaN }, "Top-p"],
+  ] as const)(
+    "respinge %s prima del fornitore e del registro",
+    async (_name, options, message) => {
+      const fetch = mockResponse(payload());
+      await expect(
+        infer(
+          publication,
+          "invalid-sampling",
+          "prompt",
+          300,
+          undefined,
+          "system",
+          undefined,
+          options,
+        ),
+      ).rejects.toThrow(message);
+      await expect(
+        configuredTransport.complete(
+          "system",
+          "prompt",
+          300,
+          undefined,
+          options,
+        ),
+      ).rejects.toThrow(message);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(await db.select().from(schema.aiUsage)).toHaveLength(0);
+    },
+  );
+
   it("registra e fattura il modello dedicato senza cambiare quello dei riassunti", async () => {
     const body = payload();
     body.model = "dedicated-comparison-model";

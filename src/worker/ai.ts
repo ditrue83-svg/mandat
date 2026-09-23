@@ -341,15 +341,36 @@ export interface AiTransport {
 }
 export type AiRequestOptions = {
   reasoningEffort?: "none" | "low" | "medium" | "high";
+  temperature?: number;
+  topP?: number;
   model?: string;
   rates?: { input: number; output: number };
 };
+function samplingOptions(options?: AiRequestOptions) {
+  const temperature =
+    options?.temperature === undefined ? 0 : options.temperature;
+  const topP = options?.topP;
+  if (
+    typeof temperature !== "number" ||
+    !Number.isFinite(temperature) ||
+    temperature < 0 ||
+    temperature > 2
+  )
+    throw new AiUnavailable("Temperatura AI non valida");
+  if (
+    topP !== undefined &&
+    (typeof topP !== "number" || !Number.isFinite(topP) || topP < 0 || topP > 1)
+  )
+    throw new AiUnavailable("Top-p AI non valido");
+  return { temperature, topP };
+}
 export type AiResponseFormat = {
   type: "json_schema";
   json_schema: { name: string; strict: true; schema: Record<string, unknown> };
 };
 export const configuredTransport: AiTransport = {
   async complete(system, prompt, maxTokens, responseFormat, options) {
+    const { temperature, topP } = samplingOptions(options);
     if (!process.env.LLM_API_KEY) throw new AiUnavailable("AI non configurata");
     const reasoningEffort =
       options?.reasoningEffort ??
@@ -381,7 +402,8 @@ export const configuredTransport: AiTransport = {
           { role: "system", content: system },
           { role: "user", content: prompt },
         ],
-        temperature: 0,
+        temperature,
+        ...(topP === undefined ? {} : { top_p: topP }),
         max_tokens: maxTokens,
         stream: false,
         ...(responseFormat ? { response_format: responseFormat } : {}),
@@ -507,6 +529,7 @@ export async function infer(
   responseFormat?: AiResponseFormat,
   options?: AiRequestOptions,
 ) {
+  samplingOptions(options);
   if (!process.env.LLM_API_KEY) throw new AiUnavailable("AI non configurata");
   const model =
     options?.model ||
