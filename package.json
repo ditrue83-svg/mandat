@@ -13,6 +13,7 @@
     "db:seed": "tsx --env-file-if-exists=.env.local scripts/seed.ts",
     "worker": "tsx --env-file-if-exists=.env.local src/worker/index.ts",
     "sources:probe": "tsx --env-file-if-exists=.env.local scripts/probe-sources.ts",
+    "ai:probe": "tsx --env-file-if-exists=.env.local scripts/probe-ai.ts",
     "watchdog": "tsx --env-file-if-exists=.env.local scripts/watchdog.ts",
     "setup:check": "node --import tsx scripts/setup-check.ts",
     "setup:init": "node --import tsx scripts/setup-init.ts",
