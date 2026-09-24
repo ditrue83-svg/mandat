@@ -4,6 +4,8 @@ import { smtpPassword } from "./smtp-config";
 import {
   aiProviderConfiguration,
   MISTRAL_LARGE_3_MODEL,
+  CLAUDE_OPUS_5_5_MODEL,
+  anthropicReasoningEffort,
 } from "./ai-provider-config";
 import {
   documentaryAiConfiguration,
@@ -238,14 +240,22 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
       "Verificare SPF/DKIM/DMARC e consegna a una casella reale; l’autenticazione SMTP da sola non prova il recapito",
   });
   const mistral = env.LLM_PROVIDER === "mistral-eu";
-  required(mistral ? "MISTRAL_API_KEY" : "LLM_API_KEY", "ai");
+  const anthropic = env.LLM_PROVIDER === "anthropic";
+  required(
+    anthropic
+      ? "ANTHROPIC_API_KEY"
+      : mistral
+        ? "MISTRAL_API_KEY"
+        : "LLM_API_KEY",
+    "ai",
+  );
   required("LLM_MODEL", "ai");
   add(
     "LLM_PROVIDER",
     "ai",
     !env.LLM_PROVIDER ||
-      ["infomaniak", "mistral-eu"].includes(env.LLM_PROVIDER),
-    "Scegliere infomaniak oppure mistral-eu",
+      ["infomaniak", "mistral-eu", "anthropic"].includes(env.LLM_PROVIDER),
+    "Scegliere infomaniak, mistral-eu oppure anthropic",
   );
   if (mistral)
     add(
@@ -254,7 +264,14 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
       env.LLM_MODEL === MISTRAL_LARGE_3_MODEL,
       "Per Mistral UE configurare mistral-large-2512",
     );
-  if (!mistral && !env.LLM_API_BASE_URL)
+  if (anthropic)
+    add(
+      "ANTHROPIC_MODEL",
+      "ai",
+      env.LLM_MODEL === CLAUDE_OPUS_5_5_MODEL,
+      "Per Anthropic configurare claude-opus-5-5",
+    );
+  if (!mistral && !anthropic && !env.LLM_API_BASE_URL)
     add(
       "INFOMANIAK_AI_PRODUCT_ID",
       "ai",
@@ -269,26 +286,34 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
     /* Report below without configuration values. */
   }
   add(
-    mistral ? "MISTRAL_API_BASE_URL" : "LLM_API_BASE_URL",
+    anthropic
+      ? "ANTHROPIC_API_BASE_URL"
+      : mistral
+        ? "MISTRAL_API_BASE_URL"
+        : "LLM_API_BASE_URL",
     "ai",
     Boolean(
       ai &&
       ai.protocol === "https:" &&
-      (mistral
-        ? ai.hostname === "api.eu.mistral.ai"
-        : ai.hostname === "api.infomaniak.com") &&
+      (anthropic
+        ? ai.hostname === "api.anthropic.com"
+        : mistral
+          ? ai.hostname === "api.eu.mistral.ai"
+          : ai.hostname === "api.infomaniak.com") &&
       !ai.port &&
       !ai.username &&
       !ai.password &&
       !ai.search &&
       !ai.hash &&
-      (mistral
+      (mistral || anthropic
         ? ai.pathname === "/v1"
         : /^\/2\/ai\/\d+\/openai\/v1\/?$/.test(ai.pathname)),
     ),
-    mistral
-      ? "Configurare esclusivamente https://api.eu.mistral.ai/v1"
-      : "Configurare l’endpoint AI Infomaniak v2 del prodotto",
+    anthropic
+      ? "Configurare esclusivamente https://api.anthropic.com/v1"
+      : mistral
+        ? "Configurare esclusivamente https://api.eu.mistral.ai/v1"
+        : "Configurare l’endpoint AI Infomaniak v2 del prodotto",
   );
   if (mistral)
     add(
@@ -297,6 +322,20 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
       !env.LLM_REASONING_EFFORT || env.LLM_REASONING_EFFORT === "none",
       "Per Mistral Large 3 lasciare vuoto oppure none",
     );
+  if (anthropic) {
+    let valid = true;
+    try {
+      anthropicReasoningEffort(env.LLM_REASONING_EFFORT);
+    } catch {
+      valid = false;
+    }
+    add(
+      "LLM_REASONING_EFFORT",
+      "ai",
+      valid,
+      "Claude richiede low, medium oppure high; non usare none",
+    );
+  }
   if (
     env.DOCUMENTARY_LLM_PROVIDER ||
     env.DOCUMENTARY_LLM_MODEL ||
@@ -311,6 +350,7 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
       valid =
         present(env[connection.apiKeyEnv]) &&
         (configuration.provider === "mistral-eu" ||
+          configuration.provider === "anthropic" ||
           (endpoint.hostname === "api.infomaniak.com" &&
             !endpoint.port &&
             /^\/2\/ai\/\d+\/openai\/v1\/?$/.test(endpoint.pathname)));
@@ -325,8 +365,10 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
     );
   }
   let usesMistral = mistral;
+  let usesAnthropic = anthropic;
   try {
     usesMistral ||= documentaryAiProvider(env) === "mistral-eu";
+    usesAnthropic ||= documentaryAiProvider(env) === "anthropic";
   } catch {
     /* Already reported as invalid. */
   }
@@ -337,6 +379,14 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
       status: "manual",
       message:
         "Verificare opt-out API da Anonymous improvement data nel pannello Mistral. Regione UE e conservazione dei dati sono controlli distinti; validare l’informativa prima del rilascio.",
+    });
+  if (usesAnthropic)
+    checks.push({
+      id: "ANTHROPIC_DATA_SETTINGS",
+      group: "ai",
+      status: "manual",
+      message:
+        "L’API diretta Anthropic usa inferenza globale e non garantisce residenza UE o svizzera. Verificare ambito dei dati autorizzati e informativa prima del rilascio.",
     });
   for (const key of ["LLM_INPUT_CHF_PER_MILLION", "LLM_OUTPUT_CHF_PER_MILLION"])
     add(

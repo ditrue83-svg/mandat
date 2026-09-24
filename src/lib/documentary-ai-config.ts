@@ -3,6 +3,7 @@ import {
   aiProvider,
   validateAiModel,
   mistralReasoningEffort,
+  anthropicReasoningEffort,
   type AiEnvironment,
 } from "./ai-provider-config";
 
@@ -28,6 +29,7 @@ export function documentaryAiReasoningEffort(
   if (provider === "mistral-eu") {
     return mistralReasoningEffort(documentaryAiModel(env), value) ?? "none";
   }
+  if (provider === "anthropic") return anthropicReasoningEffort(value);
   if (!value) return undefined;
   if (
     value !== "none" &&
@@ -43,6 +45,8 @@ export function documentaryAiReasoningEffort(
 export function documentarySourceReasoningEffort(
   env: AiEnvironment = process.env,
 ): "none" | "low" | "medium" | "high" {
+  if (documentaryAiProvider(env) === "anthropic")
+    return anthropicReasoningEffort(env.DOCUMENTARY_SOURCE_REASONING_EFFORT);
   const value = env.DOCUMENTARY_SOURCE_REASONING_EFFORT || "none";
   if (documentaryAiProvider(env) === "mistral-eu")
     return mistralReasoningEffort(documentaryAiModel(env), value) ?? "none";

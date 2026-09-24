@@ -35,6 +35,51 @@ const configured: SetupEnvironment = {
   FOGLIO_REUSE_CONFIRMED: "false",
 };
 describe("Controllo configurazione senza segreti", () => {
+  it("validates native Anthropic configuration and clearly reports global processing", () => {
+    const env = {
+      ...configured,
+      LLM_PROVIDER: "anthropic",
+      LLM_MODEL: "claude-opus-5-5",
+      LLM_API_KEY: "",
+      INFOMANIAK_AI_PRODUCT_ID: "",
+      ANTHROPIC_API_KEY: "anthropic-fixture-secret",
+      LLM_REASONING_EFFORT: "high",
+    };
+    const checks = inspectSetup(env);
+    expect(setupGroupConfigured(checks, "ai")).toBe(true);
+    expect(
+      checks.find((c) => c.id === "ANTHROPIC_DATA_SETTINGS"),
+    ).toMatchObject({
+      status: "manual",
+      message: expect.stringContaining("globale"),
+    });
+    expect(JSON.stringify(checks)).not.toContain(env.ANTHROPIC_API_KEY);
+    for (const change of [
+      { ANTHROPIC_API_KEY: "" },
+      { LLM_MODEL: "claude-opus-latest" },
+      { LLM_REASONING_EFFORT: "none" },
+      { ANTHROPIC_API_BASE_URL: "https://proxy.example/v1" },
+    ])
+      expect(
+        setupGroupConfigured(inspectSetup({ ...env, ...change }), "ai"),
+      ).toBe(false);
+    const documentary = {
+      ...configured,
+      DOCUMENTARY_LLM_PROVIDER: "anthropic",
+      DOCUMENTARY_LLM_INPUT_CHF_PER_MILLION: "5",
+      DOCUMENTARY_LLM_OUTPUT_CHF_PER_MILLION: "25",
+      ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
+    };
+    expect(
+      setupGroupConfigured(inspectSetup(documentary), "documentary-ai"),
+    ).toBe(true);
+    expect(
+      setupGroupConfigured(
+        inspectSetup({ ...documentary, ANTHROPIC_API_KEY: "" }),
+        "documentary-ai",
+      ),
+    ).toBe(false);
+  });
   it("validates a complete Mistral EU configuration without requiring an Infomaniak key", () => {
     const env = {
       ...configured,

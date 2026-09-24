@@ -8,6 +8,9 @@ import {
   MISTRAL_MEDIUM_3_5_MODEL,
   validateAiModel,
   mistralReasoningEffort,
+  ANTHROPIC_BASE_URL,
+  CLAUDE_OPUS_5_5_MODEL,
+  anthropicReasoningEffort,
 } from "../src/lib/ai-provider-config";
 
 const legacy = {
@@ -16,6 +19,29 @@ const legacy = {
   LLM_API_BASE_URL: "https://api.infomaniak.com/2/ai/123/openai/v1",
   MISTRAL_API_KEY: "mistral-secret-never-print",
 };
+
+it("keeps Anthropic credentials and pinned model separate from existing providers", () => {
+  expect(aiProviderConfiguration(legacy, "anthropic")).toEqual({
+    provider: "anthropic",
+    baseUrl: ANTHROPIC_BASE_URL,
+    apiKeyEnv: "ANTHROPIC_API_KEY",
+  });
+  expect(aiModel(legacy, "anthropic")).toBe(CLAUDE_OPUS_5_5_MODEL);
+  expect(() => validateAiModel("anthropic", "claude-opus-latest")).toThrow();
+  expect(() => validateAiModel("anthropic", "mistral-large-2512")).toThrow();
+  expect(anthropicReasoningEffort()).toBe("medium");
+  expect(anthropicReasoningEffort("high")).toBe("high");
+  expect(() => anthropicReasoningEffort("none")).toThrow();
+  for (const base of [
+    "http://api.anthropic.com/v1",
+    "https://api.anthropic.com.evil.example/v1",
+    "https://proxy.example/v1",
+    "https://api.anthropic.com/v1?key=x",
+  ])
+    expect(() =>
+      aiProviderConfiguration({ ANTHROPIC_API_BASE_URL: base }, "anthropic"),
+    ).toThrow();
+});
 
 it("pins Medium 3.5 and permits only its documented reasoning levels", () => {
   expect(() =>

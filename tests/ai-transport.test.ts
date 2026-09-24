@@ -24,6 +24,7 @@ import {
   recoverStaleAiReservations,
   summarize,
   type AiResponseDiagnostic,
+  aiReservedInputBytes,
 } from "../src/worker/ai";
 
 const expectedModel = "mistralai/Ministral-3-14B-Instruct-2512";
@@ -248,6 +249,235 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 afterAll(async () => pg.close());
+
+describe("Anthropic native messages", () => {
+  const options = {
+    provider: "anthropic" as const,
+    model: "claude-opus-5-5",
+    reasoningEffort: "high" as const,
+    rates: { input: 5, output: 25 },
+  };
+  function answer() {
+    return {
+      type: "message",
+      role: "assistant",
+      model: options.model,
+      stop_reason: "end_turn",
+      content: [
+        {
+          type: "thinking",
+          thinking: privateResponseText,
+          signature: "test-signature",
+        },
+        { type: "text", text: JSON.stringify(summary) },
+      ],
+      usage: {
+        input_tokens: 100,
+        output_tokens: 500,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 20,
+      },
+    };
+  }
+  beforeEach(() => vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key"));
+  it("uses the native endpoint and accounts for thinking and cache-read tokens", async () => {
+    const fetcher = mockResponse(answer());
+    const format = {
+      type: "json_schema" as const,
+      json_schema: {
+        name: "answer",
+        strict: true as const,
+        schema: {
+          type: "object",
+          properties: { text: { type: "string", maxLength: 40 } },
+          required: ["text"],
+          additionalProperties: false,
+        },
+      },
+    };
+    expect(
+      await infer(
+        publication,
+        "claude-test",
+        "source",
+        8192,
+        configuredTransport,
+        "instructions",
+        format,
+        options,
+      ),
+    ).toEqual(summary);
+    const [url, init] = fetcher.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(String(url)).toBe("https://api.anthropic.com/v1/messages");
+    expect(init.headers).toEqual({
+      "x-api-key": "anthropic-test-key",
+      "anthropic-version": "2023-06-01",
+      "Content-Type": "application/json",
+    });
+    expect(init.redirect).toBe("error");
+    const body = JSON.parse(String(init.body));
+    expect(body).toMatchObject({
+      inference_geo: "global",
+      service_tier: "standard_only",
+      thinking: { type: "adaptive", display: "omitted" },
+      output_config: { effort: "high", format: { type: "json_schema" } },
+    });
+    expect(body).not.toHaveProperty("temperature");
+    const [row] = await db.select().from(schema.aiUsage);
+    expect(row).toMatchObject({
+      status: "completed",
+      inputTokens: 120,
+      outputTokens: 500,
+      costChf: "0.013100",
+    });
+    const bytes = aiReservedInputBytes(
+      "instructions",
+      "source",
+      8192,
+      format,
+      options,
+    );
+    expect(bytes).toBe(Buffer.byteLength(String(init.body)) + 1000);
+    expect(row.reservedChf).toBe(((bytes * 5 + 8192 * 25) / 1e6).toFixed(6));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(row)).not.toContain(privateResponseText);
+  });
+  it.each([
+    ["length", { stop_reason: "max_tokens" }, "output_limit"],
+    ["refusal", { stop_reason: "refusal" }, "provider_refusal"],
+    ["tools", { stop_reason: "tool_use" }, "unexpected_tool_call"],
+    ["unknown finish", { stop_reason: "pause_turn" }, "finish_invalid"],
+    ["model mismatch", { model: "claude-opus-5" }, "model_mismatch"],
+    ["wrong role", { role: "user" }, "choices_invalid"],
+    ["missing message", { type: "error" }, "choices_invalid"],
+    [
+      "unknown block",
+      { content: [{ type: "image", text: "{}" }] },
+      "content_invalid",
+    ],
+    [
+      "empty answer",
+      { content: [{ type: "thinking", thinking: "", signature: "sig" }] },
+      "content_empty",
+    ],
+  ])(
+    "rejects %s and retains billed usage without retry",
+    async (_name, delta, code) => {
+      const fetcher = mockResponse({ ...answer(), ...(delta as object) });
+      let thrown: unknown;
+      try {
+        await infer(
+          publication,
+          "claude-reject",
+          "source",
+          8192,
+          configuredTransport,
+          "s",
+          undefined,
+          options,
+        );
+      } catch (e) {
+        thrown = e;
+      }
+      expect(readAiResponseDiagnostic(thrown)?.code).toBe(code);
+      const [row] = await db.select().from(schema.aiUsage);
+      expect(row).toMatchObject({
+        status: "uncertain",
+        inputTokens: 120,
+        outputTokens: 500,
+        costChf: "0.013100",
+      });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(row)).not.toContain(privateResponseText);
+    },
+  );
+  it.each([400, 401, 429, 500])(
+    "keeps an uncertainty reserve on HTTP %s without usage",
+    async (status) => {
+      const fetcher = mockResponse(
+        { type: "error", error: { message: privateResponseText } },
+        status,
+      );
+      await expect(
+        infer(
+          publication,
+          "claude-http",
+          "source",
+          8192,
+          configuredTransport,
+          "s",
+          undefined,
+          options,
+        ),
+      ).rejects.toThrow(`HTTP ${status}`);
+      const [row] = await db.select().from(schema.aiUsage);
+      expect(row.status).toBe("uncertain");
+      expect(row.costChf).toBeNull();
+      expect(Number(row.reservedChf)).toBeGreaterThan(0);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(row)).not.toContain(privateResponseText);
+    },
+  );
+  it("rejects stale sampling and malformed schemas before reservation or transmission", async () => {
+    const fetcher = mockResponse(answer());
+    for (const change of [
+      { temperature: 0 },
+      { topP: 1 },
+      { reasoningEffort: "none" as const },
+    ])
+      await expect(
+        infer(
+          publication,
+          "claude-config",
+          "source",
+          8192,
+          configuredTransport,
+          "s",
+          undefined,
+          { ...options, ...change },
+        ),
+      ).rejects.toThrow();
+    await expect(
+      infer(
+        publication,
+        "claude-schema",
+        "source",
+        8192,
+        configuredTransport,
+        "s",
+        {
+          type: "json_schema",
+          json_schema: {
+            name: "bad",
+            strict: true,
+            schema: { type: "object", additionalProperties: true },
+          },
+        },
+        options,
+      ),
+    ).rejects.toThrow();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await db.select().from(schema.aiUsage)).toEqual([]);
+  });
+  it("does not borrow another provider's key", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    const fetcher = mockResponse(answer());
+    await expect(
+      infer(
+        publication,
+        "claude-key",
+        "source",
+        8192,
+        configuredTransport,
+        "s",
+        undefined,
+        options,
+      ),
+    ).rejects.toThrow("AI non configurata");
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await db.select().from(schema.aiUsage)).toEqual([]);
+  });
+});
 
 describe("trasporto AI e consumo degli output respinti", () => {
   const mediumOptions = {

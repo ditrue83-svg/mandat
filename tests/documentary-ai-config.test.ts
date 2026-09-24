@@ -4,6 +4,33 @@ import {
   documentarySourceReasoningEffort,
 } from "../src/lib/documentary-ai-config";
 afterEach(() => vi.unstubAllEnvs());
+it("configures Claude reasoning independently and requires its own prices", () => {
+  const env = {
+    LLM_REASONING_EFFORT: "none",
+    DOCUMENTARY_LLM_PROVIDER: "anthropic",
+  };
+  expect(() => documentaryAiConfiguration(env)).toThrow("tariffe");
+  expect(documentarySourceReasoningEffort(env)).toBe("medium");
+  expect(
+    documentaryAiConfiguration({
+      ...env,
+      DOCUMENTARY_LLM_INPUT_CHF_PER_MILLION: "5",
+      DOCUMENTARY_LLM_OUTPUT_CHF_PER_MILLION: "25",
+      DOCUMENTARY_LLM_REASONING_EFFORT: "high",
+    }),
+  ).toEqual({
+    provider: "anthropic",
+    model: "claude-opus-5-5",
+    reasoningEffort: "high",
+    rates: { input: 5, output: 25 },
+  });
+  expect(() =>
+    documentarySourceReasoningEffort({
+      ...env,
+      DOCUMENTARY_SOURCE_REASONING_EFFORT: "none",
+    }),
+  ).toThrow();
+});
 it("keeps Medium source and comparison reasoning independently configurable", () => {
   const env = {
     DOCUMENTARY_LLM_PROVIDER: "mistral-eu",

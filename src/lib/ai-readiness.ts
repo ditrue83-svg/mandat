@@ -1,3 +1,4 @@
+import { ANTHROPIC_BASE_URL, type AiProvider } from "./ai-provider-config";
 // Read-only preflight for model evaluations. A successful catalog lookup does
 // not establish completion availability, schema compatibility or model quality.
 export type AiReadinessReason =
@@ -22,7 +23,12 @@ export type AiReadiness = {
 };
 
 export async function probeAiModels(
-  configuration: { baseUrl: string; apiKey: string; models: string[] },
+  configuration: {
+    baseUrl: string;
+    apiKey: string;
+    models: string[];
+    provider?: AiProvider;
+  },
   fetcher: typeof fetch = fetch,
 ): Promise<AiReadiness> {
   const requestedModels = [...new Set(configuration.models.filter(Boolean))];
@@ -45,6 +51,11 @@ export async function probeAiModels(
 
   let url: URL;
   try {
+    if (
+      configuration.provider === "anthropic" &&
+      configuration.baseUrl.replace(/\/$/, "") !== ANTHROPIC_BASE_URL
+    )
+      throw new Error("Invalid Anthropic endpoint");
     url = new URL(configuration.baseUrl);
     if (
       url.protocol !== "https:" ||
@@ -55,6 +66,10 @@ export async function probeAiModels(
     )
       throw new Error("Invalid endpoint");
     url.pathname = `${url.pathname.replace(/\/$/, "")}/models`;
+    // A single bounded catalog read; missing models are not inferred from
+    // aliases and a later page is never fetched automatically.
+    if (configuration.provider === "anthropic")
+      url.searchParams.set("limit", "1000");
   } catch {
     return { ...result, reason: "invalid_endpoint" };
   }
@@ -63,7 +78,12 @@ export async function probeAiModels(
     const response = await fetcher(url, {
       method: "GET",
       headers: {
-        Authorization: `Bearer ${configuration.apiKey}`,
+        ...(configuration.provider === "anthropic"
+          ? {
+              "x-api-key": configuration.apiKey,
+              "anthropic-version": "2023-06-01",
+            }
+          : { Authorization: `Bearer ${configuration.apiKey}` }),
         Accept: "application/json",
       },
       redirect: "error",

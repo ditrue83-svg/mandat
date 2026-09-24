@@ -15,9 +15,14 @@ import {
   aiProviderConfiguration,
   validateAiModel,
   mistralReasoningEffort,
+  anthropicReasoningEffort,
   MISTRAL_MEDIUM_3_5_MODEL,
   type AiProvider,
 } from "@/lib/ai-provider-config";
+import {
+  anthropicMessageBody,
+  anthropicMessageProjection,
+} from "@/lib/anthropic-messages";
 const summarySchema = z.object({
   summary: z.string().min(20).max(1800),
   requirements: z
@@ -426,6 +431,13 @@ function requestConfiguration(options?: AiRequestOptions) {
       throw new AiUnavailable(
         "Mistral Medium con temperatura zero richiede top_p uguale a 1",
       );
+    if (
+      provider === "anthropic" &&
+      (options?.temperature !== undefined || options?.topP !== undefined)
+    )
+      throw new AiUnavailable(
+        "Claude Opus 5.5 richiede di omettere temperatura e top-p",
+      );
     return {
       ...configuration,
       model,
@@ -433,7 +445,9 @@ function requestConfiguration(options?: AiRequestOptions) {
       reasoningEffort:
         provider === "mistral-eu"
           ? mistralReasoningEffort(model, reasoningEffort)
-          : reasoningEffort,
+          : provider === "anthropic"
+            ? anthropicReasoningEffort(reasoningEffort)
+            : reasoningEffort,
     };
   } catch (error) {
     throw new AiUnavailable(
@@ -502,27 +516,44 @@ export const configuredTransport: AiTransport = {
       temperature === 0
         ? (topP ?? 1)
         : topP;
-    const url = new URL(`${baseUrl}/chat/completions`);
+    const url = new URL(
+      `${baseUrl}/${provider === "anthropic" ? "messages" : "chat/completions"}`,
+    );
+    const body =
+      provider === "anthropic"
+        ? anthropicMessageBody(
+            expectedModel,
+            system,
+            prompt,
+            maxTokens,
+            responseFormat,
+            reasoningEffort,
+          )
+        : {
+            model: expectedModel,
+            messages: [
+              { role: "system", content: system },
+              { role: "user", content: prompt },
+            ],
+            temperature,
+            ...(effectiveTopP === undefined ? {} : { top_p: effectiveTopP }),
+            max_tokens: maxTokens,
+            stream: false,
+            ...(provider === "mistral-eu"
+              ? { service_tier: "standard_only" }
+              : {}),
+            ...(responseFormat ? { response_format: responseFormat } : {}),
+            ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+          };
     const response = await fetch(url, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        ...(provider === "anthropic"
+          ? { "x-api-key": apiKey, "anthropic-version": "2023-06-01" }
+          : { Authorization: `Bearer ${apiKey}` }),
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: expectedModel,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: prompt },
-        ],
-        temperature,
-        ...(effectiveTopP === undefined ? {} : { top_p: effectiveTopP }),
-        max_tokens: maxTokens,
-        stream: false,
-        ...(provider === "mistral-eu" ? { service_tier: "standard_only" } : {}),
-        ...(responseFormat ? { response_format: responseFormat } : {}),
-        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-      }),
+      body: JSON.stringify(body),
       redirect: "error",
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -545,6 +576,7 @@ export const configuredTransport: AiTransport = {
         ),
       );
     }
+    if (provider === "anthropic") value = anthropicMessageProjection(value);
     // Read usage independently: model, content and finish errors must not
     // discard a consumption already returned by the provider.
     const reportedUsage = z
@@ -639,6 +671,34 @@ export function parseAiJson(text: string) {
   );
   return JSON.parse(block ? block[1] : text);
 }
+
+// Native schema conversion adds descriptions and framing to the paid input.
+// Reserve against the actual wire body before any ledger write or provider call.
+export function aiReservedInputBytes(
+  systemPrompt: string,
+  prompt: string,
+  maxTokens: number,
+  responseFormat?: AiResponseFormat,
+  options?: AiRequestOptions,
+) {
+  const { provider, model, reasoningEffort } = requestConfiguration(options);
+  const content =
+    provider === "anthropic"
+      ? JSON.stringify(
+          anthropicMessageBody(
+            model,
+            systemPrompt,
+            prompt,
+            maxTokens,
+            responseFormat,
+            reasoningEffort,
+          ),
+        )
+      : systemPrompt +
+        prompt +
+        (responseFormat ? JSON.stringify(responseFormat) : "");
+  return Buffer.byteLength(content, "utf8") + 1000;
+}
 export async function infer(
   p: Publication,
   purpose: string,
@@ -665,13 +725,13 @@ export async function infer(
   if (!Number.isFinite(budget) || budget < 0)
     throw new AiUnavailable("Budget AI non valido");
   const reserve =
-    ((Buffer.byteLength(
-      systemPrompt +
-        prompt +
-        (responseFormat ? JSON.stringify(responseFormat) : ""),
-      "utf8",
-    ) +
-      1000) *
+    (aiReservedInputBytes(
+      systemPrompt,
+      prompt,
+      maxTokens,
+      responseFormat,
+      options,
+    ) *
       input +
       maxTokens * output) /
     1e6;

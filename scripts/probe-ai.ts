@@ -26,6 +26,7 @@ async function main() {
   );
   const configuredModel = documentary ? documentaryAiModel() : aiModel();
   const result = await probeAiModels({
+    provider: connection.provider,
     baseUrl: connection.baseUrl,
     apiKey: process.env[connection.apiKeyEnv] || "",
     models: values.model || (configuredModel ? [configuredModel] : []),

@@ -7,6 +7,40 @@ const configuration = {
   models: ["family/model-a", "family/model-b"],
 };
 
+it("uses native Anthropic authentication for one bounded catalog read", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValue(
+      Response.json({ data: [{ id: "claude-opus-5-5" }], has_more: false }),
+    );
+  const config = {
+    provider: "anthropic" as const,
+    baseUrl: "https://api.anthropic.com/v1",
+    apiKey: "test-key",
+    models: ["claude-opus-5-5"],
+  };
+  expect(await probeAiModels(config, fetcher)).toMatchObject({
+    ready: true,
+    semanticQuality: "not_evaluated",
+  });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  const [url, init] = fetcher.mock.calls[0];
+  expect(String(url)).toBe("https://api.anthropic.com/v1/models?limit=1000");
+  expect(init?.headers).toEqual({
+    "x-api-key": "test-key",
+    "anthropic-version": "2023-06-01",
+    Accept: "application/json",
+  });
+  expect(init?.body).toBeUndefined();
+  expect(
+    await probeAiModels(
+      { ...config, baseUrl: "https://proxy.example/v1" },
+      fetcher,
+    ),
+  ).toMatchObject({ ready: false, reason: "invalid_endpoint" });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
 it("checks exact model availability with one GET, without generation or redirects", async () => {
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
     Response.json({
