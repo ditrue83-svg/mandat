@@ -13,12 +13,7 @@ export function inventedSourceEvidenceAnswer(data: any) {
   const quote = (id: string) => {
     const passage = data.passages.find((p: any) => p.id === id);
     if (!passage) throw new Error("Invented fixture lacks source passage");
-    return {
-      sourceRef: id,
-      text: Array.from(passage.text as string)
-        .slice(0, 80)
-        .join(""),
-    };
+    return { sourceRef: id };
   };
   const target =
     data.passages.find(
@@ -60,9 +55,7 @@ export function inventedSourceEvidenceAnswer(data: any) {
         classificationId: id,
         relationship: "broad_context",
         explanation: "Relazione inventata per la sola verifica tecnica.",
-        label: label
-          ? { sourceRefs: label.sourceRefs, text: label.text }
-          : null,
+        label: label ? { sourceRefs: label.sourceRefs } : null,
         evidence: refs.map(quote),
       };
     }),

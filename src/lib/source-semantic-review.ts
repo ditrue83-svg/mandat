@@ -20,7 +20,7 @@ import type {
 } from "./automatic-comparison";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v2";
+  "documentary-source-semantic-review-v3";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -273,7 +273,7 @@ export function buildSourceSemanticReviewRequest(
       task: "Confronta assignedClaims con independentReading, già registrata senza vedere questo draft, e con le prove originali. Non riscrivere la lettura indipendente per conformarla al draft. Individua omissioni o contraddizioni nei passaggi di coverage. La mancanza di una prestazione in un altro frammento non la confuta.",
       rules: [
         "Per ogni claim assegnato restituisci esattamente un check. supported richiede sostegno reale nella fonte; contradicted richiede controprova; not_verifiable indica sostegno insufficiente. Un riferimento esatto non rende vero il significato affermato. Leggi insieme oggetto, classificazioni originali e relativo ambito.",
-        "Ogni check cita readingRefs della lettura indipendente oltre agli estratti originali. Un draft che introduce un dominio incompatibile, una correzione della fonte o una discrepanza non presente nella lettura indipendente non può essere supported solo perché ripete il nome del prodotto. Per classification_reading cita la corrispondente classificazione indipendente cN.",
+        "Ogni check cita readingRefs della lettura indipendente oltre agli estratti originali. I riferimenti evidence della lettura indipendente rimandano al testo originale in passages; le citazioni di contesto non presenti in passages conservano anche text. Un draft che introduce un dominio incompatibile, una correzione della fonte o una discrepanza non presente nella lettura indipendente non può essere supported solo perché ripete il nome del prodotto. Per classification_reading cita la corrispondente classificazione indipendente cN.",
         "Controlla dominio dell'oggetto, azione contrattuale, applicabilità al target e importanza main/accessory/excluded separatamente. Non scambiare un settore, luogo o destinatario per un ruolo. Contesto generale, classificazioni ampie e opere di altri lotti non provano una prestazione locale.",
         "Una famiglia di prodotti identificata può non specificare sottotipi, quantità o requisiti: non inventarli e non usare la loro assenza come ambiguità del mestiere. Verifica che details riporti soltanto condizioni o dettagli, non prestazioni espulse dalle componenti.",
         "Ogni claim è affidato a una sola richiesta con tutte le sue citazioni; i passaggi aggiunti sono contesto, non una selezione che sostituisce coverage. Esamina tutti i passaggi e campi di coverage per omissioni o contraddizioni rispetto al draft completo. Non richiedere che tutti gli acquisti siano ripetuti in ogni frammento. Usa findings quando le prove del gruppo mostrano un problema materiale; nessuna autocorrezione.",
@@ -427,9 +427,23 @@ export function buildGroundedSourceReviewRequests(
   );
   return freeze(
     plan.requests.map((request) => {
-      const observations = independent.observations.filter((o) =>
-        o.evidence.some((q) => request.sourceIds.includes(q.sourceRef)),
-      );
+      // Each source passage is already present in the request. Avoid repeating
+      // its full text for every reading, but preserve unseen contextual quotes.
+      const projectQuotes = (quotes: { sourceRef: string; text: string }[]) =>
+        quotes.map((q) =>
+          request.sourceIds.includes(q.sourceRef)
+            ? { sourceRef: q.sourceRef }
+            : q,
+        );
+      const observations = independent.observations
+        .filter((o) =>
+          o.evidence.some((q) => request.sourceIds.includes(q.sourceRef)),
+        )
+        .map((o) => ({ ...o, evidence: projectQuotes(o.evidence) }));
+      const readingClassifications = classifications.map((c) => ({
+        ...c,
+        evidence: projectQuotes(c.evidence),
+      }));
       const readingIds = [
         ...observations.map((o) => o.id),
         ...classifications.map((c) => c.id),
@@ -454,7 +468,10 @@ export function buildGroundedSourceReviewRequests(
       const prompt = JSON.stringify({
         ...JSON.parse(request.prompt),
         sourceEvidenceHash: independent.hash,
-        independentReading: { observations, classifications },
+        independentReading: {
+          observations,
+          classifications: readingClassifications,
+        },
       });
       if (
         Buffer.byteLength(

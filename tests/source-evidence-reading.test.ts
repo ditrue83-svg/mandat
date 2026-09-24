@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import Ajv2020 from "ajv/dist/2020.js";
 import { test } from "vitest";
 import {
@@ -8,6 +9,7 @@ import {
 } from "../src/lib/source-evidence-reading";
 import type { SourceInterpretationContext } from "../src/lib/source-interpretation";
 import { inventedSourceEvidenceAnswer } from "./helpers/source-evidence-fixture";
+import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 
 const config = {
   model: "invented-independent-model",
@@ -220,9 +222,7 @@ test("Missing classifications, invented labels and non-contiguous quotes cannot 
       a.observations[0].scope = "selected_lot";
     },
     (a: any) => {
-      a.observations[0].evidence = [
-        { sourceRef: "s3", text: "Famiglia alimentare inventata" },
-      ];
+      a.observations[0].evidence = [{ sourceRef: "s3" }];
     },
   ]) {
     const a = responses(plan);
@@ -233,7 +233,7 @@ test("Missing classifications, invented labels and non-contiguous quotes cannot 
 
 test("Independent classification conflicts, uncertainty and incomplete readings remain blocking", () => {
   const plan = buildSourceEvidenceReadingRequest(context(), config);
-  const quote = { sourceRef: "s1", text: context().body.passages[0].text };
+  const quote = { sourceRef: "s1" };
   for (const mutate of [
     (a: any) => {
       a.classifications[0].relationship = "conflicting";
@@ -344,4 +344,110 @@ test("Independent evidence is bound to source and configuration and rejects tamp
     ),
     null,
   );
+});
+
+test("Reference selections preserve complete HTML and Unicode without accepting model-written quotations", () => {
+  const input = context();
+  const original = `<p>Fornitura Alfa 🧹. ${"Il contesto originale resta integro. ".repeat(30)}La seconda frase non può essere eliminata.</p>`;
+  input.body.passages[0].text = original;
+  input.body.passages[0].endUtf16 = original.length;
+  const plan = buildSourceEvidenceReadingRequest(input, config);
+  const selections = responses(plan);
+  const before = JSON.stringify(selections);
+  const record = recordSourceEvidenceReading(selections, plan, metadata);
+  assert.equal(record.responses[0].observations[0].evidence[0].text, original);
+  assert.equal(JSON.stringify(selections), before);
+  assert.equal(readSourceEvidenceReading(record, plan)?.accepted, true);
+  const wire = new Ajv2020({ strict: false }).compile(
+    plan.requests[0].responseFormat.json_schema.schema,
+  );
+  for (const suppliedText of [original, "<p>Fornitura Alfa 🧹.</p>"]) {
+    const invalid = responses(plan);
+    Object.assign(invalid[0].observations[0].evidence[0], {
+      text: suppliedText,
+    });
+    assert.equal(wire(invalid[0]), false);
+    assert.throws(() => recordSourceEvidenceReading(invalid, plan, metadata));
+  }
+  const duplicate = responses(plan);
+  duplicate[0].observations[0].evidence.push({ sourceRef: "s1" });
+  assert.throws(
+    () => recordSourceEvidenceReading(duplicate, plan, metadata),
+    /Repeated/,
+  );
+});
+
+test("Stored evidence cannot replace the original passage with a reconstructed or shortened quote, even with a new hash", () => {
+  const input = context();
+  const original =
+    "<p>Fornitura Alfa. Anche la seconda frase appartiene alla fonte.</p>";
+  input.body.passages[0].text = original;
+  input.body.passages[0].endUtf16 = original.length;
+  const plan = buildSourceEvidenceReadingRequest(input, config);
+  const record = recordSourceEvidenceReading(responses(plan), plan, metadata);
+  for (const replacement of ["<p>Fornitura Alfa.</p>", "Fornitura Alfa."]) {
+    const changed = structuredClone(record);
+    changed.responses[0].observations[0].evidence[0].text = replacement;
+    const { hash: _hash, ...unsigned } = changed;
+    changed.hash = createHash("sha256")
+      .update(stableDocumentaryJson(unsigned))
+      .digest("hex");
+    assert.throws(
+      () => readSourceEvidenceReading(changed, plan),
+      /exact original quotation/,
+    );
+  }
+  assert.equal(
+    readSourceEvidenceReading(
+      { ...record, version: "source-evidence-reading-v1" },
+      plan,
+    ),
+    null,
+  );
+});
+
+test("Fragmented classification labels are copied completely from their ordered original references", () => {
+  const input = context();
+  const label =
+    "Famiglia alimentare " + "contesto ".repeat(80) + "e prodotti secchi";
+  const first = input.body.passages[2];
+  first.text = label.slice(0, 600);
+  first.endUtf16 = first.text.length;
+  const expanded = {
+    ...input,
+    body: {
+      ...input.body,
+      passages: [
+        ...input.body.passages,
+        {
+          ...first,
+          id: "s5",
+          text: label.slice(600),
+          startUtf16: 600,
+          endUtf16: label.length,
+        },
+      ],
+      classifications: [
+        {
+          ...input.body.classifications[0],
+          labels: [{ language: "it", text: label, sourceRefs: ["s3", "s5"] }],
+        },
+      ],
+    },
+  };
+  const plan = buildSourceEvidenceReadingRequest(expanded, config);
+  const record = recordSourceEvidenceReading(responses(plan), plan, metadata);
+  assert.deepEqual(record.responses[0].classifications[0].label, {
+    text: label,
+    sourceRefs: ["s3", "s5"],
+  });
+  assert.equal(readSourceEvidenceReading(record, plan)?.accepted, true);
+  for (const sourceRefs of [["s3"], ["s5", "s3"], ["s1"]]) {
+    const invalid = responses(plan);
+    invalid[0].classifications[0].label!.sourceRefs = sourceRefs;
+    assert.throws(
+      () => recordSourceEvidenceReading(invalid, plan, metadata),
+      /complete original label/,
+    );
+  }
 });

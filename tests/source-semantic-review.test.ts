@@ -19,6 +19,7 @@ import {
 
 import {
   inventedSourceEvidence,
+  inventedSourceEvidenceAnswer,
   inventedGroundedReviewRequests,
   inventedReadingRefs,
 } from "./helpers/source-evidence-fixture";
@@ -673,7 +674,42 @@ test("Changing the proposed draft never changes the independent source request",
   );
 });
 
-test("A v1 approval without independent evidence is obsolete and cannot be promoted", () => {
+test("Grounded review preserves original passages while avoiding repeated materialized quotation text", () => {
+  const input = context();
+  const plan = buildSourceSemanticReviewRequest(input, draft(input), config);
+  const evidence = inventedSourceEvidence(plan);
+  const before = JSON.stringify(evidence);
+  const requests = inventedGroundedReviewRequests(plan);
+  for (const request of requests) {
+    const body = JSON.parse(request.prompt);
+    assert.equal(body.sourceEvidenceHash, evidence.hash);
+    const passages = new Map(body.passages.map((p: any) => [p.id, p.text]));
+    for (const reading of [
+      ...body.independentReading.observations,
+      ...body.independentReading.classifications,
+    ]) {
+      for (const quote of reading.evidence) {
+        const original = input.body.passages.find(
+          (p) => p.id === quote.sourceRef,
+        )!;
+        if (passages.has(quote.sourceRef)) {
+          assert.equal(passages.get(quote.sourceRef), original.text);
+          assert.equal("text" in quote, false);
+        } else assert.equal(quote.text, original.text);
+      }
+    }
+    assert(
+      Buffer.byteLength(
+        request.system +
+          request.prompt +
+          JSON.stringify(request.responseFormat),
+      ) <= 160_000,
+    );
+  }
+  assert.equal(JSON.stringify(evidence), before);
+});
+
+test("Approvals using earlier independent evidence contracts cannot be promoted", () => {
   const plan = buildSourceSemanticReviewRequest(context(), draft(), config);
   const old = {
     version: "documentary-source-semantic-review-v1",
@@ -687,6 +723,13 @@ test("A v1 approval without independent evidence is obsolete and cannot be promo
     ],
   };
   assert.equal(readSourceSemanticReview(old, plan), null);
+  assert.equal(
+    readSourceSemanticReview(
+      { ...old, version: "documentary-source-semantic-review-v2" },
+      plan,
+    ),
+    null,
+  );
   assert.throws(() =>
     productionRecordSourceSemanticReview(answers(plan), plan, {
       ...metadata,
@@ -703,14 +746,14 @@ test("A v1 approval without independent evidence is obsolete and cannot be promo
 
 test("An independent classification conflict blocks even unanimous draft approval and persists its cause", () => {
   const plan = buildSourceSemanticReviewRequest(context(), draft(), config);
-  const oldEvidence = inventedSourceEvidence(plan),
-    responses = structuredClone(oldEvidence.responses);
+  const responses = plan.evidencePlan.requests.map((part) =>
+    inventedSourceEvidenceAnswer(JSON.parse(part.prompt)),
+  );
   responses[0].classifications[0].relationship = "conflicting";
   responses[0].classifications[0].explanation =
     "Contraddizione inventata fra due affermazioni originali.";
   responses[0].classifications[0].evidence.push({
     sourceRef: "s1",
-    text: context().body.passages[0].text,
   });
   const evidence = recordSourceEvidenceReading(responses, plan.evidencePlan, {
     ...metadata,
