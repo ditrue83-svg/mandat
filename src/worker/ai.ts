@@ -416,6 +416,16 @@ function requestConfiguration(options?: AiRequestOptions) {
       !["none", "low", "medium", "high"].includes(reasoningEffort)
     )
       throw new AiUnavailable("Modalità di ragionamento AI non valida");
+    if (
+      provider === "mistral-eu" &&
+      model === MISTRAL_MEDIUM_3_5_MODEL &&
+      (options?.temperature ?? 0) === 0 &&
+      options?.topP !== undefined &&
+      options.topP !== 1
+    )
+      throw new AiUnavailable(
+        "Mistral Medium con temperatura zero richiede top_p uguale a 1",
+      );
     return {
       ...configuration,
       model,
@@ -484,6 +494,14 @@ export const configuredTransport: AiTransport = {
       apiKey,
       reasoningEffort,
     } = requestConfiguration(options);
+    // Medium's API defaults top_p below one. Its greedy sampler rejects
+    // temperature zero unless top_p is explicitly one (provider error3054).
+    const effectiveTopP =
+      provider === "mistral-eu" &&
+      expectedModel === MISTRAL_MEDIUM_3_5_MODEL &&
+      temperature === 0
+        ? (topP ?? 1)
+        : topP;
     const url = new URL(`${baseUrl}/chat/completions`);
     const response = await fetch(url, {
       method: "POST",
@@ -498,7 +516,7 @@ export const configuredTransport: AiTransport = {
           { role: "user", content: prompt },
         ],
         temperature,
-        ...(topP === undefined ? {} : { top_p: topP }),
+        ...(effectiveTopP === undefined ? {} : { top_p: effectiveTopP }),
         max_tokens: maxTokens,
         stream: false,
         ...(provider === "mistral-eu" ? { service_tier: "standard_only" } : {}),

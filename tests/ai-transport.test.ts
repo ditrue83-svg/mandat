@@ -297,6 +297,8 @@ describe("trasporto AI e consumo degli output respinti", () => {
       model: mediumOptions.model,
       reasoning_effort: "high",
       service_tier: "standard_only",
+      temperature: 0,
+      top_p: 1,
     });
     const [usage] = await db.select().from(schema.aiUsage);
     expect(usage).toMatchObject({
@@ -328,6 +330,44 @@ describe("trasporto AI e consumo degli output respinti", () => {
         String((fetch.mock.calls[0] as unknown as [URL, RequestInit])[1].body),
       ).reasoning_effort,
     ).toBe("none");
+  });
+
+  it("rejects an incompatible Medium greedy sampler before reservation or fetch", async () => {
+    vi.stubEnv("MISTRAL_API_KEY", "mistral-test-key");
+    const fetch = mockResponse(mediumPayload());
+    await expect(
+      infer(
+        publication,
+        "invalid-greedy",
+        "prompt",
+        8192,
+        undefined,
+        "system",
+        undefined,
+        {
+          ...mediumOptions,
+          temperature: 0,
+          topP: 0.9,
+        },
+      ),
+    ).rejects.toThrow("top_p uguale a 1");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await db.select().from(schema.aiUsage)).toEqual([]);
+  });
+
+  it("keeps explicit non-greedy Medium sampling unchanged", async () => {
+    vi.stubEnv("MISTRAL_API_KEY", "mistral-test-key");
+    const fetch = mockResponse(mediumPayload());
+    await configuredTransport.complete("system", "prompt", 8192, undefined, {
+      ...mediumOptions,
+      temperature: 0.7,
+      topP: 0.95,
+    });
+    expect(
+      JSON.parse(
+        String((fetch.mock.calls[0] as unknown as [URL, RequestInit])[1].body),
+      ),
+    ).toMatchObject({ temperature: 0.7, top_p: 0.95 });
   });
 
   it.each([
