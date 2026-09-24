@@ -596,3 +596,70 @@ test("Contract metadata alone cannot be promoted to a performance and earlier ev
     null,
   );
 });
+
+test("A lot reading can cite shared context only with local evidence; project-only claims cannot become lot facts", () => {
+  const original = context();
+  const localText =
+    "Il lotto 1 applica la fornitura descritta nel progetto alla regione Nord.";
+  const input: SourceInterpretationContext = {
+    ...original,
+    binding: {
+      ...original.binding,
+      target: {
+        kind: "lot",
+        publicationId: "invented-publication",
+        sourceProjectId: "invented-project",
+        lotId: "invented-lot",
+      },
+    },
+    targetScope: "selected_lot",
+    body: {
+      ...original.body,
+      classifications: original.body.classifications.map((c) => ({
+        ...c,
+        appliesTo: "shared_project_context" as const,
+      })),
+      target: {
+        kind: "lot",
+        lot: { id: "invented-lot", path: "/lots/0", headerPath: null },
+      },
+      passages: [
+        ...original.body.passages,
+        {
+          ...original.body.passages[0],
+          id: "s5",
+          scope: "selected_lot",
+          rawPath: "/lots/0/orderDescription/it",
+          text: localText,
+          endUtf16: localText.length,
+        },
+      ],
+    },
+  };
+  const plan = buildSourceEvidenceReadingRequest(input, config),
+    valid = responses(plan);
+  valid[0].observations[0].scope = "selected_lot";
+  valid[0].observations[0].evidence = [
+    { sourceRef: "s5" },
+    { sourceRef: "s1" },
+  ];
+  assert.equal(
+    readSourceEvidenceReading(
+      recordSourceEvidenceReading(valid, plan, metadata),
+      plan,
+    )!.accepted,
+    true,
+  );
+  const unanchored = structuredClone(valid);
+  unanchored[0].observations[0].evidence = [{ sourceRef: "s1" }];
+  assert.throws(
+    () => recordSourceEvidenceReading(unanchored, plan, metadata),
+    /scope mismatch/,
+  );
+  const mislabelled = structuredClone(valid);
+  mislabelled[0].observations[0].scope = "project_context";
+  assert.throws(
+    () => recordSourceEvidenceReading(mislabelled, plan, metadata),
+    /scope mismatch/,
+  );
+});
