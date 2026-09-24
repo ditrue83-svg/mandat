@@ -590,17 +590,17 @@ test("Contract metadata alone cannot be promoted to a performance and earlier ev
   const record = recordSourceEvidenceReading(responses(plan), plan, metadata);
   assert.equal(
     readSourceEvidenceReading(
-      { ...record, version: "source-evidence-reading-v3" },
+      { ...record, version: "source-evidence-reading-v4" },
       plan,
     ),
     null,
   );
 });
 
-test("Lot facts and shared facts remain separate in the provider schema and stored reading", () => {
+function lotContext(
+  localText = "Il lotto 1 applica la fornitura descritta nel progetto alla regione Nord.",
+) {
   const original = context();
-  const localText =
-    "Il lotto 1 applica la fornitura descritta nel progetto alla regione Nord.";
   const input: SourceInterpretationContext = {
     ...original,
     binding: {
@@ -636,7 +636,11 @@ test("Lot facts and shared facts remain separate in the provider schema and stor
       ],
     },
   };
-  const plan = buildSourceEvidenceReadingRequest(input, config);
+  return input;
+}
+
+test("Lot facts and shared facts remain separate in the provider schema and stored reading", () => {
+  const plan = buildSourceEvidenceReadingRequest(lotContext(), config);
   const valid: any[] = responses(plan);
   valid[0].observations[0].scope = "selected_lot";
   valid[0].observations[0].evidence = [{ sourceRef: "s5" }];
@@ -684,5 +688,78 @@ test("Lot facts and shared facts remain separate in the provider schema and stor
   assert.throws(
     () => recordSourceEvidenceReading(mixedDetail, plan, metadata),
     /scope mismatch/,
+  );
+});
+
+test("A territorial partition identifies the lot only with a separately grounded common performance", () => {
+  const plan = buildSourceEvidenceReadingRequest(
+    lotContext("Regione Nord"),
+    config,
+  );
+  const answers: any[] = responses(plan);
+  const local = answers[0].observations.find(
+    (o: any) => o.scope === "selected_lot",
+  );
+  local.kind = "target_partition";
+  local.statement = "Ripartizione territoriale: Regione Nord.";
+  const validate = new Ajv2020({ strict: false }).compile(
+    plan.requests[0].responseFormat.json_schema.schema,
+  );
+  assert.equal(validate(answers[0]), true);
+  const result = readSourceEvidenceReading(
+    recordSourceEvidenceReading(answers, plan, metadata),
+    plan,
+  )!;
+  assert.equal(result.identified, true);
+  assert.equal(result.accepted, true);
+  assert(
+    !result.observations.some(
+      (o) => o.kind === "performance" && o.scope === "selected_lot",
+    ),
+  );
+  const noWork = structuredClone(answers);
+  noWork[0].observations = noWork[0].observations.filter(
+    (o: any) => o.kind !== "performance",
+  );
+  assert.equal(
+    readSourceEvidenceReading(
+      recordSourceEvidenceReading(noWork, plan, metadata),
+      plan,
+    )!.identified,
+    false,
+  );
+  const noPartition = structuredClone(answers);
+  noPartition[0].observations.find(
+    (o: any) => o.kind === "target_partition",
+  ).kind = "condition";
+  assert.equal(
+    readSourceEvidenceReading(
+      recordSourceEvidenceReading(noPartition, plan, metadata),
+      plan,
+    )!.identified,
+    false,
+  );
+  const uncertain = structuredClone(answers);
+  uncertain[0].issues.push({
+    kind: "target_uncertain",
+    reason: "L'applicabilità al lotto non è stabilita.",
+    evidence: [{ sourceRef: "s5" }],
+  });
+  assert.equal(
+    readSourceEvidenceReading(
+      recordSourceEvidenceReading(uncertain, plan, metadata),
+      plan,
+    )!.accepted,
+    false,
+  );
+  const wrongScope = structuredClone(answers);
+  const project = wrongScope[0].observations.find(
+    (o: any) => o.kind === "performance",
+  );
+  project.kind = "target_partition";
+  assert.equal(validate(wrongScope[0]), false);
+  assert.throws(
+    () => recordSourceEvidenceReading(wrongScope, plan, metadata),
+    /partition must belong/,
   );
 });

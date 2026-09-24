@@ -9,7 +9,7 @@ import {
 import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v4";
+export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v5";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -45,7 +45,7 @@ const labelQuote = z.strictObject({
 });
 const quotes = z.array(quote).min(1).max(16);
 const observation = z.strictObject({
-  kind: z.enum(["performance", "condition"]),
+  kind: z.enum(["performance", "condition", "target_partition"]),
   statement: text(600),
   scope: z.enum(["project_context", "selected_lot"]),
   evidence: quotes,
@@ -201,7 +201,13 @@ export function buildSourceEvidenceReadingRequest(
       };
       return [
         {
-          observation: observation.omit({ evidence: true }).extend(scoped),
+          observation: observation.omit({ evidence: true }).extend({
+            ...scoped,
+            kind:
+              scope === "project_context"
+                ? z.enum(["performance", "condition"])
+                : observation.shape.kind,
+          }),
           detail: missingDetail.omit({ evidence: true }).extend(scoped),
         },
       ];
@@ -256,7 +262,7 @@ export function buildSourceEvidenceReadingRequest(
         ...(context.targetScope === "selected_lot"
           ? [
               "PRIORITÀ LOTTO: selected_lot descrive solo ciò che i passaggi locali attestano. Il titolo locale di un bene non dimostra servizi accessori né luoghi di esecuzione indicati soltanto nel progetto. Per esempio, progetto 'fornitura veicoli e smaltimento', lotto 'autocarri': conserva smaltimento nel progetto, non aggiungerlo agli autocarri. Un rinvio al capitolato non prova il contenuto di un documento non fornito. Non assegnare manutenzione, installazione, quantità o ubicazioni puntuali al lotto senza prova locale.",
-              "Se i lotti ripartiscono geograficamente uno stesso lavoro comune, conserva le azioni comuni in project_context e la regione del lotto in selected_lot. Mantieni l'eventuale collegamento esplicito nella relativa osservazione, senza spostare le prove di ambito. Specifiche o applicabilità accessorie non precisate sono missingDetails; non rendono sconosciuto un oggetto locale identificabile.",
+              "Se i lotti ripartiscono geograficamente uno stesso lavoro comune, conserva le azioni comuni come performance in project_context e la regione del lotto come target_partition in selected_lot. target_partition descrive solo la suddivisione esplicita del lavoro comune: non è una prestazione autonoma e non può aggiungere azioni, beni o luoghi più precisi. Usalo solo se la fonte presenta realmente il lotto come ripartizione territoriale, non per qualunque titolo generico o lotto con beni diversi. Specifiche o applicabilità accessorie non precisate sono missingDetails; non rendono sconosciuto un oggetto locale identificabile.",
             ]
           : []),
         "Le citazioni sN sono testi originali; fN sono valori JSON originali al percorso rawPath: numero, booleano, null o collezione. Puoi citarli solo se presenti qui. Usa fN per un numero fornito nei campi, senza inventare sN. Non attribuire a una data un significato non attestato dal percorso e dalla nota. Non confondere false, 0 e null. Ogni prestazione performance richiede anche una descrizione originale con role service, non soli metadati o CPV.",
@@ -482,8 +488,10 @@ function validate(values: unknown[], plan: SourceEvidenceReadingPlan) {
       checkQuotes(o.evidence);
       if (!supportsScope(o.scope, o.evidence))
         throw new Error("Source evidence scope mismatch");
+      if (o.kind === "target_partition" && o.scope !== "selected_lot")
+        throw new Error("A target partition must belong to the selected lot");
       if (
-        o.kind === "performance" &&
+        (o.kind === "performance" || o.kind === "target_partition") &&
         !o.evidence.some(
           (q) =>
             !classificationRefs.has(q.sourceRef) &&
@@ -649,9 +657,15 @@ export function readSourceEvidenceReading(
   const missingDetails = responses.flatMap((r, i) =>
     r.missingDetails.map((d, j) => ({ id: `d${i + 1}-${j + 1}`, ...d })),
   );
-  const identified = observations.some(
-    (o) => o.kind === "performance" && o.scope === plan.context.targetScope,
-  );
+  const identified =
+    observations.some(
+      (o) => o.kind === "performance" && o.scope === plan.context.targetScope,
+    ) ||
+    (plan.context.targetScope === "selected_lot" &&
+      observations.some((o) => o.kind === "target_partition") &&
+      observations.some(
+        (o) => o.kind === "performance" && o.scope === "project_context",
+      ));
   if (!complete)
     findings.push({
       kind: "unreadable_source",
