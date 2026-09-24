@@ -2,6 +2,7 @@ import {
   aiModel,
   aiProvider,
   validateAiModel,
+  mistralReasoningEffort,
   type AiEnvironment,
 } from "./ai-provider-config";
 
@@ -25,9 +26,7 @@ export function documentaryAiReasoningEffort(
       ? env.LLM_REASONING_EFFORT
       : undefined);
   if (provider === "mistral-eu") {
-    if (value && value !== "none")
-      throw new Error("Mistral Large 3 non usa il ragionamento configurabile");
-    return "none";
+    return mistralReasoningEffort(documentaryAiModel(env), value) ?? "none";
   }
   if (!value) return undefined;
   if (
@@ -45,8 +44,8 @@ export function documentarySourceReasoningEffort(
   env: AiEnvironment = process.env,
 ): "none" | "low" | "medium" | "high" {
   const value = env.DOCUMENTARY_SOURCE_REASONING_EFFORT || "none";
-  if (documentaryAiProvider(env) === "mistral-eu" && value !== "none")
-    throw new Error("Mistral Large 3 non usa il ragionamento configurabile");
+  if (documentaryAiProvider(env) === "mistral-eu")
+    return mistralReasoningEffort(documentaryAiModel(env), value) ?? "none";
   if (
     value !== "none" &&
     value !== "low" &&

@@ -144,6 +144,17 @@ test("An explicit output limit binds requests, plan, record and hash without cha
     );
 });
 
+test("A project cannot be described as a selected lot partition in the provider schema", () => {
+  const plan = buildSourceEvidenceReadingRequest(context(), config);
+  const answers = responses(plan);
+  const validate = new Ajv2020({ strict: false }).compile(
+    plan.requests[0].responseFormat.json_schema.schema,
+  );
+  assert(validate(answers[0]));
+  answers[0].observations[0].kind = "target_partition";
+  assert(!validate(answers[0]));
+});
+
 test("Independent reading contains original source only and preserves label evidence in its strict schema", () => {
   const input = context(),
     plan = buildSourceEvidenceReadingRequest(input, config),

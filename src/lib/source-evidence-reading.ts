@@ -9,7 +9,7 @@ import {
 import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v7";
+export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v8";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -207,7 +207,15 @@ export function buildSourceEvidenceReadingRequest(
         .max(15),
     };
     const boundedObservations = z
-      .array(selectedObservation.safeExtend(boundedAnchor))
+      .array(
+        selectedObservation.safeExtend({
+          ...boundedAnchor,
+          kind:
+            context.targetScope === "project_context"
+              ? z.enum(["performance", "condition"])
+              : selectedObservation.shape.kind,
+        }),
+      )
       .max(serviceIds.length ? 32 : 0);
     const boundedDetails = z
       .array(selectedDetail.safeExtend(boundedAnchor))

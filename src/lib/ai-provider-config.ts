@@ -3,6 +3,7 @@ export type AiEnvironment = Record<string, string | undefined>;
 
 export const MISTRAL_EU_BASE_URL = "https://api.eu.mistral.ai/v1";
 export const MISTRAL_LARGE_3_MODEL = "mistral-large-2512";
+export const MISTRAL_MEDIUM_3_5_MODEL = "mistral-medium-2604";
 const legacyDefaultModel = "mistralai/Ministral-3-14B-Instruct-2512";
 
 export function aiProvider(value?: string): AiProvider {
@@ -24,8 +25,25 @@ export function aiModel(
 
 export function validateAiModel(provider: AiProvider, model: string) {
   // Dated ID only: aliases can change weights and invalidate quality checks.
-  if (provider === "mistral-eu" && model !== MISTRAL_LARGE_3_MODEL)
-    throw new Error("Per Mistral UE configurare mistral-large-2512");
+  if (
+    provider === "mistral-eu" &&
+    ![MISTRAL_LARGE_3_MODEL, MISTRAL_MEDIUM_3_5_MODEL].includes(model)
+  )
+    throw new Error(
+      "Per Mistral UE configurare mistral-large-2512 oppure mistral-medium-2604",
+    );
+}
+
+export function mistralReasoningEffort(model: string, value?: string) {
+  validateAiModel("mistral-eu", model);
+  if (model === MISTRAL_LARGE_3_MODEL) {
+    if (value && value !== "none")
+      throw new Error("Mistral Large 3 non usa il ragionamento configurabile");
+    return undefined;
+  }
+  if (!value || value === "none") return "none" as const;
+  if (value === "high") return "high" as const;
+  throw new Error("Mistral Medium 3.5 richiede ragionamento none oppure high");
 }
 
 // Contains configuration identifiers only, never credential values. Mistral

@@ -5,6 +5,9 @@ import {
   aiProviderConfiguration,
   MISTRAL_EU_BASE_URL,
   MISTRAL_LARGE_3_MODEL,
+  MISTRAL_MEDIUM_3_5_MODEL,
+  validateAiModel,
+  mistralReasoningEffort,
 } from "../src/lib/ai-provider-config";
 
 const legacy = {
@@ -13,6 +16,22 @@ const legacy = {
   LLM_API_BASE_URL: "https://api.infomaniak.com/2/ai/123/openai/v1",
   MISTRAL_API_KEY: "mistral-secret-never-print",
 };
+
+it("pins Medium 3.5 and permits only its documented reasoning levels", () => {
+  expect(() =>
+    validateAiModel("mistral-eu", MISTRAL_MEDIUM_3_5_MODEL),
+  ).not.toThrow();
+  expect(mistralReasoningEffort(MISTRAL_MEDIUM_3_5_MODEL, "high")).toBe("high");
+  expect(mistralReasoningEffort(MISTRAL_MEDIUM_3_5_MODEL)).toBe("none");
+  for (const level of ["low", "medium", "invalid"])
+    expect(() =>
+      mistralReasoningEffort(MISTRAL_MEDIUM_3_5_MODEL, level),
+    ).toThrow();
+  for (const model of ["mistral-medium-latest", "mistral-medium-3-5"])
+    expect(() => validateAiModel("mistral-eu", model)).toThrow();
+  expect(() => mistralReasoningEffort(MISTRAL_LARGE_3_MODEL, "high")).toThrow();
+  expect(mistralReasoningEffort(MISTRAL_LARGE_3_MODEL, "none")).toBeUndefined();
+});
 
 it("isolates a Mistral override from the legacy endpoint, model and credential", () => {
   expect(aiProviderConfiguration(legacy, "mistral-eu")).toEqual({

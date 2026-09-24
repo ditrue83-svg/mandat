@@ -14,6 +14,8 @@ import {
   aiProvider,
   aiProviderConfiguration,
   validateAiModel,
+  mistralReasoningEffort,
+  MISTRAL_MEDIUM_3_5_MODEL,
   type AiProvider,
 } from "@/lib/ai-provider-config";
 const summarySchema = z.object({
@@ -414,26 +416,62 @@ function requestConfiguration(options?: AiRequestOptions) {
       !["none", "low", "medium", "high"].includes(reasoningEffort)
     )
       throw new AiUnavailable("Modalità di ragionamento AI non valida");
-    if (
-      provider === "mistral-eu" &&
-      reasoningEffort &&
-      reasoningEffort !== "none"
-    )
-      throw new AiUnavailable(
-        "Mistral Large 3 non usa il ragionamento configurabile",
-      );
     return {
       ...configuration,
       model,
       apiKey,
-      // Large 3 is a non-reasoning model. Do not send Qwen-specific settings.
-      reasoningEffort: provider === "mistral-eu" ? undefined : reasoningEffort,
+      reasoningEffort:
+        provider === "mistral-eu"
+          ? mistralReasoningEffort(model, reasoningEffort)
+          : reasoningEffort,
     };
   } catch (error) {
     throw new AiUnavailable(
       error instanceof Error ? error.message : "Configurazione AI non valida",
     );
   }
+}
+// Mistral's documented high-reasoning response separates thinking chunks
+// from final text. Only the latter is parsed or returned to callers. Usage
+// still accounts for the complete response, including reasoning tokens.
+function mistralFinalContent(value: unknown) {
+  const envelope = z
+    .object({
+      choices: z
+        .array(
+          z.object({ message: z.object({ content: z.array(z.unknown()) }) }),
+        )
+        .length(1),
+    })
+    .safeParse(value);
+  if (!envelope.success) return value;
+  const parts = envelope.data.choices[0].message.content;
+  if (!parts.length || parts.length > 256) return value;
+  const textPart = z.object({ type: z.literal("text"), text: z.string() });
+  const thinkingPart = z.object({
+    type: z.literal("thinking"),
+    thinking: z.array(textPart),
+  });
+  const final: string[] = [];
+  for (const part of parts) {
+    const text = textPart.safeParse(part);
+    if (text.success) {
+      final.push(text.data.text);
+      continue;
+    }
+    if (final.length || !thinkingPart.safeParse(part).success) return value;
+  }
+  if (!final.join("").trim()) return value;
+  const body = value as {
+    choices: Array<{ message: Record<string, unknown> }>;
+  };
+  return {
+    ...body,
+    choices: body.choices.map((choice) => ({
+      ...choice,
+      message: { ...choice.message, content: final.join("") },
+    })),
+  };
 }
 export const configuredTransport: AiTransport = {
   async complete(system, prompt, maxTokens, responseFormat, options) {
@@ -531,6 +569,12 @@ export const configuredTransport: AiTransport = {
           "usage_invalid",
         ),
       );
+    const answerValue =
+      provider === "mistral-eu" &&
+      expectedModel === MISTRAL_MEDIUM_3_5_MODEL &&
+      reasoningEffort === "high"
+        ? mistralFinalContent(value)
+        : value;
     const payload = z
       .object({
         model: z.literal(expectedModel),
@@ -546,10 +590,10 @@ export const configuredTransport: AiTransport = {
           )
           .length(1),
       })
-      .safeParse(value);
+      .safeParse(answerValue);
     if (!payload.success) {
       const diagnostic = responseDiagnostic(
-        value,
+        answerValue,
         expectedModel,
         maxTokens,
         response.status,

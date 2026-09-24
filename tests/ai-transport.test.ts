@@ -250,6 +250,196 @@ afterEach(() => {
 afterAll(async () => pg.close());
 
 describe("trasporto AI e consumo degli output respinti", () => {
+  const mediumOptions = {
+    provider: "mistral-eu" as const,
+    model: "mistral-medium-2604",
+    reasoningEffort: "high" as const,
+    rates: { input: 2, output: 10 },
+  };
+  const mediumPayload = (): ProviderPayload => ({
+    ...payload(),
+    model: mediumOptions.model,
+    choices: [
+      {
+        finish_reason: "stop",
+        message: {
+          content: [
+            {
+              type: "thinking",
+              thinking: [{ type: "text", text: privateResponseText }],
+            },
+            { type: "text", text: JSON.stringify(summary).slice(0, 20) },
+            { type: "text", text: JSON.stringify(summary).slice(20) },
+          ],
+        },
+      },
+    ],
+    usage: { prompt_tokens: 100, completion_tokens: 500 },
+  });
+  it("uses Medium high reasoning on EU, parses only final text and accounts for all tokens", async () => {
+    vi.stubEnv("MISTRAL_API_KEY", "mistral-test-key");
+    const fetch = mockResponse(mediumPayload());
+    const result = await infer(
+      publication,
+      "medium-test",
+      "prompt",
+      8192,
+      undefined,
+      "system",
+      undefined,
+      mediumOptions,
+    );
+    expect(result).toEqual(summary);
+    expect(JSON.stringify(result)).not.toContain(privateResponseText);
+    const [url, init] = fetch.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(String(url)).toBe("https://api.eu.mistral.ai/v1/chat/completions");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      model: mediumOptions.model,
+      reasoning_effort: "high",
+      service_tier: "standard_only",
+    });
+    const [usage] = await db.select().from(schema.aiUsage);
+    expect(usage).toMatchObject({
+      status: "completed",
+      inputTokens: 100,
+      outputTokens: 500,
+      costChf: "0.005200",
+    });
+    expect(JSON.stringify(usage)).not.toContain(privateResponseText);
+  });
+
+  it("accepts Medium none as plain text and explicitly sends the chosen level", async () => {
+    vi.stubEnv("MISTRAL_API_KEY", "mistral-test-key");
+    const fetch = mockResponse({ ...payload(), model: mediumOptions.model });
+    await expect(
+      infer(
+        publication,
+        "medium-none",
+        "prompt",
+        8192,
+        undefined,
+        "system",
+        undefined,
+        { ...mediumOptions, reasoningEffort: "none" },
+      ),
+    ).resolves.toEqual(summary);
+    expect(
+      JSON.parse(
+        String((fetch.mock.calls[0] as unknown as [URL, RequestInit])[1].body),
+      ).reasoning_effort,
+    ).toBe("none");
+  });
+
+  it.each([
+    [
+      "no final answer",
+      [
+        {
+          type: "thinking",
+          thinking: [{ type: "text", text: privateResponseText }],
+        },
+      ],
+    ],
+    [
+      "thinking after answer",
+      [
+        { type: "text", text: JSON.stringify(summary) },
+        { type: "thinking", thinking: [] },
+      ],
+    ],
+    [
+      "unknown chunk",
+      [
+        { type: "image_url", image_url: "private" },
+        { type: "text", text: JSON.stringify(summary) },
+      ],
+    ],
+    [
+      "invalid thinking",
+      [
+        { type: "thinking", thinking: "private" },
+        { type: "text", text: JSON.stringify(summary) },
+      ],
+    ],
+    ["untyped text", [{ text: JSON.stringify(summary) }]],
+    ["empty answer", [{ type: "text", text: "  " }]],
+  ])(
+    "rejects malformed Medium chunks: %s, preserving reported consumption",
+    async (_name, chunks) => {
+      vi.stubEnv("MISTRAL_API_KEY", "mistral-test-key");
+      const body = mediumPayload();
+      body.choices[0].message.content = chunks;
+      mockResponse(body);
+      const error = await infer(
+        publication,
+        "medium-invalid",
+        "prompt",
+        8192,
+        undefined,
+        "system",
+        undefined,
+        mediumOptions,
+      ).catch((e) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(String(error)).not.toContain(privateResponseText);
+      const [usage] = await db.select().from(schema.aiUsage);
+      expect(usage).toMatchObject({
+        status: "uncertain",
+        inputTokens: 100,
+        outputTokens: 500,
+        costChf: "0.005200",
+      });
+    },
+  );
+
+  it.each(rejectedAnswers)(
+    "preserves response guards for Medium reasoning: %s",
+    async (_name, mutate, diagnostic) => {
+      vi.stubEnv("MISTRAL_API_KEY", "mistral-test-key");
+      const body = mediumPayload();
+      mutate(body);
+      mockResponse(body);
+      const error = await infer(
+        publication,
+        "medium-guard",
+        "prompt",
+        8192,
+        undefined,
+        "system",
+        undefined,
+        mediumOptions,
+      ).catch((e) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(readAiResponseDiagnostic(error)).toMatchObject(diagnostic);
+      const [usage] = await db.select().from(schema.aiUsage);
+      expect(usage).toMatchObject({
+        status: "uncertain",
+        inputTokens: 100,
+        outputTokens: 500,
+        costChf: "0.005200",
+      });
+    },
+  );
+
+  it("rejects unsupported Medium reasoning before reserving or transmitting", async () => {
+    vi.stubEnv("MISTRAL_API_KEY", "mistral-test-key");
+    const fetch = mockResponse(mediumPayload());
+    await expect(
+      infer(
+        publication,
+        "medium-config",
+        "prompt",
+        8192,
+        undefined,
+        "system",
+        undefined,
+        { ...mediumOptions, reasoningEffort: "low" },
+      ),
+    ).rejects.toThrow("none oppure high");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await db.select().from(schema.aiUsage)).toEqual([]);
+  });
+
   it("routes the documentary Mistral request to EU with its own key, fixed model and prices", async () => {
     vi.stubEnv("LLM_API_KEY", "");
     vi.stubEnv("MISTRAL_API_KEY", "mistral-test-key");

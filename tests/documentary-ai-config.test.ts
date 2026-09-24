@@ -4,6 +4,34 @@ import {
   documentarySourceReasoningEffort,
 } from "../src/lib/documentary-ai-config";
 afterEach(() => vi.unstubAllEnvs());
+it("keeps Medium source and comparison reasoning independently configurable", () => {
+  const env = {
+    DOCUMENTARY_LLM_PROVIDER: "mistral-eu",
+    DOCUMENTARY_LLM_MODEL: "mistral-medium-2604",
+    DOCUMENTARY_LLM_INPUT_CHF_PER_MILLION: "2",
+    DOCUMENTARY_LLM_OUTPUT_CHF_PER_MILLION: "10",
+    DOCUMENTARY_LLM_REASONING_EFFORT: "high",
+  };
+  expect(documentaryAiConfiguration(env)).toEqual({
+    provider: "mistral-eu",
+    model: "mistral-medium-2604",
+    reasoningEffort: "high",
+    rates: { input: 2, output: 10 },
+  });
+  expect(documentarySourceReasoningEffort(env)).toBe("none");
+  expect(
+    documentarySourceReasoningEffort({
+      ...env,
+      DOCUMENTARY_SOURCE_REASONING_EFFORT: "high",
+    }),
+  ).toBe("high");
+  expect(() =>
+    documentarySourceReasoningEffort({
+      ...env,
+      DOCUMENTARY_SOURCE_REASONING_EFFORT: "low",
+    }),
+  ).toThrow();
+});
 it("requires dedicated prices and preserves the legacy model configuration", () => {
   vi.stubEnv("LLM_MODEL", "legacy-model");
   vi.stubEnv("LLM_INPUT_CHF_PER_MILLION", "1");
