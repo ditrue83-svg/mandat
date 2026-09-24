@@ -9,7 +9,7 @@ import {
 import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v3";
+export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v4";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -182,15 +182,41 @@ export function buildSourceEvidenceReadingRequest(
     const boundedClassification = selectedClassification.safeExtend({
       evidence: boundedReferences,
     });
+    // Scope records where the evidence occurs, not inferred applicability.
+    // A generic lot title must not unlock every obligation of its project.
+    // Keep shared and local observations separate for the semantic review.
+    const scopedBranches = (
+      ["project_context", "selected_lot"] as const
+    ).flatMap((scope) => {
+      const ids = evidencePassages
+        .filter((p) => p.scope === scope && sourceIds.includes(p.id))
+        .map((p) => p.id);
+      if (!ids.length) return [];
+      const scoped = {
+        scope: z.literal(scope),
+        evidence: z
+          .array(z.strictObject({ sourceRef: z.enum(ids) }))
+          .min(1)
+          .max(16),
+      };
+      return [
+        {
+          observation: observation.omit({ evidence: true }).extend(scoped),
+          detail: missingDetail.omit({ evidence: true }).extend(scoped),
+        },
+      ];
+    });
+    const boundedObservation =
+      scopedBranches.length === 1
+        ? scopedBranches[0].observation
+        : z.union(scopedBranches.map((branch) => branch.observation));
+    const boundedDetail =
+      scopedBranches.length === 1
+        ? scopedBranches[0].detail
+        : z.union(scopedBranches.map((branch) => branch.detail));
     const bounded = selectionSchema.safeExtend({
       chunkId: z.literal(id),
-      observations: z
-        .array(
-          observation
-            .omit({ evidence: true })
-            .extend({ evidence: boundedReferences }),
-        )
-        .max(32),
+      observations: z.array(boundedObservation).max(32),
       issues: z
         .array(
           issue
@@ -198,13 +224,7 @@ export function buildSourceEvidenceReadingRequest(
             .extend({ evidence: boundedReferences }),
         )
         .max(32),
-      missingDetails: z
-        .array(
-          missingDetail
-            .omit({ evidence: true })
-            .extend({ evidence: boundedReferences }),
-        )
-        .max(32),
+      missingDetails: z.array(boundedDetail).max(32),
       classifications: group.classificationIds.length
         ? z
             .array(
@@ -232,7 +252,13 @@ export function buildSourceEvidenceReadingRequest(
         "Le osservazioni performance descrivono acquisti e azioni: fornitura di beni, esecuzione, gestione, installazione, manutenzione, progettazione o consulenza. Manutenzione conserva o ripristina un bene: luogo, destinatario o settore non la dimostrano. Metadati e classificazioni non sono prestazioni autonome.",
         "missingDetails elenca specifiche non determinate nella fonte fornita: sottotipo, composizione, quantità, modelli o condizioni rinviate ai documenti. Non proporre possibili sottotipi. Queste lacune non diventano issues se famiglia dell'oggetto e azione contrattuale sono identificabili. Per esempio: fornitura di arredi senza dimensioni -> prestazione identificata, dimensioni in missingDetails; solo 'incarico Delta' senza descrizione né famiglia -> object_uncertain. Non trasferire azioni generali o di altri lotti al target.",
         "issues contiene solo impedimenti materiali: object_uncertain quando non si può identificare neppure la famiglia o l'azione; target_uncertain quando non si può stabilire l'ambito; source_conflict per affermazioni incompatibili sul medesimo oggetto, senza precedenza o rettifica. Due clausole che includono ed escludono reciprocamente la stessa prestazione restano un conflitto, mai un semplice dettaglio da controllare. Non trasformare dati compatibili o traduzioni in conflitti.",
-        "Per un lotto, puoi collegare il contesto generale alla descrizione locale solo quando le prove ne dimostrano l'applicazione: cita anche almeno un passaggio del lotto selezionato. Conserva come project_context ciò che non è attribuibile al lotto. Un nome di luogo o un titolo generico da solo non prova un'azione né trasferisce tutte le prestazioni del progetto.",
+        "scope registra l'ambito ORIGINALE delle prove, non un'applicabilità dedotta: ogni observations o missingDetails deve citare solo prove dello stesso scope. Conserva le informazioni del progetto in project_context e quelle del lotto in selected_lot, in osservazioni distinte. Il revisore successivo potrà esaminare insieme le due serie; non perderne una e non combinarle in un fatto locale.",
+        ...(context.targetScope === "selected_lot"
+          ? [
+              "PRIORITÀ LOTTO: selected_lot descrive solo ciò che i passaggi locali attestano. Il titolo locale di un bene non dimostra servizi accessori né luoghi di esecuzione indicati soltanto nel progetto. Per esempio, progetto 'fornitura veicoli e smaltimento', lotto 'autocarri': conserva smaltimento nel progetto, non aggiungerlo agli autocarri. Un rinvio al capitolato non prova il contenuto di un documento non fornito. Non assegnare manutenzione, installazione, quantità o ubicazioni puntuali al lotto senza prova locale.",
+              "Se i lotti ripartiscono geograficamente uno stesso lavoro comune, conserva le azioni comuni in project_context e la regione del lotto in selected_lot. Mantieni l'eventuale collegamento esplicito nella relativa osservazione, senza spostare le prove di ambito. Specifiche o applicabilità accessorie non precisate sono missingDetails; non rendono sconosciuto un oggetto locale identificabile.",
+            ]
+          : []),
         "Le citazioni sN sono testi originali; fN sono valori JSON originali al percorso rawPath: numero, booleano, null o collezione. Puoi citarli solo se presenti qui. Usa fN per un numero fornito nei campi, senza inventare sN. Non attribuire a una data un significato non attestato dal percorso e dalla nota. Non confondere false, 0 e null. Ogni prestazione performance richiede anche una descrizione originale con role service, non soli metadati o CPV.",
         "Esamina tutti i passaggi e campi di coverage. Riporta condizioni solo quando il fatto e il significato sono espliciti; evita riassunti amministrativi non necessari all'oggetto e non dedurre requisiti. Se non riesci a rappresentare la parte entro i limiti, usa unreadable. In evidence scegli soltanto sourceRef ammessi, senza text: il codice conserva il testo originale o il valore JSON esatto. Un riferimento valido non rende vera un'affermazione non sostenuta.",
       ],
@@ -451,10 +477,7 @@ function validate(values: unknown[], plan: SourceEvidenceReadingPlan) {
     const supportsScope = (
       scope: "project_context" | "selected_lot",
       items: z.infer<typeof quotes>,
-    ) =>
-      scope === "project_context"
-        ? items.every((q) => byId.get(q.sourceRef)!.scope === scope)
-        : items.some((q) => byId.get(q.sourceRef)!.scope === scope);
+    ) => items.every((q) => byId.get(q.sourceRef)!.scope === scope);
     for (const o of value.observations) {
       checkQuotes(o.evidence);
       if (!supportsScope(o.scope, o.evidence))

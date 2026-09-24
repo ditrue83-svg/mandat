@@ -590,14 +590,14 @@ test("Contract metadata alone cannot be promoted to a performance and earlier ev
   const record = recordSourceEvidenceReading(responses(plan), plan, metadata);
   assert.equal(
     readSourceEvidenceReading(
-      { ...record, version: "source-evidence-reading-v2" },
+      { ...record, version: "source-evidence-reading-v3" },
       plan,
     ),
     null,
   );
 });
 
-test("A lot reading can cite shared context only with local evidence; project-only claims cannot become lot facts", () => {
+test("Lot facts and shared facts remain separate in the provider schema and stored reading", () => {
   const original = context();
   const localText =
     "Il lotto 1 applica la fornitura descritta nel progetto alla regione Nord.";
@@ -636,13 +636,20 @@ test("A lot reading can cite shared context only with local evidence; project-on
       ],
     },
   };
-  const plan = buildSourceEvidenceReadingRequest(input, config),
-    valid = responses(plan);
+  const plan = buildSourceEvidenceReadingRequest(input, config);
+  const valid: any[] = responses(plan);
   valid[0].observations[0].scope = "selected_lot";
-  valid[0].observations[0].evidence = [
-    { sourceRef: "s5" },
-    { sourceRef: "s1" },
-  ];
+  valid[0].observations[0].evidence = [{ sourceRef: "s5" }];
+  valid[0].missingDetails.push({
+    description: "Specifiche del lotto da verificare nei documenti.",
+    scope: "selected_lot",
+    evidence: [{ sourceRef: "s5" }],
+  });
+  const validate = new Ajv2020({ strict: false }).compile(
+    plan.requests[0].responseFormat.json_schema.schema,
+  );
+  assert.equal(validate(valid[0]), true);
+  assert(valid[0].observations.some((o: any) => o.scope === "project_context"));
   assert.equal(
     readSourceEvidenceReading(
       recordSourceEvidenceReading(valid, plan, metadata),
@@ -652,14 +659,30 @@ test("A lot reading can cite shared context only with local evidence; project-on
   );
   const unanchored = structuredClone(valid);
   unanchored[0].observations[0].evidence = [{ sourceRef: "s1" }];
+  assert.equal(validate(unanchored[0]), false);
   assert.throws(
     () => recordSourceEvidenceReading(unanchored, plan, metadata),
     /scope mismatch/,
   );
   const mislabelled = structuredClone(valid);
   mislabelled[0].observations[0].scope = "project_context";
+  assert.equal(validate(mislabelled[0]), false);
   assert.throws(
     () => recordSourceEvidenceReading(mislabelled, plan, metadata),
+    /scope mismatch/,
+  );
+  const mixed = structuredClone(valid);
+  mixed[0].observations[0].evidence.push({ sourceRef: "s1" });
+  assert.equal(validate(mixed[0]), false);
+  assert.throws(
+    () => recordSourceEvidenceReading(mixed, plan, metadata),
+    /scope mismatch/,
+  );
+  const mixedDetail = structuredClone(valid);
+  mixedDetail[0].missingDetails[0].evidence.push({ sourceRef: "f0" });
+  assert.equal(validate(mixedDetail[0]), false);
+  assert.throws(
+    () => recordSourceEvidenceReading(mixedDetail, plan, metadata),
     /scope mismatch/,
   );
 });
