@@ -553,7 +553,7 @@ test("Missing specifications remain visible without clearing material uncertaint
   answers[0].missingDetails.push({
     description: "Il sottotipo non è precisato nella fonte fornita.",
     scope: "project_context",
-    evidence: [{ sourceRef: "s4" }],
+    evidence: [{ sourceRef: "s4" }, { sourceRef: "s1" }],
   });
   const result = readSourceEvidenceReading(
     recordSourceEvidenceReading(answers, plan, metadata),
@@ -590,10 +590,41 @@ test("Contract metadata alone cannot be promoted to a performance and earlier ev
   const record = recordSourceEvidenceReading(responses(plan), plan, metadata);
   assert.equal(
     readSourceEvidenceReading(
-      { ...record, version: "source-evidence-reading-v4" },
+      { ...record, version: "source-evidence-reading-v5" },
       plan,
     ),
     null,
+  );
+});
+
+test("The provider schema requires descriptive evidence for performances and missing details", () => {
+  const plan = buildSourceEvidenceReadingRequest(context(), config);
+  const answers: any[] = responses(plan);
+  const validate = new Ajv2020({ strict: false }).compile(
+    plan.requests[0].responseFormat.json_schema.schema,
+  );
+  answers[0].observations[0].evidence = [{ sourceRef: "f0" }];
+  assert.equal(validate(answers[0]), false);
+  answers[0].observations[0].evidence.push({ sourceRef: "s1" });
+  assert.equal(validate(answers[0]), true);
+  answers[0].missingDetails.push({
+    description: "Specifiche non precisate.",
+    scope: "project_context",
+    evidence: [{ sourceRef: "s4" }],
+  });
+  assert.equal(validate(answers[0]), false);
+  assert.throws(
+    () => recordSourceEvidenceReading(answers, plan, metadata),
+    /missing detail requires/,
+  );
+  answers[0].missingDetails[0].evidence.push({ sourceRef: "s1" });
+  assert.equal(validate(answers[0]), true);
+  assert.equal(
+    readSourceEvidenceReading(
+      recordSourceEvidenceReading(answers, plan, metadata),
+      plan,
+    )!.accepted,
+    true,
   );
 });
 

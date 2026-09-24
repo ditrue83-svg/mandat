@@ -9,7 +9,7 @@ import {
 import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v5";
+export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v6";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -145,6 +145,7 @@ export function buildSourceEvidenceReadingRequest(
       ...(item.code?.sourceRefs ?? []),
       ...item.labels.flatMap((label) => label.sourceRefs),
     ]);
+  const classificationSourceRefs = new Set(classifications.flatMap(classRefs));
   const targetPassages = context.body.passages.filter(
     (p) => p.scope === context.targetScope && p.role === "service",
   );
@@ -192,6 +193,14 @@ export function buildSourceEvidenceReadingRequest(
         .filter((p) => p.scope === scope && sourceIds.includes(p.id))
         .map((p) => p.id);
       if (!ids.length) return [];
+      const serviceIds = evidencePassages
+        .filter(
+          (p) =>
+            ids.includes(p.id) &&
+            p.role === "service" &&
+            !classificationSourceRefs.has(p.id),
+        )
+        .map((p) => p.id);
       const scoped = {
         scope: z.literal(scope),
         evidence: z
@@ -199,27 +208,68 @@ export function buildSourceEvidenceReadingRequest(
           .min(1)
           .max(16),
       };
+      // Express the same anchor requirement in the provider schema and in
+      // local validation. Visible metadata alone cannot support a service.
+      const serviceEvidence = scoped.evidence.meta({
+        contains: {
+          type: "object",
+          properties: { sourceRef: { type: "string", enum: serviceIds } },
+          required: ["sourceRef"],
+        },
+        minContains: 1,
+      });
       return [
         {
-          observation: observation.omit({ evidence: true }).extend({
-            ...scoped,
-            kind:
-              scope === "project_context"
-                ? z.enum(["performance", "condition"])
-                : observation.shape.kind,
-          }),
-          detail: missingDetail.omit({ evidence: true }).extend(scoped),
+          observations: [
+            observation
+              .omit({ evidence: true })
+              .extend({ ...scoped, kind: z.literal("condition") }),
+            ...(serviceIds.length
+              ? [
+                  observation.omit({ evidence: true }).extend({
+                    ...scoped,
+                    kind:
+                      scope === "project_context"
+                        ? z.literal("performance")
+                        : z.enum(["performance", "target_partition"]),
+                    evidence: serviceEvidence,
+                  }),
+                ]
+              : []),
+          ],
+          details: serviceIds.length
+            ? [
+                missingDetail
+                  .omit({ evidence: true })
+                  .extend({ ...scoped, evidence: serviceEvidence }),
+              ]
+            : [],
         },
       ];
     });
+    const observationBranches = scopedBranches.flatMap(
+      (branch) => branch.observations,
+    );
+    const detailBranches = scopedBranches.flatMap((branch) => branch.details);
     const boundedObservation =
-      scopedBranches.length === 1
-        ? scopedBranches[0].observation
-        : z.union(scopedBranches.map((branch) => branch.observation));
-    const boundedDetail =
-      scopedBranches.length === 1
-        ? scopedBranches[0].detail
-        : z.union(scopedBranches.map((branch) => branch.detail));
+      observationBranches.length === 1
+        ? observationBranches[0]
+        : z.union(observationBranches);
+    const boundedDetails = detailBranches.length
+      ? z
+          .array(
+            detailBranches.length === 1
+              ? detailBranches[0]
+              : z.union(detailBranches),
+          )
+          .max(32)
+      : z
+          .array(
+            missingDetail
+              .omit({ evidence: true })
+              .extend({ evidence: boundedReferences }),
+          )
+          .max(0);
     const bounded = selectionSchema.safeExtend({
       chunkId: z.literal(id),
       observations: z.array(boundedObservation).max(32),
@@ -230,7 +280,7 @@ export function buildSourceEvidenceReadingRequest(
             .extend({ evidence: boundedReferences }),
         )
         .max(32),
-      missingDetails: z.array(boundedDetail).max(32),
+      missingDetails: boundedDetails,
       classifications: group.classificationIds.length
         ? z
             .array(
@@ -251,12 +301,14 @@ export function buildSourceEvidenceReadingRequest(
     };
     const prompt = JSON.stringify({
       stage: "original_source_evidence",
-      task: "Identifica famiglia dell'oggetto, azioni acquistate, condizioni esplicite e ambito del contratto. Non stai confermando un riassunto. Considera insieme descrizione, classificazioni e target; separa fatti confermati, dettagli non precisati e impedimenti reali a identificare la prestazione.",
+      task: "Identifica il lavoro acquistato: famiglia dell'oggetto, azioni, esclusioni e ambito. Produci una lettura essenziale per capire che cosa bisogna fornire o svolgere, non una scheda amministrativa. Considera tutta la fonte per interpretare correttamente descrizione, classificazioni e target; separa dettagli non precisati e impedimenti reali. Non stai confermando un riassunto.",
       rules: [
         "Le etichette classificatorie dichiarano il contesto originale. Una denominazione generica o polisemica non dimostra che la classificazione sia sbagliata: non inventare una discrepanza né un sottotipo. Una classificazione ampia non aggiunge tutte le attività della sua etichetta.",
         "Per ciascuna assignedClassificationIds restituisci una relazione con la descrizione. Non restituire label: il codice conserva automaticamente codice, etichette originali e traduzioni. In evidence scegli i passaggi che spiegano la relazione; i riferimenti propri della classificazione sono aggiunti dal codice. consistent o broad_context conserva la famiglia compatibile. not_decisive significa che la classificazione non determina da sola la prestazione locale. conflicting richiede affermazioni realmente incompatibili, con una controprova esterna alla classificazione.",
         "Le osservazioni performance descrivono acquisti e azioni: fornitura di beni, esecuzione, gestione, installazione, manutenzione, progettazione o consulenza. Manutenzione conserva o ripristina un bene: luogo, destinatario o settore non la dimostrano. Metadati e classificazioni non sono prestazioni autonome.",
+        "Una sola osservazione per ciascuna prestazione distinta, con oggetto e azione insieme. Non creare una seconda performance per ripetere orderType, supplyType o un altro campo amministrativo. Ogni performance e target_partition deve citare almeno una descrizione originale role service dello stesso ambito. Non aggiungere una citazione irrilevante solo per rispettare lo schema.",
         "missingDetails elenca specifiche non determinate nella fonte fornita: sottotipo, composizione, quantità, modelli o condizioni rinviate ai documenti. Non proporre possibili sottotipi. Queste lacune non diventano issues se famiglia dell'oggetto e azione contrattuale sono identificabili. Per esempio: fornitura di arredi senza dimensioni -> prestazione identificata, dimensioni in missingDetails; solo 'incarico Delta' senza descrizione né famiglia -> object_uncertain. Non trasferire azioni generali o di altri lotti al target.",
+        "Limita missingDetails alle lacune rilevanti per comprendere l'oggetto descritto, citandone anche una descrizione role service. Non generare una lista generica di possibili certificazioni, imballaggi o modalità non menzionati. Non ricavare modalità di esecuzione o consegna da campi relativi alla presentazione delle offerte. Riporta condition solo se delimita il lavoro: esclusioni, prestazioni opzionali, attività complementari o luogo che ne modifica l'ambito. Ometti cronologie, contatti e riepiloghi della procedura che non cambiano ciò che viene acquistato.",
         "issues contiene solo impedimenti materiali: object_uncertain quando non si può identificare neppure la famiglia o l'azione; target_uncertain quando non si può stabilire l'ambito; source_conflict per affermazioni incompatibili sul medesimo oggetto, senza precedenza o rettifica. Due clausole che includono ed escludono reciprocamente la stessa prestazione restano un conflitto, mai un semplice dettaglio da controllare. Non trasformare dati compatibili o traduzioni in conflitti.",
         "scope registra l'ambito ORIGINALE delle prove, non un'applicabilità dedotta: ogni observations o missingDetails deve citare solo prove dello stesso scope. Conserva le informazioni del progetto in project_context e quelle del lotto in selected_lot, in osservazioni distinte. Il revisore successivo potrà esaminare insieme le due serie; non perderne una e non combinarle in un fatto locale.",
         ...(context.targetScope === "selected_lot"
@@ -563,6 +615,16 @@ function validate(values: unknown[], plan: SourceEvidenceReadingPlan) {
       checkQuotes(item.evidence);
       if (!supportsScope(item.scope, item.evidence))
         throw new Error("Missing detail scope mismatch");
+      if (
+        !item.evidence.some(
+          (q) =>
+            !classificationRefs.has(q.sourceRef) &&
+            byId.get(q.sourceRef)!.role === "service",
+        )
+      )
+        throw new Error(
+          "A missing detail requires its original service description",
+        );
     });
   }
   return responses;
