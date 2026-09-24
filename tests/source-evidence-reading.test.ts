@@ -207,10 +207,10 @@ test("Missing classifications, invented labels and non-contiguous quotes cannot 
       a.classifications[0].label = null;
     },
     (a: any) => {
-      a.classifications[0].label.text = "Famiglia tecnica inventata";
+      a.classifications[0].label = { text: "Famiglia tecnica inventata" };
     },
     (a: any) => {
-      a.classifications[0].label.text = "Famiglia";
+      a.classifications[0].label = { text: "Famiglia" };
     },
     (a: any) => {
       a.observations[0].evidence[0].text = "Fornitura Alfa";
@@ -443,11 +443,156 @@ test("Fragmented classification labels are copied completely from their ordered 
   });
   assert.equal(readSourceEvidenceReading(record, plan)?.accepted, true);
   for (const sourceRefs of [["s3"], ["s5", "s3"], ["s1"]]) {
-    const invalid = responses(plan);
-    invalid[0].classifications[0].label!.sourceRefs = sourceRefs;
+    const invalid = structuredClone(record);
+    invalid.responses[0].classifications[0].label!.sourceRefs = sourceRefs;
+    const { hash: _hash, ...unsigned } = invalid;
+    invalid.hash = createHash("sha256")
+      .update(stableDocumentaryJson(unsigned))
+      .digest("hex");
     assert.throws(
-      () => recordSourceEvidenceReading(invalid, plan, metadata),
+      () => readSourceEvidenceReading(invalid, plan),
       /complete original label/,
     );
   }
+});
+
+test("The wire schema limits citations to existing text and scalar field references", () => {
+  const plan = buildSourceEvidenceReadingRequest(context(), config);
+  const validate = new Ajv2020({ strict: false }).compile(
+    plan.requests[0].responseFormat.json_schema.schema,
+  );
+  for (const sourceRef of ["s999", "f999"]) {
+    const invalid = responses(plan);
+    invalid[0].observations[0].evidence = [{ sourceRef }];
+    assert.equal(validate(invalid[0]), false);
+    assert.throws(
+      () => recordSourceEvidenceReading(invalid, plan, metadata),
+      /outside its request/,
+    );
+  }
+  const valid = responses(plan);
+  valid[0].observations.push({
+    kind: "condition",
+    statement: "La quantità è zero e l’opzione non è attiva.",
+    scope: "project_context",
+    evidence: [{ sourceRef: "f0" }, { sourceRef: "f1" }],
+  });
+  assert.equal(validate(valid[0]), true);
+  const record = recordSourceEvidenceReading(valid, plan, metadata);
+  assert.deepEqual(record.responses[0].observations.at(-1)!.evidence, [
+    { sourceRef: "f0", text: "0" },
+    { sourceRef: "f1", text: "false" },
+  ]);
+  const changed = structuredClone(record);
+  changed.responses[0].observations.at(-1)!.evidence[0].text = "null";
+  const { hash: _hash, ...unsigned } = changed;
+  changed.hash = createHash("sha256")
+    .update(stableDocumentaryJson(unsigned))
+    .digest("hex");
+  assert.throws(
+    () => readSourceEvidenceReading(changed, plan),
+    /exact original quotation/,
+  );
+});
+
+test("Classifications retain all original languages without delegating label assembly", () => {
+  const input = context();
+  const translated = "Invented food family";
+  const multilingual = {
+    ...input,
+    body: {
+      ...input.body,
+      passages: [
+        ...input.body.passages,
+        {
+          ...input.body.passages[2],
+          id: "s5",
+          rawPath: "/cpv/label/en",
+          text: translated,
+          endUtf16: translated.length,
+        },
+      ],
+      classifications: [
+        {
+          ...input.body.classifications[0],
+          labels: [
+            ...input.body.classifications[0].labels,
+            { language: "en", text: translated, sourceRefs: ["s5"] },
+          ],
+        },
+      ],
+    },
+  };
+  const plan = buildSourceEvidenceReadingRequest(multilingual, config);
+  const answers = responses(plan);
+  answers[0].classifications[0].evidence = [{ sourceRef: "s1" }];
+  const record = recordSourceEvidenceReading(answers, plan, metadata);
+  assert.equal("label" in answers[0].classifications[0], false);
+  assert.deepEqual(
+    record.responses[0].classifications[0].evidence.map((q) => q.sourceRef),
+    ["s1", "s2", "s3", "s5"],
+  );
+  assert.deepEqual(record.responses[0].classifications[0].label, {
+    text: input.body.classifications[0].labels[0].text,
+    sourceRefs: ["s3"],
+  });
+  const invalid: any = responses(plan);
+  invalid[0].classifications[0].label = { sourceRefs: ["s3", "s5"] };
+  assert.equal(
+    new Ajv2020({ strict: false }).compile(
+      plan.requests[0].responseFormat.json_schema.schema,
+    )(invalid[0]),
+    false,
+  );
+  assert.throws(() => recordSourceEvidenceReading(invalid, plan, metadata));
+});
+
+test("Missing specifications remain visible without clearing material uncertainty or conflicts", () => {
+  const plan = buildSourceEvidenceReadingRequest(context(), config);
+  const answers: any[] = responses(plan);
+  answers[0].missingDetails.push({
+    description: "Il sottotipo non è precisato nella fonte fornita.",
+    scope: "project_context",
+    evidence: [{ sourceRef: "s4" }],
+  });
+  const result = readSourceEvidenceReading(
+    recordSourceEvidenceReading(answers, plan, metadata),
+    plan,
+  )!;
+  assert.equal(result.accepted, true);
+  assert.equal(result.missingDetails[0].id, "d1-1");
+  assert.equal(
+    result.missingDetails[0].evidence[0].text,
+    context().body.passages[3].text,
+  );
+  answers[0].issues.push({
+    kind: "source_conflict",
+    reason: "Due clausole sostanziali incompatibili.",
+    evidence: [{ sourceRef: "s1" }, { sourceRef: "s4" }],
+  });
+  assert.equal(
+    readSourceEvidenceReading(
+      recordSourceEvidenceReading(answers, plan, metadata),
+      plan,
+    )!.accepted,
+    false,
+  );
+});
+
+test("Contract metadata alone cannot be promoted to a performance and earlier evidence stays stale", () => {
+  const plan = buildSourceEvidenceReadingRequest(context(), config),
+    answers = responses(plan);
+  answers[0].observations[0].evidence = [{ sourceRef: "f0" }];
+  assert.throws(
+    () => recordSourceEvidenceReading(answers, plan, metadata),
+    /original service description/,
+  );
+  const record = recordSourceEvidenceReading(responses(plan), plan, metadata);
+  assert.equal(
+    readSourceEvidenceReading(
+      { ...record, version: "source-evidence-reading-v2" },
+      plan,
+    ),
+    null,
+  );
 });

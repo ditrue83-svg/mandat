@@ -1743,8 +1743,12 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v15",
     sourceVersion: "documentary-source-interpretation-v6",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v16",
+    sourceVersion: "documentary-source-interpretation-v6",
+  },
 ])(
-  "Historical $comparisonVersion / $sourceVersion stays stale under v16 without rewriting evidence",
+  "Historical $comparisonVersion / $sourceVersion stays stale under v17 without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
     const input = fixture();
     const request = buildAutomaticComparisonRequest(input);
@@ -1776,7 +1780,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v16");
+    assert.equal(request.version, "documentary-service-comparison-v17");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(

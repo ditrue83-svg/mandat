@@ -46,7 +46,6 @@ export function inventedSourceEvidenceAnswer(data: any) {
       .slice(0, 32),
     classifications: data.assignedClassificationIds.map((id: string) => {
       const c = data.classifications.find((item: any) => item.id === id);
-      const label = c.labels[0];
       const refs: string[] = [
         ...(c.code?.sourceRefs ?? []),
         ...c.labels.flatMap((l: any) => l.sourceRefs),
@@ -55,11 +54,11 @@ export function inventedSourceEvidenceAnswer(data: any) {
         classificationId: id,
         relationship: "broad_context",
         explanation: "Relazione inventata per la sola verifica tecnica.",
-        label: label ? { sourceRefs: label.sourceRefs } : null,
         evidence: refs.map(quote),
       };
     }),
     issues: [],
+    missingDetails: [],
   };
 }
 const evidence = new WeakMap<

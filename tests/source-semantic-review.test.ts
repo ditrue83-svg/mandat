@@ -10,6 +10,7 @@ import {
 } from "../src/lib/source-interpretation";
 import {
   SOURCE_SEMANTIC_REVIEW_VERSION,
+  buildGroundedSourceReviewRequests,
   buildSourceSemanticReviewRequest,
   recordSourceSemanticReview as productionRecordSourceSemanticReview,
   readSourceSemanticReview,
@@ -730,6 +731,13 @@ test("Approvals using earlier independent evidence contracts cannot be promoted"
     ),
     null,
   );
+  assert.equal(
+    readSourceSemanticReview(
+      { ...old, version: "documentary-source-semantic-review-v3" },
+      plan,
+    ),
+    null,
+  );
   assert.throws(() =>
     productionRecordSourceSemanticReview(answers(plan), plan, {
       ...metadata,
@@ -788,6 +796,84 @@ test("Classification references alone cannot approve the component's contractual
   }
   assert.throws(
     () => recordSourceSemanticReview(response, plan, metadata),
+    /independent performance/,
+  );
+});
+
+test("Grounded review keeps numeric evidence and missing details without letting a detail prove a performance", () => {
+  const input = context(),
+    plan = buildSourceSemanticReviewRequest(input, draft(input), config);
+  const wire: any[] = plan.evidencePlan.requests.map((r) =>
+    inventedSourceEvidenceAnswer(JSON.parse(r.prompt)),
+  );
+  wire[0].observations.push({
+    kind: "condition",
+    statement: "Quantità originale pari a zero.",
+    scope: "project_context",
+    evidence: [{ sourceRef: "f0" }],
+  });
+  wire[0].missingDetails.push({
+    description: "Marca non precisata.",
+    scope: "project_context",
+    evidence: [{ sourceRef: "s1" }],
+  });
+  const sourceEvidence = recordSourceEvidenceReading(wire, plan.evidencePlan, {
+    ...metadata,
+    model: plan.model,
+  });
+  const requests = buildGroundedSourceReviewRequests(plan, sourceEvidence);
+  const body = JSON.parse(requests[0].prompt);
+  assert.equal(body.fields.find((f: any) => f.id === "f0").value, 0);
+  assert.equal(body.independentReading.missingDetails[0].id, "d1-1");
+  const responses = requests.map((r) => {
+    const b = JSON.parse(r.prompt);
+    return {
+      chunkId: r.id,
+      sourceEvidenceHash: sourceEvidence.hash,
+      coverage: "complete",
+      checks: r.assignedClaimIds.map((id) => {
+        const claim = plan.claims.find((c) => c.id === id)!;
+        return {
+          claimId: id,
+          verdict: "supported",
+          reason: "Solo verifica del contratto.",
+          sourceRefs: claim.sourceRefs,
+          readingRefs: inventedReadingRefs(b, claim),
+        };
+      }),
+      findings: [
+        {
+          kind: "unverifiable",
+          reason: "Rilievo inventato sul valore originale.",
+          sourceRefs: ["f0"],
+        },
+      ],
+    };
+  });
+  assert(
+    new Ajv2020({ strict: false }).compile(
+      requests[0].responseFormat.json_schema.schema,
+    )(responses[0]),
+  );
+  const record = productionRecordSourceSemanticReview(responses, plan, {
+    ...metadata,
+    sourceEvidence,
+  });
+  const reviewed = readSourceSemanticReview(record, plan)!;
+  assert.equal(reviewed.accepted, false);
+  assert.equal(reviewed.evidence.find((p) => p.id === "f0")!.text, "0");
+  assert.equal(
+    reviewed.evidence.find((p) => p.id === "f0")!.rawPath,
+    "/terms/quantity",
+  );
+  const invalid = structuredClone(responses);
+  invalid[0].checks[0].readingRefs = ["d1-1"];
+  assert.throws(
+    () =>
+      productionRecordSourceSemanticReview(invalid, plan, {
+        ...metadata,
+        sourceEvidence,
+      }),
     /independent performance/,
   );
 });

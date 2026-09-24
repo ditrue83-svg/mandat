@@ -18,9 +18,10 @@ import type {
   AutomaticResponseFormat,
   ComparisonPassage,
 } from "./automatic-comparison";
+import { sourceEvidencePassages } from "./source-evidence-context";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v3";
+  "documentary-source-semantic-review-v4";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -49,7 +50,7 @@ const configurationSchema = z.strictObject({
   maxTokens: z.number().int().min(1).max(16_384).optional(),
 });
 const refs = z
-  .array(z.string().regex(/^s\d+$/))
+  .array(z.string().regex(/^[sf]\d+$/))
   .min(1)
   .max(1024)
   .refine((values) => new Set(values).size === values.length);
@@ -76,7 +77,7 @@ function responseSchema(bounds?: {
     readingRefs: bounds?.readingIds?.length
       ? z.array(z.enum(bounds.readingIds)).min(1).max(1024)
       : z
-          .array(z.string().regex(/^(e[1-9]\d*-[1-9]\d*|c[1-9]\d*)$/))
+          .array(z.string().regex(/^([ed][1-9]\d*-[1-9]\d*|c[1-9]\d*)$/))
           .min(1)
           .max(1024),
   });
@@ -254,6 +255,10 @@ export function buildSourceSemanticReviewRequest(
     const passages = context.body.passages.filter((item) =>
       included.has(item.id),
     );
+    const sourceIds = [
+      ...passages.map((item) => item.id),
+      ...group.fieldIndexes.map((index) => `f${index}`),
+    ];
     const responseFormat: AutomaticResponseFormat = {
       type: "json_schema",
       json_schema: {
@@ -263,7 +268,7 @@ export function buildSourceSemanticReviewRequest(
           responseSchema({
             id,
             claimIds: group.claims.map((item) => item.id),
-            sourceIds: passages.map((item) => item.id),
+            sourceIds,
           }),
           { reused: "ref" },
         ),
@@ -276,6 +281,7 @@ export function buildSourceSemanticReviewRequest(
         "Ogni check cita readingRefs della lettura indipendente oltre agli estratti originali. I riferimenti evidence della lettura indipendente rimandano al testo originale in passages; le citazioni di contesto non presenti in passages conservano anche text. Un draft che introduce un dominio incompatibile, una correzione della fonte o una discrepanza non presente nella lettura indipendente non può essere supported solo perché ripete il nome del prodotto. Per classification_reading cita la corrispondente classificazione indipendente cN.",
         "Controlla dominio dell'oggetto, azione contrattuale, applicabilità al target e importanza main/accessory/excluded separatamente. Non scambiare un settore, luogo o destinatario per un ruolo. Contesto generale, classificazioni ampie e opere di altri lotti non provano una prestazione locale.",
         "Una famiglia di prodotti identificata può non specificare sottotipi, quantità o requisiti: non inventarli e non usare la loro assenza come ambiguità del mestiere. Verifica che details riporti soltanto condizioni o dettagli, non prestazioni espulse dalle componenti.",
+        "independentReading.missingDetails conserva dettagli non precisati: non sono conflitti o prestazioni ulteriori. Se il draft presenta come certo un valore che la fonte non determina, non approvarlo. Puoi citare dN-M per motivare not_verifiable. I riferimenti fN indicano il valore JSON originale in fields al relativo rawPath; non inventarne il significato e distingui 0, false e null.",
         "Ogni claim è affidato a una sola richiesta con tutte le sue citazioni; i passaggi aggiunti sono contesto, non una selezione che sostituisce coverage. Esamina tutti i passaggi e campi di coverage per omissioni o contraddizioni rispetto al draft completo. Non richiedere che tutti gli acquisti siano ripetuti in ogni frammento. Usa findings quando le prove del gruppo mostrano un problema materiale; nessuna autocorrezione.",
         "coverage complete significa esame completo del gruppo, non approvazione. Se non puoi esaminarlo usa unreadable; non dare supported a ciò che non puoi verificare. Cita soltanto gli ID originali visibili. Nessun giudizio aziendale, di idoneità o di partecipazione.",
       ],
@@ -292,6 +298,7 @@ export function buildSourceSemanticReviewRequest(
       },
       passages: passages.map(({ url: _url, ...item }) => item),
       fields: group.fieldIndexes.map((index) => ({
+        id: `f${index}`,
         index,
         ...context.body.fields[index],
       })),
@@ -303,7 +310,7 @@ export function buildSourceSemanticReviewRequest(
       responseFormat,
       maxTokens,
       assignedClaimIds: group.claims.map((claim) => claim.id),
-      sourceIds: passages.map((passage) => passage.id),
+      sourceIds,
       coverage: {
         passageIds: [...group.passageIds],
         fieldIndexes: [...group.fieldIndexes],
@@ -444,9 +451,15 @@ export function buildGroundedSourceReviewRequests(
         ...c,
         evidence: projectQuotes(c.evidence),
       }));
+      const missingDetails = independent.missingDetails
+        .filter((d) =>
+          d.evidence.some((q) => request.sourceIds.includes(q.sourceRef)),
+        )
+        .map((d) => ({ ...d, evidence: projectQuotes(d.evidence) }));
       const readingIds = [
         ...observations.map((o) => o.id),
         ...classifications.map((c) => c.id),
+        ...missingDetails.map((d) => d.id),
       ];
       const responseFormat: AutomaticResponseFormat = {
         type: "json_schema",
@@ -471,6 +484,7 @@ export function buildGroundedSourceReviewRequests(
         independentReading: {
           observations,
           classifications: readingClassifications,
+          missingDetails,
         },
       });
       if (
@@ -542,6 +556,9 @@ function validateResponses(
         independent.responses
           .flatMap((r) => r.classifications)
           .find((c) => c.classificationId === id)
+          ?.evidence.map((q) => q.sourceRef) ??
+        independent.missingDetails
+          .find((d) => d.id === id)
           ?.evidence.map((q) => q.sourceRef) ??
         [];
       if (
@@ -725,7 +742,7 @@ export function readSourceSemanticReview(
       ),
     ),
   );
-  const evidence: ComparisonPassage[] = plan.context.body.passages
+  const evidence: ComparisonPassage[] = sourceEvidencePassages(plan.context)
     .filter(
       (item) =>
         ids.has(item.id) ||
