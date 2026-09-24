@@ -1,6 +1,15 @@
 import { z } from "zod";
 import { databaseOptions } from "./database-config";
 import { smtpPassword } from "./smtp-config";
+import {
+  aiProviderConfiguration,
+  MISTRAL_LARGE_3_MODEL,
+} from "./ai-provider-config";
+import {
+  documentaryAiConfiguration,
+  documentaryAiProvider,
+  documentarySourceReasoningEffort,
+} from "./documentary-ai-config";
 
 export type SetupEnvironment = Record<string, string | undefined>;
 export type SetupCheck = {
@@ -28,10 +37,7 @@ function decode(value: string) {
   }
 }
 export function aiBaseUrl(env: SetupEnvironment) {
-  return (
-    env.LLM_API_BASE_URL ||
-    `https://api.infomaniak.com/2/ai/${env.INFOMANIAK_AI_PRODUCT_ID}/openai/v1`
-  );
+  return aiProviderConfiguration(env).baseUrl;
 }
 export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
   const checks: SetupCheck[] = [];
@@ -231,9 +237,24 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
     message:
       "Verificare SPF/DKIM/DMARC e consegna a una casella reale; l’autenticazione SMTP da sola non prova il recapito",
   });
-  required("LLM_API_KEY", "ai");
+  const mistral = env.LLM_PROVIDER === "mistral-eu";
+  required(mistral ? "MISTRAL_API_KEY" : "LLM_API_KEY", "ai");
   required("LLM_MODEL", "ai");
-  if (!env.LLM_API_BASE_URL)
+  add(
+    "LLM_PROVIDER",
+    "ai",
+    !env.LLM_PROVIDER ||
+      ["infomaniak", "mistral-eu"].includes(env.LLM_PROVIDER),
+    "Scegliere infomaniak oppure mistral-eu",
+  );
+  if (mistral)
+    add(
+      "MISTRAL_MODEL",
+      "ai",
+      env.LLM_MODEL === MISTRAL_LARGE_3_MODEL,
+      "Per Mistral UE configurare mistral-large-2512",
+    );
+  if (!mistral && !env.LLM_API_BASE_URL)
     add(
       "INFOMANIAK_AI_PRODUCT_ID",
       "ai",
@@ -241,22 +262,82 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
       "Inserire l’identificativo del prodotto AI Services",
       !env.INFOMANIAK_AI_PRODUCT_ID,
     );
-  const ai = url(aiBaseUrl(env));
+  let ai: URL | null = null;
+  try {
+    ai = url(aiBaseUrl(env));
+  } catch {
+    /* Report below without configuration values. */
+  }
   add(
-    "LLM_API_BASE_URL",
+    mistral ? "MISTRAL_API_BASE_URL" : "LLM_API_BASE_URL",
     "ai",
     Boolean(
       ai &&
       ai.protocol === "https:" &&
-      ai.hostname === "api.infomaniak.com" &&
+      (mistral
+        ? ai.hostname === "api.eu.mistral.ai"
+        : ai.hostname === "api.infomaniak.com") &&
+      !ai.port &&
       !ai.username &&
       !ai.password &&
       !ai.search &&
       !ai.hash &&
-      /^\/2\/ai\/\d+\/openai\/v1\/?$/.test(ai.pathname),
+      (mistral
+        ? ai.pathname === "/v1"
+        : /^\/2\/ai\/\d+\/openai\/v1\/?$/.test(ai.pathname)),
     ),
-    "Configurare l’endpoint AI Infomaniak v2 del prodotto; un altro fornitore richiede una verifica separata",
+    mistral
+      ? "Configurare esclusivamente https://api.eu.mistral.ai/v1"
+      : "Configurare l’endpoint AI Infomaniak v2 del prodotto",
   );
+  if (mistral)
+    add(
+      "LLM_REASONING_EFFORT",
+      "ai",
+      !env.LLM_REASONING_EFFORT || env.LLM_REASONING_EFFORT === "none",
+      "Per Mistral Large 3 lasciare vuoto oppure none",
+    );
+  if (
+    env.DOCUMENTARY_LLM_PROVIDER ||
+    env.DOCUMENTARY_LLM_MODEL ||
+    env.DOCUMENTARY_COMPARISON_ENABLED === "true"
+  ) {
+    let valid = false;
+    try {
+      const configuration = documentaryAiConfiguration(env);
+      const connection = aiProviderConfiguration(env, configuration.provider);
+      const endpoint = new URL(connection.baseUrl);
+      documentarySourceReasoningEffort(env);
+      valid =
+        present(env[connection.apiKeyEnv]) &&
+        (configuration.provider === "mistral-eu" ||
+          (endpoint.hostname === "api.infomaniak.com" &&
+            !endpoint.port &&
+            /^\/2\/ai\/\d+\/openai\/v1\/?$/.test(endpoint.pathname)));
+    } catch {
+      /* No secrets or arbitrary exception text in the setup report. */
+    }
+    add(
+      "DOCUMENTARY_AI_CONFIGURATION",
+      "documentary-ai",
+      valid,
+      "Configurare fornitore, modello, chiave dedicata, modalità e tariffe CHF del confronto documentario",
+    );
+  }
+  let usesMistral = mistral;
+  try {
+    usesMistral ||= documentaryAiProvider(env) === "mistral-eu";
+  } catch {
+    /* Already reported as invalid. */
+  }
+  if (usesMistral)
+    checks.push({
+      id: "MISTRAL_DATA_SETTINGS",
+      group: "ai",
+      status: "manual",
+      message:
+        "Verificare opt-out API da Anonymous improvement data nel pannello Mistral. Regione UE e conservazione dei dati sono controlli distinti; validare l’informativa prima del rilascio.",
+    });
   for (const key of ["LLM_INPUT_CHF_PER_MILLION", "LLM_OUTPUT_CHF_PER_MILLION"])
     add(
       key,
@@ -281,7 +362,7 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
     group: "ai",
     status: "manual",
     message:
-      "Validare riassunti, citazioni e pertinenza su un campione; impostare anche il limite nel Manager Infomaniak",
+      "Validare riassunti, citazioni e pertinenza su un campione; impostare anche il limite presso il fornitore AI",
   });
   const repository = env.RESTIC_REPOSITORY;
   const backup = repository?.startsWith("s3:")

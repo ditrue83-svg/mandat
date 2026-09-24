@@ -1,17 +1,34 @@
-// A larger comparison model must not silently change the existing summary
-// and legacy classification paths, their output limits, or their prices.
-export function documentaryAiModel() {
-  return (
-    process.env.DOCUMENTARY_LLM_MODEL ||
-    process.env.LLM_MODEL ||
-    "mistralai/Ministral-3-14B-Instruct-2512"
-  );
+import {
+  aiModel,
+  aiProvider,
+  validateAiModel,
+  type AiEnvironment,
+} from "./ai-provider-config";
+
+// A dedicated comparison provider must not change legacy summaries or prices.
+export function documentaryAiProvider(env: AiEnvironment = process.env) {
+  return aiProvider(env.DOCUMENTARY_LLM_PROVIDER || env.LLM_PROVIDER);
 }
-export function documentaryAiReasoningEffort():
-  "none" | "low" | "medium" | "high" | undefined {
+export function documentaryAiModel(env: AiEnvironment = process.env) {
+  const provider = documentaryAiProvider(env);
+  const model = env.DOCUMENTARY_LLM_MODEL || aiModel(env, provider);
+  validateAiModel(provider, model);
+  return model;
+}
+export function documentaryAiReasoningEffort(
+  env: AiEnvironment = process.env,
+): "none" | "low" | "medium" | "high" | undefined {
+  const provider = documentaryAiProvider(env);
   const value =
-    process.env.DOCUMENTARY_LLM_REASONING_EFFORT ||
-    process.env.LLM_REASONING_EFFORT;
+    env.DOCUMENTARY_LLM_REASONING_EFFORT ||
+    (provider === aiProvider(env.LLM_PROVIDER)
+      ? env.LLM_REASONING_EFFORT
+      : undefined);
+  if (provider === "mistral-eu") {
+    if (value && value !== "none")
+      throw new Error("Mistral Large 3 non usa il ragionamento configurabile");
+    return "none";
+  }
   if (!value) return undefined;
   if (
     value !== "none" &&
@@ -24,9 +41,12 @@ export function documentaryAiReasoningEffort():
 }
 // Source extraction has its own setting: it must never inherit thinking from
 // the final company comparison or from the legacy summary configuration.
-export function documentarySourceReasoningEffort():
-  "none" | "low" | "medium" | "high" {
-  const value = process.env.DOCUMENTARY_SOURCE_REASONING_EFFORT || "none";
+export function documentarySourceReasoningEffort(
+  env: AiEnvironment = process.env,
+): "none" | "low" | "medium" | "high" {
+  const value = env.DOCUMENTARY_SOURCE_REASONING_EFFORT || "none";
+  if (documentaryAiProvider(env) === "mistral-eu" && value !== "none")
+    throw new Error("Mistral Large 3 non usa il ragionamento configurabile");
   if (
     value !== "none" &&
     value !== "low" &&
@@ -36,17 +56,19 @@ export function documentarySourceReasoningEffort():
     throw new Error("Modalità di ragionamento della fonte non valida");
   return value;
 }
-export function documentaryAiConfiguration() {
-  const dedicated = Boolean(process.env.DOCUMENTARY_LLM_MODEL);
+export function documentaryAiConfiguration(env: AiEnvironment = process.env) {
+  const dedicated = Boolean(
+    env.DOCUMENTARY_LLM_MODEL || env.DOCUMENTARY_LLM_PROVIDER,
+  );
   const input = Number(
     dedicated
-      ? process.env.DOCUMENTARY_LLM_INPUT_CHF_PER_MILLION
-      : process.env.LLM_INPUT_CHF_PER_MILLION,
+      ? env.DOCUMENTARY_LLM_INPUT_CHF_PER_MILLION
+      : env.LLM_INPUT_CHF_PER_MILLION,
   );
   const output = Number(
     dedicated
-      ? process.env.DOCUMENTARY_LLM_OUTPUT_CHF_PER_MILLION
-      : process.env.LLM_OUTPUT_CHF_PER_MILLION,
+      ? env.DOCUMENTARY_LLM_OUTPUT_CHF_PER_MILLION
+      : env.LLM_OUTPUT_CHF_PER_MILLION,
   );
   if (
     !Number.isFinite(input) ||
@@ -56,8 +78,9 @@ export function documentaryAiConfiguration() {
   )
     throw new Error("Configurare le tariffe del modello di confronto");
   return {
-    model: documentaryAiModel(),
-    reasoningEffort: documentaryAiReasoningEffort(),
+    provider: documentaryAiProvider(env),
+    model: documentaryAiModel(env),
+    reasoningEffort: documentaryAiReasoningEffort(env),
     rates: { input, output },
   };
 }

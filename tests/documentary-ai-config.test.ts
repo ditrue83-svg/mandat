@@ -16,12 +16,61 @@ it("requires dedicated prices and preserves the legacy model configuration", () 
   vi.stubEnv("DOCUMENTARY_LLM_INPUT_CHF_PER_MILLION", "0.4");
   vi.stubEnv("DOCUMENTARY_LLM_OUTPUT_CHF_PER_MILLION", "3.2");
   expect(documentaryAiConfiguration()).toEqual({
+    provider: "infomaniak",
     model: "comparison-model",
     reasoningEffort: "high",
     rates: { input: 0.4, output: 3.2 },
   });
   expect(process.env.LLM_MODEL).toBe("legacy-model");
   expect(process.env.LLM_OUTPUT_CHF_PER_MILLION).toBe("2");
+});
+
+it("uses Mistral UE for the documentary path without inheriting Qwen settings or prices", () => {
+  const env = {
+    LLM_MODEL: "legacy-qwen-model",
+    LLM_REASONING_EFFORT: "high",
+    LLM_INPUT_CHF_PER_MILLION: "1",
+    LLM_OUTPUT_CHF_PER_MILLION: "8",
+    DOCUMENTARY_LLM_PROVIDER: "mistral-eu",
+  };
+  expect(() => documentaryAiConfiguration(env)).toThrow("tariffe");
+  expect(
+    documentaryAiConfiguration({
+      ...env,
+      DOCUMENTARY_LLM_INPUT_CHF_PER_MILLION: "0.6",
+      DOCUMENTARY_LLM_OUTPUT_CHF_PER_MILLION: "1.8",
+    }),
+  ).toEqual({
+    provider: "mistral-eu",
+    model: "mistral-large-2512",
+    reasoningEffort: "none",
+    rates: { input: 0.6, output: 1.8 },
+  });
+  expect(documentarySourceReasoningEffort(env)).toBe("none");
+});
+
+it("rejects stale documentary models and thinking settings for Mistral", () => {
+  const env = {
+    DOCUMENTARY_LLM_PROVIDER: "mistral-eu",
+    DOCUMENTARY_LLM_INPUT_CHF_PER_MILLION: "1",
+    DOCUMENTARY_LLM_OUTPUT_CHF_PER_MILLION: "2",
+  };
+  for (const model of ["mistral-large-latest", "previous-qwen-model"])
+    expect(() =>
+      documentaryAiConfiguration({ ...env, DOCUMENTARY_LLM_MODEL: model }),
+    ).toThrow("mistral-large-2512");
+  expect(() =>
+    documentaryAiConfiguration({
+      ...env,
+      DOCUMENTARY_LLM_REASONING_EFFORT: "high",
+    }),
+  ).toThrow("ragionamento");
+  expect(() =>
+    documentarySourceReasoningEffort({
+      ...env,
+      DOCUMENTARY_SOURCE_REASONING_EFFORT: "high",
+    }),
+  ).toThrow("ragionamento");
 });
 
 it("keeps source thinking off independently of comparison and legacy settings", () => {

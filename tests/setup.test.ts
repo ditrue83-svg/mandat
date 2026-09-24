@@ -35,6 +35,61 @@ const configured: SetupEnvironment = {
   FOGLIO_REUSE_CONFIRMED: "false",
 };
 describe("Controllo configurazione senza segreti", () => {
+  it("validates a complete Mistral EU configuration without requiring an Infomaniak key", () => {
+    const env = {
+      ...configured,
+      LLM_PROVIDER: "mistral-eu",
+      LLM_MODEL: "mistral-large-2512",
+      LLM_API_KEY: "",
+      INFOMANIAK_AI_PRODUCT_ID: "",
+      MISTRAL_API_KEY: "mistral-fixture-secret",
+    };
+    const checks = inspectSetup(env);
+    expect(setupGroupConfigured(checks, "ai")).toBe(true);
+    expect(checks.find((c) => c.id === "MISTRAL_DATA_SETTINGS")?.status).toBe(
+      "manual",
+    );
+    expect(JSON.stringify(checks)).not.toContain(env.MISTRAL_API_KEY);
+    for (const base of [
+      "https://api.mistral.ai/v1",
+      "https://api.us.mistral.ai/v1",
+    ])
+      expect(
+        setupGroupConfigured(
+          inspectSetup({ ...env, MISTRAL_API_BASE_URL: base }),
+          "ai",
+        ),
+      ).toBe(false);
+  });
+
+  it("blocks a documentary migration with missing credentials, prices or stale model settings", () => {
+    const env = {
+      ...configured,
+      DOCUMENTARY_LLM_PROVIDER: "mistral-eu",
+      MISTRAL_API_KEY: "mistral-fixture-secret",
+      DOCUMENTARY_LLM_INPUT_CHF_PER_MILLION: "0.6",
+      DOCUMENTARY_LLM_OUTPUT_CHF_PER_MILLION: "1.8",
+    };
+    expect(setupGroupConfigured(inspectSetup(env), "documentary-ai")).toBe(
+      true,
+    );
+    for (const incomplete of [
+      { MISTRAL_API_KEY: "" },
+      { DOCUMENTARY_LLM_INPUT_CHF_PER_MILLION: "" },
+      { DOCUMENTARY_LLM_MODEL: "mistral-large-latest" },
+      { DOCUMENTARY_SOURCE_REASONING_EFFORT: "high" },
+      { DOCUMENTARY_LLM_PROVIDER: "mistral-global" },
+    ])
+      expect(
+        setupGroupConfigured(
+          inspectSetup({ ...env, ...incomplete }),
+          "documentary-ai",
+        ),
+      ).toBe(false);
+    expect(
+      setupGroupConfigured(inspectSetup({ ...env, MISTRAL_API_KEY: "" }), "ai"),
+    ).toBe(true);
+  });
   it("distingue configurazione coerente da collaudo reale ancora necessario", () => {
     const checks = inspectSetup(configured);
     expect(

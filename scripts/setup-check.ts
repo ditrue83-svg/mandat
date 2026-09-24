@@ -5,11 +5,19 @@ import nodemailer from "nodemailer";
 import { smtpPassword } from "../src/lib/smtp-config";
 import { databaseOptions } from "../src/lib/database-config";
 import {
-  aiBaseUrl,
   inspectSetup,
   setupGroupConfigured,
   type SetupCheck,
 } from "../src/lib/setup";
+import {
+  aiModel,
+  aiProviderConfiguration,
+} from "../src/lib/ai-provider-config";
+import {
+  documentaryAiModel,
+  documentaryAiProvider,
+} from "../src/lib/documentary-ai-config";
+import { probeAiModels } from "../src/lib/ai-readiness";
 
 async function main() {
   const { values } = parseArgs({
@@ -107,19 +115,35 @@ async function main() {
       }
     });
     await probe("AI_MODEL_AVAILABLE", "ai", async () => {
-      const response = await fetch(
-        `${aiBaseUrl(env).replace(/\/$/, "")}/models`,
-        {
-          headers: { Authorization: `Bearer ${env.LLM_API_KEY}` },
-          redirect: "error",
-          signal: AbortSignal.timeout(10000),
+      const connection = aiProviderConfiguration(env);
+      const result = await probeAiModels({
+        baseUrl: connection.baseUrl,
+        apiKey: env[connection.apiKeyEnv] || "",
+        models: [aiModel(env)],
+      });
+      if (!result.ready) throw new Error("Model not available");
+    });
+    if (
+      env.DOCUMENTARY_LLM_PROVIDER ||
+      env.DOCUMENTARY_LLM_MODEL ||
+      env.DOCUMENTARY_COMPARISON_ENABLED === "true"
+    )
+      await probe(
+        "DOCUMENTARY_AI_MODEL_AVAILABLE",
+        "documentary-ai",
+        async () => {
+          const connection = aiProviderConfiguration(
+            env,
+            documentaryAiProvider(env),
+          );
+          const result = await probeAiModels({
+            baseUrl: connection.baseUrl,
+            apiKey: env[connection.apiKeyEnv] || "",
+            models: [documentaryAiModel(env)],
+          });
+          if (!result.ready) throw new Error("Model not available");
         },
       );
-      if (!response.ok) throw new Error("Model list unavailable");
-      const result = (await response.json()) as { data?: { id: string }[] };
-      if (!result.data?.some((model) => model.id === env.LLM_MODEL))
-        throw new Error("Model not available");
-    });
   }
   const blocking = checks.filter(
     (c) => c.status === "missing" || c.status === "invalid",

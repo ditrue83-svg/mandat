@@ -9,6 +9,13 @@ import {
   sourceScopeReviewReason,
 } from "@/lib/source-scope-review";
 import { DateTime } from "luxon";
+import {
+  aiModel,
+  aiProvider,
+  aiProviderConfiguration,
+  validateAiModel,
+  type AiProvider,
+} from "@/lib/ai-provider-config";
 const summarySchema = z.object({
   summary: z.string().min(20).max(1800),
   requirements: z
@@ -349,6 +356,7 @@ export interface AiTransport {
   ): Promise<{ text: string; inputTokens: number; outputTokens: number }>;
 }
 export type AiRequestOptions = {
+  provider?: AiProvider;
   reasoningEffort?: "none" | "low" | "medium" | "high";
   temperature?: number;
   topP?: number;
@@ -388,33 +396,61 @@ export type AiResponseFormat = {
   type: "json_schema";
   json_schema: { name: string; strict: true; schema: Record<string, unknown> };
 };
-export const configuredTransport: AiTransport = {
-  async complete(system, prompt, maxTokens, responseFormat, options) {
-    const { temperature, topP } = samplingOptions(options);
-    const timeoutMs = requestTimeoutMs(options);
-    if (!process.env.LLM_API_KEY) throw new AiUnavailable("AI non configurata");
+function requestConfiguration(options?: AiRequestOptions) {
+  try {
+    const provider = aiProvider(options?.provider || process.env.LLM_PROVIDER);
+    const configuration = aiProviderConfiguration(process.env, provider);
+    const model = options?.model || aiModel(process.env, provider);
+    validateAiModel(provider, model);
+    const apiKey = process.env[configuration.apiKeyEnv];
+    if (!apiKey?.trim()) throw new AiUnavailable("AI non configurata");
     const reasoningEffort =
-      options?.reasoningEffort ??
-      (process.env.LLM_REASONING_EFFORT || undefined);
+      options?.reasoningEffort ||
+      (provider === aiProvider(process.env.LLM_PROVIDER)
+        ? process.env.LLM_REASONING_EFFORT || undefined
+        : undefined);
     if (
       reasoningEffort &&
       !["none", "low", "medium", "high"].includes(reasoningEffort)
     )
       throw new AiUnavailable("Modalità di ragionamento AI non valida");
-    const expectedModel =
-      options?.model ||
-      process.env.LLM_MODEL ||
-      "mistralai/Ministral-3-14B-Instruct-2512";
-    const base =
-      process.env.LLM_API_BASE_URL ||
-      `https://api.infomaniak.com/2/ai/${process.env.INFOMANIAK_AI_PRODUCT_ID}/openai/v1`;
-    const url = new URL(`${base.replace(/\/$/, "")}/chat/completions`);
-    if (url.protocol !== "https:")
-      throw new AiUnavailable("L’endpoint AI deve usare HTTPS");
+    if (
+      provider === "mistral-eu" &&
+      reasoningEffort &&
+      reasoningEffort !== "none"
+    )
+      throw new AiUnavailable(
+        "Mistral Large 3 non usa il ragionamento configurabile",
+      );
+    return {
+      ...configuration,
+      model,
+      apiKey,
+      // Large 3 is a non-reasoning model. Do not send Qwen-specific settings.
+      reasoningEffort: provider === "mistral-eu" ? undefined : reasoningEffort,
+    };
+  } catch (error) {
+    throw new AiUnavailable(
+      error instanceof Error ? error.message : "Configurazione AI non valida",
+    );
+  }
+}
+export const configuredTransport: AiTransport = {
+  async complete(system, prompt, maxTokens, responseFormat, options) {
+    const { temperature, topP } = samplingOptions(options);
+    const timeoutMs = requestTimeoutMs(options);
+    const {
+      provider,
+      model: expectedModel,
+      baseUrl,
+      apiKey,
+      reasoningEffort,
+    } = requestConfiguration(options);
+    const url = new URL(`${baseUrl}/chat/completions`);
     const response = await fetch(url, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.LLM_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -427,6 +463,7 @@ export const configuredTransport: AiTransport = {
         ...(topP === undefined ? {} : { top_p: topP }),
         max_tokens: maxTokens,
         stream: false,
+        ...(provider === "mistral-eu" ? { service_tier: "standard_only" } : {}),
         ...(responseFormat ? { response_format: responseFormat } : {}),
         ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       }),
@@ -552,16 +589,11 @@ export async function infer(
 ) {
   samplingOptions(options);
   requestTimeoutMs(options);
-  if (!process.env.LLM_API_KEY) throw new AiUnavailable("AI non configurata");
-  const model =
-    options?.model ||
-    process.env.LLM_MODEL ||
-    "mistralai/Ministral-3-14B-Instruct-2512";
+  const { model, provider } = requestConfiguration(options);
   if (
-    options?.model &&
-    options.model !==
-      (process.env.LLM_MODEL || "mistralai/Ministral-3-14B-Instruct-2512") &&
-    !options.rates
+    (provider !== aiProvider(process.env.LLM_PROVIDER) ||
+      model !== aiModel()) &&
+    !options?.rates
   )
     throw new AiUnavailable(
       "Le tariffe devono corrispondere al modello scelto",

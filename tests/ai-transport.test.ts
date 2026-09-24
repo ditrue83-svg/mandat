@@ -250,6 +250,216 @@ afterEach(() => {
 afterAll(async () => pg.close());
 
 describe("trasporto AI e consumo degli output respinti", () => {
+  it("routes the documentary Mistral request to EU with its own key, fixed model and prices", async () => {
+    vi.stubEnv("LLM_API_KEY", "");
+    vi.stubEnv("MISTRAL_API_KEY", "mistral-test-key");
+    vi.stubEnv("LLM_REASONING_EFFORT", "high");
+    const fetch = mockResponse({ ...payload(), model: "mistral-large-2512" });
+    const format = {
+      type: "json_schema" as const,
+      json_schema: {
+        name: "test",
+        strict: true as const,
+        schema: { type: "object" },
+      },
+    };
+    await expect(
+      infer(
+        publication,
+        "mistral-test",
+        "prompt",
+        300,
+        undefined,
+        "system",
+        format,
+        {
+          provider: "mistral-eu",
+          model: "mistral-large-2512",
+          reasoningEffort: "none",
+          rates: { input: 0.6, output: 1.8 },
+        },
+      ),
+    ).resolves.toEqual(summary);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = fetch.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(String(url)).toBe("https://api.eu.mistral.ai/v1/chat/completions");
+    expect(init.headers).toMatchObject({
+      Authorization: "Bearer mistral-test-key",
+    });
+    expect(init.redirect).toBe("error");
+    const request = JSON.parse(String(init.body));
+    expect(request).toMatchObject({
+      model: "mistral-large-2512",
+      temperature: 0,
+      max_tokens: 300,
+      stream: false,
+      service_tier: "standard_only",
+      response_format: format,
+    });
+    expect(request).not.toHaveProperty("reasoning_effort");
+    const [usage] = await db.select().from(schema.aiUsage);
+    expect(usage).toMatchObject({
+      model: "mistral-large-2512",
+      status: "completed",
+      inputTokens: 100,
+      outputTokens: 50,
+      costChf: "0.000150",
+    });
+  });
+
+  it("never borrows the Infomaniak key for Mistral", async () => {
+    vi.stubEnv("MISTRAL_API_KEY", "");
+    const fetch = mockResponse(payload());
+    await expect(
+      infer(
+        publication,
+        "mistral-test",
+        "prompt",
+        300,
+        undefined,
+        "system",
+        undefined,
+        {
+          provider: "mistral-eu",
+          model: "mistral-large-2512",
+          rates: { input: 1, output: 2 },
+        },
+      ),
+    ).rejects.toThrow("non configurata");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await db.select().from(schema.aiUsage)).toEqual([]);
+  });
+
+  it("supports Mistral as the main provider and applies the existing monthly budget", async () => {
+    vi.stubEnv("LLM_PROVIDER", "mistral-eu");
+    vi.stubEnv("LLM_MODEL", "mistral-large-2512");
+    vi.stubEnv("MISTRAL_API_KEY", "mistral-test-key");
+    vi.stubEnv("LLM_API_KEY", "");
+    const fetch = mockResponse({ ...payload(), model: "mistral-large-2512" });
+    await expect(
+      infer(publication, "mistral-global-config", "prompt", 300),
+    ).resolves.toEqual(summary);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(String((fetch.mock.calls[0] as unknown[])[0])).toBe(
+      "https://api.eu.mistral.ai/v1/chat/completions",
+    );
+    vi.stubEnv("AI_MONTHLY_BUDGET_CHF", "0.0001");
+    await expect(
+      infer(publication, "mistral-budget-test", "prompt", 300),
+    ).rejects.toThrow("Limite mensile");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(await db.select().from(schema.aiUsage)).toHaveLength(1);
+  });
+
+  it("refuses a global endpoint before transmitting Mistral credentials or reserving spend", async () => {
+    vi.stubEnv("MISTRAL_API_KEY", "mistral-test-key");
+    vi.stubEnv("MISTRAL_API_BASE_URL", "https://api.mistral.ai/v1");
+    const fetch = mockResponse(payload());
+    await expect(
+      infer(
+        publication,
+        "mistral-test",
+        "prompt",
+        300,
+        undefined,
+        "system",
+        undefined,
+        {
+          provider: "mistral-eu",
+          rates: { input: 0.6, output: 1.8 },
+        },
+      ),
+    ).rejects.toThrow("regionale UE");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await db.select().from(schema.aiUsage)).toEqual([]);
+  });
+
+  it("requires dedicated prices and rejects incompatible Mistral settings before reserving money", async () => {
+    vi.stubEnv("MISTRAL_API_KEY", "mistral-test-key");
+    const fetch = mockResponse(payload());
+    for (const options of [
+      { provider: "mistral-eu" as const, model: "mistral-large-2512" },
+      {
+        provider: "mistral-eu" as const,
+        model: "mistral-large-latest",
+        rates: { input: 1, output: 2 },
+      },
+      {
+        provider: "mistral-eu" as const,
+        model: "mistral-large-2512",
+        reasoningEffort: "high" as const,
+        rates: { input: 1, output: 2 },
+      },
+    ])
+      await expect(
+        infer(
+          publication,
+          "mistral-test",
+          "prompt",
+          300,
+          undefined,
+          "system",
+          undefined,
+          options,
+        ),
+      ).rejects.toThrow();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await db.select().from(schema.aiUsage)).toEqual([]);
+  });
+
+  it("keeps exact model verification and the billable usage on Mistral mismatches", async () => {
+    vi.stubEnv("MISTRAL_API_KEY", "mistral-test-key");
+    const fetch = mockResponse({ ...payload(), model: "mistral-large-latest" });
+    await expect(
+      infer(
+        publication,
+        "mistral-test",
+        "prompt",
+        300,
+        undefined,
+        "system",
+        undefined,
+        {
+          provider: "mistral-eu",
+          model: "mistral-large-2512",
+          rates: { input: 0.6, output: 1.8 },
+        },
+      ),
+    ).rejects.toThrow("model_mismatch");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [usage] = await db.select().from(schema.aiUsage);
+    expect(usage).toMatchObject({
+      model: "mistral-large-2512",
+      status: "uncertain",
+      costChf: "0.000150",
+    });
+  });
+
+  it("does not retry a Mistral outage against the global API or another provider", async () => {
+    vi.stubEnv("MISTRAL_API_KEY", "mistral-test-key");
+    const fetch = mockResponse({ error: "unavailable" }, 503);
+    await expect(
+      infer(
+        publication,
+        "mistral-test",
+        "prompt",
+        300,
+        undefined,
+        "system",
+        undefined,
+        {
+          provider: "mistral-eu",
+          rates: { input: 0.6, output: 1.8 },
+        },
+      ),
+    ).rejects.toThrow("HTTP 503");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [usage] = await db.select().from(schema.aiUsage);
+    expect(usage.status).toBe("uncertain");
+    expect(usage.costChf).toBeNull();
+    expect(Number(usage.reservedChf)).toBeGreaterThan(0);
+  });
+
   it("invia temperatura e top-p richiesti e registra il consumo", async () => {
     const fetch = mockResponse(payload());
     await expect(
