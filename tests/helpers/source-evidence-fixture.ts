@@ -33,16 +33,25 @@ export function inventedSourceEvidenceAnswer(data: any) {
       target,
       ...data.passages.filter((p: any) => p.id !== target.id),
     ]
-      .map((p: any) => ({
-        kind:
-          p.id === target.id || p.role === "service"
-            ? "performance"
-            : "condition",
-        statement:
-          "Osservazione inventata per verificare il contratto, non il significato.",
-        scope: p.scope,
-        evidence: [quote(p.id)],
-      }))
+      .flatMap((p: any) => {
+        const anchor = data.passages.find(
+          (candidate: any) =>
+            candidate.scope === p.scope && candidate.role === "service",
+        );
+        if (!anchor) return [];
+        return [
+          {
+            kind:
+              p.id === target.id || p.role === "service"
+                ? "performance"
+                : "condition",
+            statement:
+              "Osservazione inventata per verificare il contratto, non il significato.",
+            serviceRef: p.role === "service" ? p.id : anchor.id,
+            evidence: [quote(p.id)],
+          },
+        ];
+      })
       .slice(0, 32),
     classifications: data.assignedClassificationIds.map((id: string) => {
       const c = data.classifications.find((item: any) => item.id === id);

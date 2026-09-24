@@ -222,6 +222,7 @@ test("Missing classifications, invented labels and non-contiguous quotes cannot 
       a.observations[0].scope = "selected_lot";
     },
     (a: any) => {
+      a.observations[0].serviceRef = "s3";
       a.observations[0].evidence = [{ sourceRef: "s3" }];
     },
   ]) {
@@ -474,17 +475,17 @@ test("The wire schema limits citations to existing text and scalar field referen
   valid[0].observations.push({
     kind: "condition",
     statement: "La quantità è zero e l’opzione non è attiva.",
-    scope: "project_context",
+    serviceRef: "s1",
     evidence: [{ sourceRef: "f0" }, { sourceRef: "f1" }],
   });
   assert.equal(validate(valid[0]), true);
   const record = recordSourceEvidenceReading(valid, plan, metadata);
-  assert.deepEqual(record.responses[0].observations.at(-1)!.evidence, [
+  assert.deepEqual(record.responses[0].observations.at(-1)!.evidence.slice(1), [
     { sourceRef: "f0", text: "0" },
     { sourceRef: "f1", text: "false" },
   ]);
   const changed = structuredClone(record);
-  changed.responses[0].observations.at(-1)!.evidence[0].text = "null";
+  changed.responses[0].observations.at(-1)!.evidence[1].text = "null";
   const { hash: _hash, ...unsigned } = changed;
   changed.hash = createHash("sha256")
     .update(stableDocumentaryJson(unsigned))
@@ -552,8 +553,8 @@ test("Missing specifications remain visible without clearing material uncertaint
   const answers: any[] = responses(plan);
   answers[0].missingDetails.push({
     description: "Il sottotipo non è precisato nella fonte fornita.",
-    scope: "project_context",
-    evidence: [{ sourceRef: "s4" }, { sourceRef: "s1" }],
+    serviceRef: "s1",
+    evidence: [{ sourceRef: "s4" }],
   });
   const result = readSourceEvidenceReading(
     recordSourceEvidenceReading(answers, plan, metadata),
@@ -562,7 +563,7 @@ test("Missing specifications remain visible without clearing material uncertaint
   assert.equal(result.accepted, true);
   assert.equal(result.missingDetails[0].id, "d1-1");
   assert.equal(
-    result.missingDetails[0].evidence[0].text,
+    result.missingDetails[0].evidence.find((q) => q.sourceRef === "s4")!.text,
     context().body.passages[3].text,
   );
   answers[0].issues.push({
@@ -582,6 +583,7 @@ test("Missing specifications remain visible without clearing material uncertaint
 test("Contract metadata alone cannot be promoted to a performance and earlier evidence stays stale", () => {
   const plan = buildSourceEvidenceReadingRequest(context(), config),
     answers = responses(plan);
+  answers[0].observations[0].serviceRef = "s2";
   answers[0].observations[0].evidence = [{ sourceRef: "f0" }];
   assert.throws(
     () => recordSourceEvidenceReading(answers, plan, metadata),
@@ -590,7 +592,7 @@ test("Contract metadata alone cannot be promoted to a performance and earlier ev
   const record = recordSourceEvidenceReading(responses(plan), plan, metadata);
   assert.equal(
     readSourceEvidenceReading(
-      { ...record, version: "source-evidence-reading-v5" },
+      { ...record, version: "source-evidence-reading-v6" },
       plan,
     ),
     null,
@@ -603,21 +605,22 @@ test("The provider schema requires descriptive evidence for performances and mis
   const validate = new Ajv2020({ strict: false }).compile(
     plan.requests[0].responseFormat.json_schema.schema,
   );
+  answers[0].observations[0].serviceRef = "s2";
   answers[0].observations[0].evidence = [{ sourceRef: "f0" }];
   assert.equal(validate(answers[0]), false);
-  answers[0].observations[0].evidence.push({ sourceRef: "s1" });
+  answers[0].observations[0].serviceRef = "s1";
   assert.equal(validate(answers[0]), true);
   answers[0].missingDetails.push({
     description: "Specifiche non precisate.",
-    scope: "project_context",
+    serviceRef: "s4",
     evidence: [{ sourceRef: "s4" }],
   });
   assert.equal(validate(answers[0]), false);
   assert.throws(
     () => recordSourceEvidenceReading(answers, plan, metadata),
-    /missing detail requires/,
+    /descriptive anchor requires/,
   );
-  answers[0].missingDetails[0].evidence.push({ sourceRef: "s1" });
+  answers[0].missingDetails[0].serviceRef = "s1";
   assert.equal(validate(answers[0]), true);
   assert.equal(
     readSourceEvidenceReading(
@@ -673,18 +676,18 @@ function lotContext(
 test("Lot facts and shared facts remain separate in the provider schema and stored reading", () => {
   const plan = buildSourceEvidenceReadingRequest(lotContext(), config);
   const valid: any[] = responses(plan);
-  valid[0].observations[0].scope = "selected_lot";
+  valid[0].observations[0].serviceRef = "s5";
   valid[0].observations[0].evidence = [{ sourceRef: "s5" }];
   valid[0].missingDetails.push({
     description: "Specifiche del lotto da verificare nei documenti.",
-    scope: "selected_lot",
+    serviceRef: "s5",
     evidence: [{ sourceRef: "s5" }],
   });
   const validate = new Ajv2020({ strict: false }).compile(
     plan.requests[0].responseFormat.json_schema.schema,
   );
   assert.equal(validate(valid[0]), true);
-  assert(valid[0].observations.some((o: any) => o.scope === "project_context"));
+  assert(valid[0].observations.some((o: any) => o.serviceRef === "s1"));
   assert.equal(
     readSourceEvidenceReading(
       recordSourceEvidenceReading(valid, plan, metadata),
@@ -694,28 +697,28 @@ test("Lot facts and shared facts remain separate in the provider schema and stor
   );
   const unanchored = structuredClone(valid);
   unanchored[0].observations[0].evidence = [{ sourceRef: "s1" }];
-  assert.equal(validate(unanchored[0]), false);
+  assert.equal(validate(unanchored[0]), true); // Cross-field scope is checked locally.
   assert.throws(
     () => recordSourceEvidenceReading(unanchored, plan, metadata),
     /scope mismatch/,
   );
   const mislabelled = structuredClone(valid);
-  mislabelled[0].observations[0].scope = "project_context";
-  assert.equal(validate(mislabelled[0]), false);
+  mislabelled[0].observations[0].serviceRef = "s1";
+  assert.equal(validate(mislabelled[0]), true);
   assert.throws(
     () => recordSourceEvidenceReading(mislabelled, plan, metadata),
     /scope mismatch/,
   );
   const mixed = structuredClone(valid);
   mixed[0].observations[0].evidence.push({ sourceRef: "s1" });
-  assert.equal(validate(mixed[0]), false);
+  assert.equal(validate(mixed[0]), true);
   assert.throws(
     () => recordSourceEvidenceReading(mixed, plan, metadata),
     /scope mismatch/,
   );
   const mixedDetail = structuredClone(valid);
   mixedDetail[0].missingDetails[0].evidence.push({ sourceRef: "f0" });
-  assert.equal(validate(mixedDetail[0]), false);
+  assert.equal(validate(mixedDetail[0]), true);
   assert.throws(
     () => recordSourceEvidenceReading(mixedDetail, plan, metadata),
     /scope mismatch/,
@@ -728,9 +731,7 @@ test("A territorial partition identifies the lot only with a separately grounded
     config,
   );
   const answers: any[] = responses(plan);
-  const local = answers[0].observations.find(
-    (o: any) => o.scope === "selected_lot",
-  );
+  const local = answers[0].observations.find((o: any) => o.serviceRef === "s5");
   local.kind = "target_partition";
   local.statement = "Ripartizione territoriale: Regione Nord.";
   const validate = new Ajv2020({ strict: false }).compile(
@@ -788,7 +789,7 @@ test("A territorial partition identifies the lot only with a separately grounded
     (o: any) => o.kind === "performance",
   );
   project.kind = "target_partition";
-  assert.equal(validate(wrongScope[0]), false);
+  assert.equal(validate(wrongScope[0]), true);
   assert.throws(
     () => recordSourceEvidenceReading(wrongScope, plan, metadata),
     /partition must belong/,

@@ -733,7 +733,7 @@ test("Approvals using earlier independent evidence contracts cannot be promoted"
   );
   assert.equal(
     readSourceSemanticReview(
-      { ...old, version: "documentary-source-semantic-review-v3" },
+      { ...old, version: "documentary-source-semantic-review-v4" },
       plan,
     ),
     null,
@@ -809,12 +809,12 @@ test("Grounded review keeps numeric evidence and missing details without letting
   wire[0].observations.push({
     kind: "condition",
     statement: "Quantità originale pari a zero.",
-    scope: "project_context",
+    serviceRef: "s1",
     evidence: [{ sourceRef: "f0" }],
   });
   wire[0].missingDetails.push({
     description: "Marca non precisata.",
-    scope: "project_context",
+    serviceRef: "s1",
     evidence: [{ sourceRef: "s1" }],
   });
   const sourceEvidence = recordSourceEvidenceReading(wire, plan.evidencePlan, {

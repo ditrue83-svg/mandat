@@ -9,7 +9,7 @@ import {
 import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v6";
+export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v7";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -46,6 +46,7 @@ const labelQuote = z.strictObject({
 const quotes = z.array(quote).min(1).max(16);
 const observation = z.strictObject({
   kind: z.enum(["performance", "condition", "target_partition"]),
+  serviceRef: z.string().regex(/^s\d+$/),
   statement: text(600),
   scope: z.enum(["project_context", "selected_lot"]),
   evidence: quotes,
@@ -68,6 +69,7 @@ const issue = z.strictObject({
   evidence: quotes,
 });
 const missingDetail = z.strictObject({
+  serviceRef: z.string().regex(/^s\d+$/),
   description: text(600),
   scope: z.enum(["project_context", "selected_lot"]),
   evidence: quotes,
@@ -84,6 +86,16 @@ const responseSchema = z.strictObject({
 // original text, so a model cannot rewrite HTML or join non-contiguous quotes.
 const reference = quote.omit({ text: true });
 const references = z.array(reference).min(1).max(16);
+const anchoredSelection = {
+  serviceRef: z.string().regex(/^s\d+$/),
+  evidence: z.array(reference).max(15),
+};
+const selectedObservation = observation
+  .omit({ scope: true, evidence: true })
+  .extend(anchoredSelection);
+const selectedDetail = missingDetail
+  .omit({ scope: true, evidence: true })
+  .extend(anchoredSelection);
 const selectedClassification = classification
   .omit({ label: true, evidence: true })
   .extend({
@@ -97,20 +109,12 @@ const selectionSchema = responseSchema
     missingDetails: true,
   })
   .extend({
-    observations: z
-      .array(
-        observation.omit({ evidence: true }).extend({ evidence: references }),
-      )
-      .max(32),
+    observations: z.array(selectedObservation).max(32),
     classifications: z.array(selectedClassification).max(1024),
     issues: z
       .array(issue.omit({ evidence: true }).extend({ evidence: references }))
       .max(32),
-    missingDetails: z
-      .array(
-        missingDetail.omit({ evidence: true }).extend({ evidence: references }),
-      )
-      .max(32),
+    missingDetails: z.array(selectedDetail).max(32),
   });
 const unique = (values: string[]) => [...new Set(values)];
 function freeze<T>(value: T): T {
@@ -183,96 +187,34 @@ export function buildSourceEvidenceReadingRequest(
     const boundedClassification = selectedClassification.safeExtend({
       evidence: boundedReferences,
     });
-    // Scope records where the evidence occurs, not inferred applicability.
-    // A generic lot title must not unlock every obligation of its project.
-    // Keep shared and local observations separate for the semantic review.
-    const scopedBranches = (
-      ["project_context", "selected_lot"] as const
-    ).flatMap((scope) => {
-      const ids = evidencePassages
-        .filter((p) => p.scope === scope && sourceIds.includes(p.id))
-        .map((p) => p.id);
-      if (!ids.length) return [];
-      const serviceIds = evidencePassages
-        .filter(
-          (p) =>
-            ids.includes(p.id) &&
-            p.role === "service" &&
-            !classificationSourceRefs.has(p.id),
-        )
-        .map((p) => p.id);
-      const scoped = {
-        scope: z.literal(scope),
-        evidence: z
-          .array(z.strictObject({ sourceRef: z.enum(ids) }))
-          .min(1)
-          .max(16),
-      };
-      // Express the same anchor requirement in the provider schema and in
-      // local validation. Visible metadata alone cannot support a service.
-      const serviceEvidence = scoped.evidence.meta({
-        contains: {
-          type: "object",
-          properties: { sourceRef: { type: "string", enum: serviceIds } },
-          required: ["sourceRef"],
-        },
-        minContains: 1,
-      });
-      return [
-        {
-          observations: [
-            observation
-              .omit({ evidence: true })
-              .extend({ ...scoped, kind: z.literal("condition") }),
-            ...(serviceIds.length
-              ? [
-                  observation.omit({ evidence: true }).extend({
-                    ...scoped,
-                    kind:
-                      scope === "project_context"
-                        ? z.literal("performance")
-                        : z.enum(["performance", "target_partition"]),
-                    evidence: serviceEvidence,
-                  }),
-                ]
-              : []),
-          ],
-          details: serviceIds.length
-            ? [
-                missingDetail
-                  .omit({ evidence: true })
-                  .extend({ ...scoped, evidence: serviceEvidence }),
-              ]
-            : [],
-        },
-      ];
-    });
-    const observationBranches = scopedBranches.flatMap(
-      (branch) => branch.observations,
-    );
-    const detailBranches = scopedBranches.flatMap((branch) => branch.details);
-    const boundedObservation =
-      observationBranches.length === 1
-        ? observationBranches[0]
-        : z.union(observationBranches);
-    const boundedDetails = detailBranches.length
-      ? z
-          .array(
-            detailBranches.length === 1
-              ? detailBranches[0]
-              : z.union(detailBranches),
-          )
-          .max(32)
-      : z
-          .array(
-            missingDetail
-              .omit({ evidence: true })
-              .extend({ evidence: boundedReferences }),
-          )
-          .max(0);
+    // The model selects a mandatory descriptive anchor. Its original scope
+    // is assigned by the application; no conditional JSON-schema keywords
+    // are needed to require a real service description.
+    const serviceIds = evidencePassages
+      .filter(
+        (p) =>
+          sourceIds.includes(p.id) &&
+          p.role === "service" &&
+          !classificationSourceRefs.has(p.id),
+      )
+      .map((p) => p.id);
+    const boundedAnchor = {
+      serviceRef: serviceIds.length
+        ? z.enum(serviceIds)
+        : anchoredSelection.serviceRef,
+      evidence: z
+        .array(z.strictObject({ sourceRef: z.enum(sourceIds) }))
+        .max(15),
+    };
+    const boundedObservations = z
+      .array(selectedObservation.safeExtend(boundedAnchor))
+      .max(serviceIds.length ? 32 : 0);
+    const boundedDetails = z
+      .array(selectedDetail.safeExtend(boundedAnchor))
+      .max(serviceIds.length ? 32 : 0);
     const bounded = selectionSchema.safeExtend({
       chunkId: z.literal(id),
-      observations: z.array(boundedObservation).max(32),
+      observations: boundedObservations,
       issues: z
         .array(
           issue
@@ -310,7 +252,7 @@ export function buildSourceEvidenceReadingRequest(
         "missingDetails elenca specifiche non determinate nella fonte fornita: sottotipo, composizione, quantità, modelli o condizioni rinviate ai documenti. Non proporre possibili sottotipi. Queste lacune non diventano issues se famiglia dell'oggetto e azione contrattuale sono identificabili. Per esempio: fornitura di arredi senza dimensioni -> prestazione identificata, dimensioni in missingDetails; solo 'incarico Delta' senza descrizione né famiglia -> object_uncertain. Non trasferire azioni generali o di altri lotti al target.",
         "Limita missingDetails alle lacune rilevanti per comprendere l'oggetto descritto, citandone anche una descrizione role service. Non generare una lista generica di possibili certificazioni, imballaggi o modalità non menzionati. Non ricavare modalità di esecuzione o consegna da campi relativi alla presentazione delle offerte. Riporta condition solo se delimita il lavoro: esclusioni, prestazioni opzionali, attività complementari o luogo che ne modifica l'ambito. Ometti cronologie, contatti e riepiloghi della procedura che non cambiano ciò che viene acquistato.",
         "issues contiene solo impedimenti materiali: object_uncertain quando non si può identificare neppure la famiglia o l'azione; target_uncertain quando non si può stabilire l'ambito; source_conflict per affermazioni incompatibili sul medesimo oggetto, senza precedenza o rettifica. Due clausole che includono ed escludono reciprocamente la stessa prestazione restano un conflitto, mai un semplice dettaglio da controllare. Non trasformare dati compatibili o traduzioni in conflitti.",
-        "scope registra l'ambito ORIGINALE delle prove, non un'applicabilità dedotta: ogni observations o missingDetails deve citare solo prove dello stesso scope. Conserva le informazioni del progetto in project_context e quelle del lotto in selected_lot, in osservazioni distinte. Il revisore successivo potrà esaminare insieme le due serie; non perderne una e non combinarle in un fatto locale.",
+        "In ogni observations e missingDetails scegli serviceRef: una descrizione principale role service. Il codice ne ricava scope e conserva la citazione; non restituire scope. Gli eventuali riferimenti aggiuntivi in evidence devono appartenere allo stesso ambito originale di serviceRef, non a un’applicabilità dedotta. Conserva le informazioni del progetto in project_context e quelle del lotto in selected_lot, in osservazioni distinte. Il revisore successivo potrà esaminare insieme le due serie; non perderne una e non combinarle in un fatto locale.",
         ...(context.targetScope === "selected_lot"
           ? [
               "PRIORITÀ LOTTO: selected_lot descrive solo ciò che i passaggi locali attestano. Il titolo locale di un bene non dimostra servizi accessori né luoghi di esecuzione indicati soltanto nel progetto. Per esempio, progetto 'fornitura veicoli e smaltimento', lotto 'autocarri': conserva smaltimento nel progetto, non aggiungerlo agli autocarri. Un rinvio al capitolato non prova il contenuto di un documento non fornito. Non assegnare manutenzione, installazione, quantità o ubicazioni puntuali al lotto senza prova locale.",
@@ -453,12 +395,46 @@ function materialize(values: unknown[], plan: SourceEvidenceReadingPlan) {
         return { sourceRef, text: passage.text };
       });
     };
+    const resolveAnchored = <
+      T extends
+        z.infer<typeof selectedObservation> | z.infer<typeof selectedDetail>,
+    >(
+      item: T,
+    ) => {
+      const { serviceRef, ...rest } = item;
+      const anchor = byId.get(serviceRef);
+      const classificationRef = plan.classifications.some((c) =>
+        [
+          ...(c.code?.sourceRefs ?? []),
+          ...c.labels.flatMap((l) => l.sourceRefs),
+        ].includes(serviceRef),
+      );
+      if (
+        !anchor ||
+        !request.sourceIds.includes(serviceRef) ||
+        anchor.role !== "service" ||
+        classificationRef
+      )
+        throw new Error(
+          "A descriptive anchor requires an original service description",
+        );
+      // Resolve the extra refs first so duplicate/invented refs are rejected,
+      // then add the original primary quotation once, without model text.
+      const extra = resolve(rest.evidence);
+      return {
+        ...rest,
+        serviceRef,
+        scope: anchor.scope,
+        evidence: resolve(
+          unique([serviceRef, ...extra.map((q) => q.sourceRef)]).map(
+            (sourceRef) => ({ sourceRef }),
+          ),
+        ),
+      };
+    };
     return {
       ...selected,
-      observations: selected.observations.map((o) => ({
-        ...o,
-        evidence: resolve(o.evidence),
-      })),
+      observations: selected.observations.map(resolveAnchored),
       classifications: selected.classifications.map((c) => {
         const original = plan.classifications.find(
           (item) => item.id === c.classificationId,
@@ -487,10 +463,7 @@ function materialize(values: unknown[], plan: SourceEvidenceReadingPlan) {
         ...item,
         evidence: resolve(item.evidence),
       })),
-      missingDetails: selected.missingDetails.map((item) => ({
-        ...item,
-        evidence: resolve(item.evidence),
-      })),
+      missingDetails: selected.missingDetails.map(resolveAnchored),
     };
   });
 }
@@ -536,8 +509,24 @@ function validate(values: unknown[], plan: SourceEvidenceReadingPlan) {
       scope: "project_context" | "selected_lot",
       items: z.infer<typeof quotes>,
     ) => items.every((q) => byId.get(q.sourceRef)!.scope === scope);
+    const checkAnchor = (item: {
+      serviceRef: string;
+      scope: string;
+      evidence: z.infer<typeof quotes>;
+    }) => {
+      const anchor = byId.get(item.serviceRef);
+      if (
+        !anchor ||
+        anchor.role !== "service" ||
+        classificationRefs.has(item.serviceRef) ||
+        anchor.scope !== item.scope ||
+        item.evidence[0]?.sourceRef !== item.serviceRef
+      )
+        throw new Error("Source evidence descriptive anchor mismatch");
+    };
     for (const o of value.observations) {
       checkQuotes(o.evidence);
+      checkAnchor(o);
       if (!supportsScope(o.scope, o.evidence))
         throw new Error("Source evidence scope mismatch");
       if (o.kind === "target_partition" && o.scope !== "selected_lot")
@@ -613,6 +602,7 @@ function validate(values: unknown[], plan: SourceEvidenceReadingPlan) {
     value.issues.forEach((i) => checkQuotes(i.evidence));
     value.missingDetails.forEach((item) => {
       checkQuotes(item.evidence);
+      checkAnchor(item);
       if (!supportsScope(item.scope, item.evidence))
         throw new Error("Missing detail scope mismatch");
       if (

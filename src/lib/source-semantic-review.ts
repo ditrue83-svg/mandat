@@ -21,7 +21,7 @@ import type {
 import { sourceEvidencePassages } from "./source-evidence-context";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v4";
+  "documentary-source-semantic-review-v5";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -442,19 +442,30 @@ export function buildGroundedSourceReviewRequests(
             ? { sourceRef: q.sourceRef }
             : q,
         );
+      // A condition's primary description ties it to the purchased work;
+      // its extra references locate the condition itself. Using the common
+      // primary ref to select every condition would copy all document tails
+      // into every chunk. Each original passage still has one coverage owner.
+      const relevant = (
+        item: { serviceRef: string; evidence: { sourceRef: string }[] },
+        condition: boolean,
+      ) => {
+        const detailRefs = condition
+          ? item.evidence.filter((q) => q.sourceRef !== item.serviceRef)
+          : [];
+        return (detailRefs.length ? detailRefs : item.evidence).some((q) =>
+          request.sourceIds.includes(q.sourceRef),
+        );
+      };
       const observations = independent.observations
-        .filter((o) =>
-          o.evidence.some((q) => request.sourceIds.includes(q.sourceRef)),
-        )
+        .filter((o) => relevant(o, o.kind === "condition"))
         .map((o) => ({ ...o, evidence: projectQuotes(o.evidence) }));
       const readingClassifications = classifications.map((c) => ({
         ...c,
         evidence: projectQuotes(c.evidence),
       }));
       const missingDetails = independent.missingDetails
-        .filter((d) =>
-          d.evidence.some((q) => request.sourceIds.includes(q.sourceRef)),
-        )
+        .filter((d) => relevant(d, true))
         .map((d) => ({ ...d, evidence: projectQuotes(d.evidence) }));
       const readingIds = [
         ...observations.map((o) => o.id),
