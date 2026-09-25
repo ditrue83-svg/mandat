@@ -42,7 +42,7 @@ import {
 import { SOURCE_EVIDENCE_READING_VERSION } from "./source-evidence-reading";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v23";
+  "documentary-service-comparison-v24";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
