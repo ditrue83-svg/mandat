@@ -21,7 +21,7 @@ import type {
 import { sourceEvidencePassages } from "./source-evidence-context";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v6";
+  "documentary-source-semantic-review-v7";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -275,13 +275,14 @@ export function buildSourceSemanticReviewRequest(
       },
     };
     const prompt = JSON.stringify({
-      task: "Confronta assignedClaims con independentReading, già registrata senza vedere questo draft, e con le prove originali. Verifica la fedeltà delle affermazioni e la completezza delle prestazioni rappresentate. Non riscrivere la lettura indipendente per conformarla al draft. La mancanza di una prestazione in un altro frammento non la confuta.",
+      task: "Verifica assignedClaims contro le prove originali: passages, fields e classificationContext. independentReading è una lettura AI separata, registrata prima di vedere il draft: serve a individuare prove e prestazioni, non sostituisce la fonte. Verifica la fedeltà delle affermazioni e la completezza delle prestazioni rappresentate. Non riscrivere la lettura indipendente per conformarla al draft. La mancanza di una prestazione in un altro frammento non la confuta.",
       rules: [
         "Per ogni claim assegnato restituisci esattamente un check. supported richiede sostegno reale nella fonte; contradicted richiede controprova; not_verifiable indica sostegno insufficiente. Un riferimento esatto non rende vero il significato affermato. Leggi insieme oggetto, classificazioni originali e relativo ambito.",
+        "Una valutazione AI non è una nuova affermazione del committente. Per contradicted identifica l'affermazione precisa del draft e il fatto originale incompatibile: una diversa formulazione o precisione non basta. La mancanza di un sottotipo non cancella la famiglia esplicitamente dichiarata dalle etichette originali; queste non dimostrano da sole azioni accessorie o applicabilità a un lotto.",
         "Ogni check cita readingRefs della lettura indipendente oltre agli estratti originali. I riferimenti evidence della lettura indipendente rimandano al testo originale in passages; le citazioni di contesto non presenti in passages conservano anche text. Un draft che introduce un dominio incompatibile, una correzione della fonte o una discrepanza non presente nella lettura indipendente non può essere supported solo perché ripete il nome del prodotto. Per classification_reading cita la corrispondente classificazione indipendente cN.",
         "Controlla dominio dell'oggetto, azione contrattuale, applicabilità al target e importanza main/accessory/excluded separatamente. Non scambiare un settore, luogo o destinatario per un ruolo. Contesto generale, classificazioni ampie e opere di altri lotti non provano una prestazione locale.",
         "Per component_domain verifica il significato dichiarato, non la sola presenza di classificationContextIds. Ripetere o tradurre un nome ambiguo senza conservarne il dominio attestato non basta a identificarlo. Non ignorare una spiegazione classificatoria incompatibile con quel significato.",
-        "Una famiglia di prodotti identificata può non specificare sottotipi, quantità o requisiti: non inventarli e non usare la loro assenza come ambiguità del mestiere. Verifica che details riporti soltanto condizioni o dettagli, non prestazioni espulse dalle componenti.",
+        "Una famiglia di prodotti identificata può non specificare sottotipi, quantità o requisiti: non inventarli e non usare la loro assenza come ambiguità del mestiere. Il nome del bene non è una specifica di composizione, materiale, modello o sottotipo: descriverlo come generico può essere compatibile con il conservarne il nome. Se invece una caratteristica è esplicita nella fonte, negarne la presenza resta contradicted. Verifica che details riporti soltanto condizioni o dettagli, non prestazioni espulse dalle componenti.",
         "independentReading.missingDetails conserva dettagli non precisati: non sono conflitti o prestazioni ulteriori. Se il draft presenta come certo un valore che la fonte non determina, non approvarlo. Puoi citare dN-M per motivare not_verifiable. I riferimenti fN indicano il valore JSON originale in fields al relativo rawPath; non inventarne il significato e distingui 0, false e null.",
         "Ogni claim è affidato a una sola richiesta con tutte le sue citazioni; i passaggi aggiunti sono contesto, non una selezione che sostituisce coverage. Esamina tutti i passaggi e campi di coverage. Non richiedere che tutti gli acquisti siano ripetuti in ogni frammento. Usa findings per problemi materiali nel significato del lavoro; nessuna autocorrezione.",
         "omitted_scope richiede una prestazione principale, accessoria o esclusa mancante, oppure un limite che cambi concretamente oggetto, azione, ruolo o applicabilità al target. In reason identifica quale lavoro risulterebbe omesso o diverso. Una condition nella lettura indipendente è una prova di contesto, non un obbligo di copiarla nel draft. Periodi contrattuali, proroghe temporali, scadenze, contatti e modalità di presentazione non devono essere ripetuti quando non cambiano le prestazioni. La loro sola assenza non produce findings né not_verifiable.",
@@ -463,8 +464,13 @@ export function buildGroundedSourceReviewRequests(
       const observations = independent.observations
         .filter((o) => relevant(o, o.kind === "condition"))
         .map((o) => ({ ...o, evidence: projectQuotes(o.evidence) }));
+      // The reviewer gets source-backed classification references, not an
+      // earlier model's verdict or rationale promoted into source evidence.
+      // Conflicting readings still fail the accepted-reading gate above.
       const readingClassifications = classifications.map((c) => ({
-        ...c,
+        id: c.id,
+        classificationId: c.classificationId,
+        label: c.label,
         evidence: projectQuotes(c.evidence),
       }));
       const missingDetails = independent.missingDetails

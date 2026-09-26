@@ -710,6 +710,58 @@ test("Grounded review preserves original passages while avoiding repeated materi
   assert.equal(JSON.stringify(evidence), before);
 });
 
+test("Review preserves original classification evidence without inheriting a prior model's opinion", () => {
+  const input = context();
+  const original = draft(input);
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  for (const relationship of [
+    "consistent",
+    "broad_context",
+    "not_decisive",
+  ] as const) {
+    const responses = plan.evidencePlan.requests.map((part) =>
+      inventedSourceEvidenceAnswer(JSON.parse(part.prompt)),
+    );
+    const opinion = "IPOTESI AI INVENTATA: ignorare la famiglia originale.";
+    responses[0].classifications[0].relationship = relationship;
+    responses[0].classifications[0].explanation = opinion;
+    const evidence = recordSourceEvidenceReading(responses, plan.evidencePlan, {
+      ...metadata,
+      id: `invented-${relationship}`,
+    });
+    const before = JSON.stringify(evidence);
+    for (const request of buildGroundedSourceReviewRequests(plan, evidence)) {
+      const body = JSON.parse(request.prompt);
+      assert.equal(body.sourceEvidenceHash, evidence.hash);
+      assert.deepEqual(
+        body.classificationContext,
+        original.classificationContext,
+      );
+      assert(!request.prompt.includes(opinion));
+      for (const item of body.independentReading.classifications) {
+        assert.equal("relationship" in item, false);
+        assert.equal("explanation" in item, false);
+        assert.equal(item.id, item.classificationId);
+        assert(request.readingIds.includes(item.id));
+        assert.equal(item.label.text, "Categoria inventata 🌳");
+        assert(
+          item.evidence.some(
+            (quote: { sourceRef: string }) => quote.sourceRef === "s2",
+          ),
+        );
+        assert(
+          item.evidence.some(
+            (quote: { sourceRef: string }) => quote.sourceRef === "s3",
+          ),
+        );
+      }
+    }
+    // Keep the original response and its hash available for diagnostics.
+    assert.equal(JSON.stringify(evidence), before);
+    assert.equal(evidence.responses[0].classifications[0].explanation, opinion);
+  }
+});
+
 test("Approvals using earlier independent evidence contracts cannot be promoted", () => {
   const plan = buildSourceSemanticReviewRequest(context(), draft(), config);
   const old = {
@@ -734,6 +786,18 @@ test("Approvals using earlier independent evidence contracts cannot be promoted"
   assert.equal(
     readSourceSemanticReview(
       { ...old, version: "documentary-source-semantic-review-v4" },
+      plan,
+    ),
+    null,
+  );
+  const prior = recordSourceSemanticReview(answers(plan), plan, metadata);
+  const { hash: _hash, ...priorUnsigned } = {
+    ...prior,
+    version: "documentary-source-semantic-review-v6",
+  };
+  assert.equal(
+    readSourceSemanticReview(
+      { ...priorUnsigned, hash: digest(priorUnsigned) },
       plan,
     ),
     null,
