@@ -4,6 +4,33 @@ import {
   documentarySourceReasoningEffort,
 } from "../src/lib/documentary-ai-config";
 afterEach(() => vi.unstubAllEnvs());
+it("keeps Luna source reasoning and prices independent of previous providers", () => {
+  const env = {
+    LLM_REASONING_EFFORT: "none",
+    DOCUMENTARY_LLM_PROVIDER: "openai",
+  };
+  expect(() => documentaryAiConfiguration(env)).toThrow("tariffe");
+  expect(documentarySourceReasoningEffort(env)).toBe("medium");
+  expect(
+    documentaryAiConfiguration({
+      ...env,
+      DOCUMENTARY_LLM_INPUT_CHF_PER_MILLION: "0.15",
+      DOCUMENTARY_LLM_OUTPUT_CHF_PER_MILLION: "0.75",
+      DOCUMENTARY_LLM_REASONING_EFFORT: "high",
+    }),
+  ).toEqual({
+    provider: "openai",
+    model: "gpt-6-luna",
+    reasoningEffort: "high",
+    rates: { input: 0.15, output: 0.75 },
+  });
+  expect(
+    documentarySourceReasoningEffort({
+      ...env,
+      DOCUMENTARY_SOURCE_REASONING_EFFORT: "low",
+    }),
+  ).toBe("low");
+});
 it("configures Claude reasoning independently and requires its own prices", () => {
   const env = {
     LLM_REASONING_EFFORT: "none",

@@ -11,6 +11,9 @@ import {
   ANTHROPIC_BASE_URL,
   CLAUDE_OPUS_5_5_MODEL,
   anthropicReasoningEffort,
+  OPENAI_BASE_URL,
+  GPT_6_LUNA_MODEL,
+  openaiReasoningEffort,
 } from "../src/lib/ai-provider-config";
 
 const legacy = {
@@ -19,6 +22,29 @@ const legacy = {
   LLM_API_BASE_URL: "https://api.infomaniak.com/2/ai/123/openai/v1",
   MISTRAL_API_KEY: "mistral-secret-never-print",
 };
+
+it("isolates Luna credentials/model and rejects proxies or stale reasoning settings", () => {
+  expect(aiProviderConfiguration(legacy, "openai")).toEqual({
+    provider: "openai",
+    baseUrl: OPENAI_BASE_URL,
+    apiKeyEnv: "OPENAI_API_KEY",
+  });
+  expect(aiModel(legacy, "openai")).toBe(GPT_6_LUNA_MODEL);
+  expect(() => validateAiModel("openai", "gpt-6-luna-latest")).toThrow();
+  expect(openaiReasoningEffort()).toBe("medium");
+  expect(openaiReasoningEffort("high")).toBe("high");
+  expect(() => openaiReasoningEffort("invalid")).toThrow();
+  for (const endpoint of [
+    "http://api.openai.com/v1",
+    "https://proxy.example/v1",
+    "https://api.openai.com.evil.example/v1",
+    "https://api.openai.com/v1?key=x",
+    "https://user:secret@api.openai.com/v1",
+  ])
+    expect(() =>
+      aiProviderConfiguration({ OPENAI_API_BASE_URL: endpoint }, "openai"),
+    ).toThrow();
+});
 
 it("keeps Anthropic credentials and pinned model separate from existing providers", () => {
   expect(aiProviderConfiguration(legacy, "anthropic")).toEqual({

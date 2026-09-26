@@ -1,4 +1,4 @@
-export type AiProvider = "infomaniak" | "mistral-eu" | "anthropic";
+export type AiProvider = "infomaniak" | "mistral-eu" | "anthropic" | "openai";
 export type AiEnvironment = Record<string, string | undefined>;
 
 export const MISTRAL_EU_BASE_URL = "https://api.eu.mistral.ai/v1";
@@ -6,11 +6,14 @@ export const MISTRAL_LARGE_3_MODEL = "mistral-large-2512";
 export const MISTRAL_MEDIUM_3_5_MODEL = "mistral-medium-2604";
 export const ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1";
 export const CLAUDE_OPUS_5_5_MODEL = "claude-opus-5-5";
+export const OPENAI_BASE_URL = "https://api.openai.com/v1";
+export const GPT_6_LUNA_MODEL = "gpt-6-luna";
 const legacyDefaultModel = "mistralai/Ministral-3-14B-Instruct-2512";
 
 export function aiProvider(value?: string): AiProvider {
   if (!value || value === "infomaniak") return "infomaniak";
-  if (value === "mistral-eu" || value === "anthropic") return value;
+  if (value === "mistral-eu" || value === "anthropic" || value === "openai")
+    return value;
   throw new Error("Fornitore AI non supportato");
 }
 
@@ -25,11 +28,16 @@ export function aiModel(
       ? MISTRAL_LARGE_3_MODEL
       : provider === "anthropic"
         ? CLAUDE_OPUS_5_5_MODEL
-        : legacyDefaultModel)
+        : provider === "openai"
+          ? GPT_6_LUNA_MODEL
+          : legacyDefaultModel)
   );
 }
 
 export function validateAiModel(provider: AiProvider, model: string) {
+  // The current API publishes this exact ID, without a dated Luna snapshot.
+  if (provider === "openai" && model !== GPT_6_LUNA_MODEL)
+    throw new Error("Per OpenAI configurare gpt-6-luna");
   // This ID is a pinned snapshot in Anthropic's current versioning scheme.
   if (provider === "anthropic" && model !== CLAUDE_OPUS_5_5_MODEL)
     throw new Error("Per Anthropic configurare claude-opus-5-5");
@@ -41,6 +49,14 @@ export function validateAiModel(provider: AiProvider, model: string) {
     throw new Error(
       "Per Mistral UE configurare mistral-large-2512 oppure mistral-medium-2604",
     );
+}
+
+export function openaiReasoningEffort(value?: string) {
+  if (!value) return "medium" as const;
+  // These are the levels exposed by Mandat's current request contract.
+  if (["none", "low", "medium", "high"].includes(value))
+    return value as "none" | "low" | "medium" | "high";
+  throw new Error("Luna richiede ragionamento none, low, medium oppure high");
 }
 
 export function anthropicReasoningEffort(value?: string) {
@@ -71,12 +87,14 @@ export function aiProviderConfiguration(
 ) {
   provider = aiProvider(provider);
   const base =
-    provider === "anthropic"
-      ? env.ANTHROPIC_API_BASE_URL || ANTHROPIC_BASE_URL
-      : provider === "mistral-eu"
-        ? env.MISTRAL_API_BASE_URL || MISTRAL_EU_BASE_URL
-        : env.LLM_API_BASE_URL ||
-          `https://api.infomaniak.com/2/ai/${env.INFOMANIAK_AI_PRODUCT_ID}/openai/v1`;
+    provider === "openai"
+      ? env.OPENAI_API_BASE_URL || OPENAI_BASE_URL
+      : provider === "anthropic"
+        ? env.ANTHROPIC_API_BASE_URL || ANTHROPIC_BASE_URL
+        : provider === "mistral-eu"
+          ? env.MISTRAL_API_BASE_URL || MISTRAL_EU_BASE_URL
+          : env.LLM_API_BASE_URL ||
+            `https://api.infomaniak.com/2/ai/${env.INFOMANIAK_AI_PRODUCT_ID}/openai/v1`;
   let url: URL;
   try {
     url = new URL(base);
@@ -94,6 +112,8 @@ export function aiProviderConfiguration(
       "L’endpoint AI deve usare HTTPS senza credenziali o parametri",
     );
   const baseUrl = url.href.replace(/\/$/, "");
+  if (provider === "openai" && baseUrl !== OPENAI_BASE_URL)
+    throw new Error("OpenAI richiede l’endpoint api.openai.com/v1");
   if (provider === "anthropic" && baseUrl !== ANTHROPIC_BASE_URL)
     throw new Error("Anthropic richiede l’endpoint api.anthropic.com/v1");
   if (provider === "mistral-eu" && baseUrl !== MISTRAL_EU_BASE_URL)
@@ -104,10 +124,12 @@ export function aiProviderConfiguration(
     provider,
     baseUrl,
     apiKeyEnv:
-      provider === "anthropic"
-        ? "ANTHROPIC_API_KEY"
-        : provider === "mistral-eu"
-          ? "MISTRAL_API_KEY"
-          : "LLM_API_KEY",
+      provider === "openai"
+        ? "OPENAI_API_KEY"
+        : provider === "anthropic"
+          ? "ANTHROPIC_API_KEY"
+          : provider === "mistral-eu"
+            ? "MISTRAL_API_KEY"
+            : "LLM_API_KEY",
   } as const;
 }

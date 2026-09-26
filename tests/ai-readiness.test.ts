@@ -7,6 +7,38 @@ const configuration = {
   models: ["family/model-a", "family/model-b"],
 };
 
+it("checks Luna availability without inference and refuses credential forwarding", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValue(Response.json({ data: [{ id: "gpt-6-luna" }] }));
+  const config = {
+    provider: "openai" as const,
+    baseUrl: "https://api.openai.com/v1",
+    apiKey: "openai-test-key",
+    models: ["gpt-6-luna"],
+  };
+  expect(await probeAiModels(config, fetcher)).toMatchObject({
+    ready: true,
+    completionRequested: false,
+    semanticQuality: "not_evaluated",
+  });
+  expect(String(fetcher.mock.calls[0][0])).toBe(
+    "https://api.openai.com/v1/models",
+  );
+  expect(fetcher.mock.calls[0][1]).toMatchObject({
+    method: "GET",
+    redirect: "error",
+    headers: { Authorization: "Bearer openai-test-key" },
+  });
+  expect(
+    await probeAiModels(
+      { ...config, baseUrl: "https://proxy.example/v1" },
+      fetcher,
+    ),
+  ).toMatchObject({ ready: false, reason: "invalid_endpoint" });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
 it("uses native Anthropic authentication for one bounded catalog read", async () => {
   const fetcher = vi
     .fn<typeof fetch>()

@@ -6,6 +6,8 @@ import {
   MISTRAL_LARGE_3_MODEL,
   CLAUDE_OPUS_5_5_MODEL,
   anthropicReasoningEffort,
+  openaiReasoningEffort,
+  GPT_6_LUNA_MODEL,
 } from "./ai-provider-config";
 import {
   documentaryAiConfiguration,
@@ -241,12 +243,15 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
   });
   const mistral = env.LLM_PROVIDER === "mistral-eu";
   const anthropic = env.LLM_PROVIDER === "anthropic";
+  const openai = env.LLM_PROVIDER === "openai";
   required(
-    anthropic
-      ? "ANTHROPIC_API_KEY"
-      : mistral
-        ? "MISTRAL_API_KEY"
-        : "LLM_API_KEY",
+    openai
+      ? "OPENAI_API_KEY"
+      : anthropic
+        ? "ANTHROPIC_API_KEY"
+        : mistral
+          ? "MISTRAL_API_KEY"
+          : "LLM_API_KEY",
     "ai",
   );
   required("LLM_MODEL", "ai");
@@ -254,8 +259,10 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
     "LLM_PROVIDER",
     "ai",
     !env.LLM_PROVIDER ||
-      ["infomaniak", "mistral-eu", "anthropic"].includes(env.LLM_PROVIDER),
-    "Scegliere infomaniak, mistral-eu oppure anthropic",
+      ["infomaniak", "mistral-eu", "anthropic", "openai"].includes(
+        env.LLM_PROVIDER,
+      ),
+    "Scegliere infomaniak, mistral-eu, anthropic oppure openai",
   );
   if (mistral)
     add(
@@ -271,7 +278,14 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
       env.LLM_MODEL === CLAUDE_OPUS_5_5_MODEL,
       "Per Anthropic configurare claude-opus-5-5",
     );
-  if (!mistral && !anthropic && !env.LLM_API_BASE_URL)
+  if (openai)
+    add(
+      "OPENAI_MODEL",
+      "ai",
+      env.LLM_MODEL === GPT_6_LUNA_MODEL,
+      "Per OpenAI configurare gpt-6-luna",
+    );
+  if (!mistral && !anthropic && !openai && !env.LLM_API_BASE_URL)
     add(
       "INFOMANIAK_AI_PRODUCT_ID",
       "ai",
@@ -286,34 +300,40 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
     /* Report below without configuration values. */
   }
   add(
-    anthropic
-      ? "ANTHROPIC_API_BASE_URL"
-      : mistral
-        ? "MISTRAL_API_BASE_URL"
-        : "LLM_API_BASE_URL",
+    openai
+      ? "OPENAI_API_BASE_URL"
+      : anthropic
+        ? "ANTHROPIC_API_BASE_URL"
+        : mistral
+          ? "MISTRAL_API_BASE_URL"
+          : "LLM_API_BASE_URL",
     "ai",
     Boolean(
       ai &&
       ai.protocol === "https:" &&
-      (anthropic
-        ? ai.hostname === "api.anthropic.com"
-        : mistral
-          ? ai.hostname === "api.eu.mistral.ai"
-          : ai.hostname === "api.infomaniak.com") &&
+      (openai
+        ? ai.hostname === "api.openai.com"
+        : anthropic
+          ? ai.hostname === "api.anthropic.com"
+          : mistral
+            ? ai.hostname === "api.eu.mistral.ai"
+            : ai.hostname === "api.infomaniak.com") &&
       !ai.port &&
       !ai.username &&
       !ai.password &&
       !ai.search &&
       !ai.hash &&
-      (mistral || anthropic
+      (mistral || anthropic || openai
         ? ai.pathname === "/v1"
         : /^\/2\/ai\/\d+\/openai\/v1\/?$/.test(ai.pathname)),
     ),
-    anthropic
-      ? "Configurare esclusivamente https://api.anthropic.com/v1"
-      : mistral
-        ? "Configurare esclusivamente https://api.eu.mistral.ai/v1"
-        : "Configurare l’endpoint AI Infomaniak v2 del prodotto",
+    openai
+      ? "Configurare esclusivamente https://api.openai.com/v1"
+      : anthropic
+        ? "Configurare esclusivamente https://api.anthropic.com/v1"
+        : mistral
+          ? "Configurare esclusivamente https://api.eu.mistral.ai/v1"
+          : "Configurare l’endpoint AI Infomaniak v2 del prodotto",
   );
   if (mistral)
     add(
@@ -336,6 +356,20 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
       "Claude richiede low, medium oppure high; non usare none",
     );
   }
+  if (openai) {
+    let valid = true;
+    try {
+      openaiReasoningEffort(env.LLM_REASONING_EFFORT);
+    } catch {
+      valid = false;
+    }
+    add(
+      "LLM_REASONING_EFFORT",
+      "ai",
+      valid,
+      "Luna richiede none, low, medium oppure high",
+    );
+  }
   if (
     env.DOCUMENTARY_LLM_PROVIDER ||
     env.DOCUMENTARY_LLM_MODEL ||
@@ -351,6 +385,7 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
         present(env[connection.apiKeyEnv]) &&
         (configuration.provider === "mistral-eu" ||
           configuration.provider === "anthropic" ||
+          configuration.provider === "openai" ||
           (endpoint.hostname === "api.infomaniak.com" &&
             !endpoint.port &&
             /^\/2\/ai\/\d+\/openai\/v1\/?$/.test(endpoint.pathname)));
@@ -366,9 +401,11 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
   }
   let usesMistral = mistral;
   let usesAnthropic = anthropic;
+  let usesOpenai = openai;
   try {
     usesMistral ||= documentaryAiProvider(env) === "mistral-eu";
     usesAnthropic ||= documentaryAiProvider(env) === "anthropic";
+    usesOpenai ||= documentaryAiProvider(env) === "openai";
   } catch {
     /* Already reported as invalid. */
   }
@@ -388,6 +425,14 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
       message:
         "L’API diretta Anthropic usa inferenza globale e non garantisce residenza UE o svizzera. Verificare ambito dei dati autorizzati e informativa prima del rilascio.",
     });
+  if (usesOpenai)
+    checks.push({
+      id: "OPENAI_DATA_SETTINGS",
+      group: "ai",
+      status: "manual",
+      message:
+        "L’endpoint OpenAI standard non garantisce residenza UE o svizzera. Prima del rilascio verificare informativa e ambito autorizzato. La stima applica prudenzialmente 1,25× alla tariffa input per coprire le scritture cache.",
+    });
   for (const key of ["LLM_INPUT_CHF_PER_MILLION", "LLM_OUTPUT_CHF_PER_MILLION"])
     add(
       key,
@@ -403,8 +448,8 @@ export function inspectSetup(env: SetupEnvironment): SetupCheck[] {
     "ai",
     Number.isFinite(Number(env.AI_MONTHLY_BUDGET_CHF)) &&
       Number(env.AI_MONTHLY_BUDGET_CHF) > 0 &&
-      Number(env.AI_MONTHLY_BUDGET_CHF) <= 40,
-    "Per la beta impostare un limite AI superiore a zero e non oltre CHF 40",
+      Number(env.AI_MONTHLY_BUDGET_CHF) <= 10,
+    "Per la beta impostare un limite AI superiore a zero e non oltre CHF 10",
     !env.AI_MONTHLY_BUDGET_CHF,
   );
   checks.push({

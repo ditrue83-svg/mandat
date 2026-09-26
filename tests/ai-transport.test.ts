@@ -250,6 +250,236 @@ afterEach(() => {
 });
 afterAll(async () => pg.close());
 
+describe("OpenAI native Responses", () => {
+  const options = {
+    provider: "openai" as const,
+    model: "gpt-6-luna",
+    reasoningEffort: "high" as const,
+    rates: { input: 0.15, output: 0.75 },
+  };
+  function answer() {
+    return {
+      object: "response",
+      model: options.model,
+      service_tier: "default",
+      status: "completed",
+      error: null,
+      incomplete_details: null,
+      output: [
+        { type: "reasoning", summary: [{ text: privateResponseText }] },
+        {
+          type: "message",
+          role: "assistant",
+          status: "completed",
+          content: [{ type: "output_text", text: JSON.stringify(summary) }],
+        },
+      ],
+      usage: {
+        input_tokens: 100,
+        input_tokens_details: { cached_tokens: 20, cache_write_tokens: 60 },
+        output_tokens: 500,
+        output_tokens_details: { reasoning_tokens: 400 },
+        total_tokens: 600,
+      },
+    };
+  }
+  beforeEach(() => vi.stubEnv("OPENAI_API_KEY", "openai-test-key"));
+  it("uses Responses and reserves the entire native body including conservative cache pricing", async () => {
+    const fetcher = mockResponse(answer());
+    const format = {
+      type: "json_schema" as const,
+      json_schema: {
+        name: "answer",
+        strict: true as const,
+        schema: {
+          type: "object",
+          properties: { text: { type: "string", maxLength: 40 } },
+          required: ["text"],
+          additionalProperties: false,
+        },
+      },
+    };
+    expect(
+      await infer(
+        publication,
+        "luna-test",
+        "source",
+        8192,
+        configuredTransport,
+        "instructions",
+        format,
+        options,
+      ),
+    ).toEqual(summary);
+    const [url, init] = fetcher.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(String(url)).toBe("https://api.openai.com/v1/responses");
+    expect(init.headers).toEqual({
+      Authorization: "Bearer openai-test-key",
+      "Content-Type": "application/json",
+    });
+    expect(init.redirect).toBe("error");
+    const body = JSON.parse(String(init.body));
+    expect(body).toMatchObject({
+      model: options.model,
+      service_tier: "default",
+      store: false,
+      reasoning: { effort: "high" },
+      text: { format: { strict: true } },
+    });
+    expect(body).not.toHaveProperty("temperature");
+    const [row] = await db.select().from(schema.aiUsage);
+    expect(row).toMatchObject({
+      status: "completed",
+      inputTokens: 100,
+      outputTokens: 500,
+      costChf: "0.000394",
+    });
+    const bytes = aiReservedInputBytes(
+      "instructions",
+      "source",
+      8192,
+      format,
+      options,
+    );
+    expect(bytes).toBe(Buffer.byteLength(String(init.body)) + 1000);
+    expect(Number(row.reservedChf)).toBeCloseTo(
+      (bytes * 0.15 * 1.25 + 8192 * 0.75) / 1e6,
+      6,
+    );
+  });
+  it("records billed reasoning on truncated output and never exposes its content", async () => {
+    mockResponse({
+      ...answer(),
+      status: "incomplete",
+      incomplete_details: { reason: "max_output_tokens" },
+    });
+    await expect(
+      infer(
+        publication,
+        "luna-truncated",
+        "source",
+        8192,
+        configuredTransport,
+        "instructions",
+        undefined,
+        options,
+      ),
+    ).rejects.toThrow("output_limit");
+    const [row] = await db.select().from(schema.aiUsage);
+    expect(row).toMatchObject({
+      status: "uncertain",
+      inputTokens: 100,
+      outputTokens: 500,
+      costChf: "0.000394",
+    });
+    expect(JSON.stringify(row)).not.toContain(privateResponseText);
+  });
+  it("keeps an uncertain reservation on unreadable billing rather than inventing zero usage", async () => {
+    mockResponse({ ...answer(), usage: null });
+    await expect(
+      infer(
+        publication,
+        "luna-unknown",
+        "source",
+        8192,
+        configuredTransport,
+        "instructions",
+        undefined,
+        options,
+      ),
+    ).rejects.toThrow("Consumo");
+    const [row] = await db.select().from(schema.aiUsage);
+    expect(row).toMatchObject({
+      status: "uncertain",
+      costChf: null,
+      inputTokens: null,
+      outputTokens: null,
+    });
+    expect(Number(row.reservedChf)).toBeGreaterThan(0);
+  });
+  it("blocks unsupported settings, missing credentials and oversized sources before the ledger or network", async () => {
+    const fetcher = mockResponse(answer());
+    for (const changed of [
+      { ...options, temperature: 0 },
+      { ...options, topP: 1 },
+      { ...options, model: "other" },
+    ])
+      await expect(
+        infer(
+          publication,
+          "luna-invalid",
+          "source",
+          8192,
+          configuredTransport,
+          "instructions",
+          undefined,
+          changed,
+        ),
+      ).rejects.toThrow();
+    await expect(
+      infer(
+        publication,
+        "luna-large",
+        "è".repeat(100_000),
+        8192,
+        configuredTransport,
+        "instructions",
+        undefined,
+        options,
+      ),
+    ).rejects.toThrow("grande");
+    vi.stubEnv("OPENAI_API_KEY", "");
+    await expect(
+      infer(
+        publication,
+        "luna-no-key",
+        "source",
+        8192,
+        configuredTransport,
+        "instructions",
+        undefined,
+        options,
+      ),
+    ).rejects.toThrow("configurata");
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await db.select().from(schema.aiUsage)).toHaveLength(0);
+  });
+  it("honors the CHF10 cap including earlier uncertain reservations and never resets old spending", async () => {
+    vi.stubEnv("AI_MONTHLY_BUDGET_CHF", "10");
+    const fetcher = mockResponse(answer());
+    await infer(
+      publication,
+      "luna-initial",
+      "source",
+      8192,
+      configuredTransport,
+      "instructions",
+      undefined,
+      options,
+    );
+    await db
+      .update(schema.aiUsage)
+      .set({ status: "uncertain", costChf: null, reservedChf: "9.999900" });
+    fetcher.mockClear();
+    await expect(
+      infer(
+        publication,
+        "luna-over-budget",
+        "source",
+        8192,
+        configuredTransport,
+        "instructions",
+        undefined,
+        options,
+      ),
+    ).rejects.toThrow("Limite mensile");
+    expect(fetcher).not.toHaveBeenCalled();
+    const rows = await db.select().from(schema.aiUsage);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].reservedChf).toBe("9.999900");
+  });
+});
+
 describe("Anthropic native messages", () => {
   const options = {
     provider: "anthropic" as const,

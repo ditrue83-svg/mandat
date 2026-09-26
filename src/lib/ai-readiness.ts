@@ -1,4 +1,8 @@
-import { ANTHROPIC_BASE_URL, type AiProvider } from "./ai-provider-config";
+import {
+  ANTHROPIC_BASE_URL,
+  OPENAI_BASE_URL,
+  type AiProvider,
+} from "./ai-provider-config";
 // Read-only preflight for model evaluations. A successful catalog lookup does
 // not establish completion availability, schema compatibility or model quality.
 export type AiReadinessReason =
@@ -51,6 +55,11 @@ export async function probeAiModels(
 
   let url: URL;
   try {
+    if (
+      configuration.provider === "openai" &&
+      configuration.baseUrl.replace(/\/$/, "") !== OPENAI_BASE_URL
+    )
+      throw new Error("Invalid OpenAI endpoint");
     if (
       configuration.provider === "anthropic" &&
       configuration.baseUrl.replace(/\/$/, "") !== ANTHROPIC_BASE_URL

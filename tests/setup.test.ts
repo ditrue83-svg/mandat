@@ -26,7 +26,7 @@ const configured: SetupEnvironment = {
   LLM_MODEL: "mistralai/Ministral-3-14B-Instruct-2512",
   LLM_INPUT_CHF_PER_MILLION: "0.4",
   LLM_OUTPUT_CHF_PER_MILLION: "0.5",
-  AI_MONTHLY_BUDGET_CHF: "40",
+  AI_MONTHLY_BUDGET_CHF: "10",
   RESTIC_REPOSITORY: "s3:https://s3.swiss-backup99.infomaniak.com/test-bucket",
   RESTIC_PASSWORD: "distinct-backup-secret",
   AWS_ACCESS_KEY_ID: "access-fixture",
@@ -35,6 +35,45 @@ const configured: SetupEnvironment = {
   FOGLIO_REUSE_CONFIRMED: "false",
 };
 describe("Controllo configurazione senza segreti", () => {
+  it("validates Luna main and documentary configuration without borrowing another key", () => {
+    const env = {
+      ...configured,
+      LLM_PROVIDER: "openai",
+      LLM_MODEL: "gpt-6-luna",
+      LLM_API_KEY: "",
+      INFOMANIAK_AI_PRODUCT_ID: "",
+      OPENAI_API_KEY: "openai-fixture-secret",
+      LLM_REASONING_EFFORT: "high",
+      AI_MONTHLY_BUDGET_CHF: "10",
+    };
+    const checks = inspectSetup(env);
+    expect(setupGroupConfigured(checks, "ai")).toBe(true);
+    expect(checks.find((c) => c.id === "OPENAI_DATA_SETTINGS")).toMatchObject({
+      status: "manual",
+    });
+    expect(JSON.stringify(checks)).not.toContain(env.OPENAI_API_KEY);
+    for (const change of [
+      { OPENAI_API_KEY: "" },
+      { LLM_MODEL: "other" },
+      { LLM_REASONING_EFFORT: "invalid" },
+      { OPENAI_API_BASE_URL: "https://proxy.example/v1" },
+    ])
+      expect(
+        setupGroupConfigured(inspectSetup({ ...env, ...change }), "ai"),
+      ).toBe(false);
+    expect(
+      setupGroupConfigured(
+        inspectSetup({
+          ...configured,
+          DOCUMENTARY_LLM_PROVIDER: "openai",
+          OPENAI_API_KEY: env.OPENAI_API_KEY,
+          DOCUMENTARY_LLM_INPUT_CHF_PER_MILLION: "0.15",
+          DOCUMENTARY_LLM_OUTPUT_CHF_PER_MILLION: "0.75",
+        }),
+        "documentary-ai",
+      ),
+    ).toBe(true);
+  });
   it("validates native Anthropic configuration and clearly reports global processing", () => {
     const env = {
       ...configured,
@@ -196,7 +235,7 @@ describe("Controllo configurazione senza segreti", () => {
       ...configured,
       APP_URL: "http://user:secret@mandat.example",
       LLM_API_BASE_URL: "https://api.example.com/2/ai/123/openai/v1",
-      AI_MONTHLY_BUDGET_CHF: "41",
+      AI_MONTHLY_BUDGET_CHF: "11",
     });
     for (const id of ["APP_URL", "LLM_API_BASE_URL", "AI_MONTHLY_BUDGET_CHF"])
       expect(checks.find((c) => c.id === id)?.status).toBe("invalid");

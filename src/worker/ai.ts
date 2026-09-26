@@ -16,6 +16,7 @@ import {
   validateAiModel,
   mistralReasoningEffort,
   anthropicReasoningEffort,
+  openaiReasoningEffort,
   MISTRAL_MEDIUM_3_5_MODEL,
   type AiProvider,
 } from "@/lib/ai-provider-config";
@@ -23,6 +24,11 @@ import {
   anthropicMessageBody,
   anthropicMessageProjection,
 } from "@/lib/anthropic-messages";
+import {
+  openaiResponseBody,
+  openaiResponseProjection,
+  OPENAI_INPUT_COST_MULTIPLIER,
+} from "@/lib/openai-responses";
 const summarySchema = z.object({
   summary: z.string().min(20).max(1800),
   requirements: z
@@ -432,11 +438,11 @@ function requestConfiguration(options?: AiRequestOptions) {
         "Mistral Medium con temperatura zero richiede top_p uguale a 1",
       );
     if (
-      provider === "anthropic" &&
+      (provider === "anthropic" || provider === "openai") &&
       (options?.temperature !== undefined || options?.topP !== undefined)
     )
       throw new AiUnavailable(
-        "Claude Opus 5.5 richiede di omettere temperatura e top-p",
+        "Questo collegamento AI richiede di omettere temperatura e top-p",
       );
     return {
       ...configuration,
@@ -447,7 +453,9 @@ function requestConfiguration(options?: AiRequestOptions) {
           ? mistralReasoningEffort(model, reasoningEffort)
           : provider === "anthropic"
             ? anthropicReasoningEffort(reasoningEffort)
-            : reasoningEffort,
+            : provider === "openai"
+              ? openaiReasoningEffort(reasoningEffort)
+              : reasoningEffort,
     };
   } catch (error) {
     throw new AiUnavailable(
@@ -517,7 +525,7 @@ export const configuredTransport: AiTransport = {
         ? (topP ?? 1)
         : topP;
     const url = new URL(
-      `${baseUrl}/${provider === "anthropic" ? "messages" : "chat/completions"}`,
+      `${baseUrl}/${provider === "anthropic" ? "messages" : provider === "openai" ? "responses" : "chat/completions"}`,
     );
     const body =
       provider === "anthropic"
@@ -529,22 +537,31 @@ export const configuredTransport: AiTransport = {
             responseFormat,
             reasoningEffort,
           )
-        : {
-            model: expectedModel,
-            messages: [
-              { role: "system", content: system },
-              { role: "user", content: prompt },
-            ],
-            temperature,
-            ...(effectiveTopP === undefined ? {} : { top_p: effectiveTopP }),
-            max_tokens: maxTokens,
-            stream: false,
-            ...(provider === "mistral-eu"
-              ? { service_tier: "standard_only" }
-              : {}),
-            ...(responseFormat ? { response_format: responseFormat } : {}),
-            ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-          };
+        : provider === "openai"
+          ? openaiResponseBody(
+              expectedModel,
+              system,
+              prompt,
+              maxTokens,
+              responseFormat,
+              reasoningEffort,
+            )
+          : {
+              model: expectedModel,
+              messages: [
+                { role: "system", content: system },
+                { role: "user", content: prompt },
+              ],
+              temperature,
+              ...(effectiveTopP === undefined ? {} : { top_p: effectiveTopP }),
+              max_tokens: maxTokens,
+              stream: false,
+              ...(provider === "mistral-eu"
+                ? { service_tier: "standard_only" }
+                : {}),
+              ...(responseFormat ? { response_format: responseFormat } : {}),
+              ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+            };
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -577,6 +594,7 @@ export const configuredTransport: AiTransport = {
       );
     }
     if (provider === "anthropic") value = anthropicMessageProjection(value);
+    if (provider === "openai") value = openaiResponseProjection(value);
     // Read usage independently: model, content and finish errors must not
     // discard a consumption already returned by the provider.
     const reportedUsage = z
@@ -694,9 +712,20 @@ export function aiReservedInputBytes(
             reasoningEffort,
           ),
         )
-      : systemPrompt +
-        prompt +
-        (responseFormat ? JSON.stringify(responseFormat) : "");
+      : provider === "openai"
+        ? JSON.stringify(
+            openaiResponseBody(
+              model,
+              systemPrompt,
+              prompt,
+              maxTokens,
+              responseFormat,
+              reasoningEffort,
+            ),
+          )
+        : systemPrompt +
+          prompt +
+          (responseFormat ? JSON.stringify(responseFormat) : "");
   return Buffer.byteLength(content, "utf8") + 1000;
 }
 export async function infer(
@@ -720,8 +749,12 @@ export async function infer(
     throw new AiUnavailable(
       "Le tariffe devono corrispondere al modello scelto",
     );
-  const { input, output } = rates(options?.rates);
-  const budget = Number(process.env.AI_MONTHLY_BUDGET_CHF || 40);
+  const configuredRates = rates(options?.rates);
+  const input =
+    configuredRates.input *
+    (provider === "openai" ? OPENAI_INPUT_COST_MULTIPLIER : 1);
+  const output = configuredRates.output;
+  const budget = Number(process.env.AI_MONTHLY_BUDGET_CHF || 10);
   if (!Number.isFinite(budget) || budget < 0)
     throw new AiUnavailable("Budget AI non valido");
   const reserve =
