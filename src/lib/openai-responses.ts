@@ -216,46 +216,64 @@ export function openaiJsonSchema(original: JsonObject): JsonObject {
         .join(" ");
     return result;
   };
-  if (
+  const wrapped =
     (Array.isArray(original.anyOf) && original.anyOf.length > 0) ||
-    (Array.isArray(original.oneOf) && original.oneOf.length > 0)
-  ) {
-    // Structured Outputs allows unions below an object, but not at its root.
-    // Keep the complete original schema (including branch-specific required
-    // fields) under one property, rebasing every local reference with it.
-    // https://developers.openai.com/api/docs/guides/structured-outputs
-    const nested = visit(original);
-    const rebase = (schema: JsonObject): JsonObject => {
-      const result = { ...schema };
-      if (typeof result.$ref === "string")
-        result.$ref = `#/$defs/result${result.$ref.slice(1)}`;
-      for (const key of ["properties", "$defs", "definitions"]) {
-        const fields = object(result[key]);
-        if (fields)
-          result[key] = Object.fromEntries(
-            Object.entries(fields).map(([name, child]) => [
-              name,
-              rebase(child as JsonObject),
-            ]),
-          );
-      }
-      if (object(result.items))
-        result.items = rebase(result.items as JsonObject);
-      if (Array.isArray(result.anyOf))
-        result.anyOf = result.anyOf.map((child) => rebase(child as JsonObject));
-      return result;
-    };
-    return {
-      type: "object",
-      properties: { result: { $ref: "#/$defs/result" } },
-      required: ["result"],
-      additionalProperties: false,
-      $defs: { result: rebase(nested) },
-    };
-  }
-  if (original.type !== "object" || original.anyOf)
+    (Array.isArray(original.oneOf) && original.oneOf.length > 0);
+  if (!wrapped && original.type !== "object")
     throw new Error("OpenAI richiede uno schema radice oggetto");
-  return visit(original);
+
+  // Resolve against the original schema, then emit all referenced schemas in
+  // root $defs. Moving the whole union under a nested $defs preserved JSON
+  // Schema semantics but the provider rejected those deeper reference paths.
+  // Index by target identity before visiting to preserve recursion and sharing.
+  // This also preserves pointers into oneOf after its conversion to anyOf.
+  // https://developers.openai.com/api/docs/guides/structured-outputs
+  const targets = new Map<JsonObject, string>();
+  const definitions: JsonObject = {};
+  const flatten = (schema: JsonObject): JsonObject => {
+    const result: JsonObject = {};
+    for (const [key, entry] of Object.entries(schema)) {
+      if (key === "$defs" || key === "definitions") continue;
+      if (key === "$ref") {
+        const target = resolve(entry);
+        if (!wrapped && target === original) {
+          result.$ref = "#";
+          continue;
+        }
+        let name = targets.get(target);
+        if (!name) {
+          name = `schema${targets.size}`;
+          targets.set(target, name);
+        }
+        result.$ref = `#/$defs/${name}`;
+      } else if (key === "properties") {
+        result[key] = Object.fromEntries(
+          Object.entries(entry as JsonObject).map(([name, child]) => [
+            name,
+            flatten(child as JsonObject),
+          ]),
+        );
+      } else if (key === "items") result[key] = flatten(entry as JsonObject);
+      else if (key === "anyOf")
+        result[key] = (entry as JsonObject[]).map(flatten);
+      else result[key] = entry;
+    }
+    return result;
+  };
+  const converted = flatten(visit(original));
+  // Map iteration includes newly discovered targets, without expanding cycles.
+  for (const [target, name] of targets)
+    definitions[name] = flatten(visit(target));
+  const result: JsonObject = wrapped
+    ? {
+        type: "object",
+        properties: { result: converted },
+        required: ["result"],
+        additionalProperties: false,
+      }
+    : converted;
+  if (targets.size) result.$defs = definitions;
+  return result;
 }
 
 export function openaiResponseBody(

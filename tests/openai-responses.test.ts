@@ -243,6 +243,7 @@ it("wraps root unions while preserving branch requirements and recursive local r
   const wire = openaiJsonSchema(original);
   expect(wire.type).toBe("object");
   expect(wire).not.toHaveProperty("anyOf");
+  assertRootDefinitions(wire);
   const accepts = new Ajv2020({ strict: false }).compile(wire);
   expect(
     accepts({
@@ -260,6 +261,58 @@ it("wraps root unions while preserving branch requirements and recursive local r
     { result: { status: "leaf", label: "known" }, extra: true },
   ])
     expect(accepts(invalid)).toBe(false);
+  expect(original).toEqual(before);
+});
+
+function assertRootDefinitions(wire: Record<string, unknown>) {
+  const definitions = wire.$defs as Record<string, unknown>;
+  expect(Object.keys(definitions).length).toBeGreaterThan(0);
+  const check = (value: unknown): void => {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) return value.forEach(check);
+    const schema = value as Record<string, unknown>;
+    if (value !== wire) expect(schema).not.toHaveProperty("$defs");
+    expect(schema).not.toHaveProperty("definitions");
+    if (typeof schema.$ref === "string") {
+      expect(schema.$ref).toMatch(/^#\/\$defs\/[^/]+$/);
+      expect(definitions).toHaveProperty(schema.$ref.slice(8));
+    }
+    Object.values(schema).forEach(check);
+  };
+  check(wire);
+}
+
+it("hoists distinct nested definitions and preserves references through converted oneOf paths", () => {
+  const branch = (index: number, tag: string, value: string) => ({
+    type: "object",
+    properties: {
+      status: { type: "string", const: tag },
+      value: {
+        $defs: { item: { type: "string", enum: [value] } },
+        $ref: `#/oneOf/${index}/properties/value/$defs/item`,
+      },
+    },
+    required: ["status", "value"],
+    additionalProperties: false,
+  });
+  const original = {
+    oneOf: [branch(0, "left", "first"), branch(1, "right", "second")],
+  };
+  const before = structuredClone(original);
+  const wire = openaiJsonSchema(original);
+  assertRootDefinitions(wire);
+  const originalAccepts = new Ajv2020({ strict: false }).compile(original);
+  const wireAccepts = new Ajv2020({ strict: false }).compile(wire);
+  for (const [value, accepted] of [
+    [{ status: "left", value: "first" }, true],
+    [{ status: "right", value: "second" }, true],
+    [{ status: "left", value: "second" }, false],
+    [{ status: "right", value: "first" }, false],
+    [{ status: "left" }, false],
+  ] as const) {
+    expect(originalAccepts(value)).toBe(accepted);
+    expect(wireAccepts({ result: value })).toBe(accepted);
+  }
   expect(original).toEqual(before);
 });
 

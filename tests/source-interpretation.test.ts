@@ -189,6 +189,17 @@ test("OpenAI can encode the full source interpretation union without dropping lo
   const accepts = new Ajv2020({ strict: false }).compile(
     body.text!.format.schema,
   );
+  // The provider rejected nested $defs paths despite valid JSON Schema.
+  // Exercise the real generation schema, not only a simplified root union.
+  const wireSchema = body.text!.format.schema;
+  const references = JSON.stringify(wireSchema).matchAll(/"\$ref":"([^"]+)"/g);
+  let referenceCount = 0;
+  for (const [, ref] of references) {
+    assert.match(ref, /^#\/\$defs\/[^/]+$/);
+    assert(Object.hasOwn(wireSchema.$defs as object, ref.slice(8)));
+    referenceCount++;
+  }
+  assert(referenceCount > 10);
   assert(accepts({ result: response(input) }));
   const missingRole = structuredClone(response(input)) as Record<string, any>;
   delete missingRole.components[0].roleEvidence;
