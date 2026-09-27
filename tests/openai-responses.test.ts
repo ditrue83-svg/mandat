@@ -5,6 +5,7 @@ import {
   openaiJsonSchema,
 } from "../src/lib/openai-responses";
 import { z } from "zod";
+import Ajv2020 from "ajv/dist/2020.js";
 
 function response() {
   return {
@@ -136,6 +137,115 @@ it("refuses long-input pricing, other models and invalid output limits before tr
   expect(() => openaiResponseBody("other-model", "s", "p", 8192)).toThrow();
   for (const limit of [0, 15, 128_001, 16.5, Infinity])
     expect(() => openaiResponseBody("gpt-6-luna", "s", "p", limit)).toThrow();
+});
+
+it("wraps root unions while preserving branch requirements and recursive local references", () => {
+  const original = {
+    $defs: { "label/~": { type: "string", enum: ["known"] } },
+    anyOf: [
+      {
+        type: "object",
+        properties: {
+          status: { const: "leaf", type: "string" },
+          label: { $ref: "#/$defs/label~1~0" },
+        },
+        required: ["status", "label"],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: {
+          status: { const: "branch", type: "string" },
+          children: { type: "array", items: { $ref: "#" } },
+        },
+        required: ["status", "children"],
+        additionalProperties: false,
+      },
+    ],
+  };
+  const before = structuredClone(original);
+  const wire = openaiJsonSchema(original);
+  expect(wire.type).toBe("object");
+  expect(wire).not.toHaveProperty("anyOf");
+  const accepts = new Ajv2020({ strict: false }).compile(wire);
+  expect(
+    accepts({
+      result: {
+        status: "branch",
+        children: [{ status: "leaf", label: "known" }],
+      },
+    }),
+  ).toBe(true);
+  for (const invalid of [
+    { result: { status: "leaf" } },
+    { result: { status: "leaf", label: "unknown" } },
+    { result: { status: "leaf", children: [] } },
+    { result: { status: "branch", children: [{ status: "leaf" }] } },
+    { result: { status: "leaf", label: "known" }, extra: true },
+  ])
+    expect(accepts(invalid)).toBe(false);
+  expect(original).toEqual(before);
+});
+
+it("unwraps only the requested union envelope and rejects malformed envelopes without losing usage", () => {
+  const schema = z.toJSONSchema(
+    z.union([
+      z.strictObject({ accepted: z.literal(true) }),
+      z.strictObject({ accepted: z.literal(false), reason: z.string() }),
+    ]),
+  );
+  const format = {
+    type: "json_schema" as const,
+    json_schema: { name: "union", strict: true as const, schema },
+  };
+  const body = response();
+  const withText = (text: string) => ({
+    ...body,
+    output: [{ ...body.output[1], content: [{ type: "output_text", text }] }],
+  });
+  const projected = openaiResponseProjection(
+    withText('{"result":{"accepted":true}}'),
+    format,
+  );
+  expect(projected).toMatchObject({
+    usage: { prompt_tokens: 100, completion_tokens: 500 },
+    choices: [{ message: { content: '{"accepted":true}' } }],
+  });
+  for (const text of [
+    '{"accepted":true}',
+    '{"result":{},"extra":"private"}',
+    "[]",
+    "private-invalid-json",
+  ]) {
+    const rejected = openaiResponseProjection(withText(text), format);
+    expect(rejected).toMatchObject({
+      usage: { prompt_tokens: 100 },
+      choices: [{ message: { content: null } }],
+    });
+    expect(JSON.stringify(rejected)).not.toContain("private");
+  }
+  // A business field named result must remain a business field for plain objects.
+  expect(
+    openaiResponseProjection(withText('{"result":{"accepted":true}}')),
+  ).toMatchObject({
+    choices: [{ message: { content: '{"result":{"accepted":true}}' } }],
+  });
+});
+
+it("rejects overlapping or optional oneOf discriminators instead of broadening them", () => {
+  const branch = {
+    type: "object",
+    properties: { status: { type: "string", const: "same" } },
+    required: ["status"],
+    additionalProperties: false,
+  };
+  expect(() =>
+    openaiJsonSchema({ oneOf: [branch, structuredClone(branch)] }),
+  ).toThrow("discriminante");
+  const optional = { ...branch, required: [] };
+  expect(() => openaiJsonSchema({ oneOf: [branch, optional] })).toThrow(
+    "discriminante",
+  );
 });
 
 it("returns only final text with literal usage inclusive of reasoning and cache", () => {

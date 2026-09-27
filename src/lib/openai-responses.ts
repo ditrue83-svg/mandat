@@ -36,6 +36,52 @@ export function openaiJsonSchema(original: JsonObject): JsonObject {
     "additionalProperties",
   ]);
   const hints = new Set(["minLength", "maxLength", "uniqueItems"]);
+  const resolve = (ref: unknown): JsonObject => {
+    if (typeof ref !== "string" || (ref !== "#" && !ref.startsWith("#/")))
+      throw new Error("Riferimento schema OpenAI non locale");
+    let target: unknown = original;
+    for (const part of ref === "#" ? [] : ref.slice(2).split("/")) {
+      const key = part.replace(/~1/g, "/").replace(/~0/g, "~");
+      if (!target || typeof target !== "object" || !Object.hasOwn(target, key))
+        throw new Error("Riferimento schema OpenAI assente");
+      target = (target as JsonObject)[key];
+    }
+    const schema = object(target);
+    if (!schema) throw new Error("Riferimento schema OpenAI assente");
+    return schema;
+  };
+  const dereference = (value: unknown): JsonObject => {
+    let schema = object(value);
+    const seen = new Set<JsonObject>();
+    while (schema?.$ref) {
+      if (seen.has(schema)) throw new Error("Discriminante OpenAI ricorsivo");
+      seen.add(schema);
+      schema = resolve(schema.$ref);
+    }
+    if (!schema) throw new Error("Discriminante OpenAI non valido");
+    return schema;
+  };
+  const disjoint = (branches: unknown[]): boolean => {
+    const schemas = branches.map(dereference);
+    return Object.keys(object(schemas[0]?.properties) ?? {}).some((key) => {
+      const values = schemas.map((schema) => {
+        if (
+          schema.type !== "object" ||
+          !Array.isArray(schema.required) ||
+          !schema.required.includes(key)
+        )
+          return null;
+        const tag = dereference(object(schema.properties)?.[key]);
+        return tag.type === "string" && typeof tag.const === "string"
+          ? tag.const
+          : null;
+      });
+      return (
+        values.every((value) => value !== null) &&
+        new Set(values).size === branches.length
+      );
+    });
+  };
   const visit = (value: unknown): JsonObject => {
     const schema = object(value);
     if (!schema) throw new Error("Schema OpenAI non valido");
@@ -68,18 +114,14 @@ export function openaiJsonSchema(original: JsonObject): JsonObject {
       } else if (key === "items") result[key] = visit(entry);
       else if (key === "anyOf" && Array.isArray(entry))
         result[key] = entry.map(visit);
-      else if (key === "$ref") {
-        if (
-          typeof entry !== "string" ||
-          (entry !== "#" && !entry.startsWith("#/"))
-        )
-          throw new Error("Riferimento schema OpenAI non locale");
-        let target: unknown = original;
-        for (const part of entry === "#" ? [] : entry.slice(2).split("/"))
-          target =
-            object(target)?.[part.replace(/~1/g, "/").replace(/~0/g, "~")];
-        if (!object(target))
-          throw new Error("Riferimento schema OpenAI assente");
+      else if (key === "oneOf" && Array.isArray(entry) && entry.length > 0) {
+        // Only convert exclusive unions when a required literal discriminator
+        // proves the alternatives cannot overlap. Other oneOf schemas fail.
+        if (schema.anyOf || !disjoint(entry))
+          throw new Error("Unione OpenAI senza discriminante esclusivo");
+        result.anyOf = entry.map(visit);
+      } else if (key === "$ref") {
+        resolve(entry);
         result[key] = entry;
       } else if (hints.has(key))
         descriptions.push(`${key}=${JSON.stringify(entry)}`);
@@ -95,6 +137,43 @@ export function openaiJsonSchema(original: JsonObject): JsonObject {
         .join(" ");
     return result;
   };
+  if (
+    (Array.isArray(original.anyOf) && original.anyOf.length > 0) ||
+    (Array.isArray(original.oneOf) && original.oneOf.length > 0)
+  ) {
+    // Structured Outputs allows unions below an object, but not at its root.
+    // Keep the complete original schema (including branch-specific required
+    // fields) under one property, rebasing every local reference with it.
+    // https://developers.openai.com/api/docs/guides/structured-outputs
+    const nested = visit(original);
+    const rebase = (schema: JsonObject): JsonObject => {
+      const result = { ...schema };
+      if (typeof result.$ref === "string")
+        result.$ref = `#/$defs/result${result.$ref.slice(1)}`;
+      for (const key of ["properties", "$defs", "definitions"]) {
+        const fields = object(result[key]);
+        if (fields)
+          result[key] = Object.fromEntries(
+            Object.entries(fields).map(([name, child]) => [
+              name,
+              rebase(child as JsonObject),
+            ]),
+          );
+      }
+      if (object(result.items))
+        result.items = rebase(result.items as JsonObject);
+      if (Array.isArray(result.anyOf))
+        result.anyOf = result.anyOf.map((child) => rebase(child as JsonObject));
+      return result;
+    };
+    return {
+      type: "object",
+      properties: { result: { $ref: "#/$defs/result" } },
+      required: ["result"],
+      additionalProperties: false,
+      $defs: { result: rebase(nested) },
+    };
+  }
   if (original.type !== "object" || original.anyOf)
     throw new Error("OpenAI richiede uno schema radice oggetto");
   return visit(original);
@@ -168,7 +247,10 @@ const usageSchema = z
 
 // Only final assistant text enters the existing validation gate. Reasoning,
 // tool arguments, annotations and error/refusal prose never enter our records.
-export function openaiResponseProjection(value: unknown): JsonObject {
+export function openaiResponseProjection(
+  value: unknown,
+  format?: AiResponseFormat,
+): JsonObject {
   const body = object(value);
   const parsed = usageSchema.safeParse(body?.usage);
   const usage =
@@ -230,13 +312,33 @@ export function openaiResponseProjection(value: unknown): JsonObject {
             body.incomplete_details == null
           ? "stop"
           : "other";
+  let content = valid && messages === 1 ? texts.join("") : null;
+  if (
+    content &&
+    (Array.isArray(format?.json_schema.schema.anyOf) ||
+      Array.isArray(format?.json_schema.schema.oneOf))
+  ) {
+    // Unwrap only when the requested schema required the wire envelope.
+    // Invalid wrappers remain rejected while the original usage is retained.
+    try {
+      const envelope = object(JSON.parse(content));
+      content =
+        envelope &&
+        Object.keys(envelope).length === 1 &&
+        Object.hasOwn(envelope, "result")
+          ? JSON.stringify(envelope.result)
+          : null;
+    } catch {
+      content = null;
+    }
+  }
   return {
     ...base,
     choices: [
       {
         finish_reason: finish,
         message: {
-          content: valid && messages === 1 ? texts.join("") : null,
+          content,
           ...(refusal ? { refusal: "" } : {}),
         },
       },

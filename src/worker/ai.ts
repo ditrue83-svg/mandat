@@ -594,7 +594,8 @@ export const configuredTransport: AiTransport = {
       );
     }
     if (provider === "anthropic") value = anthropicMessageProjection(value);
-    if (provider === "openai") value = openaiResponseProjection(value);
+    if (provider === "openai")
+      value = openaiResponseProjection(value, responseFormat);
     // Read usage independently: model, content and finish errors must not
     // discard a consumption already returned by the provider.
     const reportedUsage = z

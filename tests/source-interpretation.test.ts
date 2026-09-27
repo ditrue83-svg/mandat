@@ -14,6 +14,7 @@ import {
   type SourceInterpretationContext,
 } from "../src/lib/source-interpretation";
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
+import { openaiResponseBody } from "../src/lib/openai-responses";
 
 // Invented records check the source-only contract, never model quality.
 function context(): SourceInterpretationContext {
@@ -172,6 +173,33 @@ const metadata = {
   at: "2030-01-01T12:00:00.000Z",
   model: "invented-model",
 };
+
+test("OpenAI can encode the full source interpretation union without dropping local validation", () => {
+  const input = context();
+  const request = buildSourceInterpretationRequest(input);
+  const before = structuredClone(request.responseFormat);
+  const body = openaiResponseBody(
+    "gpt-6-luna",
+    request.system,
+    request.prompt,
+    8192,
+    request.responseFormat,
+    "high",
+  );
+  const accepts = new Ajv2020({ strict: false }).compile(
+    body.text!.format.schema,
+  );
+  assert(accepts({ result: response(input) }));
+  const missingRole = structuredClone(response(input)) as Record<string, any>;
+  delete missingRole.components[0].roleEvidence;
+  assert.equal(accepts({ result: missingRole }), false);
+  const badQuote = structuredClone(response(input));
+  badQuote.components[0].roleEvidence.actionText =
+    "Invented quote with valid JSON shape";
+  assert(accepts({ result: badQuote }));
+  assert.throws(() => validateSourceInterpretation(badQuote, request));
+  assert.deepEqual(request.responseFormat, before);
+});
 
 test("An untyped issue cannot make a fully identified source uncertain", () => {
   const request = buildSourceInterpretationRequest(context());

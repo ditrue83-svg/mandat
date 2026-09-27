@@ -284,6 +284,82 @@ describe("OpenAI native Responses", () => {
     };
   }
   beforeEach(() => vi.stubEnv("OPENAI_API_KEY", "openai-test-key"));
+  it("returns the original union payload and accounts for the envelope bytes", async () => {
+    const value = { status: "resolved", result: "business-value" };
+    const format = {
+      type: "json_schema" as const,
+      json_schema: {
+        name: "union",
+        strict: true as const,
+        schema: {
+          anyOf: [
+            {
+              type: "object",
+              properties: {
+                status: { type: "string", const: "resolved" },
+                result: { type: "string" },
+              },
+              required: ["status", "result"],
+              additionalProperties: false,
+            },
+            {
+              type: "object",
+              properties: {
+                status: { type: "string", const: "uncertain" },
+                reason: { type: "string" },
+              },
+              required: ["status", "reason"],
+              additionalProperties: false,
+            },
+          ],
+        },
+      },
+    };
+    const body = answer();
+    const fetcher = mockResponse({
+      ...body,
+      output: [
+        {
+          ...body.output[1],
+          content: [
+            { type: "output_text", text: JSON.stringify({ result: value }) },
+          ],
+        },
+      ],
+    });
+    expect(
+      await infer(
+        publication,
+        "luna-union",
+        "source",
+        8192,
+        configuredTransport,
+        "instructions",
+        format,
+        options,
+      ),
+    ).toEqual(value);
+    const [, init] = fetcher.mock.calls[0] as unknown as [URL, RequestInit];
+    const native = JSON.parse(String(init.body));
+    expect(native.text.format.schema.type).toBe("object");
+    expect(native.text.format.schema).not.toHaveProperty("anyOf");
+    expect(
+      aiReservedInputBytes("instructions", "source", 8192, format, options),
+    ).toBe(Buffer.byteLength(String(init.body)) + 1000);
+    const [row] = await db.select().from(schema.aiUsage);
+    expect(row).toMatchObject({
+      status: "completed",
+      inputTokens: 100,
+      outputTokens: 500,
+      costChf: "0.000394",
+    });
+    expect(Number(row.reservedChf)).toBeCloseTo(
+      ((Buffer.byteLength(String(init.body)) + 1000) * 0.15 * 1.25 +
+        8192 * 0.75) /
+        1e6,
+      6,
+    );
+  });
   it("uses Responses and reserves the entire native body including conservative cache pricing", async () => {
     const fetcher = mockResponse(answer());
     const format = {
