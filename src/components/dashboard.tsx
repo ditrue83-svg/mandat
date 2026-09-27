@@ -25,8 +25,8 @@ import { TenderListCard } from "./tender-list-card";
 import { LoadingContent } from "./page-states";
 import { matchesSearch } from "@/lib/search";
 import { profileSchema } from "@/lib/validation";
-import { preliminaryMatch } from "@/lib/matching";
-import { tenderWorkExcerpt } from "@/lib/tender-brief";
+import { matchesDemoProfile } from "@/lib/demo";
+import { tenderWorkExcerpt } from "@/lib/tender-work-excerpt";
 import {
   SECTORS,
   daysUntil,
@@ -115,7 +115,7 @@ export function Dashboard({
               (item) =>
                 savedOnly ||
                 !parsed.success ||
-                preliminaryMatch(item, parsed.data).eligible,
+                matchesDemoProfile(item, parsed.data),
             )
             .map((item) => ({ ...item, ...data[item.id] })),
         );

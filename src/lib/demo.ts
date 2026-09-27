@@ -1,4 +1,32 @@
 import type { CompanyProfile, Opportunity, Sector, Viewer } from "./domain";
+
+// These fixtures already declare their sectors. Keep their interactive filter
+// browser-safe; the real classifier and its source hashes run only on the server.
+// This helper cannot admit a real opportunity or supply an AI assessment.
+export function matchesDemoProfile(
+  item: Opportunity,
+  profile: CompanyProfile,
+  now = new Date(),
+) {
+  if (item.assessment !== "demo") return false;
+  const text = `${item.title} ${item.originalText}`.toLowerCase();
+  return (
+    item.status === "open" &&
+    (!item.deadline || new Date(item.deadline) > now) &&
+    new Date(item.visibleAt) <= now &&
+    (!item.canton || item.canton === "TI") &&
+    (!item.zone ||
+      profile.zones.includes("Tutto il Ticino") ||
+      profile.zones.includes(item.zone)) &&
+    !profile.exclusions.some((word) => text.includes(word.toLowerCase())) &&
+    (item.valueChf === null ||
+      ((profile.minValue === null || item.valueChf >= profile.minValue) &&
+        (profile.maxValue === null || item.valueChf <= profile.maxValue))) &&
+    (item.sectors.some((sector) => profile.sectors.includes(sector)) ||
+      profile.keywords.some((word) => text.includes(word.toLowerCase())))
+  );
+}
+
 export const demoProfile: CompanyProfile = {
   name: "La tua ditta",
   activities: "Pulizie e cura degli spazi verdi",

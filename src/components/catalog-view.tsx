@@ -14,7 +14,7 @@ import { formatDeadline, type Viewer } from "@/lib/domain";
 import type { readCatalog } from "@/lib/catalog";
 import { sectorCaption } from "@/lib/sectors";
 import { CatalogBookmark } from "@/components/catalog-bookmark";
-import { tenderWorkExcerpt } from "@/lib/tender-brief";
+import { tenderWorkExcerpt } from "@/lib/tender-work-excerpt";
 
 function sourceHeadline(source: CatalogSourceSummary) {
   if (source.state === "disabled") return "non attivo nella beta";
