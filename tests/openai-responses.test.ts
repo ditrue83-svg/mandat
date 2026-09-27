@@ -3,9 +3,85 @@ import {
   openaiResponseBody,
   openaiResponseProjection,
   openaiJsonSchema,
+  openaiErrorDiagnostic,
 } from "../src/lib/openai-responses";
 import { z } from "zod";
 import Ajv2020 from "ajv/dist/2020.js";
+
+it("classifies native schema errors without retaining provider prose or unknown values", () => {
+  const privateText = "private-source-and-credential";
+  const diagnostic = openaiErrorDiagnostic({
+    error: {
+      code: "invalid_json_schema",
+      type: "invalid_request_error",
+      param: "text.format.schema",
+      message: `${privateText}: Objects provided via 'anyOf' must not share identical first keys.`,
+      details: { source: privateText },
+    },
+  });
+  expect(diagnostic).toEqual({
+    code: "invalid_json_schema",
+    type: "invalid_request_error",
+    parameter: "text.format.schema",
+    schemaMessageCategory: "any_of_first_key",
+  });
+  expect(Object.isFrozen(diagnostic)).toBe(true);
+  expect(JSON.stringify(diagnostic)).not.toContain(privateText);
+  expect(
+    openaiErrorDiagnostic({
+      error: {
+        code: privateText,
+        type: privateText,
+        param: privateText,
+        message: privateText,
+      },
+    }),
+  ).toEqual({
+    code: "other",
+    type: "other",
+    parameter: "other",
+    schemaMessageCategory: null,
+  });
+  expect(openaiErrorDiagnostic({ error: null })).toBeNull();
+  expect(openaiErrorDiagnostic({ error: [privateText] })).toBeNull();
+  expect(openaiErrorDiagnostic(null)).toBeNull();
+});
+
+it.each([
+  [
+    "additional properties",
+    "'additionalProperties' must be false",
+    "additional_properties",
+  ],
+  [
+    "required fields",
+    "'required' is required to be supplied",
+    "required_fields",
+  ],
+  ["reference", "Invalid $ref", "schema_reference"],
+  [
+    "unsupported keyword",
+    "'oneOf' is not permitted",
+    "unsupported_schema_keyword",
+  ],
+  ["size limit", "too many enum values", "schema_limit"],
+  ["unknown", "unrecognized provider explanation", "other"],
+  ["oversized message", "private".repeat(3000), "other"],
+])(
+  "keeps only a bounded category for schema error %s",
+  (_name, message, expected) => {
+    expect(
+      openaiErrorDiagnostic({
+        error: { code: "invalid_json_schema", message },
+      }),
+    ).toEqual({
+      code: "invalid_json_schema",
+      type: null,
+      parameter: null,
+      schemaMessageCategory: expected,
+    });
+  },
+);
 
 function response() {
   return {

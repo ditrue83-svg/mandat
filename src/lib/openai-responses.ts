@@ -13,6 +13,85 @@ const object = (value: unknown): JsonObject | null =>
 // https://developers.openai.com/api/docs/guides/prompt-caching
 export const OPENAI_INPUT_COST_MULTIPLIER = 1.25;
 
+const errorCodes = [
+  "invalid_json_schema",
+  "unsupported_parameter",
+  "unsupported_value",
+  "invalid_value",
+  "missing_required_parameter",
+  "model_not_found",
+  "context_length_exceeded",
+  "insufficient_quota",
+  "project_spend_limit_exceeded",
+  "organization_spend_limit_exceeded",
+  "rate_limit_exceeded",
+] as const;
+const errorTypes = [
+  "invalid_request_error",
+  "authentication_error",
+  "permission_error",
+  "rate_limit_error",
+  "server_error",
+] as const;
+const errorParameters = [
+  "text.format.schema",
+  "text.format",
+  "model",
+  "input",
+  "max_output_tokens",
+  "reasoning.effort",
+  "prompt_cache_options",
+  "prompt_cache_options.mode",
+  "service_tier",
+] as const;
+function allowedErrorValue<T extends readonly string[]>(
+  value: unknown,
+  allowed: T,
+): T[number] | "other" | null {
+  return value == null
+    ? null
+    : typeof value === "string" && allowed.includes(value)
+      ? (value as T[number])
+      : "other";
+}
+
+// Inspect before projecting a native response, which drops the error object.
+// Return only fixed categories: provider messages can echo source or secrets.
+// These observations never authorize retries or imply zero billable usage.
+export function openaiErrorDiagnostic(value: unknown) {
+  const error = object(object(value)?.error);
+  if (!error) return null;
+  const code = allowedErrorValue(error.code, errorCodes);
+  const parameter = allowedErrorValue(error.param, errorParameters);
+  const message =
+    typeof error.message === "string" && error.message.length <= 16_384
+      ? error.message.toLowerCase()
+      : "";
+  const schemaMessageCategory =
+    code !== "invalid_json_schema" && parameter !== "text.format.schema"
+      ? null
+      : message.includes("anyof") && message.includes("identical first keys")
+        ? "any_of_first_key"
+        : message.includes("additionalproperties")
+          ? "additional_properties"
+          : message.includes("required")
+            ? "required_fields"
+            : message.includes("$ref") || message.includes("reference")
+              ? "schema_reference"
+              : message.includes("not supported") ||
+                  message.includes("not permitted")
+                ? "unsupported_schema_keyword"
+                : message.includes("limit") || message.includes("too many")
+                  ? "schema_limit"
+                  : "other";
+  return Object.freeze({
+    code,
+    type: allowedErrorValue(error.type, errorTypes),
+    parameter,
+    schemaMessageCategory,
+  });
+}
+
 // Restrict the wire schema to the documented Structured Outputs subset.
 // Length/uniqueness rules stay explicit descriptions and remain mandatory in
 // the original application validator; no answer is repaired or relaxed.

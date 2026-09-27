@@ -27,6 +27,7 @@ import {
 import {
   openaiResponseBody,
   openaiResponseProjection,
+  openaiErrorDiagnostic,
   OPENAI_INPUT_COST_MULTIPLIER,
 } from "@/lib/openai-responses";
 const summarySchema = z.object({
@@ -154,6 +155,7 @@ export type AiResponseDiagnostic = Readonly<{
   contentState: ContentState;
   refusalState: RefusalState;
   usage: Readonly<TokenUsage> | null;
+  providerError?: NonNullable<ReturnType<typeof openaiErrorDiagnostic>>;
 }>;
 
 // This projection never retains the provider body, content, reasoning, refusal
@@ -168,6 +170,7 @@ function responseDiagnostic(
   httpStatus: number,
   usage: TokenUsage | null,
   override?: RejectionCode,
+  providerError?: ReturnType<typeof openaiErrorDiagnostic>,
 ): AiResponseDiagnostic {
   const object = (item: unknown): Record<string, unknown> | null =>
     item !== null && typeof item === "object" && !Array.isArray(item)
@@ -277,6 +280,7 @@ function responseDiagnostic(
           outputTokens: usage.outputTokens,
         })
       : null,
+    ...(providerError ? { providerError } : {}),
   });
 }
 // An unusable answer may still have a known, billable token consumption.
@@ -593,6 +597,10 @@ export const configuredTransport: AiTransport = {
         ),
       );
     }
+    const providerError =
+      !response.ok && provider === "openai"
+        ? openaiErrorDiagnostic(value)
+        : null;
     if (provider === "anthropic") value = anthropicMessageProjection(value);
     if (provider === "openai")
       value = openaiResponseProjection(value, responseFormat);
@@ -623,6 +631,7 @@ export const configuredTransport: AiTransport = {
           response.status,
           usage,
           "http_error",
+          providerError,
         ),
       );
     if (!usage)

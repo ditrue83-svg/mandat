@@ -284,6 +284,60 @@ describe("OpenAI native Responses", () => {
     };
   }
   beforeEach(() => vi.stubEnv("OPENAI_API_KEY", "openai-test-key"));
+  it.each([false, true])(
+    "preserves native HTTP error categories and usageKnown=%s without retrying",
+    async (usageKnown) => {
+      const body = {
+        ...(usageKnown ? answer() : {}),
+        error: {
+          type: "invalid_request_error",
+          code: "invalid_json_schema",
+          param: "text.format.schema",
+          message: `${privateResponseText}: 'additionalProperties' must be false`,
+        },
+      };
+      const fetcher = mockResponse(body, 400);
+      const error = await infer(
+        publication,
+        "luna-http-error",
+        "source",
+        8192,
+        configuredTransport,
+        "instructions",
+        undefined,
+        options,
+      ).catch((rejected: unknown) => rejected);
+      expect(error).toBeInstanceOf(Error);
+      const diagnostic = readAiResponseDiagnostic(error);
+      expect(diagnostic).toMatchObject({
+        code: "http_error",
+        httpStatus: 400,
+        providerError: {
+          type: "invalid_request_error",
+          code: "invalid_json_schema",
+          parameter: "text.format.schema",
+          schemaMessageCategory: "additional_properties",
+        },
+        usage: usageKnown ? { inputTokens: 100, outputTokens: 500 } : null,
+      });
+      expect(Object.isFrozen(diagnostic?.providerError)).toBe(true);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      const [row] = await db.select().from(schema.aiUsage);
+      expect(row).toMatchObject({
+        status: "uncertain",
+        costChf: usageKnown ? "0.000394" : null,
+      });
+      expect(Number(row.reservedChf)).toBeGreaterThan(0);
+      for (const text of [
+        JSON.stringify(error),
+        String(error),
+        JSON.stringify(diagnostic),
+        JSON.stringify(row),
+      ])
+        expect(text).not.toContain(privateResponseText);
+    },
+  );
+
   it("returns the original union payload and accounts for the envelope bytes", async () => {
     const value = { status: "resolved", result: "business-value" };
     const format = {
