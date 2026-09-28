@@ -199,6 +199,149 @@ function answers(plan: SourceSemanticReviewPlan) {
   });
 }
 
+test("Territorial review keeps common work and local partition separate without overriding missing proof or negative checks", () => {
+  const base = context();
+  const local =
+    "Regione Est: ripartizione territoriale della fornitura comune.";
+  const input: SourceInterpretationContext = {
+    ...base,
+    binding: {
+      ...base.binding,
+      target: {
+        kind: "lot",
+        publicationId: "invented-publication",
+        sourceProjectId: "invented-project",
+        lotId: "invented-lot",
+      },
+    },
+    targetScope: "selected_lot",
+    body: {
+      ...base.body,
+      target: {
+        kind: "lot",
+        lot: { id: "invented-lot", path: "/lots/0", headerPath: null },
+      },
+      classifications: base.body.classifications.map((c) => ({
+        ...c,
+        appliesTo: "shared_project_context",
+      })),
+      passages: [
+        ...base.body.passages,
+        {
+          id: "s5",
+          rawPath: "/lots/0/title/it",
+          role: "service",
+          text: local,
+          scope: "selected_lot",
+          startUtf16: 0,
+          endUtf16: local.length,
+          url: "https://example.invalid/source",
+        },
+      ],
+    },
+  };
+  const value = structuredClone(draft().response);
+  value.targetRef = "s5";
+  value.summary = "Fornitura di articoli inventati per la Regione Est.";
+  value.components[0].sourceRefs.push("s5");
+  value.components[0].meaning.classificationContextIds = [];
+  value.classificationReadings[0].use = "shared_project_only";
+  const original = recordSourceInterpretation(
+    value,
+    buildSourceInterpretationRequest(input),
+    {
+      ...metadata,
+      model: input.binding.model,
+    },
+  );
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  const responses = plan.evidencePlan.requests.map((request) => {
+    const answer = inventedSourceEvidenceAnswer(JSON.parse(request.prompt));
+    answer.observations = [
+      {
+        kind: "performance",
+        statement: "Fornitura comune inventata.",
+        serviceRef: "s1",
+        evidence: [{ sourceRef: "s1" }],
+      },
+      {
+        kind: "target_partition",
+        statement: local,
+        serviceRef: "s5",
+        evidence: [{ sourceRef: "s5" }],
+      },
+      {
+        kind: "condition",
+        statement: "La quantità della fornitura sarà definita.",
+        serviceRef: "s1",
+        evidence: [{ sourceRef: "s4" }],
+      },
+    ];
+    return answer;
+  });
+  const sourceEvidence = recordSourceEvidenceReading(
+    responses,
+    plan.evidencePlan,
+    metadata,
+  );
+  const requests = buildGroundedSourceReviewRequests(plan, sourceEvidence);
+  const body = JSON.parse(requests[0].prompt);
+  assert.deepEqual(
+    body.independentReading.observations.map((o: any) => [o.kind, o.scope]),
+    [
+      ["performance", "project_context"],
+      ["target_partition", "selected_lot"],
+      ["condition", "project_context"],
+    ],
+  );
+  for (const id of ["s1", "s5"])
+    assert.deepEqual(
+      body.passages.find((p: any) => p.id === id),
+      (({ url: _url, ...passage }) => passage)(
+        input.body.passages.find((p) => p.id === id)!,
+      ),
+    );
+  const rejected = requests.map((request) => {
+    const data = JSON.parse(request.prompt);
+    return {
+      chunkId: request.id,
+      sourceEvidenceHash: sourceEvidence.hash,
+      coverage: "complete",
+      checks: request.assignedClaimIds.map((id) => {
+        const claim = plan.claims.find((c) => c.id === id)!;
+        return {
+          claimId: id,
+          verdict:
+            claim.kind === "component_scope" ? "not_verifiable" : "supported",
+          reason:
+            "Esito inventato per verificare il blocco, non la qualità semantica.",
+          sourceRefs: claim.sourceRefs,
+          readingRefs: inventedReadingRefs(data, claim),
+        };
+      }),
+      findings: [],
+    };
+  });
+  const record = productionRecordSourceSemanticReview(rejected, plan, {
+    ...metadata,
+    sourceEvidence,
+  });
+  assert.equal(readSourceSemanticReview(record, plan)?.accepted, false);
+  const incomplete = structuredClone(responses);
+  incomplete[0].observations = incomplete[0].observations.filter(
+    (o) => o.kind === "target_partition",
+  );
+  const regionOnly = recordSourceEvidenceReading(
+    incomplete,
+    plan.evidencePlan,
+    metadata,
+  );
+  assert.throws(
+    () => buildGroundedSourceReviewRequests(plan, regionOnly),
+    /accepted/,
+  );
+});
+
 test("An explicit output limit binds the review and independent evidence while preserving the default hash", () => {
   const input = context();
   const original = draft(input);
