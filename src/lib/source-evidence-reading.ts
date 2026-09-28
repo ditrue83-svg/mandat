@@ -9,7 +9,7 @@ import {
 import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v10";
+export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v11";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -47,7 +47,6 @@ const quotes = z.array(quote).min(1).max(16);
 const observation = z.strictObject({
   kind: z.enum(["performance", "condition", "target_partition"]),
   serviceRef: z.string().regex(/^s\d+$/),
-  statement: text(600),
   scope: z.enum(["project_context", "selected_lot"]),
   evidence: quotes,
 });
@@ -286,6 +285,7 @@ export function buildSourceEvidenceReadingRequest(
         ],
       },
       rules: [
+        "Le observations sono selezioni di prove originali, non un riassunto. Scegli kind, serviceRef ed evidence per individuare tutte le prestazioni e condizioni rilevanti; non produrre parafrasi, traduzioni o un campo statement. Il codice conserva i passaggi integrali. Oggetto, azione, soggetto contrattuale, destinatario, permessi e obblighi rimangono nel testo originale selezionato, che il revisore dovrà leggere direttamente. La sola selezione di un riferimento non dimostra un significato né l'applicabilità al target.",
         "Le etichette classificatorie dichiarano il contesto originale. Una denominazione generica o polisemica non dimostra che la classificazione sia sbagliata: non inventare una discrepanza né un sottotipo. Una classificazione ampia non aggiunge tutte le attività della sua etichetta.",
         "Per ciascuna assignedClassificationIds restituisci una relazione con la descrizione. Non restituire label: il codice conserva automaticamente codice, etichette originali e traduzioni. In evidence scegli i passaggi che spiegano la relazione; i riferimenti propri della classificazione sono aggiunti dal codice. consistent o broad_context conserva la famiglia compatibile. not_decisive significa che la classificazione non determina da sola la prestazione locale. conflicting richiede affermazioni realmente incompatibili, con una controprova esterna alla classificazione.",
         "Le osservazioni performance descrivono acquisti e azioni: fornitura di beni, esecuzione, gestione, installazione, manutenzione, progettazione o consulenza. Manutenzione conserva o ripristina un bene: luogo, destinatario o settore non la dimostrano. Metadati e classificazioni non sono prestazioni autonome.",

@@ -45,8 +45,6 @@ export function inventedSourceEvidenceAnswer(data: any) {
               p.id === target.id || p.role === "service"
                 ? "performance"
                 : "condition",
-            statement:
-              "Osservazione inventata per verificare il contratto, non il significato.",
             serviceRef: p.role === "service" ? p.id : anchor.id,
             evidence: [quote(p.id)],
           },

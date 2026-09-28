@@ -260,19 +260,16 @@ test("Territorial review keeps common work and local partition separate without 
     answer.observations = [
       {
         kind: "performance",
-        statement: "Fornitura comune inventata.",
         serviceRef: "s1",
         evidence: [{ sourceRef: "s1" }],
       },
       {
         kind: "target_partition",
-        statement: local,
         serviceRef: "s5",
         evidence: [{ sourceRef: "s5" }],
       },
       {
         kind: "condition",
-        statement: "La quantità della fornitura sarà definita.",
         serviceRef: "s1",
         evidence: [{ sourceRef: "s4" }],
       },
@@ -301,6 +298,18 @@ test("Territorial review keeps common work and local partition separate without 
         input.body.passages.find((p) => p.id === id)!,
       ),
     );
+  for (const observation of body.independentReading.observations) {
+    assert.equal("statement" in observation, false);
+    for (const quote of observation.evidence) {
+      const originalPassage = input.body.passages.find(
+        (p) => p.id === quote.sourceRef,
+      )!;
+      const text =
+        quote.text ??
+        body.passages.find((p: any) => p.id === quote.sourceRef).text;
+      assert.equal(text, originalPassage.text);
+    }
+  }
   const rejected = requests.map((request) => {
     const data = JSON.parse(request.prompt);
     return {
@@ -1015,7 +1024,6 @@ test("Grounded review keeps numeric evidence and missing details without letting
   );
   wire[0].observations.push({
     kind: "condition",
-    statement: "Quantità originale pari a zero.",
     serviceRef: "s1",
     evidence: [{ sourceRef: "f0" }],
   });

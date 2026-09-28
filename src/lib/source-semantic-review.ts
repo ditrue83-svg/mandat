@@ -21,7 +21,7 @@ import type {
 import { sourceEvidencePassages } from "./source-evidence-context";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v8";
+  "documentary-source-semantic-review-v9";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -277,6 +277,7 @@ export function buildSourceSemanticReviewRequest(
     const prompt = JSON.stringify({
       task: "Verifica assignedClaims contro le prove originali: passages, fields e classificationContext. independentReading è una lettura AI separata, registrata prima di vedere il draft: serve a individuare prove e prestazioni, non sostituisce la fonte. Verifica la fedeltà delle affermazioni e la completezza delle prestazioni rappresentate. Non riscrivere la lettura indipendente per conformarla al draft. La mancanza di una prestazione in un altro frammento non la confuta.",
       rules: [
+        "Le observations della lettura indipendente selezionano e classificano passaggi originali senza riscriverli. Leggi direttamente evidence e passages per stabilire lavoro, soggetto che lo richiede, operatore che lo svolge, destinatario e carattere obbligatorio o facoltativo. kind e serviceRef aiutano a trovare le prove; non sono affermazioni del committente né sostituiscono il loro significato originale.",
         "Per ogni claim assegnato restituisci esattamente un check. supported richiede sostegno reale nella fonte; contradicted richiede controprova; not_verifiable indica sostegno insufficiente. Un riferimento esatto non rende vero il significato affermato. Leggi insieme oggetto, classificazioni originali e relativo ambito.",
         "Una valutazione AI non è una nuova affermazione del committente. Per contradicted identifica l'affermazione precisa del draft e il fatto originale incompatibile: una diversa formulazione o precisione non basta. La mancanza di un sottotipo non cancella la famiglia esplicitamente dichiarata dalle etichette originali; queste non dimostrano da sole azioni accessorie o applicabilità a un lotto.",
         "Ogni check cita readingRefs della lettura indipendente oltre agli estratti originali. I riferimenti evidence della lettura indipendente rimandano al testo originale in passages; le citazioni di contesto non presenti in passages conservano anche text. Un draft che introduce un dominio incompatibile, una correzione della fonte o una discrepanza non presente nella lettura indipendente non può essere supported solo perché ripete il nome del prodotto. Per classification_reading cita la corrispondente classificazione indipendente cN.",

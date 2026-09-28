@@ -412,8 +412,51 @@ test("Stored evidence cannot replace the original passage with a reconstructed o
   for (const version of [
     "source-evidence-reading-v1",
     "source-evidence-reading-v9",
+    "source-evidence-reading-v10",
   ])
     assert.equal(readSourceEvidenceReading({ ...record, version }, plan), null);
+});
+
+test("Evidence observations preserve original contractual parties and reject an additional model paraphrase", () => {
+  const input = context();
+  const original =
+    "<p>Le mandant pourra demander au prestataire un service complémentaire facultatif.</p>";
+  input.body.passages[3].text = original;
+  input.body.passages[3].endUtf16 = original.length;
+  const plan = buildSourceEvidenceReadingRequest(input, config);
+  const answer = responses(plan);
+  answer[0].observations = [
+    { kind: "performance", serviceRef: "s1", evidence: [] },
+    {
+      kind: "condition",
+      serviceRef: "s1",
+      evidence: [{ sourceRef: "s4" }],
+    },
+  ];
+  const wire = new Ajv2020({ strict: false }).compile(
+    plan.requests[0].responseFormat.json_schema.schema,
+  );
+  assert.equal(wire(answer[0]), true);
+  const record = recordSourceEvidenceReading(answer, plan, metadata);
+  const condition = record.responses[0].observations[1];
+  assert.equal("statement" in condition, false);
+  assert.equal(condition.scope, "project_context");
+  assert.deepEqual(condition.evidence, [
+    { sourceRef: "s1", text: input.body.passages[0].text },
+    { sourceRef: "s4", text: original },
+  ]);
+  const incorrect = "Il prestatore può chiedere al committente il servizio.";
+  const supplied = structuredClone(answer);
+  Object.assign(supplied[0].observations[1], { statement: incorrect });
+  assert.equal(wire(supplied[0]), false);
+  assert.throws(() => recordSourceEvidenceReading(supplied, plan, metadata));
+  const changed = structuredClone(record);
+  Object.assign(changed.responses[0].observations[1], { statement: incorrect });
+  const { hash: _hash, ...unsigned } = changed;
+  changed.hash = createHash("sha256")
+    .update(stableDocumentaryJson(unsigned))
+    .digest("hex");
+  assert.throws(() => readSourceEvidenceReading(changed, plan));
 });
 
 test("Fragmented classification labels are copied completely from their ordered original references", () => {
@@ -483,7 +526,6 @@ test("The wire schema limits citations to existing text and scalar field referen
   const valid = responses(plan);
   valid[0].observations.push({
     kind: "condition",
-    statement: "La quantità è zero e l’opzione non è attiva.",
     serviceRef: "s1",
     evidence: [{ sourceRef: "f0" }, { sourceRef: "f1" }],
   });
@@ -742,7 +784,6 @@ test("A territorial partition identifies the lot only with a separately grounded
   const answers: any[] = responses(plan);
   const local = answers[0].observations.find((o: any) => o.serviceRef === "s5");
   local.kind = "target_partition";
-  local.statement = "Ripartizione territoriale: Regione Nord.";
   const validate = new Ajv2020({ strict: false }).compile(
     plan.requests[0].responseFormat.json_schema.schema,
   );
