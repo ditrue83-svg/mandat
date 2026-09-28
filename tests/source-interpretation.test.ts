@@ -968,6 +968,11 @@ test("A selected lot keeps shared classification contextual and requires its own
     validateSourceInterpretation(scopeQuestion, request).status,
     "uncertain",
   );
+  assert(
+    new Ajv2020({ strict: false }).compile(
+      request.responseFormat.json_schema.schema,
+    )(scopeQuestion),
+  );
   assert.throws(
     () =>
       validateSourceInterpretation(
@@ -1559,9 +1564,10 @@ test.each([
   "documentary-source-interpretation-v5",
   "documentary-source-interpretation-v6",
   "documentary-source-interpretation-v7",
+  "documentary-source-interpretation-v8",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
-  assert.equal(request.version, "documentary-source-interpretation-v8");
+  assert.equal(request.version, "documentary-source-interpretation-v9");
   const current = recordSourceInterpretation(response(), request, metadata);
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
@@ -2126,5 +2132,70 @@ test("Multilingual classification labels spanning passages retain exact ordered 
       (id) => read.evidence.find((item) => item.id === id)!.text,
     ),
     parts,
+  );
+});
+
+test("Provider schema forbids shared-project details on project targets while preserving lot context and relational checks", () => {
+  const project = buildSourceInterpretationRequest(context());
+  const value = response();
+  const shared = {
+    ...value,
+    details: [
+      {
+        kind: "shared_project_context",
+        explanation: "Contesto inventato",
+        sourceRefs: ["s4"],
+        scope: "project_context",
+      },
+    ],
+  };
+  const validate = new Ajv2020({ strict: false }).compile(
+    project.responseFormat.json_schema.schema,
+  );
+  assert(validate(value));
+  assert.equal(validate(shared), false);
+  assert.throws(
+    () => validateSourceInterpretation(shared, project),
+    /Shared project detail requires a lot/,
+  );
+  const orphan = {
+    ...value,
+    classificationReadings: value.classificationReadings.map((r) => ({
+      ...r,
+      use: "clarifies_domain",
+    })),
+  };
+  assert.throws(
+    () => validateSourceInterpretation(orphan, project),
+    /grounded component/,
+  );
+  assert(
+    JSON.stringify(project.responseFormat).includes(
+      "meaning.classificationContextIds",
+    ),
+  );
+  assert(
+    JSON.stringify(project.responseFormat).includes(
+      "shared_project_context è ammesso solo per un lotto",
+    ),
+  );
+  const linked = {
+    ...orphan,
+    components: orphan.components.map((item, index) =>
+      index === 0
+        ? {
+            ...item,
+            meaning: {
+              ...item.meaning,
+              classificationContextIds: ["c1"],
+              basis: "text_with_classification_context",
+            },
+          }
+        : item,
+    ),
+  };
+  assert.equal(
+    validateSourceInterpretation(linked, project).status,
+    "resolved",
   );
 });

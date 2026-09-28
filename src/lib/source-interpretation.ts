@@ -8,7 +8,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v8";
+  "documentary-source-interpretation-v9";
 // Structured source output keeps its full allowance even without thinking.
 export const SOURCE_INTERPRETATION_MAX_TOKENS = 8192;
 const digest = (value: unknown) =>
@@ -199,7 +199,7 @@ const componentRole = z
     "other",
   ])
   .describe(
-    "supply: fornire beni; execute: svolgere una prestazione; design: progettare; install: installare o mettere in opera; maintain: conservare o ripristinare la funzionalità di un bene; operate: gestire continuativamente un servizio o impianto; advise: fornire consulenza; other: altra azione identificata. Il ruolo descrive l'azione contrattuale, non il settore, il luogo o il destinatario.",
+    "supply: fornire beni; execute: svolgere o organizzare una prestazione; design: progettare; install: installare o mettere in opera; maintain: conservare o ripristinare la funzionalità di un bene; operate: gestire continuativamente un servizio o impianto; advise: fornire consulenza; other: altra azione identificata. Il ruolo descrive l'azione contrattuale, non il settore, il luogo o il destinatario.",
   );
 const componentImportance = z
   .enum(["main", "accessory", "excluded"])
@@ -218,6 +218,7 @@ function buildResponseSchema(bounds?: {
   classificationId: z.ZodType<string>;
   classificationCount: number;
   targetRef: z.ZodType<string>;
+  targetScope: z.infer<typeof scope>;
 }) {
   const refs = bounds?.refs ?? sourceRefs;
   const contextId = bounds?.classificationId ?? classificationId;
@@ -231,7 +232,7 @@ function buildResponseSchema(bounds?: {
       .max(bounds?.classificationCount ?? 1024)
       .refine((ids) => new Set(ids).size === ids.length)
       .describe(
-        "ID delle classificazioni usate per questo significato. Il contesto condiviso del progetto non può da solo disambiguare l'oggetto di un lotto.",
+        "ID realmente usati per il significato; collega qui ogni reading clarifies_domain. Un contesto condiviso non disambigua da solo un lotto.",
       ),
   };
   const identifiedMeaning = z.strictObject({
@@ -294,7 +295,7 @@ function buildResponseSchema(bounds?: {
     classificationId: contextId,
     explanation: text(600),
     sourceRefs: refs.describe(
-      "Cita la classificazione valutata; clarifies_domain richiede almeno un'etichetta originale. Un conflitto richiede due asserzioni della fonte incompatibili, non una tua inferenza.",
+      "clarifies_domain richiede etichetta originale e una componente collegata con meaning.classificationContextIds; semplice compatibilità: broad_context. Conflitti solo tra asserzioni originali.",
     ),
   };
   const settledReading = z.strictObject({
@@ -334,12 +335,20 @@ function buildResponseSchema(bounds?: {
     ]),
     ...issueFields,
   });
+  // Keep the stored contract broad; only the provider request narrows states
+  // that are already forbidden for this target by relational validation.
+  const detailKind: z.ZodType<
+    "missing_specification" | "execution_condition" | "shared_project_context"
+  > =
+    bounds?.targetScope === "project_context"
+      ? z.enum(["missing_specification", "execution_condition"])
+      : z.enum([
+          "missing_specification",
+          "execution_condition",
+          "shared_project_context",
+        ]);
   const detail = z.strictObject({
-    kind: z.enum([
-      "missing_specification",
-      "execution_condition",
-      "shared_project_context",
-    ]),
+    kind: detailKind,
     explanation: text(600),
     sourceRefs: refs,
     scope,
@@ -355,7 +364,7 @@ function buildResponseSchema(bounds?: {
       .array(detail)
       .max(32)
       .describe(
-        "Precisazioni non bloccanti, separate dalle prestazioni: specifiche mancanti, condizioni esecutive o contesto condiviso. Non dichiarano da sole indeterminato l'oggetto o il ruolo.",
+        "Specifiche mancanti o condizioni, non prestazioni. shared_project_context è ammesso solo per un lotto con prove nel progetto, mai per un intero progetto.",
       ),
   };
   const resolved = z.strictObject({
@@ -567,6 +576,7 @@ export function buildSourceInterpretationRequest(
           classificationId: boundedClassificationId,
           classificationCount: classificationContext.length,
           targetRef: z.enum(targets),
+          targetScope,
         }),
         // Repeated reference enums share a JSON Schema definition. Preserve
         // their exact bounds without charging the long source multiple copies.
