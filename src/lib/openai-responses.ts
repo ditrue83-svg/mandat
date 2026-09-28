@@ -230,23 +230,74 @@ export function openaiJsonSchema(original: JsonObject): JsonObject {
   // https://developers.openai.com/api/docs/guides/structured-outputs
   const targets = new Map<JsonObject, string>();
   const definitions: JsonObject = {};
+  const annotatedTargets = new Map<JsonObject, Map<string, JsonObject>>();
+  const referenceTarget = (schema: JsonObject): JsonObject => {
+    const annotations = { description: [] as string[], title: [] as string[] };
+    const seen = new Set<JsonObject>();
+    let alias = schema;
+    let target: JsonObject;
+    // The provider rejects siblings of $ref, even annotation keywords. Move
+    // annotations onto a shared specialization of the concrete target instead.
+    // Do not merge validation siblings: that could weaken an intersection.
+    while (true) {
+      for (const key of Object.keys(alias)) {
+        if (
+          !["$ref", "$defs", "definitions", "description", "title"].includes(
+            key,
+          )
+        )
+          throw new Error(
+            "Vincolo accanto a riferimento OpenAI non supportato",
+          );
+      }
+      for (const key of ["description", "title"] as const) {
+        if (alias[key] !== undefined) {
+          if (typeof alias[key] !== "string")
+            throw new Error("Annotazione schema OpenAI non valida");
+          annotations[key].unshift(alias[key]);
+        }
+      }
+      target = resolve(alias.$ref);
+      if (!target.$ref) break;
+      if (seen.has(target))
+        throw new Error("Catena di riferimenti OpenAI senza schema concreto");
+      seen.add(target);
+      alias = visit(target);
+    }
+    if (!annotations.description.length && !annotations.title.length)
+      return target;
+    const key = JSON.stringify(annotations);
+    let variants = annotatedTargets.get(target);
+    if (!variants) annotatedTargets.set(target, (variants = new Map()));
+    let annotated = variants.get(key);
+    if (!annotated) {
+      annotated = { ...target };
+      for (const key of ["description", "title"] as const) {
+        if (annotations[key].length)
+          annotated[key] = [...new Set([target[key], ...annotations[key]])]
+            .filter((value) => value !== undefined)
+            .join("\n");
+      }
+      // Cache before traversal so annotated recursive references remain finite.
+      variants.set(key, annotated);
+    }
+    return annotated;
+  };
   const flatten = (schema: JsonObject): JsonObject => {
+    if (schema.$ref) {
+      const target = referenceTarget(schema);
+      if (!wrapped && target === original) return { $ref: "#" };
+      let name = targets.get(target);
+      if (!name) {
+        name = `schema${targets.size}`;
+        targets.set(target, name);
+      }
+      return { $ref: `#/$defs/${name}` };
+    }
     const result: JsonObject = {};
     for (const [key, entry] of Object.entries(schema)) {
       if (key === "$defs" || key === "definitions") continue;
-      if (key === "$ref") {
-        const target = resolve(entry);
-        if (!wrapped && target === original) {
-          result.$ref = "#";
-          continue;
-        }
-        let name = targets.get(target);
-        if (!name) {
-          name = `schema${targets.size}`;
-          targets.set(target, name);
-        }
-        result.$ref = `#/$defs/${name}`;
-      } else if (key === "properties") {
+      if (key === "properties") {
         result[key] = Object.fromEntries(
           Object.entries(entry as JsonObject).map(([name, child]) => [
             name,

@@ -274,6 +274,7 @@ function assertRootDefinitions(wire: Record<string, unknown>) {
     if (value !== wire) expect(schema).not.toHaveProperty("$defs");
     expect(schema).not.toHaveProperty("definitions");
     if (typeof schema.$ref === "string") {
+      expect(Object.keys(schema)).toEqual(["$ref"]);
       expect(schema.$ref).toMatch(/^#\/\$defs\/[^/]+$/);
       expect(definitions).toHaveProperty(schema.$ref.slice(8));
     }
@@ -281,6 +282,127 @@ function assertRootDefinitions(wire: Record<string, unknown>) {
   };
   check(wire);
 }
+
+it("preserves shared reference annotations, alias chains and original constraints", () => {
+  const original = {
+    type: "object",
+    properties: {
+      first: { $ref: "#/$defs/alias", description: "First use" },
+      second: { $ref: "#/$defs/alias", description: "Second use" },
+      repeated: { $ref: "#/$defs/alias", description: "First use" },
+    },
+    required: ["first", "second", "repeated"],
+    additionalProperties: false,
+    $defs: {
+      values: {
+        type: "array",
+        description: "Shared values",
+        title: "Values",
+        minItems: 1,
+        maxItems: 2,
+        items: { type: "string", enum: ["known"] },
+      },
+      alias: {
+        $ref: "#/$defs/values",
+        description: "Alias meaning",
+        title: "Alias",
+      },
+    },
+  };
+  const before = structuredClone(original);
+  const wire = openaiJsonSchema(original);
+  assertRootDefinitions(wire);
+  const properties = wire.properties as Record<string, { $ref: string }>;
+  expect(properties.first).toEqual(properties.repeated);
+  expect(properties.first).not.toEqual(properties.second);
+  const definition = (wire.$defs as Record<string, any>)[
+    properties.first.$ref.slice(8)
+  ];
+  expect(definition.description).toBe(
+    "Shared values\nAlias meaning\nFirst use",
+  );
+  expect(definition.title).toBe("Values\nAlias");
+  const originalAccepts = new Ajv2020({ strict: false }).compile(original);
+  const wireAccepts = new Ajv2020({ strict: false }).compile(wire);
+  for (const [first, accepted] of [
+    [["known"], true],
+    [[], false],
+    [["unknown"], false],
+    [["known", "known", "known"], false],
+  ] as const) {
+    const value = { first, second: ["known"], repeated: ["known"] };
+    expect(originalAccepts(value)).toBe(accepted);
+    expect(wireAccepts(value)).toBe(accepted);
+  }
+  expect(original).toEqual(before);
+});
+
+it("keeps annotated recursive references finite and retains local validation hints", () => {
+  const original = {
+    type: "object",
+    properties: { root: { $ref: "#/$defs/node", description: "Root node" } },
+    required: ["root"],
+    additionalProperties: false,
+    $defs: {
+      label: { type: "string", enum: ["leaf"] },
+      node: {
+        type: "object",
+        description: "Tree node",
+        properties: {
+          label: {
+            $ref: "#/$defs/label",
+            description: "Node label",
+            minLength: 4,
+          },
+          children: {
+            type: "array",
+            items: { $ref: "#/$defs/node", description: "Child node" },
+          },
+        },
+        required: ["label", "children"],
+        additionalProperties: false,
+      },
+    },
+  };
+  const wire = openaiJsonSchema(original);
+  assertRootDefinitions(wire);
+  expect(Object.keys(wire.$defs as object)).toHaveLength(3);
+  expect(JSON.stringify(wire)).toContain("Required constraints: minLength=4.");
+  const accepts = new Ajv2020({ strict: false }).compile(wire);
+  expect(
+    accepts({
+      root: { label: "leaf", children: [{ label: "leaf", children: [] }] },
+    }),
+  ).toBe(true);
+  expect(
+    accepts({
+      root: { label: "leaf", children: [{ label: "unknown", children: [] }] },
+    }),
+  ).toBe(false);
+});
+
+it("rejects validation siblings and alias-only cycles instead of silently changing constraints", () => {
+  const original = {
+    type: "object",
+    properties: { items: { $ref: "#/$defs/values", minItems: 2 } },
+    required: ["items"],
+    additionalProperties: false,
+    $defs: {
+      values: { type: "array", maxItems: 1, items: { type: "string" } },
+    },
+  };
+  expect(() => openaiJsonSchema(original)).toThrow("Vincolo accanto");
+  expect(() =>
+    openaiJsonSchema({
+      ...original,
+      properties: { items: { $ref: "#/$defs/one" } },
+      $defs: {
+        one: { $ref: "#/$defs/two", description: "One" },
+        two: { $ref: "#/$defs/one" },
+      },
+    }),
+  ).toThrow("senza schema concreto");
+});
 
 it("hoists distinct nested definitions and preserves references through converted oneOf paths", () => {
   const branch = (index: number, tag: string, value: string) => ({

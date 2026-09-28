@@ -200,6 +200,12 @@ test("OpenAI can encode the full source interpretation union without dropping lo
     referenceCount++;
   }
   assert(referenceCount > 10);
+  const checkReferenceSiblings = (value: unknown): void => {
+    if (!value || typeof value !== "object") return;
+    if ("$ref" in value) assert.deepEqual(Object.keys(value), ["$ref"]);
+    Object.values(value).forEach(checkReferenceSiblings);
+  };
+  checkReferenceSiblings(wireSchema);
   assert(accepts({ result: response(input) }));
   const missingRole = structuredClone(response(input)) as Record<string, any>;
   delete missingRole.components[0].roleEvidence;
