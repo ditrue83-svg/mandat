@@ -21,7 +21,7 @@ import type {
 import { sourceEvidencePassages } from "./source-evidence-context";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v9";
+  "documentary-source-semantic-review-v10";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -77,7 +77,7 @@ function responseSchema(bounds?: {
     readingRefs: bounds?.readingIds?.length
       ? z.array(z.enum(bounds.readingIds)).min(1).max(1024)
       : z
-          .array(z.string().regex(/^([ed][1-9]\d*-[1-9]\d*|c[1-9]\d*)$/))
+          .array(z.string().regex(/^([ed][1-9]\d*-[1-9]\d*|c[1-9]\d*|o-s\d+)$/))
           .min(1)
           .max(1024),
   });
@@ -281,6 +281,8 @@ export function buildSourceSemanticReviewRequest(
         "Per ogni claim assegnato restituisci esattamente un check. supported richiede sostegno reale nella fonte; contradicted richiede controprova; not_verifiable indica sostegno insufficiente. Un riferimento esatto non rende vero il significato affermato. Leggi insieme oggetto, classificazioni originali e relativo ambito.",
         "Una valutazione AI non è una nuova affermazione del committente. Per contradicted identifica l'affermazione precisa del draft e il fatto originale incompatibile: una diversa formulazione o precisione non basta. La mancanza di un sottotipo non cancella la famiglia esplicitamente dichiarata dalle etichette originali; queste non dimostrano da sole azioni accessorie o applicabilità a un lotto.",
         "Ogni check cita readingRefs della lettura indipendente oltre agli estratti originali. I riferimenti evidence della lettura indipendente rimandano al testo originale in passages; le citazioni di contesto non presenti in passages conservano anche text. Un draft che introduce un dominio incompatibile, una correzione della fonte o una discrepanza non presente nella lettura indipendente non può essere supported solo perché ripete il nome del prodotto. Per classification_reading cita la corrispondente classificazione indipendente cN.",
+        "Solo per i claim detail puoi citare in readingRefs gli originalFacts o-sN: sono rinvii del codice a passages originali, non giudizi AI. Servono anche quando la lettura preliminare omette cronologie o dettagli amministrativi. Verifica il testo originale e cita lo stesso sN in sourceRefs; non usare o-sN per summary, componenti o classificazioni. Una data non selezionata prima non è falsa per questo motivo.",
+        "Una componente main richiede una performance indipendente pertinente. Componenti accessory o excluded possono essere verificate anche su una condition indipendente pertinente: leggi la clausola originale per distinguere un acquisto opzionale o un'esclusione da un semplice permesso organizzativo. Una condition non prova automaticamente un lavoro acquistato e non può sostenere una nuova prestazione principale.",
         "Controlla dominio dell'oggetto, azione contrattuale, applicabilità al target e importanza main/accessory/excluded separatamente. Non scambiare un settore, luogo o destinatario per un ruolo. Contesto generale, classificazioni ampie e opere di altri lotti non provano una prestazione locale.",
         "Per un lotto territoriale verifica insieme le performance comuni in project_context e la target_partition in selected_lot. Se le descrizioni originali del progetto e del lotto mostrano che il lotto ripartisce geograficamente quello stesso lavoro, il loro collegamento può sostenere summary, component_scope e component_importance: non occorre che il titolo geografico ripeta le azioni comuni. Cita entrambe le prove mantenendone gli ambiti originali. Un rinvio al dossier lascia ignote le specifiche, non cancella di per sé questo collegamento documentato.",
         "target_partition è una proposta della lettura AI, non una prova automatica di applicabilità: controlla i testi originali. Non usare questa composizione per lotti con beni o prestazioni differenti, per estendere lavori di altri lotti, per assegnare servizi accessori o ubicazioni puntuali non attestati. Una classificazione comune o una coincidenza geografica non basta. Se manca la prova del lavoro comune o della sua ripartizione nel lotto, oppure una clausola locale la contraddice, l'applicabilità resta da verificare.",
@@ -479,10 +481,35 @@ export function buildGroundedSourceReviewRequests(
       const missingDetails = independent.missingDetails
         .filter((d) => relevant(d, true))
         .map((d) => ({ ...d, evidence: projectQuotes(d.evidence) }));
+      // Administrative details may be intentionally absent from the AI's
+      // work selection. Give these claims explicit pointers to the immutable
+      // original passages, without inventing independent AI observations.
+      const originalFacts = unique(
+        plan.claims
+          .filter(
+            (claim) =>
+              claim.kind === "detail" &&
+              request.assignedClaimIds.includes(claim.id),
+          )
+          .flatMap((claim) => claim.sourceRefs),
+      ).map((sourceRef) => {
+        const passage = plan.context.body.passages.find(
+          (p) => p.id === sourceRef,
+        );
+        if (!passage || !request.sourceIds.includes(sourceRef))
+          throw new Error("Original detail evidence outside its request");
+        return {
+          id: `o-${sourceRef}`,
+          sourceRef,
+          scope: passage.scope,
+          rawPath: passage.rawPath,
+        };
+      });
       const readingIds = [
         ...observations.map((o) => o.id),
         ...classifications.map((c) => c.id),
         ...missingDetails.map((d) => d.id),
+        ...originalFacts.map((fact) => fact.id),
       ];
       const responseFormat: AutomaticResponseFormat = {
         type: "json_schema",
@@ -504,6 +531,7 @@ export function buildGroundedSourceReviewRequests(
       const prompt = JSON.stringify({
         ...JSON.parse(request.prompt),
         sourceEvidenceHash: independent.hash,
+        originalFacts,
         independentReading: {
           observations,
           classifications: readingClassifications,
@@ -516,7 +544,7 @@ export function buildGroundedSourceReviewRequests(
         ) > MAX_BYTES
       )
         throw new Error("source_semantic_review_grounded_capacity");
-      return { ...request, prompt, responseFormat, readingIds };
+      return { ...request, prompt, responseFormat, readingIds, originalFacts };
     }),
   );
 }
@@ -572,6 +600,21 @@ function validateResponses(
       )
         throw new Error("Source review cites unknown independent reading");
       const claim = claims.get(check.claimId)!;
+      const directFacts = request.originalFacts.filter((fact) =>
+        check.readingRefs.includes(fact.id),
+      );
+      if (
+        directFacts.length &&
+        (claim.kind !== "detail" ||
+          directFacts.some(
+            (fact) =>
+              !claim.sourceRefs.includes(fact.sourceRef) ||
+              !check.sourceRefs.includes(fact.sourceRef),
+          ))
+      )
+        throw new Error(
+          "Original fact pointers require their own detail claim and source evidence",
+        );
       const independentRefs = (id: string) =>
         independent.observations
           .find((o) => o.id === id)
@@ -583,7 +626,17 @@ function validateResponses(
         independent.missingDetails
           .find((d) => d.id === id)
           ?.evidence.map((q) => q.sourceRef) ??
-        [];
+        directFacts
+          .filter((fact) => fact.id === id)
+          .map((fact) => fact.sourceRef);
+      const component = claim.kind.startsWith("component_")
+        ? JSON.parse(request.prompt).draft.components[
+            Number(claim.subject.split("/").at(-1))
+          ]
+        : null;
+      const allowsCondition =
+        component?.importance === "accessory" ||
+        component?.importance === "excluded";
       if (
         check.verdict === "supported" &&
         !check.readingRefs.some((id) =>
@@ -600,13 +653,14 @@ function validateResponses(
           independent.observations.some(
             (o) =>
               o.id === id &&
-              o.kind === "performance" &&
+              (o.kind === "performance" ||
+                (allowsCondition && o.kind === "condition")) &&
               o.evidence.some((q) => claim.sourceRefs.includes(q.sourceRef)),
           ),
         )
       )
         throw new Error(
-          "A component claim requires an independent performance observation",
+          "A component claim requires a relevant independent performance or complementary condition",
         );
       if (claim.kind === "classification_reading") {
         const index = Number(claim.subject.split("/").at(-1));

@@ -862,6 +862,208 @@ test("Grounded review preserves original passages while avoiding repeated materi
   assert.equal(JSON.stringify(evidence), before);
 });
 
+test("A detail absent from the work selection uses its exact original fact without bypassing independent work evidence", () => {
+  const input = context();
+  const date = input.body.passages[3];
+  date.text = "Durata dal 1 gennaio al 31 dicembre 2030.";
+  date.endUtf16 = date.text.length;
+  const original = recordSourceInterpretation(
+    {
+      ...draft(input).response,
+      details: [
+        {
+          kind: "execution_condition",
+          explanation: date.text,
+          sourceRefs: ["s4"],
+          scope: "project_context",
+        },
+      ],
+    },
+    buildSourceInterpretationRequest(input),
+    { ...metadata, model: input.binding.model },
+  );
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  const selections = plan.evidencePlan.requests.map((r) => {
+    const answer = inventedSourceEvidenceAnswer(JSON.parse(r.prompt));
+    answer.observations = answer.observations.filter(
+      (o) => !o.evidence.some((q) => q.sourceRef === "s4"),
+    );
+    return answer;
+  });
+  const evidence = recordSourceEvidenceReading(
+    selections,
+    plan.evidencePlan,
+    metadata,
+  );
+  const request = buildGroundedSourceReviewRequests(plan, evidence)[0];
+  const body = JSON.parse(request.prompt);
+  assert.deepEqual(body.originalFacts, [
+    {
+      id: "o-s4",
+      sourceRef: "s4",
+      scope: "project_context",
+      rawPath: date.rawPath,
+    },
+  ]);
+  assert.equal(body.passages.find((p: any) => p.id === "s4").text, date.text);
+  assert(!JSON.stringify(body.independentReading).includes('"s4"'));
+  const response = {
+    chunkId: request.id,
+    sourceEvidenceHash: evidence.hash,
+    coverage: "complete",
+    checks: request.assignedClaimIds.map((id) => {
+      const claim = plan.claims.find((c) => c.id === id)!;
+      return {
+        claimId: id,
+        verdict: "supported",
+        reason: "Risposta inventata per il contratto.",
+        sourceRefs: claim.sourceRefs,
+        readingRefs:
+          claim.kind === "detail" ? ["o-s4"] : inventedReadingRefs(body, claim),
+      };
+    }),
+    findings: [],
+  };
+  const wire = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  assert(wire(response));
+  const store = (answer: typeof response) =>
+    productionRecordSourceSemanticReview([answer], plan, {
+      ...metadata,
+      sourceEvidence: evidence,
+    });
+  assert.equal(readSourceSemanticReview(store(response), plan)?.accepted, true);
+  for (const kind of [
+    "summary",
+    "component_domain",
+    "classification_reading",
+  ]) {
+    const changed = structuredClone(response);
+    const claim = plan.claims.find((c) => c.kind === kind)!;
+    changed.checks.find((c) => c.claimId === claim.id)!.readingRefs = ["o-s4"];
+    assert.throws(() => store(changed), /own detail claim/);
+  }
+  const detail = plan.claims.find((c) => c.kind === "detail")!;
+  const wrongOriginal = structuredClone(response);
+  wrongOriginal.checks.find((c) => c.claimId === detail.id)!.sourceRefs = [
+    "s1",
+  ];
+  assert.throws(() => store(wrongOriginal), /own detail claim/);
+  const wrongSelection = structuredClone(response);
+  wrongSelection.checks.find((c) => c.claimId === detail.id)!.readingRefs = [
+    "e1-1",
+  ];
+  assert.throws(() => store(wrongSelection), /own independent evidence/);
+  const unknown = structuredClone(response);
+  unknown.checks.find((c) => c.claimId === detail.id)!.readingRefs = ["o-s999"];
+  assert(!wire(unknown));
+  assert.throws(() => store(unknown), /unknown independent reading/);
+  const omitted = structuredClone(response);
+  omitted.checks.find((c) => c.claimId === detail.id)!.readingRefs = [];
+  assert(!wire(omitted));
+  assert.throws(() => store(omitted));
+});
+
+test.each(["accessory", "excluded"] as const)(
+  "A %s component may cite a relevant original condition but cannot promote it to main work",
+  (importance) => {
+    const originalContext = context();
+    const text =
+      importance === "accessory"
+        ? "È acquistabile a richiesta il montaggio opzionale."
+        : "Il montaggio è escluso dal contratto.";
+    const input = {
+      ...originalContext,
+      body: {
+        ...originalContext.body,
+        passages: [
+          ...originalContext.body.passages,
+          {
+            ...originalContext.body.passages[3],
+            id: "s5",
+            rawPath: "/procurement/options/it",
+            text,
+            endUtf16: text.length,
+          },
+        ],
+      },
+    };
+    const base = draft(input);
+    const extra = {
+      description: text,
+      importance,
+      sourceRefs: ["s5"],
+      role: "execute",
+      roleEvidence: {
+        state: "identified",
+        actionText: text,
+        sourceRefs: ["s5"],
+        scope: "project_context",
+      },
+      meaning: {
+        state: "identified",
+        statement: text,
+        objectRefs: ["s5"],
+        classificationContextIds: [],
+        basis: "explicit_text",
+      },
+    };
+    const make = (importance: "main" | "accessory" | "excluded") => {
+      const source = recordSourceInterpretation(
+        {
+          ...base.response,
+          components: [...base.response.components, { ...extra, importance }],
+        },
+        buildSourceInterpretationRequest(input),
+        { ...metadata, model: input.binding.model },
+      );
+      const plan = buildSourceSemanticReviewRequest(input, source, config);
+      const evidence = inventedSourceEvidence(plan);
+      const responses = answers(plan);
+      return { plan, evidence, responses };
+    };
+    const valid = make(importance);
+    const record = productionRecordSourceSemanticReview(
+      valid.responses,
+      valid.plan,
+      {
+        ...metadata,
+        sourceEvidence: valid.evidence,
+      },
+    );
+    assert.equal(readSourceSemanticReview(record, valid.plan)?.accepted, true);
+    const promoted = make("main");
+    assert.throws(
+      () =>
+        productionRecordSourceSemanticReview(
+          promoted.responses,
+          promoted.plan,
+          {
+            ...metadata,
+            sourceEvidence: promoted.evidence,
+          },
+        ),
+      /independent performance/,
+    );
+    const unrelated = structuredClone(valid.responses);
+    const componentClaim = valid.plan.claims.find(
+      (c) => c.kind === "component_scope" && c.subject === "/components/1",
+    )!;
+    unrelated[0].checks.find(
+      (c) => c.claimId === componentClaim.id,
+    )!.readingRefs = ["c1"];
+    assert.throws(
+      () =>
+        productionRecordSourceSemanticReview(unrelated, valid.plan, {
+          ...metadata,
+          sourceEvidence: valid.evidence,
+        }),
+      /own independent evidence/,
+    );
+  },
+);
+
 test("Review preserves original classification evidence without inheriting a prior model's opinion", () => {
   const input = context();
   const original = draft(input);
@@ -950,6 +1152,13 @@ test("Approvals using earlier independent evidence contracts cannot be promoted"
   assert.equal(
     readSourceSemanticReview(
       { ...priorUnsigned, hash: digest(priorUnsigned) },
+      plan,
+    ),
+    null,
+  );
+  assert.equal(
+    readSourceSemanticReview(
+      { ...prior, version: "documentary-source-semantic-review-v9" },
       plan,
     ),
     null,
