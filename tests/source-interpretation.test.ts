@@ -1558,9 +1558,10 @@ test("A real purchased classification or cataloguing service is not rejected by 
 test.each([
   "documentary-source-interpretation-v5",
   "documentary-source-interpretation-v6",
+  "documentary-source-interpretation-v7",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
-  assert.equal(request.version, "documentary-source-interpretation-v7");
+  assert.equal(request.version, "documentary-source-interpretation-v8");
   const current = recordSourceInterpretation(response(), request, metadata);
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");

@@ -184,6 +184,7 @@ function answers(plan: SourceSemanticReviewPlan) {
         const claim = plan.claims.find((c) => c.id === id)!;
         return {
           claimId: id,
+          draftQuote: claim.text.slice(0, 1200),
           verdict: "supported" as const,
           reason: "Supporto inventato per verificare soltanto il contratto.",
           sourceRefs: claim.sourceRefs,
@@ -320,6 +321,7 @@ test("Territorial review keeps common work and local partition separate without 
         const claim = plan.claims.find((c) => c.id === id)!;
         return {
           claimId: id,
+          draftQuote: claim.text.slice(0, 1200),
           verdict:
             claim.kind === "component_scope" ? "not_verifiable" : "supported",
           reason:
@@ -915,6 +917,7 @@ test("A detail absent from the work selection uses its exact original fact witho
       const claim = plan.claims.find((c) => c.id === id)!;
       return {
         claimId: id,
+        draftQuote: claim.text.slice(0, 1200),
         verdict: "supported",
         reason: "Risposta inventata per il contratto.",
         sourceRefs: claim.sourceRefs,
@@ -1158,7 +1161,7 @@ test("Approvals using earlier independent evidence contracts cannot be promoted"
   );
   assert.equal(
     readSourceSemanticReview(
-      { ...prior, version: "documentary-source-semantic-review-v9" },
+      { ...prior, version: "documentary-source-semantic-review-v10" },
       plan,
     ),
     null,
@@ -1259,6 +1262,7 @@ test("Grounded review keeps numeric evidence and missing details without letting
         const claim = plan.claims.find((c) => c.id === id)!;
         return {
           claimId: id,
+          draftQuote: claim.text.slice(0, 1200),
           verdict: "supported",
           reason: "Solo verifica del contratto.",
           sourceRefs: claim.sourceRefs,
@@ -1299,5 +1303,122 @@ test("Grounded review keeps numeric evidence and missing details without letting
         sourceEvidence,
       }),
     /independent performance/,
+  );
+});
+
+test("Review criticisms quote their assigned text without confusing summary and detail", () => {
+  const input = context();
+  const exactCondition =
+    "I beni vengono preparati in laboratorio e consegnati a domicilio.";
+  const widenedSummary = "Tutto il servizio si svolge in laboratorio.";
+  const passage = input.body.passages[0];
+  const original = {
+    ...input,
+    body: {
+      ...input.body,
+      passages: input.body.passages.map((p) =>
+        p.id === passage.id
+          ? { ...p, text: exactCondition, endUtf16: exactCondition.length }
+          : p,
+      ),
+    },
+  };
+  const extraction = buildSourceInterpretationRequest(original);
+  const value = draft(original).response;
+  const record = recordSourceInterpretation(
+    {
+      ...value,
+      summary: widenedSummary,
+      details: [
+        {
+          kind: "execution_condition",
+          explanation: exactCondition,
+          scope: "project_context",
+          sourceRefs: [passage.id],
+        },
+      ],
+    },
+    extraction,
+    { ...metadata, model: original.binding.model },
+  );
+  const plan = buildSourceSemanticReviewRequest(original, record, config);
+  const summary = plan.claims.find((c) => c.kind === "summary")!,
+    detail = plan.claims.find((c) => c.kind === "detail")!;
+  assert.equal(summary.text, widenedSummary);
+  assert.equal(detail.text, exactCondition);
+  assert(Object.isFrozen(summary) && Object.isFrozen(detail));
+  const response = answers(plan);
+  const setCheck = (
+    id: string,
+    quote: string | null,
+    verdict: "supported" | "not_verifiable",
+  ) =>
+    response.map((r) => ({
+      ...r,
+      checks: r.checks.map((c) =>
+        c.claimId === id ? { ...c, draftQuote: quote, verdict } : c,
+      ),
+    }));
+  assert.throws(
+    () =>
+      recordSourceSemanticReview(
+        setCheck(detail.id, widenedSummary, "not_verifiable"),
+        plan,
+        metadata,
+      ),
+    /quote its own assigned claim/,
+  );
+  assert.throws(
+    () =>
+      recordSourceSemanticReview(
+        setCheck(detail.id, null, "not_verifiable"),
+        plan,
+        metadata,
+      ),
+    /quote its own assigned claim/,
+  );
+  assert.throws(
+    () =>
+      recordSourceSemanticReview(
+        setCheck(summary.id, exactCondition, "not_verifiable"),
+        plan,
+        metadata,
+      ),
+    /quote its own assigned claim/,
+  );
+  assert.throws(
+    () =>
+      recordSourceSemanticReview(
+        setCheck(summary.id, "parole inventate", "supported"),
+        plan,
+        metadata,
+      ),
+    /quote its own assigned claim/,
+  );
+  const negative = recordSourceSemanticReview(
+    setCheck(summary.id, widenedSummary, "not_verifiable"),
+    plan,
+    metadata,
+  );
+  const resolved = readSourceSemanticReview(negative, plan)!;
+  assert.equal(resolved.accepted, false);
+  assert.equal(
+    negative.responses
+      .flatMap((r) => r.checks)
+      .find((c) => c.claimId === detail.id)!.verdict,
+    "supported",
+  );
+  assert.equal(record.response.details[0].explanation, exactCondition);
+  assert.equal(record.response.summary, widenedSummary);
+  assert.equal(
+    readSourceSemanticReview(
+      recordSourceSemanticReview(
+        setCheck(detail.id, null, "supported"),
+        plan,
+        metadata,
+      ),
+      plan,
+    )?.accepted,
+    true,
   );
 });

@@ -156,8 +156,9 @@ function inventedAnswer(prompt: string) {
       sourceEvidenceHash: data.sourceEvidenceHash,
       coverage: "complete",
       checks: data.assignedClaims.map(
-        (claim: { id: string; sourceRefs: string[] }) => ({
+        (claim: { id: string; sourceRefs: string[]; text: string }) => ({
           claimId: claim.id,
+          draftQuote: claim.text.slice(0, 1200),
           readingRefs: inventedReadingRefs(data, claim),
           verdict: "supported",
           reason:

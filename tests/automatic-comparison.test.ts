@@ -292,8 +292,9 @@ function sourceReview(
         sourceEvidenceHash: body.sourceEvidenceHash,
         coverage: "complete",
         checks: body.assignedClaims.map(
-          (claim: { id: string; sourceRefs: string[] }) => ({
+          (claim: { id: string; sourceRefs: string[]; text: string }) => ({
             claimId: claim.id,
+            draftQuote: claim.text.slice(0, 1200),
             readingRefs: inventedReadingRefs(body, claim),
             verdict,
             reason:
@@ -1784,7 +1785,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v30");
+    assert.equal(request.version, "documentary-service-comparison-v31");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(

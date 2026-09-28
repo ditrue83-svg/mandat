@@ -21,7 +21,7 @@ import type {
 import { sourceEvidencePassages } from "./source-evidence-context";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v10";
+  "documentary-source-semantic-review-v11";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -72,6 +72,7 @@ function responseSchema(bounds?: {
     claimId:
       bounds && bounds.claimIds.length ? z.enum(bounds.claimIds) : claimId,
     verdict,
+    draftQuote: text(1200).nullable(),
     reason: text(600),
     sourceRefs: references,
     readingRefs: bounds?.readingIds?.length
@@ -113,6 +114,7 @@ type Claim = {
     | "detail"
     | "classification_reading";
   subject: string;
+  text: string;
   sourceRefs: string[];
 };
 const unique = (values: readonly string[]) => [...new Set(values)];
@@ -177,14 +179,21 @@ export function buildSourceSemanticReviewRequest(
   const add = (
     kind: Claim["kind"],
     subject: string,
+    claimText: string,
     required: readonly string[],
   ) => {
     const sourceRefs = unique(required);
     if (!sourceRefs.length || sourceRefs.some((id) => !byId.has(id)))
       throw new Error("Review claim has unknown source evidence");
-    claims.push({ id: `q${claims.length + 1}`, kind, subject, sourceRefs });
+    claims.push({
+      id: `q${claims.length + 1}`,
+      kind,
+      subject,
+      text: claimText,
+      sourceRefs,
+    });
   };
-  add("summary", "/summary", [
+  add("summary", "/summary", draft.response.summary, [
     draft.response.targetRef,
     ...draft.response.components.flatMap((item) => item.sourceRefs),
   ]);
@@ -209,19 +218,33 @@ export function buildSourceSemanticReviewRequest(
       "component_scope",
       "component_importance",
     ] as const)
-      add(kind, `/components/${index}`, required);
+      add(
+        kind,
+        `/components/${index}`,
+        kind === "component_role"
+          ? `${item.role ?? "unresolved"}
+${item.roleEvidence.actionText ?? ""}`
+          : kind === "component_importance"
+            ? `${item.importance}
+${item.description}`
+            : `${item.description}
+${item.meaning.statement}`,
+        required,
+      );
   });
   draft.response.details.forEach((item, index) =>
-    add("detail", `/details/${index}`, item.sourceRefs),
+    add("detail", `/details/${index}`, item.explanation, item.sourceRefs),
   );
   draft.response.classificationReadings.forEach((item, index) => {
     const classification = classes.get(item.classificationId);
     if (!classification)
       throw new Error("Review reading has unknown classification context");
-    add("classification_reading", `/classificationReadings/${index}`, [
-      ...item.sourceRefs,
-      ...classificationRefs(classification),
-    ]);
+    add(
+      "classification_reading",
+      `/classificationReadings/${index}`,
+      item.explanation,
+      [...item.sourceRefs, ...classificationRefs(classification)],
+    );
   });
   const mandatory = unique([
     draft.response.targetRef,
@@ -278,7 +301,7 @@ export function buildSourceSemanticReviewRequest(
       task: "Verifica assignedClaims contro le prove originali: passages, fields e classificationContext. independentReading è una lettura AI separata, registrata prima di vedere il draft: serve a individuare prove e prestazioni, non sostituisce la fonte. Verifica la fedeltà delle affermazioni e la completezza delle prestazioni rappresentate. Non riscrivere la lettura indipendente per conformarla al draft. La mancanza di una prestazione in un altro frammento non la confuta.",
       rules: [
         "Le observations della lettura indipendente selezionano e classificano passaggi originali senza riscriverli. Leggi direttamente evidence e passages per stabilire lavoro, soggetto che lo richiede, operatore che lo svolge, destinatario e carattere obbligatorio o facoltativo. kind e serviceRef aiutano a trovare le prove; non sono affermazioni del committente né sostituiscono il loro significato originale.",
-        "Per ogni claim assegnato restituisci esattamente un check. supported richiede sostegno reale nella fonte; contradicted richiede controprova; not_verifiable indica sostegno insufficiente. Un riferimento esatto non rende vero il significato affermato. Leggi insieme oggetto, classificazioni originali e relativo ambito.",
+        "Per ogni assignedClaim verifica il suo text e restituisci un check. Non attribuirgli parole di altri claim o campi del draft. supported richiede sostegno reale; contradicted una controprova; not_verifiable sostegno insufficiente. Per ogni esito negativo, draftQuote deve essere un estratto esatto non vuoto del text assegnato che identifica l’affermazione problematica; supported può usare null. Spiega quel preciso difetto contro la fonte. Un problema nel summary va giudicato nel claim summary, anche se un detail distinto è corretto. Leggi insieme oggetto, classificazioni originali e relativo ambito.",
         "Una valutazione AI non è una nuova affermazione del committente. Per contradicted identifica l'affermazione precisa del draft e il fatto originale incompatibile: una diversa formulazione o precisione non basta. La mancanza di un sottotipo non cancella la famiglia esplicitamente dichiarata dalle etichette originali; queste non dimostrano da sole azioni accessorie o applicabilità a un lotto.",
         "Ogni check cita readingRefs della lettura indipendente oltre agli estratti originali. I riferimenti evidence della lettura indipendente rimandano al testo originale in passages; le citazioni di contesto non presenti in passages conservano anche text. Un draft che introduce un dominio incompatibile, una correzione della fonte o una discrepanza non presente nella lettura indipendente non può essere supported solo perché ripete il nome del prodotto. Per classification_reading cita la corrispondente classificazione indipendente cN.",
         "Solo per i claim detail puoi citare in readingRefs gli originalFacts o-sN: sono rinvii del codice a passages originali, non giudizi AI. Servono anche quando la lettura preliminare omette cronologie o dettagli amministrativi. Verifica il testo originale e cita lo stesso sN in sourceRefs; non usare o-sN per summary, componenti o classificazioni. Una data non selezionata prima non è falsa per questo motivo.",
@@ -600,6 +623,13 @@ function validateResponses(
       )
         throw new Error("Source review cites unknown independent reading");
       const claim = claims.get(check.claimId)!;
+      if (
+        (check.verdict !== "supported" && check.draftQuote === null) ||
+        (check.draftQuote !== null && !claim.text.includes(check.draftQuote))
+      )
+        throw new Error(
+          "Source review criticism must quote its own assigned claim",
+        );
       const directFacts = request.originalFacts.filter((fact) =>
         check.readingRefs.includes(fact.id),
       );
