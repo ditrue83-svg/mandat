@@ -44,7 +44,12 @@ export async function compareDocumentaryTarget(
   } = {},
 ) {
   const request = buildAutomaticComparisonRequest(input);
-  const configuration = documentaryAiConfiguration();
+  // Source interpretation/review can exceed the generic 90-second transport
+  // deadline. Keep this bounded worker path aligned with its validated runs.
+  const configuration = {
+    ...documentaryAiConfiguration(),
+    timeoutMs: 300_000,
+  };
   let sourceInterpretation: SourceInterpretationRecord | null = null;
   let sourceReview: SourceSemanticReviewRecord | null = null;
   if (options.loadSourceInterpretations) {

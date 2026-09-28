@@ -21,7 +21,7 @@ import type {
 import { sourceEvidencePassages } from "./source-evidence-context";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v15";
+  "documentary-source-semantic-review-v16";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -155,7 +155,6 @@ export function buildSourceSemanticReviewRequest(
 ) {
   const context = validateSourceInterpretationContext(input);
   const config = configurationSchema.parse(configuration);
-  const maxTokens = config.maxTokens ?? MAX_TOKENS;
   const evidencePlan = buildSourceEvidenceReadingRequest(context, config);
   const draft = sourceInterpretationRecordSchema.parse(
     structuredClone(draftValue),
@@ -261,6 +260,11 @@ ${item.meaning.statement}`,
       [...item.sourceRefs, ...classificationRefs(classification)],
     );
   });
+  // A review may check four dimensions per component plus classifications.
+  // Its output and reasoning allowance is independent from the earlier source
+  // reading. Explicit caller limits remain authoritative.
+  const maxTokens =
+    config.maxTokens ?? (claims.length > 16 ? 16_384 : MAX_TOKENS);
   const mandatory = unique([
     draft.response.targetRef,
     ...classificationContext.flatMap(classificationRefs),

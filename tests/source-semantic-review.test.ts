@@ -612,6 +612,52 @@ test("An explicit output limit binds the review and independent evidence while p
     );
 });
 
+test("A large review gets more output without repeating or changing its independent source reading", () => {
+  const input = context();
+  input.body.passages[0].text =
+    "Fornitura di articoli inventati A, B, C e D; trasporto escluso.";
+  input.body.passages[0].endUtf16 = input.body.passages[0].text.length;
+  const original = draft(input);
+  const complex = recordSourceInterpretation(
+    {
+      ...original.response,
+      components: ["A", "B", "C", "D"].map((group) => ({
+        ...original.response.components[0],
+        description: `Fornitura di articoli inventati ${group}.`,
+        meaning: {
+          ...original.response.components[0].meaning,
+          statement: `Articoli inventati ${group}.`,
+        },
+      })),
+    },
+    buildSourceInterpretationRequest(input),
+    { ...metadata, model: input.binding.model },
+  );
+  const automatic = buildSourceSemanticReviewRequest(input, complex, config);
+  const bounded = buildSourceSemanticReviewRequest(input, complex, {
+    ...config,
+    maxTokens: 8192,
+  });
+  assert.equal(automatic.claims.length, 19);
+  assert.equal(automatic.maxTokens, 16_384);
+  assert.equal(bounded.maxTokens, 8192);
+  assert.deepEqual(automatic.evidencePlan, bounded.evidencePlan);
+  assert.deepEqual(automatic.claims, bounded.claims);
+  assert.deepEqual(
+    automatic.requests.map(({ maxTokens: _, ...request }) => request),
+    bounded.requests.map(({ maxTokens: _, ...request }) => request),
+  );
+  assert.notEqual(automatic.inputHash, bounded.inputHash);
+  const record = recordSourceSemanticReview(
+    answers(automatic),
+    automatic,
+    metadata,
+  );
+  assert.equal(record.maxTokens, 16_384);
+  assert.equal(readSourceSemanticReview(record, automatic)?.accepted, true);
+  assert.equal(readSourceSemanticReview(record, bounded), null);
+});
+
 test("Independent review is source-only and binds every server claim without changing the draft", () => {
   const input = context(),
     original = draft(input),

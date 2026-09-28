@@ -319,6 +319,8 @@ it("Durably schedules once, completes a referenced comparison, and never creates
     status: "skipped",
   });
   expect(infer).toHaveBeenCalledTimes(4);
+  for (const call of vi.mocked(infer).mock.calls)
+    expect(call[7]?.timeoutMs).toBe(300_000);
   const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
   expect(loaded.project.targets[0].automatic?.serviceRelation).toBe("direct");
   expect(loaded.project.qualityEventIds).toEqual([]);
@@ -677,6 +679,7 @@ it("Reads every long-source chunk before interpretation and reuses those reading
     expect(reading[3]).toBe(2400);
     expect(reading[7]?.reasoningEffort).toBe("none");
   }
+  for (const call of calls) expect(call[7]?.timeoutMs).toBe(300_000);
   expect(calls.map((call) => call[1])).toEqual([
     ...readingCalls.map(() => "documentary-source-reading"),
     "documentary-source-interpretation",
