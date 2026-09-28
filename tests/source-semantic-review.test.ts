@@ -200,6 +200,124 @@ function answers(plan: SourceSemanticReviewPlan) {
   });
 }
 
+function languageVariantReview(rawPath = "/procurement/orderDescription/de") {
+  const base = context();
+  const text = "Lieferung erfundener Artikel; Transport ausgeschlossen.";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[0],
+          id: "s5",
+          rawPath,
+          text,
+          endUtf16: text.length,
+        },
+      ],
+    },
+  };
+  const plan = buildSourceSemanticReviewRequest(input, draft(input), config);
+  const values = plan.evidencePlan.requests.map((r) =>
+    inventedSourceEvidenceAnswer(JSON.parse(r.prompt)),
+  );
+  values[0].observations = [
+    { kind: "performance", serviceRef: "s5", evidence: [{ sourceRef: "s5" }] },
+  ];
+  const sourceEvidence = recordSourceEvidenceReading(
+    values,
+    plan.evidencePlan,
+    metadata,
+  );
+  const requests = buildGroundedSourceReviewRequests(plan, sourceEvidence);
+  const responses = requests.map((request) => ({
+    chunkId: request.id,
+    sourceEvidenceHash: sourceEvidence.hash,
+    coverage: "complete",
+    checks: request.assignedClaimIds.map((id) => {
+      const claim = plan.claims.find((c) => c.id === id)!;
+      const classification = claim.kind === "classification_reading",
+        detail = claim.kind === "detail";
+      return {
+        claimId: id,
+        draftQuote: claim.text,
+        verdict: "supported",
+        reason:
+          "Giudizio inventato per verificare il collegamento delle citazioni, non una valutazione AI.",
+        sourceRefs: [
+          ...new Set([
+            ...claim.sourceRefs,
+            ...(!classification && !detail ? ["s5"] : []),
+          ]),
+        ],
+        readingRefs: classification
+          ? ["c1"]
+          : detail
+            ? claim.sourceRefs.map((ref) => `o-${ref}`)
+            : ["e1-1"],
+      };
+    }),
+    findings: [],
+  }));
+  return { plan, sourceEvidence, responses };
+}
+
+test("A component can cite an independently read original language variant only with both source texts", () => {
+  const { plan, sourceEvidence, responses } = languageVariantReview();
+  const read = (values: unknown[]) =>
+    readSourceSemanticReview(
+      productionRecordSourceSemanticReview(values, plan, {
+        ...metadata,
+        sourceEvidence,
+      }),
+      plan,
+    )!;
+  assert.equal(read(responses).accepted, true);
+  const claimId = plan.claims.find((c) => c.kind === "component_role")!.id;
+  for (const omitted of ["s1", "s5"]) {
+    const changed = structuredClone(responses);
+    const check = changed
+      .flatMap((r) => r.checks)
+      .find((c) => c.claimId === claimId)!;
+    check.sourceRefs = check.sourceRefs.filter((ref) => ref !== omitted);
+    assert.throws(
+      () => read(changed),
+      /independent evidence|relevant independent/,
+    );
+  }
+  const negative = structuredClone(responses);
+  const check = negative
+    .flatMap((r) => r.checks)
+    .find((c) => c.claimId === claimId)!;
+  check.verdict = "contradicted";
+  check.reason =
+    "La versione linguistica originale contesta l'azione: controprova inventata.";
+  assert.equal(read(negative).accepted, false);
+  assert.equal(sourceEvidence.responses[0].observations[0].serviceRef, "s5");
+});
+
+test("A language suffix cannot bridge different fields, lots or unnamed text variants", () => {
+  for (const rawPath of [
+    "/base/title/de",
+    "/lots/0/orderDescription/de",
+    "/procurement/otherDescription/de",
+    "/procurement/orderDescription/extra",
+    "/procurement/orderDescription/it",
+  ]) {
+    const { plan, sourceEvidence, responses } = languageVariantReview(rawPath);
+    assert.throws(
+      () =>
+        productionRecordSourceSemanticReview(responses, plan, {
+          ...metadata,
+          sourceEvidence,
+        }),
+      /independent evidence|relevant independent/,
+    );
+  }
+});
+
 test("Metadata warnings survive review without becoming evidence or overriding a negative claim", () => {
   const original = draft(),
     before = JSON.stringify(original);
