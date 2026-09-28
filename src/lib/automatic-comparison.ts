@@ -24,7 +24,7 @@ import {
 
 import {
   SOURCE_INTERPRETATION_VERSION,
-  SOURCE_INTERPRETATION_MAX_TOKENS,
+  sourceInterpretationTokenLimit,
   buildSourceInterpretationRequest,
   sourceInterpretationKey,
   sourceInterpretationRecordSchema,
@@ -414,7 +414,10 @@ export function buildAutomaticComparisonRequest(
     shapeEpochToken: input.shapeState.epochToken,
     model: automaticComparisonModel(),
     reasoningEffort: documentarySourceReasoningEffort(),
-    maxTokens: SOURCE_INTERPRETATION_MAX_TOKENS,
+    maxTokens: sourceInterpretationTokenLimit({
+      sourceUtf16,
+      classifications: classifications.length,
+    }),
   } satisfies SourceInterpretationBinding;
   const sourceKey = sourceInterpretationKey(sourceBinding);
   const dependency = {

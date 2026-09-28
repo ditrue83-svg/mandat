@@ -5,6 +5,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 import {
   SOURCE_INTERPRETATION_VERSION,
   SOURCE_INTERPRETATION_MAX_TOKENS,
+  sourceInterpretationTokenLimit,
   buildSourceInterpretationRequest,
   sourceInterpretationKey,
   validateSourceInterpretation,
@@ -1789,7 +1790,7 @@ test.each([
   assert.equal(readSourceInterpretation(current, request)!.status, "resolved");
 });
 
-test("Source output allowance remains 8192 with or without thinking and is bound to the request", () => {
+test("Source output allowance is bounded, independent from thinking and part of the cache identity", () => {
   const input = context();
   const high = buildSourceInterpretationRequest(input);
   const none = buildSourceInterpretationRequest({
@@ -1803,8 +1804,34 @@ test("Source output allowance remains 8192 with or without thinking and is bound
   assert.notEqual(high.inputHash, none.inputHash);
   assert.deepEqual(none.body, high.body);
   assert.deepEqual(none.responseFormat, high.responseFormat);
+  const expanded = buildSourceInterpretationRequest({
+    ...input,
+    binding: { ...input.binding, maxTokens: 16_384 },
+  });
+  assert.equal(expanded.maxTokens, 16_384);
+  assert.notEqual(expanded.sourceKey, high.sourceKey);
+  assert.notEqual(expanded.inputHash, high.inputHash);
+  assert.equal(expanded.prompt, high.prompt);
+  assert.deepEqual(expanded.responseFormat, high.responseFormat);
+  assert.equal(
+    openaiResponseBody(
+      "gpt-6-luna",
+      expanded.system,
+      expanded.prompt,
+      expanded.maxTokens,
+      expanded.responseFormat,
+      "high",
+    ).max_output_tokens,
+    16_384,
+  );
   const { maxTokens: _maxTokens, ...unbound } = input.binding;
-  for (const binding of [unbound, { ...input.binding, maxTokens: 1600 }])
+  for (const binding of [
+    unbound,
+    ...[1600, 8193, 16_385, NaN].map((maxTokens) => ({
+      ...input.binding,
+      maxTokens,
+    })),
+  ])
     assert.throws(() =>
       buildSourceInterpretationRequest(
         JSON.parse(JSON.stringify({ ...input, binding })),
@@ -1812,6 +1839,46 @@ test("Source output allowance remains 8192 with or without thinking and is bound
     );
   const stored = recordSourceInterpretation(response(), high, metadata);
   assert.equal(readSourceInterpretation(stored, none), null);
+  assert.equal(readSourceInterpretation(stored, expanded), null);
+  const expandedRecord = recordSourceInterpretation(
+    response(),
+    expanded,
+    metadata,
+  );
+  assert.equal(readSourceInterpretation(expandedRecord, high), null);
+  assert.equal(
+    readSourceInterpretation(expandedRecord, expanded)?.status,
+    "resolved",
+  );
+});
+
+test("Large source output allowance has fixed limits and rejects malformed size inputs", () => {
+  assert.equal(
+    sourceInterpretationTokenLimit({ sourceUtf16: 32_000, classifications: 7 }),
+    8192,
+  );
+  assert.equal(
+    sourceInterpretationTokenLimit({ sourceUtf16: 32_001, classifications: 7 }),
+    16_384,
+  );
+  assert.equal(
+    sourceInterpretationTokenLimit({ sourceUtf16: 1000, classifications: 8 }),
+    16_384,
+  );
+  for (const value of [-1, 1.5, NaN, Infinity]) {
+    assert.throws(() =>
+      sourceInterpretationTokenLimit({
+        sourceUtf16: value,
+        classifications: 1,
+      }),
+    );
+    assert.throws(() =>
+      sourceInterpretationTokenLimit({
+        sourceUtf16: 100,
+        classifications: value,
+      }),
+    );
+  }
 });
 
 test("Server classification context retains every original label and reference independently of model citations", () => {

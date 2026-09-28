@@ -491,6 +491,12 @@ test("Semantic reviews use the full original source and never company data", () 
   }));
   const source = sourceRecord(request, readings);
   const reduced = buildAutomaticSourceRequest(request, readings);
+  assert.equal(request.sourceBinding.maxTokens, 16_384);
+  assert.equal(reduced.maxTokens, 16_384);
+  assert.equal(
+    request.maxTokens,
+    buildAutomaticComparisonRequest(fixture()).maxTokens,
+  );
   assert.ok(reduced.body.passages.length < request.passages.length);
   const plan = buildAutomaticSourceSemanticReviewRequest(request, source);
   const bodies = plan.requests.map((chunk) => JSON.parse(chunk.prompt));

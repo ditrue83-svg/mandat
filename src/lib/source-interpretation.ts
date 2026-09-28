@@ -10,8 +10,21 @@ import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
   "documentary-source-interpretation-v11";
-// Structured source output keeps its full allowance even without thinking.
+// Both allowances include provider reasoning. Large sources need room for
+// their components and classification accounting, without dropping evidence.
 export const SOURCE_INTERPRETATION_MAX_TOKENS = 8192;
+export const LARGE_SOURCE_INTERPRETATION_MAX_TOKENS = 16_384;
+export function sourceInterpretationTokenLimit(input: {
+  sourceUtf16: number;
+  classifications: number;
+}) {
+  for (const value of [input.sourceUtf16, input.classifications])
+    if (!Number.isSafeInteger(value) || value < 0)
+      throw new Error("Invalid source size");
+  return input.sourceUtf16 > 32_000 || input.classifications >= 8
+    ? LARGE_SOURCE_INTERPRETATION_MAX_TOKENS
+    : SOURCE_INTERPRETATION_MAX_TOKENS;
+}
 const digest = (value: unknown) =>
   createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
@@ -56,7 +69,10 @@ const bindingSchema = z.strictObject({
   shapeEpochToken: text(256),
   model: text(200),
   reasoningEffort: z.enum(["none", "low", "medium", "high"]),
-  maxTokens: z.literal(SOURCE_INTERPRETATION_MAX_TOKENS),
+  maxTokens: z.union([
+    z.literal(SOURCE_INTERPRETATION_MAX_TOKENS),
+    z.literal(LARGE_SOURCE_INTERPRETATION_MAX_TOKENS),
+  ]),
 });
 export type SourceInterpretationBinding = {
   readonly target: LotSourceTarget;
@@ -65,7 +81,9 @@ export type SourceInterpretationBinding = {
   readonly shapeEpochToken: string;
   readonly model: string;
   readonly reasoningEffort: "none" | "low" | "medium" | "high";
-  readonly maxTokens: typeof SOURCE_INTERPRETATION_MAX_TOKENS;
+  readonly maxTokens:
+    | typeof SOURCE_INTERPRETATION_MAX_TOKENS
+    | typeof LARGE_SOURCE_INTERPRETATION_MAX_TOKENS;
 };
 const readingSchema = z.strictObject({
   chunkId: z.string().regex(/^chunk\d+$/),
