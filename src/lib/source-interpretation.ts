@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { stableDocumentaryJson } from "./documentary-observation";
+import { isOriginalSourceQuotation } from "./source-quotation";
 import type {
   ComparisonPassage,
   AutomaticResponseFormat,
@@ -8,7 +9,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v10";
+  "documentary-source-interpretation-v11";
 // Structured source output keeps its full allowance even without thinking.
 export const SOURCE_INTERPRETATION_MAX_TOKENS = 8192;
 const digest = (value: unknown) =>
@@ -258,7 +259,7 @@ function buildResponseSchema(bounds?: {
   };
   const roleFields = {
     actionText: text(600).describe(
-      "Estratto originale esatto che attesta l'azione o l'indeterminatezza del ruolo. Non tradurre né sostituire con nomi di professioni.",
+      "Estratto originale esatto dell'azione o dell'indeterminatezza del ruolo. Puoi omettere tag HTML e uniformare spazi; non parafrasare, tradurre o sostituire parole.",
     ),
     sourceRefs: refs,
     scope,
@@ -879,7 +880,7 @@ export function validateSourceInterpretation(
           : span.text;
       path = span.rawPath;
       end = span.endUtf16;
-      if (joined.includes(role.actionText)) quoteFound = true;
+      if (isOriginalSourceQuotation(joined, role.actionText)) quoteFound = true;
     }
     if (!quoteFound)
       throw new Error(

@@ -570,66 +570,81 @@ test("Role identity requires a quoted action or an explicitly unresolved role wi
     );
 });
 
-test("Role action quotations preserve contiguous long-source fragments and never bridge gaps or fields", () => {
-  const input = context();
-  const first = "Gestione continuativa ",
-    second = "del deposito 🌳.";
-  const request = buildSourceInterpretationRequest({
-    ...input,
-    body: {
-      ...input.body,
-      passages: [
-        ...input.body.passages.filter((item) => item.id !== "s1"),
-        { ...input.body.passages[0], text: first, endUtf16: first.length },
-        {
-          ...input.body.passages[0],
-          id: "s5",
-          text: second,
-          startUtf16: first.length,
-          endUtf16: first.length + second.length,
-        },
-      ],
-    },
-  });
-  const value = {
-    ...response(),
-    components: [
-      {
-        ...response().components[0],
-        sourceRefs: ["s1", "s5"],
-        role: "operate",
-        roleEvidence: {
-          state: "identified",
-          actionText: first + second,
-          sourceRefs: ["s5", "s1"],
-          scope: "project_context",
-        },
-      },
-    ],
-  };
-  assert.equal(validateSourceInterpretation(value, request).status, "resolved");
-  for (const change of [
-    {
-      startUtf16: first.length + 1,
-      endUtf16: first.length + second.length + 1,
-    },
-    { rawPath: "/other/field/it" },
-  ]) {
-    const changed = buildSourceInterpretationRequest({
+test.each([
+  [
+    "Gestione continuativa ",
+    "del deposito 🌳.",
+    "Gestione continuativa del deposito 🌳.",
+  ],
+  [
+    "<p>Gestione continuativa </p>",
+    "<p>del deposito 🌳.</p>",
+    "Gestione continuativa del deposito 🌳.",
+  ],
+])(
+  "Role quotations preserve contiguous fragments without bridging gaps or fields: %s",
+  (first, second, quotation) => {
+    const input = context();
+    const request = buildSourceInterpretationRequest({
       ...input,
       body: {
-        ...request.body,
-        passages: request.body.passages.map((item) =>
-          item.id === "s5" ? { ...item, ...change } : item,
-        ),
+        ...input.body,
+        passages: [
+          ...input.body.passages.filter((item) => item.id !== "s1"),
+          { ...input.body.passages[0], text: first, endUtf16: first.length },
+          {
+            ...input.body.passages[0],
+            id: "s5",
+            text: second,
+            startUtf16: first.length,
+            endUtf16: first.length + second.length,
+          },
+        ],
       },
     });
-    assert.throws(
-      () => validateSourceInterpretation(value, changed),
-      /exact quotation/,
+    const value = {
+      ...response(),
+      components: [
+        {
+          ...response().components[0],
+          sourceRefs: ["s1", "s5"],
+          role: "operate",
+          roleEvidence: {
+            state: "identified",
+            actionText: quotation,
+            sourceRefs: ["s5", "s1"],
+            scope: "project_context",
+          },
+        },
+      ],
+    };
+    assert.equal(
+      validateSourceInterpretation(value, request).status,
+      "resolved",
     );
-  }
-});
+    for (const change of [
+      {
+        startUtf16: first.length + 1,
+        endUtf16: first.length + second.length + 1,
+      },
+      { rawPath: "/other/field/it" },
+    ]) {
+      const changed = buildSourceInterpretationRequest({
+        ...input,
+        body: {
+          ...request.body,
+          passages: request.body.passages.map((item) =>
+            item.id === "s5" ? { ...item, ...change } : item,
+          ),
+        },
+      });
+      assert.throws(
+        () => validateSourceInterpretation(value, changed),
+        /exact quotation/,
+      );
+    }
+  },
+);
 
 test("Unreadability and incomplete representation retain distinct evidenced blocking reasons", () => {
   const request = buildSourceInterpretationRequest(context());
@@ -1732,9 +1747,10 @@ test.each([
   "documentary-source-interpretation-v7",
   "documentary-source-interpretation-v8",
   "documentary-source-interpretation-v9",
+  "documentary-source-interpretation-v10",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
-  assert.equal(request.version, "documentary-source-interpretation-v10");
+  assert.equal(request.version, "documentary-source-interpretation-v11");
   const current = recordSourceInterpretation(response(), request, metadata);
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
