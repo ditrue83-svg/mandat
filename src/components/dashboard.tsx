@@ -54,12 +54,14 @@ export function Dashboard({
   opportunities,
   savedOnly = false,
   radarStatus = { state: "ready", pendingCount: 0 },
+  aiProcessingBlocked,
   initialFilters = {},
 }: {
   viewer: Viewer;
   opportunities: Opportunity[];
   savedOnly?: boolean;
   radarStatus?: RadarStatus;
+  aiProcessingBlocked?: "permission" | "unavailable";
   initialFilters?: {
     q?: string;
     settore?: string;
@@ -160,7 +162,13 @@ export function Dashboard({
   }, [pathname, query, savedOnly, sector, showDismissed, sort]);
 
   useEffect(() => {
-    if (viewer.demo || savedOnly || radarStatus.state === "ready") return;
+    if (
+      viewer.demo ||
+      savedOnly ||
+      aiProcessingBlocked ||
+      radarStatus.state === "ready"
+    )
+      return;
     const refresh = () => {
       if (document.visibilityState === "visible" && !refreshing)
         startRefresh(() => router.refresh());
@@ -171,7 +179,14 @@ export function Dashboard({
       clearInterval(timer);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [viewer.demo, savedOnly, radarStatus.state, refreshing, router]);
+  }, [
+    viewer.demo,
+    savedOnly,
+    radarStatus.state,
+    aiProcessingBlocked,
+    refreshing,
+    router,
+  ]);
 
   useEffect(() => {
     if (!toast) return;
@@ -274,6 +289,7 @@ export function Dashboard({
   const processingEmpty =
     !savedOnly &&
     !viewer.demo &&
+    !aiProcessingBlocked &&
     radarStatus.state !== "ready" &&
     collection.length === 0;
   const returnHref = useMemo(() => {
@@ -297,8 +313,28 @@ export function Dashboard({
         active={savedOnly ? "saved" : "radar"}
         showProfileLink={!savedOnly}
       />
+      {!savedOnly && !viewer.demo && aiProcessingBlocked && (
+        <div className="notice" role="status">
+          <strong>
+            {aiProcessingBlocked === "permission"
+              ? "I nuovi confronti AI sono disattivati."
+              : "I confronti AI sono temporaneamente indisponibili."}
+          </strong>
+          <p>
+            {aiProcessingBlocked === "permission"
+              ? "Puoi attivarli dal profilo dopo aver letto come vengono trattati i dati della ditta. Nel frattempo puoi consultare Esplora e i risultati già disponibili."
+              : "Puoi continuare a consultare Esplora e i risultati già disponibili."}
+          </p>
+          {aiProcessingBlocked === "permission" && (
+            <Link className="text-link" href="/profilo#ai-processing-heading">
+              Gestisci i confronti AI
+            </Link>
+          )}
+        </div>
+      )}
       {!savedOnly &&
         !viewer.demo &&
+        !aiProcessingBlocked &&
         radarStatus.state !== "ready" &&
         collection.length > 0 && (
           <div className="radar-progress" role="status">

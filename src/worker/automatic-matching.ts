@@ -4,6 +4,7 @@ import { automaticMatchRuns, companies, matches, issues } from "@/db/schema";
 import { lockCanonicalPublications } from "@/lib/canonical-lock";
 import { readLotMatchReview } from "@/lib/lot-match-reviews";
 import { companyAllowsPilotProcessingSql } from "@/lib/pilot-processing";
+import { companyAllowsAiProcessingSql } from "@/lib/ai-processing-permission";
 import {
   assessmentTargetKey,
   sameAssessmentTarget,
@@ -117,6 +118,7 @@ async function current(tx: Tx, job: AutomaticComparisonJob, now: Date) {
         isNull(companies.disabledAt),
         isNotNull(companies.onboardedAt),
         companyAllowsPilotProcessingSql(),
+        companyAllowsAiProcessingSql("documentary"),
       ),
     )
     .for("share");

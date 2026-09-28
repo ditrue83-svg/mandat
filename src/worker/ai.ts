@@ -1187,6 +1187,7 @@ export async function classify(
   p: Publication,
   profile: CompanyProfile,
   transport?: AiTransport,
+  beforeRequest?: () => Promise<void>,
 ) {
   // A recorded doubt about the commissioned work belongs to the source,
   // not to the company. Do not ask a scorer to override this review state.
@@ -1208,6 +1209,7 @@ export async function classify(
       needsReview: true,
     };
   const scopeRequest = buildScopeRequest(p);
+  await beforeRequest?.();
   const scope = validateScope(
     await infer(
       p,
@@ -1227,6 +1229,7 @@ export async function classify(
       needsReview: true,
     };
   const request = buildMatchRequest(p, profile);
+  await beforeRequest?.();
   const input = await infer(
     p,
     "match",

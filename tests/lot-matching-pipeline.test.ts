@@ -35,6 +35,12 @@ import {
 } from "../src/lib/lot-notice";
 import { renderLotNoticeContent } from "../src/lib/notification-content";
 import { PILOT_PARTICIPATION_TERMS_VERSION } from "../src/lib/pilot-participation";
+import { AI_PROCESSING_NOTICE_HASH } from "../src/lib/ai-processing-permission";
+import {
+  AI_PROCESSING_NOTICE,
+  AI_PROCESSING_NOTICE_VERSION,
+  AI_PROCESSING_RECIPIENT,
+} from "../src/lib/ai-processing-notice";
 import {
   LOT_WORKER_REVIEW_VERSION,
   matchAdoptedPublication,
@@ -120,11 +126,16 @@ beforeAll(async () => {
 }, 20000);
 beforeEach(async () => {
   vi.stubEnv("DOCUMENTARY_COMPARISON_ENABLED", "false");
+  vi.stubEnv("LLM_PROVIDER", "openai");
+  vi.stubEnv("DOCUMENTARY_LLM_PROVIDER", "");
+  vi.stubEnv("OPENAI_API_BASE_URL", "https://api.openai.com/v1");
   vi.stubEnv("DOCUMENTARY_LLM_MODEL", "");
-  vi.stubEnv("DOCUMENTARY_LLM_REASONING_EFFORT", "");
-  vi.stubEnv("DOCUMENTARY_SOURCE_REASONING_EFFORT", "");
+  vi.stubEnv("DOCUMENTARY_LLM_REASONING_EFFORT", "none");
+  vi.stubEnv("DOCUMENTARY_SOURCE_REASONING_EFFORT", "none");
   vi.stubEnv("LLM_REASONING_EFFORT", "");
-  vi.stubEnv("LLM_MODEL", "invented-documentary-model");
+  // Inference is mocked; production provider restrictions and receipt checks
+  // remain real. Model-key invalidation is covered in source-interpretation.
+  vi.stubEnv("LLM_MODEL", "gpt-6-luna");
   vi.stubEnv("LLM_INPUT_CHF_PER_MILLION", "1");
   vi.stubEnv("LLM_OUTPUT_CHF_PER_MILLION", "2");
   vi.mocked(infer)
@@ -781,7 +792,7 @@ it("A corrupted current public interpretation fails closed before any provider f
   });
 });
 
-for (const changed of ["source", "model", "source_reasoning"] as const)
+for (const changed of ["source", "source_reasoning"] as const)
   it(`A changed ${changed} creates a new public interpretation instead of reusing the old cache`, async () => {
     const { f, job } = await automaticFixture();
     vi.mocked(infer).mockImplementation(async (_pub, _purpose, prompt) =>
@@ -794,9 +805,7 @@ for (const changed of ["source", "model", "source_reasoning"] as const)
       corrected.lots[0].orderDescription.it = `${lotText} Rettifica inventata: manutenzione stagionale.`;
       const observation = await f.observation(corrected);
       await f.adopt(observation.id);
-    } else if (changed === "model")
-      vi.stubEnv("LLM_MODEL", "another-invented-documentary-model");
-    else vi.stubEnv("DOCUMENTARY_SOURCE_REASONING_EFFORT", "high");
+    } else vi.stubEnv("DOCUMENTARY_SOURCE_REASONING_EFFORT", "high");
     const other = await company();
     const nextJob = await automaticJob(f.p.id, other);
     vi.mocked(infer).mockClear();
@@ -832,6 +841,64 @@ it("A profile change while the provider runs supersedes its answer without holdi
   const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
   expect(loaded.project.signalEligible).toBe(false);
   expect(loaded.project.targets[0].automatic).toBeNull();
+  expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
+    "documentary-source-interpretation",
+  ]);
+});
+
+it("The pinned OpenAI model cannot be replaced by an unvalidated model", async () => {
+  const { job } = await automaticFixture();
+  vi.stubEnv("LLM_MODEL", "another-invented-documentary-model");
+  expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+    status: "skipped",
+  });
+  expect(infer).not.toHaveBeenCalled();
+});
+
+it("Pilot participation alone never queues a private AI comparison", async () => {
+  vi.stubEnv("DOCUMENTARY_COMPARISON_ENABLED", "true");
+  const f = await fixture();
+  await company(baseProfile, { aiPermission: false });
+  await matchAdoptedPublication({ publicationId: f.p.id, now });
+  expect(
+    await db
+      .select()
+      .from(schema.automaticMatchRuns)
+      .where(eq(schema.automaticMatchRuns.publicationId, f.p.id)),
+  ).toEqual([]);
+  expect(infer).not.toHaveBeenCalled();
+});
+
+it("A queued comparison is invalidated when the AI permission is revoked", async () => {
+  const { job, companyId } = await automaticFixture();
+  await db
+    .update(schema.aiProcessingReceipts)
+    .set({ revokedAt: new Date() })
+    .where(eq(schema.aiProcessingReceipts.companyId, companyId));
+  expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+    status: "skipped",
+  });
+  expect(infer).not.toHaveBeenCalled();
+  const [run] = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(eq(schema.automaticMatchRuns.id, job.runId));
+  expect(run.result).toBeNull();
+  expect(run.status).toBe("superseded");
+});
+
+it("Revocation after a public reading prevents the private company request", async () => {
+  const { job, companyId } = await automaticFixture();
+  vi.mocked(infer).mockImplementation(async (_pub, _purpose, prompt) => {
+    await db
+      .update(schema.aiProcessingReceipts)
+      .set({ revokedAt: new Date() })
+      .where(eq(schema.aiProcessingReceipts.companyId, companyId));
+    return inventedAnswer(prompt);
+  });
+  expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+    status: "superseded",
+  });
   expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
     "documentary-source-interpretation",
   ]);
@@ -1290,6 +1357,7 @@ async function company(
     disabled?: boolean;
     onboarded?: boolean;
     acceptedVersion?: string;
+    aiPermission?: boolean;
   } = {},
 ) {
   const id = randomUUID();
@@ -1312,6 +1380,16 @@ async function company(
     acceptedVersion:
       options.acceptedVersion ?? PILOT_PARTICIPATION_TERMS_VERSION,
   });
+  if (options.aiPermission !== false)
+    await db.insert(schema.aiProcessingReceipts).values({
+      id: randomUUID(),
+      companyId: id,
+      userId: id,
+      recipient: AI_PROCESSING_RECIPIENT,
+      noticeVersion: AI_PROCESSING_NOTICE_VERSION,
+      noticeHash: AI_PROCESSING_NOTICE_HASH,
+      noticeText: AI_PROCESSING_NOTICE.join("\n\n"),
+    });
   return id;
 }
 async function fixture(

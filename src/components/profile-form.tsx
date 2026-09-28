@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Check } from "lucide-react";
 import { Shell } from "./shell";
+import { AiProcessingPanel } from "./ai-processing-panel";
+import type { AiProcessingStatus } from "@/lib/ai-processing-notice";
 import {
   SECTORS,
   ZONES,
@@ -19,9 +21,11 @@ import {
 export function ProfileForm({
   viewer,
   onboarding = false,
+  aiProcessing,
 }: {
   viewer: Viewer;
   onboarding?: boolean;
+  aiProcessing?: AiProcessingStatus;
 }) {
   const [form, setForm] = useState<CompanyProfile>(viewer.profile);
   const [sectorQuery, setSectorQuery] = useState("");
@@ -510,6 +514,9 @@ export function ProfileForm({
             </button>
           </div>
         </form>
+        {aiProcessing && (!onboarding || step === 3) && (
+          <AiProcessingPanel initial={aiProcessing} demo={viewer.demo} />
+        )}
       </div>
     </Shell>
   );

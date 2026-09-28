@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import { PgBoss, fromDrizzle } from "pg-boss";
-import { automaticMatchRuns } from "@/db/schema";
+import { automaticMatchRuns, companies } from "@/db/schema";
+import { companyAllowsAiProcessingSql } from "./ai-processing-permission";
+import { companyAllowsPilotProcessingSql } from "./pilot-processing";
 import type { LoadedLotMatchReview } from "./lot-match-reviews";
 import { assessmentTargetKey } from "./lot-assessment";
 import {
@@ -32,6 +34,19 @@ export async function enqueueAutomaticComparisons(
     loaded.project.dismissed
   )
     return 0;
+  const [authorized] = await tx
+    .select({ id: companies.id })
+    .from(companies)
+    .where(
+      and(
+        eq(companies.id, loaded.company.id),
+        isNull(companies.disabledAt),
+        companyAllowsPilotProcessingSql(),
+        companyAllowsAiProcessingSql("documentary"),
+      ),
+    )
+    .limit(1);
+  if (!authorized) return 0;
   let queued = 0;
   for (const target of loaded.project.targets) {
     if (

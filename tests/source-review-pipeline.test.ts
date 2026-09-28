@@ -228,7 +228,12 @@ it("mantiene il percorso senza eventi e la cache legacy senza inventare una dipe
   await run();
   expect(classify).toHaveBeenCalledTimes(1);
   expect(summarize).not.toHaveBeenCalled();
-  expect(vi.mocked(classify).mock.calls[0]).toHaveLength(2);
+  const call = vi.mocked(classify).mock.calls[0];
+  expect(call[2]).toBeUndefined();
+  expect(call[3]).toBeTypeOf("function");
+  // The mocked classifier below tests cache behavior. The real callback must
+  // still refuse this fixture, which has no explicit AI-processing receipt.
+  await expect(call[3]!()).rejects.toThrow("I nuovi confronti AI sono disattivati");
   expect((await storedMatches())[0]).toMatchObject({
     score: 85,
     eligible: true,

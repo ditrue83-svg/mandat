@@ -88,17 +88,21 @@ export const rateLimit = pgTable("rate_limit", {
   count: integer("count").notNull(),
   lastRequest: bigint("last_request", { mode: "number" }).notNull(),
 }).enableRLS();
-export const companies = pgTable("companies", {
-  id: text("id").primaryKey(),
-  ownerId: text("owner_id")
-    .notNull()
-    .unique()
-    .references(() => user.id, { onDelete: "cascade" }),
-  profile: jsonb("profile").$type<CompanyProfile>().notNull(),
-  onboardedAt: time("onboarded_at"),
-  createdAt: time("created_at").notNull().defaultNow(),
-  disabledAt: time("disabled_at"),
-}).enableRLS();
+export const companies = pgTable(
+  "companies",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .unique()
+      .references(() => user.id, { onDelete: "cascade" }),
+    profile: jsonb("profile").$type<CompanyProfile>().notNull(),
+    onboardedAt: time("onboarded_at"),
+    createdAt: time("created_at").notNull().defaultNow(),
+    disabledAt: time("disabled_at"),
+  },
+  (t) => [uniqueIndex("companies_owner_identity_idx").on(t.id, t.ownerId)],
+).enableRLS();
 export const administrators = pgTable("administrators", {
   userId: text("user_id")
     .primaryKey()
@@ -122,6 +126,38 @@ export const invitations = pgTable(
     check(
       "invitations_acceptance_pair_check",
       sql`((${t.acceptedAt} is null and ${t.acceptedVersion} is null) or (${t.acceptedAt} is not null and ${t.acceptedVersion} is not null))`,
+    ),
+  ],
+).enableRLS();
+export const aiProcessingReceipts = pgTable(
+  "ai_processing_receipts",
+  {
+    id: text("id").primaryKey(),
+    companyId: text("company_id").notNull(),
+    userId: text("user_id").notNull(),
+    recipient: text("recipient").notNull(),
+    noticeVersion: text("notice_version").notNull(),
+    noticeHash: text("notice_hash").notNull(),
+    noticeText: text("notice_text").notNull(),
+    acceptedAt: time("accepted_at").notNull().defaultNow(),
+    revokedAt: time("revoked_at"),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.companyId, t.userId],
+      foreignColumns: [companies.id, companies.ownerId],
+      name: "ai_processing_receipt_owner_fk",
+    }).onDelete("cascade"),
+    uniqueIndex("ai_processing_receipt_active_idx")
+      .on(t.companyId, t.userId, t.recipient, t.noticeHash)
+      .where(sql`${t.revokedAt} is null`),
+    check(
+      "ai_processing_receipt_hash_check",
+      sql`${t.noticeHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check(
+      "ai_processing_receipt_dates_check",
+      sql`${t.revokedAt} is null or ${t.revokedAt} >= ${t.acceptedAt}`,
     ),
   ],
 ).enableRLS();

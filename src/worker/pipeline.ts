@@ -59,6 +59,10 @@ import {
   sourceReviewReason,
 } from "@/lib/source-review-policy";
 import { companyAllowsPilotProcessingSql } from "@/lib/pilot-processing";
+import {
+  assertCompanyAiProcessing,
+  CompanyAiProcessingBlocked,
+} from "@/lib/ai-processing-permission";
 import { sourceEdition } from "@/lib/source-edition";
 // A human source judgment is not an automatic company comparison. Version
 // this completed manual-review path so an earlier automatic cache cannot win
@@ -886,7 +890,10 @@ export async function enrichAndMatch(
         needsReview = true;
       } else if (preliminary.eligible && aiReady) {
         try {
-          const ai = await classify(p, firm.profile);
+          const ai = await classify(p, firm.profile, undefined, async () => {
+            options.signal?.throwIfAborted();
+            await assertCompanyAiProcessing(firm.id, "legacy");
+          });
           options.signal?.throwIfAborted();
           score = ai.score;
           reason = ai.reason;
@@ -895,9 +902,18 @@ export async function enrichAndMatch(
           await resolveIssue(`match-ai:${firm.id}:${p.id}`);
         } catch (e) {
           options.signal?.throwIfAborted();
-          if (!(e instanceof AiUnavailable)) failedAnalyses++;
+          if (
+            !(e instanceof AiUnavailable) &&
+            !(e instanceof CompanyAiProcessingBlocked)
+          )
+            failedAnalyses++;
           uncertain = true;
           retry = true;
+          if (e instanceof CompanyAiProcessingBlocked) {
+            score = 0;
+            reason = e.message;
+            needsReview = true;
+          }
           await recordIssue(
             `match-ai:${firm.id}:${p.id}`,
             "Pertinenza da verificare",

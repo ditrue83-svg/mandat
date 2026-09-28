@@ -1484,6 +1484,26 @@ h1 {
   font-size: 14px;
   line-height: 1.85;
 }
+.ai-processing-panel details {
+  margin: 1rem 0;
+}
+.ai-processing-panel summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+.ai-processing-panel .check-label {
+  align-items: flex-start;
+  white-space: normal;
+  margin-bottom: 1rem;
+}
+.ai-processing-panel .check-label input {
+  flex-shrink: 0;
+  margin-top: 0.3rem;
+}
+.ai-processing-panel .button {
+  white-space: normal;
+  max-width: 100%;
+}
 .panel p + p {
   margin-top: 12px;
 }
