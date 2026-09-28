@@ -21,7 +21,7 @@ import type {
 import { sourceEvidencePassages } from "./source-evidence-context";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v14";
+  "documentary-source-semantic-review-v15";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -64,6 +64,7 @@ function responseSchema(bounds?: {
   sourceIds: string[];
   evidenceHash?: string;
   readingIds?: string[];
+  claimReadingGroups?: { claimIds: string[]; readingIds: string[] }[];
 }) {
   const references = bounds
     ? z.array(z.enum(bounds.sourceIds)).min(1).max(1024)
@@ -82,6 +83,20 @@ function responseSchema(bounds?: {
           .min(1)
           .max(1024),
   });
+  // Enforce the same ownership at generation time as in validateResponses.
+  // Group claims sharing the allowed readings to avoid repeating the whole
+  // source vocabulary for every component dimension.
+  const boundChecks = bounds?.claimReadingGroups?.map((group) =>
+    check.extend({
+      claimId: z.enum(group.claimIds),
+      readingRefs: z.array(z.enum(group.readingIds)).min(1).max(1024),
+    }),
+  );
+  const assignedCheck = boundChecks?.length
+    ? boundChecks.length === 1
+      ? boundChecks[0]
+      : z.union(boundChecks)
+    : check;
   return z.strictObject({
     chunkId: bounds ? z.literal(bounds.id) : chunkId,
     sourceEvidenceHash: bounds?.evidenceHash
@@ -89,8 +104,8 @@ function responseSchema(bounds?: {
       : hash,
     coverage: z.enum(["complete", "unreadable"]),
     checks: bounds
-      ? z.array(check).length(bounds.claimIds.length)
-      : z.array(check).max(MAX_CHECKS),
+      ? z.array(assignedCheck).length(bounds.claimIds.length)
+      : z.array(assignedCheck).max(MAX_CHECKS),
     findings: z
       .array(
         z.strictObject({
@@ -530,12 +545,37 @@ export function buildGroundedSourceReviewRequests(
           rawPath: passage.rawPath,
         };
       });
-      const readingIds = [
+      const independentReadingIds = [
         ...observations.map((o) => o.id),
         ...classifications.map((c) => c.id),
         ...missingDetails.map((d) => d.id),
+      ];
+      const readingIds = [
+        ...independentReadingIds,
         ...originalFacts.map((fact) => fact.id),
       ];
+      const readingGroups = new Map<
+        string,
+        { claimIds: string[]; readingIds: string[] }
+      >();
+      for (const claim of plan.claims.filter((c) =>
+        request.assignedClaimIds.includes(c.id),
+      )) {
+        const ownFacts = originalFacts
+          .filter(
+            (fact) =>
+              claim.kind === "detail" &&
+              claim.sourceRefs.includes(fact.sourceRef),
+          )
+          .map((fact) => fact.id);
+        const key = JSON.stringify(ownFacts);
+        const group = readingGroups.get(key) ?? {
+          claimIds: [],
+          readingIds: [...independentReadingIds, ...ownFacts],
+        };
+        group.claimIds.push(claim.id);
+        readingGroups.set(key, group);
+      }
       const responseFormat: AutomaticResponseFormat = {
         type: "json_schema",
         json_schema: {
@@ -548,6 +588,7 @@ export function buildGroundedSourceReviewRequests(
               sourceIds: request.sourceIds,
               evidenceHash: independent.hash,
               readingIds,
+              claimReadingGroups: [...readingGroups.values()],
             }),
             { reused: "ref" },
           ),
@@ -700,8 +741,7 @@ function validateResponses(
         claim.sourceRefs.includes(ref) ||
         claim.sourceRefs.some(
           (ownRef) =>
-            check.sourceRefs.includes(ownRef) &&
-            languageVariants(ref, ownRef),
+            check.sourceRefs.includes(ownRef) && languageVariants(ref, ownRef),
         );
       if (
         check.verdict === "supported" &&

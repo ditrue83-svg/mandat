@@ -25,6 +25,7 @@ import {
   inventedReadingRefs,
 } from "./helpers/source-evidence-fixture";
 import { recordSourceEvidenceReading } from "../src/lib/source-evidence-reading";
+import { openaiJsonSchema } from "../src/lib/openai-responses";
 function recordSourceSemanticReview(
   responses: unknown[],
   plan: SourceSemanticReviewPlan,
@@ -1128,7 +1129,11 @@ test("A detail absent from the work selection uses its exact original fact witho
   const wire = new Ajv2020({ strict: false }).compile(
     request.responseFormat.json_schema.schema,
   );
+  const openaiWire = new Ajv2020({ strict: false }).compile(
+    openaiJsonSchema(request.responseFormat.json_schema.schema),
+  );
   assert(wire(response));
+  assert(openaiWire(response));
   const store = (answer: typeof response) =>
     productionRecordSourceSemanticReview([answer], plan, {
       ...metadata,
@@ -1142,7 +1147,16 @@ test("A detail absent from the work selection uses its exact original fact witho
   ]) {
     const changed = structuredClone(response);
     const claim = plan.claims.find((c) => c.kind === kind)!;
+    const extraPointer = structuredClone(response);
+    extraPointer.checks
+      .find((c) => c.claimId === claim.id)!
+      .readingRefs.push("o-s4");
+    assert(!wire(extraPointer), `${kind} cannot add a detail-only pointer`);
+    assert(!openaiWire(extraPointer));
+    assert.throws(() => store(extraPointer), /own detail claim/);
     changed.checks.find((c) => c.claimId === claim.id)!.readingRefs = ["o-s4"];
+    assert(!wire(changed), `${kind} cannot substitute a detail-only pointer`);
+    assert(!openaiWire(changed));
     assert.throws(() => store(changed), /own detail claim/);
   }
   const detail = plan.claims.find((c) => c.kind === "detail")!;
@@ -1164,6 +1178,80 @@ test("A detail absent from the work selection uses its exact original fact witho
   omitted.checks.find((c) => c.claimId === detail.id)!.readingRefs = [];
   assert(!wire(omitted));
   assert.throws(() => store(omitted));
+});
+
+test("The generated review schema keeps each original fact with its own detail", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[3],
+          id: "s5",
+          rawPath: "/other-condition/it",
+          text: "Consegna presso il magazzino inventato.",
+          endUtf16: "Consegna presso il magazzino inventato.".length,
+        },
+      ],
+    },
+  };
+  const original = recordSourceInterpretation(
+    {
+      ...draft(input).response,
+      details: ["s4", "s5"].map((id) => ({
+        kind: "execution_condition",
+        explanation: input.body.passages.find((p) => p.id === id)!.text,
+        sourceRefs: [id],
+        scope: "project_context",
+      })),
+    },
+    buildSourceInterpretationRequest(input),
+    { ...metadata, model: input.binding.model },
+  );
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  const evidence = inventedSourceEvidence(plan);
+  const request = buildGroundedSourceReviewRequests(plan, evidence)[0];
+  const body = JSON.parse(request.prompt);
+  const response = {
+    chunkId: request.id,
+    sourceEvidenceHash: evidence.hash,
+    coverage: "complete",
+    checks: request.assignedClaimIds.map((id) => {
+      const claim = plan.claims.find((c) => c.id === id)!;
+      return {
+        claimId: id,
+        draftQuote: null,
+        verdict: "supported",
+        reason: "Controllo inventato della proprietà dei riferimenti.",
+        sourceRefs: claim.sourceRefs,
+        readingRefs:
+          claim.kind === "detail"
+            ? claim.sourceRefs.map((ref) => `o-${ref}`)
+            : inventedReadingRefs(body, claim),
+      };
+    }),
+    findings: [],
+  };
+  const wire = new Ajv2020({ strict: false }).compile(
+    openaiJsonSchema(request.responseFormat.json_schema.schema),
+  );
+  assert(wire(response));
+  const claim = plan.claims.find(
+    (c) => c.kind === "detail" && c.sourceRefs.includes("s4"),
+  )!;
+  response.checks.find((c) => c.claimId === claim.id)!.readingRefs.push("o-s5");
+  assert(!wire(response));
+  assert.throws(
+    () =>
+      productionRecordSourceSemanticReview([response], plan, {
+        ...metadata,
+        sourceEvidence: evidence,
+      }),
+    /own detail claim/,
+  );
 });
 
 test.each(["accessory", "excluded"] as const)(
