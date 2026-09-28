@@ -8,7 +8,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v6";
+  "documentary-source-interpretation-v7";
 // Structured source output keeps its full allowance even without thinking.
 export const SOURCE_INTERPRETATION_MAX_TOKENS = 8192;
 const digest = (value: unknown) =>
@@ -537,6 +537,8 @@ export function buildSourceInterpretationRequest(
       "roleEvidence cita un estratto esatto, non tradotto e non classificatorio, dell'azione: refs della componente e scope coerente. Non scambiare settore, luogo o destinatario per ruolo contrattuale. Se indeterminato usa role null, roleEvidence unresolved e issue role_identity. Per details e roleEvidence scope è l'ambito dei passaggi; per issues è il target interessato. target_scope riguarda soltanto lotti e cita entrambi gli ambiti: contesto condiviso e lotto.",
       "source_conflict richiede status conflicting e due asserzioni materialmente incompatibili sullo stesso target, con riferimenti distinti nello stesso issue. Una tua interpretazione non è un'asserzione della fonte. Categoria ampia, descrizione specifica, traduzioni, ripetizioni o segmenti spezzati non costituiscono di per sé un conflitto. Una lettura unreadable vieta resolved.",
       "Descrivi ogni acquisto con azione e prodotto o servizio concreto, comprensibile da solo e coerente con la sintesi. Distingui oggetto, ruolo e opera a cui serve. Conserva tutte le prestazioni principali, accessorie ed escluse; non promuovere lavori di terzi. Non creare componenti da intestazioni, codici o traduzioni e non duplicare lo stesso acquisto per la classificazione. Servizi realmente acquistati di classificazione/catalogazione restano prestazioni, documentate dal testo.",
+      "Conserva nella sintesi o nei details tutti i destinatari, il numero esplicito di strutture o unità operative, continuità e territorio che definiscono il servizio. Non dedurre quantità o periodicità assenti.",
+      "Permessi organizzativi e limiti al subappalto vanno in details come execution_condition: conserva soggetti, attività e limiti. Non provano nuovi acquisti. Per creare componenti serve un'ulteriore clausola che acquisti o escluda quei lavori: cita quella prova. Distingui una prestazione acquistabile in opzione dal solo permesso di delegare il lavoro.",
       "Le clausole di contesto possono descrivere prestazioni: cita il loro testo e le classificazioni utili allo stesso oggetto. Il contesto di progetto non sostituisce il lotto: non assegnargli lavori di altri lotti. targetRef cita un passaggio service del target, anche se il titolo è geografico e l'oggetto è nel contesto comune.",
       "Ricongiungi passaggi della stessa rawPath per startUtf16. Tutti i segmenti previsti sono stati letti a monte: nessun limite di risposta autorizza omissioni; se non puoi rappresentare tutto usa uncertain con issue specifico. sourceRefs usa soltanto ID forniti, i testi originali vengono recuperati dal server.",
     ],
