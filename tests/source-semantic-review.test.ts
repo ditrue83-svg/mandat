@@ -264,7 +264,7 @@ function languageVariantReview(rawPath = "/procurement/orderDescription/de") {
   return { plan, sourceEvidence, responses };
 }
 
-test("A component can cite an independently read original language variant only with both source texts", () => {
+test("A language variant needs the draft citation and an explicit independent reading, without duplicating its source pointer", () => {
   const { plan, sourceEvidence, responses } = languageVariantReview();
   const read = (values: unknown[]) =>
     readSourceSemanticReview(
@@ -276,18 +276,27 @@ test("A component can cite an independently read original language variant only 
     )!;
   assert.equal(read(responses).accepted, true);
   const claimId = plan.claims.find((c) => c.kind === "component_role")!.id;
-  for (const omitted of ["s1", "s5"]) {
+  const withoutDuplicate = structuredClone(responses);
+  for (const check of withoutDuplicate.flatMap((r) => r.checks)) {
+    check.sourceRefs = check.sourceRefs.filter((ref) => ref !== "s5");
+  }
+  const unchanged = JSON.stringify(withoutDuplicate);
+  assert.equal(read(withoutDuplicate).accepted, true);
+  assert.equal(JSON.stringify(withoutDuplicate), unchanged);
+  for (const missing of ["draft_source", "independent_reading"]) {
     const changed = structuredClone(responses);
     const check = changed
       .flatMap((r) => r.checks)
       .find((c) => c.claimId === claimId)!;
-    check.sourceRefs = check.sourceRefs.filter((ref) => ref !== omitted);
+    if (missing === "draft_source")
+      check.sourceRefs = check.sourceRefs.filter((ref) => ref !== "s1");
+    else check.readingRefs = ["c1"];
     assert.throws(
       () => read(changed),
       /independent evidence|relevant independent/,
     );
   }
-  const negative = structuredClone(responses);
+  const negative = structuredClone(withoutDuplicate);
   const check = negative
     .flatMap((r) => r.checks)
     .find((c) => c.claimId === claimId)!;

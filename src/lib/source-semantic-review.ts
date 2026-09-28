@@ -21,7 +21,7 @@ import type {
 import { sourceEvidencePassages } from "./source-evidence-context";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v13";
+  "documentary-source-semantic-review-v14";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -604,9 +604,11 @@ function validateResponses(
       passage,
     ]),
   );
-  // Original language variants of one service field may support each other
-  // only when the reviewer cites both. This links provenance, not meaning:
-  // the review must still judge equivalence, omissions and contradictions.
+  // A cited independent reading already anchors its original source text.
+  // The reviewer must also cite the draft's original language variant of the
+  // same service field. Do not require a duplicate of the reading's pointer
+  // in sourceRefs. This links provenance, not meaning: the review must still
+  // judge equivalence, omissions and contradictions.
   const languageVariants = (leftId: string, rightId: string) => {
     const left = originals.get(leftId),
       right = originals.get(rightId);
@@ -696,12 +698,11 @@ function validateResponses(
         component?.importance === "excluded";
       const supportsClaimOrigin = (ref: string) =>
         claim.sourceRefs.includes(ref) ||
-        (check.sourceRefs.includes(ref) &&
-          claim.sourceRefs.some(
-            (ownRef) =>
-              check.sourceRefs.includes(ownRef) &&
-              languageVariants(ref, ownRef),
-          ));
+        claim.sourceRefs.some(
+          (ownRef) =>
+            check.sourceRefs.includes(ownRef) &&
+            languageVariants(ref, ownRef),
+        );
       if (
         check.verdict === "supported" &&
         !check.readingRefs.some((id) =>
