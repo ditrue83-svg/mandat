@@ -8,7 +8,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v9";
+  "documentary-source-interpretation-v10";
 // Structured source output keeps its full allowance even without thinking.
 export const SOURCE_INTERPRETATION_MAX_TOKENS = 8192;
 const digest = (value: unknown) =>
@@ -182,10 +182,10 @@ const contextSchema = z.strictObject({
 });
 
 const meaningStatement = text(600).describe(
-  "Significato concreto dell'oggetto nel suo dominio, non la sola ripetizione o traduzione di un termine polisemico. Non inventare dettagli assenti né decodificare codici da conoscenze esterne.",
+  "Significato concreto dell'oggetto nel suo dominio. Non basta ripetere o tradurre un termine ambiguo; non inventare dettagli o decodificare codici da memoria.",
 );
 const componentDescription = text(600).describe(
-  "Prestazione concreta: nomina l'azione e il prodotto o servizio acquistato, comprensibili senza leggere la sintesi. Riporta solo caratteristiche attestate dalla fonte. Non scrivere il nome di un campo, un'intestazione o la funzione di un dato nel documento.",
+  "Azione e prodotto/servizio acquistato, comprensibili da soli, con sole caratteristiche attestate. Non descrivere campi, intestazioni o funzioni dei dati.",
 );
 const componentRole = z
   .enum([
@@ -199,17 +199,17 @@ const componentRole = z
     "other",
   ])
   .describe(
-    "supply: fornire beni; execute: svolgere o organizzare una prestazione; design: progettare; install: installare o mettere in opera; maintain: conservare o ripristinare la funzionalità di un bene; operate: gestire continuativamente un servizio o impianto; advise: fornire consulenza; other: altra azione identificata. Il ruolo descrive l'azione contrattuale, non il settore, il luogo o il destinatario.",
+    "Azione contrattuale, non settore/luogo/destinatario. supply: beni; execute: svolgere/organizzare; design: progettare; install: mettere in opera; maintain: conservare/ripristinare funzionalità; operate: gestione continuativa; advise: consulenza; other: altra azione identificata.",
   );
 const componentImportance = z
   .enum(["main", "accessory", "excluded"])
   .describe(
-    "Posizione della prestazione nel contratto: principale, accessoria oppure esplicitamente esclusa. Non indica l'importanza di un dato o di una sezione del documento.",
+    "Prestazione principale, accessoria o esplicitamente esclusa; non importanza di dati/sezioni.",
   );
 const componentRefsDescription =
   "Cita il testo che identifica la prestazione, anche se si trova in una clausola o nel contesto del progetto. Codici ed etichette classificatorie possono chiarire questo stesso oggetto, ma non sono da soli una prestazione distinta.";
 const componentsDescription =
-  "Una componente per ciascuna prestazione o prodotto realmente acquistato, accessorio o esplicitamente escluso. Descrizione e classificazione dello stesso acquisto non sono due prestazioni. Dati amministrativi, codici, traduzioni e intestazioni non creano componenti aggiuntive.";
+  "Una componente per acquisto reale, accessorio o escluso. Descrizione e classificazione dello stesso acquisto non sono due prestazioni; dati, codici, traduzioni e intestazioni non aggiungono componenti.";
 
 // The same tagged shapes build the local contract and the provider schema.
 // Refinements below retain relational checks that JSON Schema does not encode.
@@ -258,7 +258,7 @@ function buildResponseSchema(bounds?: {
   };
   const roleFields = {
     actionText: text(600).describe(
-      "Estratto esatto, nella lingua originale, del testo che attesta l'azione o ne lascia indeterminato il ruolo. Non tradurre e non sostituire l'estratto con il nome di una professione.",
+      "Estratto originale esatto che attesta l'azione o l'indeterminatezza del ruolo. Non tradurre né sostituire con nomi di professioni.",
     ),
     sourceRefs: refs,
     scope,
@@ -419,6 +419,115 @@ function buildResponseSchema(bounds?: {
     });
 }
 export const sourceInterpretationResponseSchema = buildResponseSchema();
+
+// The provider assigns each original passage its purpose once. The stored
+// contract retains separate reference lists, derived without adding evidence.
+function buildProviderResponseSchema(
+  bounds?: Parameters<typeof buildResponseSchema>[0],
+  reference: z.ZodType<string> = sourceId,
+) {
+  const [resolved, uncertain, conflicting] =
+    buildResponseSchema(bounds).options;
+  const identified = resolved.shape.components.element;
+  const [anyIdentified, unresolved] =
+    uncertain.shape.components.element.options;
+  const identifiedMeaning = identified.shape.meaning.omit({ objectRefs: true });
+  const anyMeaning = z.discriminatedUnion("state", [
+    identifiedMeaning,
+    anyIdentified.shape.meaning.options[1].omit({ objectRefs: true }),
+  ]);
+  const evidence = z
+    .array(
+      z.strictObject({
+        sourceRef: reference,
+        use: z.enum(["component", "role", "meaning", "role_and_meaning"]),
+      }),
+    )
+    .min(1)
+    .max(32)
+    .refine(
+      (items) =>
+        new Set(items.map((item) => item.sourceRef)).size === items.length,
+      "Repeated component evidence",
+    )
+    .describe(
+      "Ogni ID una sola volta. Tutti sostengono la componente; role attesta actionText, meaning identifica l'oggetto, role_and_meaning entrambi. component aggiunge solo contesto. Ruolo e significato richiedono ciascuno prove non classificatorie.",
+    );
+  const identifiedComponent = identified
+    .omit({ sourceRefs: true, roleEvidence: true, meaning: true })
+    .extend({
+      evidence,
+      roleEvidence: identified.shape.roleEvidence.omit({ sourceRefs: true }),
+      meaning: identifiedMeaning,
+    });
+  const anyComponent = z.union([
+    identifiedComponent.extend({ meaning: anyMeaning }),
+    unresolved
+      .omit({ sourceRefs: true, roleEvidence: true, meaning: true })
+      .extend({
+        evidence,
+        roleEvidence: unresolved.shape.roleEvidence.omit({ sourceRefs: true }),
+        meaning: anyMeaning,
+      }),
+  ]);
+  const evidenceFormat = z.literal("component_evidence_v1");
+  const unresolvedFields = {
+    evidenceFormat,
+    components: z.array(anyComponent).max(64).describe(componentsDescription),
+  };
+  return z.discriminatedUnion("status", [
+    resolved.extend({
+      evidenceFormat,
+      components: z
+        .array(identifiedComponent)
+        .min(1)
+        .max(64)
+        .describe(componentsDescription),
+    }),
+    uncertain.extend(unresolvedFields),
+    conflicting.extend(unresolvedFields),
+  ]);
+}
+const providerResponseSchema = buildProviderResponseSchema();
+function decodeProviderResponse(response: unknown): unknown {
+  if (
+    !response ||
+    typeof response !== "object" ||
+    !("evidenceFormat" in response)
+  )
+    return response;
+  const {
+    evidenceFormat: _format,
+    components,
+    ...value
+  } = providerResponseSchema.parse(response);
+  return {
+    ...value,
+    components: components.map(
+      ({ evidence, roleEvidence, meaning, ...component }) => ({
+        ...component,
+        sourceRefs: evidence.map((item) => item.sourceRef),
+        roleEvidence: {
+          ...roleEvidence,
+          sourceRefs: evidence
+            .filter(
+              (item) => item.use === "role" || item.use === "role_and_meaning",
+            )
+            .map((item) => item.sourceRef),
+        },
+        meaning: {
+          ...meaning,
+          objectRefs: evidence
+            .filter(
+              (item) =>
+                item.use === "meaning" || item.use === "role_and_meaning",
+            )
+            .map((item) => item.sourceRef),
+        },
+      }),
+    ),
+  };
+}
 function freeze<T>(value: T): T {
   if (value && typeof value === "object") {
     Object.values(value).forEach(freeze);
@@ -540,16 +649,16 @@ export function buildSourceInterpretationRequest(
     task: "Identifica ciò che viene concretamente acquistato dal target, usando insieme descrizioni e contesto originale. Produci una sintesi neutrale e componenti distinte, con riferimenti esatti. La tua interpretazione sarà fissata prima di qualsiasi confronto aziendale.",
     rules: [
       "classificationContext è un registro immutabile separato dalle prestazioni: rendiconta ogni ID una volta, conservando codici, etichette, lingue e ambiti. clarifies_domain richiede un'etichetta originale; broad_context è una famiglia ampia, non prova una prestazione specifica; shared_project_only è contesto condiviso. Senza etichetta non decodificare codici da memoria. unresolved indica dubbio materiale; conflicting richiede asserzioni incompatibili.",
-      "meaning identifica l'oggetto nel suo dominio con objectRefs non classificatori e classificationContextIds usati. Non basta ripetere o tradurre un termine ambiguo: disambigua con le etichette originali, senza scegliere settori esterni o dichiarare errata la classificazione per salvare un'ipotesi. explicit_text si fonda sul testo; text_with_classification_context richiede un'etichetta del target. Solo per un lotto senza classificazioni proprie può usare un'etichetta condivisa insieme a objectRefs locali. Famiglie classificatorie non provano equivalenza, capacità o ammissibilità.",
+      "meaning identifica l'oggetto nel suo dominio: evidence con use meaning o role_and_meaning cita prove non classificatorie; classificationContextIds riporta le classificazioni usate. Non basta ripetere o tradurre un termine ambiguo: disambigua con le etichette originali, senza scegliere settori esterni o dichiarare errata la classificazione per salvare un'ipotesi. explicit_text si fonda sul testo; text_with_classification_context richiede un'etichetta del target. Solo per un lotto senza classificazioni proprie può usare un'etichetta condivisa insieme a prove locali del significato. Famiglie classificatorie non provano equivalenza, capacità o ammissibilità.",
       "resolved richiede oggetto e ruolo identificabili, anche come famiglia di prodotti senza sottotipo o dettagli tecnici. Non inventare dettagli: quantità, certificazioni o specifiche assenti non rendono da sole incerto il mestiere. details separa specifiche mancanti, condizioni esecutive e contesto condiviso; conserva quantità e unità originali. Non sono prestazioni aggiuntive né issues bloccanti.",
       "uncertain richiede un issue materiale tipizzato. object_identity collega componentIndexes (zero-based) a meaning ambiguous; role_identity a role null e roleEvidence unresolved; unreadable_source richiede una lettura unreadable. representation_incomplete cita prestazioni non rappresentate, non informazioni commerciali o specifiche assenti. Non inserire issues per dichiarare assenza di incertezza, e non dichiarare completa una rappresentazione incompleta.",
-      "roleEvidence cita un estratto esatto, non tradotto e non classificatorio, dell'azione: refs della componente e scope coerente. Non scambiare settore, luogo o destinatario per ruolo contrattuale. Se indeterminato usa role null, roleEvidence unresolved e issue role_identity. Per details e roleEvidence scope è l'ambito dei passaggi; per issues è il target interessato. target_scope riguarda soltanto lotti e cita entrambi gli ambiti: contesto condiviso e lotto.",
+      "roleEvidence cita un estratto esatto, non tradotto e non classificatorio dell'azione; evidence con use role o role_and_meaning lo documenta nello stesso scope. Non scambiare settore, luogo o destinatario per ruolo contrattuale. Se indeterminato usa role null, roleEvidence unresolved e issue role_identity. Per details e roleEvidence scope è l'ambito dei passaggi; per issues è il target interessato. target_scope riguarda soltanto lotti e cita entrambi gli ambiti: contesto condiviso e lotto.",
       "source_conflict richiede status conflicting e due asserzioni materialmente incompatibili sullo stesso target, con riferimenti distinti nello stesso issue. Una tua interpretazione non è un'asserzione della fonte. Categoria ampia, descrizione specifica, traduzioni, ripetizioni o segmenti spezzati non costituiscono di per sé un conflitto. Una lettura unreadable vieta resolved.",
       "Descrivi ogni acquisto con azione e prodotto o servizio concreto, comprensibile da solo e coerente con la sintesi. Distingui oggetto, ruolo e opera a cui serve. Conserva tutte le prestazioni principali, accessorie ed escluse; non promuovere lavori di terzi. Non creare componenti da intestazioni, codici o traduzioni e non duplicare lo stesso acquisto per la classificazione. Servizi realmente acquistati di classificazione/catalogazione restano prestazioni, documentate dal testo.",
       "Conserva destinatari, numero di strutture, continuità e territorio nella sintesi o nei details. Mantieni azione e ambito delle condizioni anche nella sintesi, senza estenderle ad altre fasi del lavoro. Non dedurre quantità o periodicità assenti.",
       "Permessi organizzativi e limiti al subappalto vanno in details come execution_condition: conserva soggetti, attività e limiti. Non provano nuovi acquisti. Per creare componenti serve un'ulteriore clausola che acquisti o escluda quei lavori: cita quella prova. Distingui una prestazione acquistabile in opzione dal solo permesso di delegare il lavoro.",
       "Le clausole di contesto possono descrivere prestazioni: cita il loro testo e le classificazioni utili allo stesso oggetto. Il contesto di progetto non sostituisce il lotto: non assegnargli lavori di altri lotti. targetRef cita un passaggio service del target, anche se il titolo è geografico e l'oggetto è nel contesto comune.",
-      "Ricongiungi passaggi della stessa rawPath per startUtf16. Tutti i segmenti previsti sono stati letti a monte: nessun limite di risposta autorizza omissioni; se non puoi rappresentare tutto usa uncertain con issue specifico. sourceRefs usa soltanto ID forniti, i testi originali vengono recuperati dal server.",
+      "Ricongiungi passaggi della stessa rawPath per startUtf16. Tutti i segmenti previsti sono stati letti a monte: nessun limite di risposta autorizza omissioni; se non puoi rappresentare tutto usa uncertain con issue specifico. Usa soltanto ID forniti; i testi originali sono recuperati dal server. In ogni componente evidence elenca ogni ID una sola volta con il suo uso; gli altri elenchi sourceRefs restano separati.",
     ],
     targetScope,
     coverage: context.coverage,
@@ -558,10 +667,8 @@ export function buildSourceInterpretationRequest(
     classificationContext,
     passages: body.passages.map(({ url: _url, ...passage }) => passage),
   });
-  const boundedRefs = z
-    .array(z.enum(body.passages.map((passage) => passage.id)))
-    .min(1)
-    .max(32);
+  const boundedReference = z.enum(body.passages.map((passage) => passage.id));
+  const boundedRefs = z.array(boundedReference).min(1).max(32);
   const boundedClassificationId = classificationContext.length
     ? z.enum(classificationContext.map((item) => item.id))
     : classificationId;
@@ -571,13 +678,16 @@ export function buildSourceInterpretationRequest(
       name: "documentary_source_interpretation",
       strict: true,
       schema: z.toJSONSchema(
-        buildResponseSchema({
-          refs: boundedRefs,
-          classificationId: boundedClassificationId,
-          classificationCount: classificationContext.length,
-          targetRef: z.enum(targets),
-          targetScope,
-        }),
+        buildProviderResponseSchema(
+          {
+            refs: boundedRefs,
+            classificationId: boundedClassificationId,
+            classificationCount: classificationContext.length,
+            targetRef: z.enum(targets),
+            targetScope,
+          },
+          boundedReference,
+        ),
         // Repeated reference enums share a JSON Schema definition. Preserve
         // their exact bounds without charging the long source multiple copies.
         { reused: "ref" },
@@ -965,7 +1075,10 @@ export function recordSourceInterpretation(
 ): SourceInterpretationRecord {
   if (metadata.model !== request.model)
     throw new Error("Source interpretation model changed during inference");
-  const validated = validateSourceInterpretation(response, request);
+  const validated = validateSourceInterpretation(
+    decodeProviderResponse(response),
+    request,
+  );
   const unsigned = {
     version: SOURCE_INTERPRETATION_VERSION,
     sourceKey: request.sourceKey,

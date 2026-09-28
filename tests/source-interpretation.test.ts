@@ -168,11 +168,171 @@ function response(input = context()) {
     targetRef: "s1",
   };
 }
+// Test fixtures keep the stored contract; encode their citations explicitly
+// when exercising the distinct provider JSON Schema.
+function wireResponse(value: any) {
+  return {
+    ...value,
+    evidenceFormat: "component_evidence_v1",
+    components: value.components.map(
+      ({ sourceRefs, roleEvidence, meaning, ...component }: any) => {
+        const { sourceRefs: roleRefs, ...role } = roleEvidence ?? {};
+        const { objectRefs, ...object } = meaning ?? {};
+        return {
+          ...component,
+          evidence: sourceRefs.map((sourceRef: string) => ({
+            sourceRef,
+            use: roleRefs?.includes(sourceRef)
+              ? objectRefs?.includes(sourceRef)
+                ? "role_and_meaning"
+                : "role"
+              : objectRefs?.includes(sourceRef)
+                ? "meaning"
+                : "component",
+          })),
+          roleEvidence: roleEvidence ? role : undefined,
+          meaning: meaning ? object : undefined,
+        };
+      },
+    ),
+  };
+}
 const metadata = {
   id: "invented-source-record",
   at: "2030-01-01T12:00:00.000Z",
   model: "invented-model",
 };
+
+test("Provider evidence records a supporting title once and derives all existing reference lists", () => {
+  const base = context();
+  const title = "Fornitura di prodotti inventati";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[0],
+          id: "s5",
+          rawPath: "/base/title/it",
+          role: "context",
+          text: title,
+          endUtf16: title.length,
+        },
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const wire = wireResponse(response(input));
+  wire.components[0].evidence.push({ sourceRef: "s5", use: "meaning" });
+  const before = JSON.stringify(wire);
+  const accepts = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  assert(accepts(wire));
+  const record = recordSourceInterpretation(wire, request, metadata);
+  const read = readSourceInterpretation(record, request)!;
+  assert.deepEqual(read.components[0].sourceRefs, ["s1", "s3", "s5"]);
+  assert.deepEqual(read.components[0].meaning.objectRefs, ["s1", "s5"]);
+  assert.deepEqual(read.components[0].roleEvidence.sourceRefs, ["s1"]);
+  assert.equal(read.evidence.find((item) => item.id === "s5")!.text, title);
+  assert.equal(JSON.stringify(wire), before);
+  assert.equal("evidenceFormat" in record.response, false);
+  // The stored contract is still strict. It never repairs an old malformed
+  // response by silently adding a missing parent reference.
+  const malformed = structuredClone(record.response);
+  malformed.components[0].sourceRefs = ["s1", "s3"];
+  assert.throws(
+    () => recordSourceInterpretation(malformed, request, metadata),
+    /within the component/,
+  );
+  const { hash: _hash, ...unsigned } = record;
+  const changed = { ...unsigned, response: malformed };
+  const tampered = {
+    ...changed,
+    hash: createHash("sha256")
+      .update(stableDocumentaryJson(changed))
+      .digest("hex"),
+  };
+  assert.throws(
+    () => readSourceInterpretation(tampered, request),
+    /within the component/,
+  );
+});
+
+test("Single-list evidence requires real role and meaning evidence without inferring its purpose", () => {
+  const request = buildSourceInterpretationRequest(context());
+  const base = wireResponse(response());
+  const first = base.components[0];
+  const changes = [
+    {
+      evidence: first.evidence.map((item: any) => ({
+        ...item,
+        use: "component",
+      })),
+    },
+    { evidence: first.evidence.map((item: any) => ({ ...item, use: "role" })) },
+    {
+      evidence: first.evidence.map((item: any) => ({
+        ...item,
+        use: "meaning",
+      })),
+    },
+    { evidence: [{ sourceRef: "s3", use: "role_and_meaning" }] },
+    { evidence: [{ sourceRef: "s999", use: "role_and_meaning" }] },
+    {
+      roleEvidence: {
+        ...first.roleEvidence,
+        actionText: "Traduzione non presente",
+      },
+    },
+    { roleEvidence: { ...first.roleEvidence, scope: "selected_lot" } },
+    { evidence: [...first.evidence, first.evidence[0]] },
+  ];
+  for (const change of changes) {
+    const value = { ...base, components: [{ ...first, ...change }] };
+    const before = JSON.stringify(value);
+    assert.throws(() => recordSourceInterpretation(value, request, metadata));
+    assert.equal(JSON.stringify(value), before);
+  }
+});
+
+test("Provider schema requires the wire version, bounded IDs and a single unambiguous evidence format", () => {
+  const request = buildSourceInterpretationRequest(context());
+  const accepts = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  const wire = wireResponse(response());
+  assert.equal(accepts(response()), false);
+  const { evidenceFormat: _format, ...unversioned } = wire;
+  for (const value of [
+    unversioned,
+    { ...wire, evidenceFormat: "unknown" },
+    { ...wire, components: [{ ...wire.components[0], sourceRefs: ["s1"] }] },
+    {
+      ...wire,
+      components: [
+        {
+          ...wire.components[0],
+          evidence: [{ sourceRef: "s999", use: "meaning" }],
+        },
+      ],
+    },
+    {
+      ...wire,
+      components: [
+        {
+          ...wire.components[0],
+          meaning: { ...wire.components[0].meaning, objectRefs: ["s1"] },
+        },
+      ],
+    },
+  ]) {
+    assert.equal(accepts(value), false);
+    assert.throws(() => recordSourceInterpretation(value, request, metadata));
+  }
+});
 
 test("OpenAI can encode the full source interpretation union without dropping local validation", () => {
   const input = context();
@@ -206,14 +366,14 @@ test("OpenAI can encode the full source interpretation union without dropping lo
     Object.values(value).forEach(checkReferenceSiblings);
   };
   checkReferenceSiblings(wireSchema);
-  assert(accepts({ result: response(input) }));
+  assert(accepts({ result: wireResponse(response(input)) }));
   const missingRole = structuredClone(response(input)) as Record<string, any>;
   delete missingRole.components[0].roleEvidence;
-  assert.equal(accepts({ result: missingRole }), false);
+  assert.equal(accepts({ result: wireResponse(missingRole) }), false);
   const badQuote = structuredClone(response(input));
   badQuote.components[0].roleEvidence.actionText =
     "Invented quote with valid JSON shape";
-  assert(accepts({ result: badQuote }));
+  assert(accepts({ result: wireResponse(badQuote) }));
   assert.throws(() => validateSourceInterpretation(badQuote, request));
   assert.deepEqual(request.responseFormat, before);
 });
@@ -265,7 +425,7 @@ test("Known object and action retain missing specifications as details without c
   const provider = new Ajv2020({ strict: false }).compile(
     request.responseFormat.json_schema.schema,
   );
-  assert.equal(provider(value), true);
+  assert.equal(provider(wireResponse(value)), true);
   const record = recordSourceInterpretation(value, request, metadata);
   const read = readSourceInterpretation(record, request)!;
   assert.equal(read.status, "resolved");
@@ -308,7 +468,7 @@ test("Known object and action retain missing specifications as details without c
     status: "uncertain",
     issues: [{ ...detail, componentIndexes: [] }],
   };
-  assert.equal(provider(untypedBlockingDetail), false);
+  assert.equal(provider(wireResponse(untypedBlockingDetail)), false);
   assert.throws(() =>
     validateSourceInterpretation(untypedBlockingDetail, request),
   );
@@ -344,7 +504,7 @@ test("Role identity requires a quoted action or an explicitly unresolved role wi
   const provider = new Ajv2020({ strict: false }).compile(
     request.responseFormat.json_schema.schema,
   );
-  assert.equal(provider(unresolved), true);
+  assert.equal(provider(wireResponse(unresolved)), true);
   const before = JSON.stringify(unresolved);
   const read = readSourceInterpretation(
     recordSourceInterpretation(unresolved, request, metadata),
@@ -361,7 +521,7 @@ test("Role identity requires a quoted action or an explicitly unresolved role wi
       components: [{ ...unresolved.components[0], role: "maintain" }],
     },
   ]) {
-    assert.equal(provider(value), false);
+    assert.equal(provider(wireResponse(value)), false);
     assert.throws(() => validateSourceInterpretation(value, request));
   }
   assert.throws(
@@ -552,7 +712,7 @@ test("Provider JSON Schema rejects the resolved ambiguous combination already re
     ],
   };
   assert.throws(() => validateSourceInterpretation(incoherent, request));
-  assert.equal(validate(incoherent), false);
+  assert.equal(validate(wireResponse(incoherent)), false);
 });
 
 test("Serialized provider schema and local validator agree on tagged states without coercing responses", () => {
@@ -659,14 +819,20 @@ test("Serialized provider schema and local validator agree on tagged states with
   ];
   for (const [name, value, wanted] of examples) {
     const before = JSON.stringify(value);
-    assert.equal(providerAccepts(value), wanted, name);
-    if (wanted)
+    assert.equal(providerAccepts(wireResponse(value)), wanted, name);
+    if (wanted) {
       assert.deepEqual(
         validateSourceInterpretation(value, request).response,
         value,
         name,
       );
-    else
+      assert.deepEqual(
+        recordSourceInterpretation(wireResponse(value), request, metadata)
+          .response,
+        value,
+        name,
+      );
+    } else
       assert.throws(() => validateSourceInterpretation(value, request), name);
     assert.equal(JSON.stringify(value), before, name);
   }
@@ -721,7 +887,7 @@ test("Cross-reference and main-component guarantees remain server checks beyond 
     },
   ];
   for (const value of malformed) {
-    assert.equal(providerAccepts(value), true);
+    assert.equal(providerAccepts(wireResponse(value)), true);
     assert.throws(() => validateSourceInterpretation(value, request));
   }
 });
@@ -971,7 +1137,7 @@ test("A selected lot keeps shared classification contextual and requires its own
   assert(
     new Ajv2020({ strict: false }).compile(
       request.responseFormat.json_schema.schema,
-    )(scopeQuestion),
+    )(wireResponse(scopeQuestion)),
   );
   assert.throws(
     () =>
@@ -1565,9 +1731,10 @@ test.each([
   "documentary-source-interpretation-v6",
   "documentary-source-interpretation-v7",
   "documentary-source-interpretation-v8",
+  "documentary-source-interpretation-v9",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
-  assert.equal(request.version, "documentary-source-interpretation-v9");
+  assert.equal(request.version, "documentary-source-interpretation-v10");
   const current = recordSourceInterpretation(response(), request, metadata);
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
@@ -2152,8 +2319,8 @@ test("Provider schema forbids shared-project details on project targets while pr
   const validate = new Ajv2020({ strict: false }).compile(
     project.responseFormat.json_schema.schema,
   );
-  assert(validate(value));
-  assert.equal(validate(shared), false);
+  assert(validate(wireResponse(value)));
+  assert.equal(validate(wireResponse(shared)), false);
   assert.throws(
     () => validateSourceInterpretation(shared, project),
     /Shared project detail requires a lot/,
