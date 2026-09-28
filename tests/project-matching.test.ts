@@ -232,10 +232,49 @@ test("A source site-visit note is review evidence and invalidates a prior operat
   assert.equal(filter(raw).requiresReview, false);
 });
 
+test("An explicit absence of a visit retains evidence and clears only the visit review", () => {
+  const raw = detail(),
+    before = filter(raw);
+  const notes = { it: "Sopralluogo non previsto", de: null };
+  Object.assign(raw.terms, { walkThroughNotes: notes });
+  const absent = filter(raw);
+  assert.equal(absent.requiresReview, false);
+  assert.equal(absent.eligible, true);
+  assert.deepEqual(
+    absent.evidence.find((e) => e.rawPath === "/terms/walkThroughNotes")?.value,
+    notes,
+  );
+  assert.notEqual(absent.operationalInputHash, before.operationalInputHash);
+  assert.deepEqual(absent.automaticReviewReasons, []);
+  raw.procurement.orderAddressOnlyDescription = "yes";
+  raw.procurement.orderAddressDescription = { it: "Luogo da concordare." };
+  const unknownLocation = filter(raw);
+  assert.equal(unknownLocation.requiresReview, true);
+  assert(
+    unknownLocation.automaticReviewReasons.some((r) => r.includes("Luogo")),
+  );
+  assert(
+    !unknownLocation.automaticReviewReasons.some((r) =>
+      r.includes("sopralluogo"),
+    ),
+  );
+  Object.assign(raw.terms, {
+    walkThroughNotes: { it: notes.it, fr: "Visite obligatoire." },
+  });
+  const conflicting = filter(raw);
+  assert(
+    conflicting.automaticReviewReasons.some((r) => r.includes("sopralluogo")),
+  );
+  assert.notEqual(
+    conflicting.operationalInputHash,
+    unknownLocation.operationalInputHash,
+  );
+});
+
 test("A real without project gets its own attributable CPV/place/deadline, with exact source evidence", () => {
   const raw = detail(),
     result = filter(raw);
-  assert.equal(PROJECT_PREFILTER_VERSION, "project-operational-prefilter-v2");
+  assert.equal(PROJECT_PREFILTER_VERSION, "project-operational-prefilter-v3");
   assert.equal(result.eligible, true);
   assert.equal(result.requiresReview, false);
   assert.equal(result.operational.deadline, "2030-12-01T11:00:00.000Z");

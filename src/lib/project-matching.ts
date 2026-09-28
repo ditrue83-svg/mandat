@@ -8,8 +8,9 @@ import {
   projectClassificationInput,
 } from "./sector-classification";
 import { zoneForExactCity } from "./ticino-localities";
+import { explicitlyNoSiteVisit } from "./site-visit-notes";
 
-export const PROJECT_PREFILTER_VERSION = "project-operational-prefilter-v2";
+export const PROJECT_PREFILTER_VERSION = "project-operational-prefilter-v3";
 export type ProjectOperationalEvidence = {
   scope: "publication" | "project_context";
   url: string;
@@ -395,9 +396,9 @@ export function preliminaryProjectMatch({
       } else review("Luogo di esecuzione del progetto da verificare.");
     } else review("Luogo di esecuzione del progetto da verificare.");
 
-    // Keep source visit instructions visible to the reviewer, even when the
-    // offer deadline is still open. Do not infer attendance or parse prose as
-    // an automatic legal deadline/exclusion. Empty language slots are absent.
+    // Keep every original note as evidence. Only complete, unqualified absence
+    // statements need no visit review. Do not infer attendance, optionality or
+    // a legal deadline/exclusion from other prose.
     const visit = own(object(sections.terms), "walkThroughNotes");
     if (
       visit !== null &&
@@ -415,9 +416,10 @@ export function preliminaryProjectMatch({
         "/terms",
         "availability",
       );
-      review(
-        "La fonte contiene indicazioni sul sopralluogo: verifica obbligatorietà, data ed eventuale partecipazione.",
-      );
+      if (!explicitlyNoSiteVisit(visit))
+        review(
+          "La fonte contiene indicazioni sul sopralluogo: verifica obbligatorietà, data ed eventuale partecipazione.",
+        );
     }
 
     const baseProcess = field(base, "processType", "/base", "deadline");
