@@ -409,13 +409,11 @@ test("Stored evidence cannot replace the original passage with a reconstructed o
       /exact original quotation/,
     );
   }
-  assert.equal(
-    readSourceEvidenceReading(
-      { ...record, version: "source-evidence-reading-v1" },
-      plan,
-    ),
-    null,
-  );
+  for (const version of [
+    "source-evidence-reading-v1",
+    "source-evidence-reading-v9",
+  ])
+    assert.equal(readSourceEvidenceReading({ ...record, version }, plan), null);
 });
 
 test("Fragmented classification labels are copied completely from their ordered original references", () => {
