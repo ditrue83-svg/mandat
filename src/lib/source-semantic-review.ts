@@ -21,7 +21,7 @@ import type {
 import { sourceEvidencePassages } from "./source-evidence-context";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v16";
+  "documentary-source-semantic-review-v17";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -133,6 +133,26 @@ type Claim = {
   sourceRefs: string[];
 };
 const unique = (values: readonly string[]) => [...new Set(values)];
+function areServiceLanguageVariants(
+  originals: ReadonlyMap<string, ComparisonPassage>,
+  leftId: string,
+  rightId: string,
+) {
+  const left = originals.get(leftId),
+    right = originals.get(rightId);
+  if (
+    !left ||
+    !right ||
+    left.scope !== right.scope ||
+    left.role !== "service" ||
+    right.role !== "service"
+  )
+    return false;
+  const localeField = /^(.*)\/(de|en|fr|it|rm)$/;
+  const a = localeField.exec(left.rawPath),
+    b = localeField.exec(right.rawPath);
+  return Boolean(a && b && a[1] === b[1] && a[2] !== b[2]);
+}
 function freeze<T>(value: T): T {
   if (value && typeof value === "object") {
     Object.values(value).forEach(freeze);
@@ -484,6 +504,12 @@ export function buildGroundedSourceReviewRequests(
   const classifications = independent.responses.flatMap((r) =>
     r.classifications.map((c) => ({ id: c.classificationId, ...c })),
   );
+  const originals = new Map(
+    sourceEvidencePassages(plan.context).map((passage) => [
+      passage.id,
+      passage,
+    ]),
+  );
   return freeze(
     plan.requests.map((request) => {
       // Each source passage is already present in the request. Avoid repeating
@@ -509,8 +535,31 @@ export function buildGroundedSourceReviewRequests(
           request.sourceIds.includes(q.sourceRef),
         );
       };
+      // A claim may cite a translation whose independent performance belongs
+      // to an earlier coverage chunk. Carry that original reading with its
+      // full quotes, using the same field/scope boundary as the validator.
+      // This supplies evidence to judge; it does not assert that translations
+      // agree or promote a condition into a performance.
+      const workClaimRefs = unique(
+        plan.claims
+          .filter(
+            (claim) =>
+              request.assignedClaimIds.includes(claim.id) &&
+              (claim.kind === "summary" || claim.kind.startsWith("component_")),
+          )
+          .flatMap((claim) => claim.sourceRefs),
+      );
       const observations = independent.observations
-        .filter((o) => relevant(o, o.kind === "condition"))
+        .filter(
+          (o) =>
+            relevant(o, o.kind === "condition") ||
+            (o.kind === "performance" &&
+              o.evidence.some((quote) =>
+                workClaimRefs.some((ref) =>
+                  areServiceLanguageVariants(originals, quote.sourceRef, ref),
+                ),
+              )),
+        )
         .map((o) => ({ ...o, evidence: projectQuotes(o.evidence) }));
       // The reviewer gets source-backed classification references, not an
       // earlier model's verdict or rationale promoted into source evidence.
@@ -654,22 +703,6 @@ function validateResponses(
   // same service field. Do not require a duplicate of the reading's pointer
   // in sourceRefs. This links provenance, not meaning: the review must still
   // judge equivalence, omissions and contradictions.
-  const languageVariants = (leftId: string, rightId: string) => {
-    const left = originals.get(leftId),
-      right = originals.get(rightId);
-    if (
-      !left ||
-      !right ||
-      left.scope !== right.scope ||
-      left.role !== "service" ||
-      right.role !== "service"
-    )
-      return false;
-    const localeField = /^(.*)\/(de|en|fr|it|rm)$/;
-    const a = localeField.exec(left.rawPath),
-      b = localeField.exec(right.rawPath);
-    return Boolean(a && b && a[1] === b[1] && a[2] !== b[2]);
-  };
   for (const [index, response] of responses.entries()) {
     const request = grounded[index];
     if (response.chunkId !== request.id)
@@ -745,7 +778,8 @@ function validateResponses(
         claim.sourceRefs.includes(ref) ||
         claim.sourceRefs.some(
           (ownRef) =>
-            check.sourceRefs.includes(ownRef) && languageVariants(ref, ownRef),
+            check.sourceRefs.includes(ownRef) &&
+            areServiceLanguageVariants(originals, ref, ownRef),
         );
       if (
         check.verdict === "supported" &&

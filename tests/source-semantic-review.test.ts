@@ -201,10 +201,13 @@ function answers(plan: SourceSemanticReviewPlan) {
   });
 }
 
-function languageVariantReview(rawPath = "/procurement/orderDescription/de") {
+function languageVariantReview(
+  rawPath = "/procurement/orderDescription/de",
+  separateCoverage = false,
+) {
   const base = context();
   const text = "Lieferung erfundener Artikel; Transport ausgeschlossen.";
-  const input: SourceInterpretationContext = {
+  let input: SourceInterpretationContext = {
     ...base,
     body: {
       ...base.body,
@@ -220,10 +223,49 @@ function languageVariantReview(rawPath = "/procurement/orderDescription/de") {
       ],
     },
   };
-  const plan = buildSourceSemanticReviewRequest(input, draft(input), config);
+  if (separateCoverage) {
+    const translation = input.body.passages.at(-1)!;
+    const filler = Array.from({ length: 100 }, (_, index) => {
+      const text = `Clausola amministrativa inventata ${index}. `.padEnd(
+        1500,
+        "x",
+      );
+      return {
+        ...base.body.passages[3],
+        id: `s${index + 6}`,
+        rawPath: `/terms/unrelated/${index}/it`,
+        text,
+        endUtf16: text.length,
+      };
+    });
+    const passages = [translation, ...filler, ...base.body.passages];
+    input = {
+      ...input,
+      body: { ...input.body, passages },
+      coverage: {
+        ...base.coverage,
+        sourceUtf16: passages.reduce((n, p) => n + p.text.length, 0),
+        fields: passages.length + input.body.fields.length,
+        chunks: 2,
+      },
+      readings: [
+        { chunkId: "chunk1", status: "complete", sourceRefs: ["s1"] },
+        { chunkId: "chunk2", status: "complete", sourceRefs: [] },
+      ],
+    };
+  }
+  const extractionInput = separateCoverage
+    ? { ...input, body: base.body }
+    : input;
+  const plan = buildSourceSemanticReviewRequest(
+    input,
+    draft(extractionInput),
+    config,
+  );
   const values = plan.evidencePlan.requests.map((r) =>
     inventedSourceEvidenceAnswer(JSON.parse(r.prompt)),
   );
+  for (const value of values) value.observations = [];
   values[0].observations = [
     { kind: "performance", serviceRef: "s5", evidence: [{ sourceRef: "s5" }] },
   ];
@@ -250,7 +292,9 @@ function languageVariantReview(rawPath = "/procurement/orderDescription/de") {
         sourceRefs: [
           ...new Set([
             ...claim.sourceRefs,
-            ...(!classification && !detail ? ["s5"] : []),
+            ...(!classification && !detail && request.sourceIds.includes("s5")
+              ? ["s5"]
+              : []),
           ]),
         ],
         readingRefs: classification
@@ -262,8 +306,69 @@ function languageVariantReview(rawPath = "/procurement/orderDescription/de") {
     }),
     findings: [],
   }));
-  return { plan, sourceEvidence, responses };
+  return { plan, sourceEvidence, responses, requests };
 }
+
+test("A later claim keeps its independent performance from another language and coverage chunk", () => {
+  const { plan, sourceEvidence, responses, requests } = languageVariantReview(
+    "/procurement/orderDescription/de",
+    true,
+  );
+  assert.ok(plan.requests.length > 1);
+  const claim = plan.claims.find((c) => c.kind === "component_importance")!;
+  const index = requests.findIndex((r) =>
+    r.assignedClaimIds.includes(claim.id),
+  );
+  assert.ok(index > 0);
+  const request = requests[index];
+  assert.ok(!request.sourceIds.includes("s5"));
+  const body = JSON.parse(request.prompt);
+  const performance = body.independentReading.observations.find(
+    (o: { id: string }) => o.id === "e1-1",
+  );
+  assert.equal(performance.kind, "performance");
+  assert.deepEqual(performance.evidence, [
+    {
+      sourceRef: "s5",
+      text: "Lieferung erfundener Artikel; Transport ausgeschlossen.",
+    },
+  ]);
+  assert.ok(request.readingIds.includes("e1-1"));
+  assert.deepEqual(
+    requests.flatMap((r) => r.coverage.passageIds),
+    plan.context.body.passages.map((p) => p.id),
+  );
+  const record = productionRecordSourceSemanticReview(responses, plan, {
+    ...metadata,
+    sourceEvidence,
+  });
+  assert.equal(readSourceSemanticReview(record, plan)!.accepted, true);
+  const missing = structuredClone(responses);
+  missing[index].checks.find((c) => c.claimId === claim.id)!.readingRefs = [
+    "c1",
+  ];
+  assert.throws(
+    () =>
+      productionRecordSourceSemanticReview(missing, plan, {
+        ...metadata,
+        sourceEvidence,
+      }),
+    /independent evidence|relevant independent/,
+  );
+  const foreign = languageVariantReview("/lots/0/orderDescription/de", true);
+  const foreignRequest = foreign.requests.find((r) =>
+    r.assignedClaimIds.includes(claim.id),
+  )!;
+  assert.ok(!foreignRequest.readingIds.includes("e1-1"));
+  assert.throws(
+    () =>
+      productionRecordSourceSemanticReview(foreign.responses, foreign.plan, {
+        ...metadata,
+        sourceEvidence: foreign.sourceEvidence,
+      }),
+    /unknown independent reading/,
+  );
+});
 
 test("A language variant needs the draft citation and an explicit independent reading, without duplicating its source pointer", () => {
   const { plan, sourceEvidence, responses } = languageVariantReview();
