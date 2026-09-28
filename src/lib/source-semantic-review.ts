@@ -21,7 +21,7 @@ import type {
 import { sourceEvidencePassages } from "./source-evidence-context";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v11";
+  "documentary-source-semantic-review-v12";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -303,6 +303,7 @@ ${item.meaning.statement}`,
         "Le observations della lettura indipendente selezionano e classificano passaggi originali senza riscriverli. Leggi direttamente evidence e passages per stabilire lavoro, soggetto che lo richiede, operatore che lo svolge, destinatario e carattere obbligatorio o facoltativo. kind e serviceRef aiutano a trovare le prove; non sono affermazioni del committente né sostituiscono il loro significato originale.",
         "Per ogni assignedClaim verifica il suo text e restituisci un check. Non attribuirgli parole di altri claim o campi del draft. supported richiede sostegno reale; contradicted una controprova; not_verifiable sostegno insufficiente. Per ogni esito negativo, draftQuote deve essere un estratto esatto non vuoto del text assegnato che identifica l’affermazione problematica; supported può usare null. Spiega quel preciso difetto contro la fonte. Un problema nel summary va giudicato nel claim summary, anche se un detail distinto è corretto. Leggi insieme oggetto, classificazioni originali e relativo ambito.",
         "Una valutazione AI non è una nuova affermazione del committente. Per contradicted identifica l'affermazione precisa del draft e il fatto originale incompatibile: una diversa formulazione o precisione non basta. La mancanza di un sottotipo non cancella la famiglia esplicitamente dichiarata dalle etichette originali; queste non dimostrano da sole azioni accessorie o applicabilità a un lotto.",
+        "Una categoria amministrativa e una descrizione specifica possono usare nomi diversi senza contraddirsi. La categoria non esclude di per sé un lavoro esplicito né aggiunge tutte le attività della sua etichetta. Verifica il lavoro contro la descrizione originale, mantenendo le classificazioni come dichiarate; non approvare correzioni del codice o nuovi servizi. Caratteristiche esplicite incompatibili e clausole opposte rimangono bloccanti. Un avviso sui metadati non sana ambiguità, omissioni o affermazioni false.",
         "Ogni check cita readingRefs della lettura indipendente oltre agli estratti originali. I riferimenti evidence della lettura indipendente rimandano al testo originale in passages; le citazioni di contesto non presenti in passages conservano anche text. Un draft che introduce un dominio incompatibile, una correzione della fonte o una discrepanza non presente nella lettura indipendente non può essere supported solo perché ripete il nome del prodotto. Per classification_reading cita la corrispondente classificazione indipendente cN.",
         "Solo per i claim detail puoi citare in readingRefs gli originalFacts o-sN: sono rinvii del codice a passages originali, non giudizi AI. Servono anche quando la lettura preliminare omette cronologie o dettagli amministrativi. Verifica il testo originale e cita lo stesso sN in sourceRefs; non usare o-sN per summary, componenti o classificazioni. Una data non selezionata prima non è falsa per questo motivo.",
         "Una componente main richiede una performance indipendente pertinente. Componenti accessory o excluded possono essere verificate anche su una condition indipendente pertinente: leggi la clausola originale per distinguere un acquisto opzionale o un'esclusione da un semplice permesso organizzativo. Una condition non prova automaticamente un lavoro acquistato e non può sostenere una nuova prestazione principale.",
@@ -495,6 +496,7 @@ export function buildGroundedSourceReviewRequests(
       // The reviewer gets source-backed classification references, not an
       // earlier model's verdict or rationale promoted into source evidence.
       // Conflicting readings still fail the accepted-reading gate above.
+      // Metadata advisories are retained for the operator, not used as proof.
       const readingClassifications = classifications.map((c) => ({
         id: c.id,
         classificationId: c.classificationId,
@@ -853,18 +855,23 @@ export function readSourceSemanticReview(
     .filter(
       (item) =>
         ids.has(item.id) ||
-        independent.findings.some((f) => f.sourceRefs.includes(item.id)),
+        [...independent.findings, ...independent.warnings].some((f) =>
+          f.sourceRefs.includes(item.id),
+        ),
     )
     .map((item) => ({ ...item }));
   return freeze({
     ...record,
     accepted,
     reason: accepted
-      ? "La revisione della fonte non ha rilevato incoerenze o prestazioni omesse nell'interpretazione del lavoro."
+      ? independent.warnings.length
+        ? "La revisione conferma l'interpretazione del lavoro; resta un avviso sulla classificazione originale."
+        : "La revisione della fonte non ha rilevato incoerenze o prestazioni omesse nell'interpretazione del lavoro."
       : !complete
         ? "La revisione della fonte originale è incompleta: serve una verifica."
         : "La revisione della fonte ha rilevato affermazioni non confermate: serve una verifica.",
     findings,
+    warnings: independent.warnings,
     evidence,
   });
 }

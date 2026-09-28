@@ -168,17 +168,22 @@ export function lotMatchEditorData(
                 ],
                 activities: automatic.companyEvidence.map((item) => item.text),
                 chunks: automatic.coverage.chunks,
-                reviewNotes:
-                  automatic.sourceReview && !automatic.sourceReview.accepted
-                    ? [
-                        ...new Set([
-                          plainText(automatic.sourceReview.reason),
-                          ...automatic.sourceReview.findings.map((item) =>
-                            plainText(item.reason),
-                          ),
-                        ]),
-                      ]
-                    : [],
+                reviewNotes: automatic.sourceReview
+                  ? [
+                      ...new Set([
+                        ...(!automatic.sourceReview.accepted ||
+                        automatic.sourceReview.warnings.length
+                          ? [plainText(automatic.sourceReview.reason)]
+                          : []),
+                        ...automatic.sourceReview.findings.map((item) =>
+                          plainText(item.reason),
+                        ),
+                        ...automatic.sourceReview.warnings.map((item) =>
+                          plainText(item.reason),
+                        ),
+                      ]),
+                    ]
+                  : [],
               }
             : null,
           expected: {

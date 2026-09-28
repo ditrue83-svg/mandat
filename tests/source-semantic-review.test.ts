@@ -200,6 +200,77 @@ function answers(plan: SourceSemanticReviewPlan) {
   });
 }
 
+test("Metadata warnings survive review without becoming evidence or overriding a negative claim", () => {
+  const original = draft(),
+    before = JSON.stringify(original);
+  const plan = buildSourceSemanticReviewRequest(context(), original, config);
+  const inputs = plan.evidencePlan.requests.map((r) =>
+    inventedSourceEvidenceAnswer(JSON.parse(r.prompt)),
+  );
+  inputs[0].classifications[0].relationship = "metadata_discrepancy";
+  inputs[0].classifications[0].explanation =
+    "Avviso inventato sulla categoria, non prova del significato.";
+  inputs[0].classifications[0].evidence.push({ sourceRef: "s1" });
+  const sourceEvidence = recordSourceEvidenceReading(
+    inputs,
+    plan.evidencePlan,
+    metadata,
+  );
+  const grounded = buildGroundedSourceReviewRequests(plan, sourceEvidence);
+  for (const request of grounded) {
+    const reading = JSON.parse(request.prompt).independentReading;
+    assert(
+      !JSON.stringify(reading).includes(
+        inputs[0].classifications[0].explanation,
+      ),
+    );
+    assert(
+      reading.classifications.every(
+        (c: any) => !Object.hasOwn(c, "relationship"),
+      ),
+    );
+  }
+  const responses = answers(plan).map((r) => ({
+    ...r,
+    sourceEvidenceHash: sourceEvidence.hash,
+  }));
+  const reviewed = readSourceSemanticReview(
+    productionRecordSourceSemanticReview(responses, plan, {
+      ...metadata,
+      sourceEvidence,
+    }),
+    plan,
+  )!;
+  assert.equal(reviewed.accepted, true);
+  assert.equal(
+    reviewed.warnings[0].reason,
+    inputs[0].classifications[0].explanation,
+  );
+  assert.match(reviewed.reason, /avviso/);
+  assert(
+    reviewed.evidence.some(
+      (p) => p.id === "s3" && p.text === context().body.passages[2].text,
+    ),
+  );
+  const negative = responses.map((r) => ({
+    ...r,
+    checks: r.checks.map((c, i) =>
+      i === 0 ? { ...c, verdict: "contradicted" } : c,
+    ),
+  }));
+  const blocked = readSourceSemanticReview(
+    productionRecordSourceSemanticReview(negative, plan, {
+      ...metadata,
+      sourceEvidence,
+    }),
+    plan,
+  )!;
+  assert.equal(blocked.accepted, false);
+  assert.equal(blocked.warnings.length, 1);
+  assert.equal(blocked.findings[0].kind, "contradicted");
+  assert.equal(JSON.stringify(original), before);
+});
+
 test("Territorial review keeps common work and local partition separate without overriding missing proof or negative checks", () => {
   const base = context();
   const local =

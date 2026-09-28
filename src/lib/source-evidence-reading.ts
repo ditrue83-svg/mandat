@@ -9,7 +9,7 @@ import {
 import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v11";
+export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v12";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -56,6 +56,7 @@ const classification = z.strictObject({
     "consistent",
     "broad_context",
     "not_decisive",
+    "metadata_discrepancy",
     "conflicting",
   ]),
   explanation: text(600),
@@ -255,7 +256,7 @@ export function buildSourceEvidenceReadingRequest(
         order: [
           "Individua nella descrizione l'azione contrattuale e conserva la denominazione originale del bene.",
           "Leggi la famiglia dichiarata dalle classificazioni originali e riportala come contesto, senza ricavarne ingredienti, materiali o sottotipi.",
-          "Solo una caratteristica o clausola esplicita della descrizione può contraddire quel contesto. Prima di conflicting individua le due asserzioni incompatibili nella fonte; se una delle due è una tua interpretazione o traduzione del nome, non è un conflitto dimostrato.",
+          "Distingui una differenza nominale nei metadati da una incompatibilità materiale. Una categoria che nomina un contesto o un servizio complessivo non esclude di per sé un lavoro specifico: usa broad_context se compatibile, metadata_discrepancy se l'etichetta appare poco pertinente ma azione e oggetto sono espliciti e non incompatibili. Conserva entrambi i testi. Prima di conflicting individua caratteristiche o clausole originali incompatibili, non solo nomi diversi o una tua traduzione.",
         ],
         inventedExamplesNotSourceEvidence: [
           {
@@ -266,6 +267,13 @@ export function buildSourceEvidenceReadingRequest(
             relationship: "consistent",
             rationale:
               "Il nome ammette più significati: non prova accumulatori elettrici né un errore della classificazione.",
+          },
+          {
+            description: "Pulizia delle sale di lettura e degli scaffali",
+            classification: "Servizi di biblioteca",
+            relationship: "metadata_discrepancy",
+            rationale:
+              "Etichetta generica diversa dal lavoro descritto: non vieta la pulizia né dichiara caratteristiche incompatibili. Il lavoro esplicito resta identificato; conservare l'anomalia come avviso, senza aggiungere gestione o prestito di libri.",
           },
           {
             description:
@@ -287,7 +295,7 @@ export function buildSourceEvidenceReadingRequest(
       rules: [
         "Le observations sono selezioni di prove originali, non un riassunto. Scegli kind, serviceRef ed evidence per individuare tutte le prestazioni e condizioni rilevanti; non produrre parafrasi, traduzioni o un campo statement. Il codice conserva i passaggi integrali. Oggetto, azione, soggetto contrattuale, destinatario, permessi e obblighi rimangono nel testo originale selezionato, che il revisore dovrà leggere direttamente. La sola selezione di un riferimento non dimostra un significato né l'applicabilità al target.",
         "Le etichette classificatorie dichiarano il contesto originale. Una denominazione generica o polisemica non dimostra che la classificazione sia sbagliata: non inventare una discrepanza né un sottotipo. Una classificazione ampia non aggiunge tutte le attività della sua etichetta.",
-        "Per ciascuna assignedClassificationIds restituisci una relazione con la descrizione. Non restituire label: il codice conserva automaticamente codice, etichette originali e traduzioni. In evidence scegli i passaggi che spiegano la relazione; i riferimenti propri della classificazione sono aggiunti dal codice. consistent o broad_context conserva la famiglia compatibile. not_decisive significa che la classificazione non determina da sola la prestazione locale. conflicting richiede affermazioni realmente incompatibili, con una controprova esterna alla classificazione.",
+        "Per ciascuna assignedClassificationIds restituisci una relazione con la descrizione. Non restituire label: il codice conserva codice ed etichette originali. In evidence scegli le prove della relazione; i riferimenti della classificazione sono aggiunti dal codice. consistent o broad_context conserva la famiglia compatibile; not_decisive non determina da sola la prestazione locale. metadata_discrepancy segnala una differenza di etichetta senza incompatibilità materiale: richiede in evidence il serviceRef di una performance esplicita dello stesso ambito e una spiegazione della differenza, senza correggere il codice. Non risolve oggetti ambigui, fonti incomplete o clausole opposte. conflicting richiede caratteristiche o affermazioni realmente incompatibili, con controprova originale esterna alla classificazione.",
         "Le osservazioni performance descrivono acquisti e azioni: fornitura di beni, esecuzione, gestione, installazione, manutenzione, progettazione o consulenza. Manutenzione conserva o ripristina un bene: luogo, destinatario o settore non la dimostrano. Metadati e classificazioni non sono prestazioni autonome.",
         "Una sola osservazione per ciascuna prestazione distinta, con oggetto e azione insieme. Non creare una seconda performance per ripetere orderType, supplyType o un altro campo amministrativo. Ogni performance e target_partition deve citare almeno una descrizione originale role service dello stesso ambito. Non aggiungere una citazione irrilevante solo per rispettare lo schema.",
         "missingDetails elenca specifiche non determinate nella fonte fornita: sottotipo, composizione, quantità, modelli o condizioni rinviate ai documenti. Non proporre possibili sottotipi. Queste lacune non diventano issues se famiglia dell'oggetto e azione contrattuale sono identificabili. Per esempio: fornitura di arredi senza dimensioni -> prestazione identificata, dimensioni in missingDetails; solo 'incarico Delta' senza descrizione né famiglia -> object_uncertain. Non trasferire azioni generali o di altri lotti al target.",
@@ -640,6 +648,20 @@ function validate(values: unknown[], plan: SourceEvidenceReadingPlan) {
         throw new Error(
           "Classification conflict requires original non-classification evidence",
         );
+      if (
+        c.relationship === "metadata_discrepancy" &&
+        !c.evidence.some(
+          (q) =>
+            !classificationRefs.has(q.sourceRef) &&
+            byId.get(q.sourceRef)?.scope === original.scope &&
+            value.observations.some(
+              (o) => o.kind === "performance" && o.serviceRef === q.sourceRef,
+            ),
+        )
+      )
+        throw new Error(
+          "Classification metadata discrepancy requires an original performance in the same scope",
+        );
     }
     value.issues.forEach((i) => checkQuotes(i.evidence));
     value.missingDetails.forEach((item) => {
@@ -744,6 +766,17 @@ export function readSourceEvidenceReading(
         sourceRefs: unique(c.evidence.map((q) => q.sourceRef)),
       })),
   ]);
+  // An advisory never replaces or clears findings, and does not approve a
+  // draft. The separate semantic review must still verify every claim.
+  const warnings = responses.flatMap((r) =>
+    r.classifications
+      .filter((c) => c.relationship === "metadata_discrepancy")
+      .map((c) => ({
+        kind: "classification_metadata_discrepancy" as const,
+        reason: c.explanation,
+        sourceRefs: unique(c.evidence.map((q) => q.sourceRef)),
+      })),
+  );
   const complete = responses.every((r) => r.coverage === "complete");
   const observations = responses.flatMap((r, i) =>
     r.observations.map((o, j) => ({ id: `e${i + 1}-${j + 1}`, ...o })),
@@ -788,5 +821,6 @@ export function readSourceEvidenceReading(
     observations,
     missingDetails,
     findings,
+    warnings,
   });
 }

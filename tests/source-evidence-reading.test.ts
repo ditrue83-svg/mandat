@@ -281,6 +281,87 @@ test("Independent classification conflicts, uncertainty and incomplete readings 
   );
 });
 
+test("A metadata advisory preserves original evidence and cannot clear material findings", () => {
+  const plan = buildSourceEvidenceReadingRequest(context(), config);
+  const input = responses(plan);
+  input[0].classifications[0].relationship = "metadata_discrepancy";
+  input[0].classifications[0].explanation =
+    "Etichetta da controllare; prestazione esplicita conservata.";
+  input[0].classifications[0].evidence.push({ sourceRef: "s1" });
+  const value = recordSourceEvidenceReading(input, plan, metadata);
+  const result = readSourceEvidenceReading(value, plan)!;
+  assert.equal(result.accepted, true);
+  assert.equal(result.findings.length, 0);
+  assert.equal(result.warnings[0].kind, "classification_metadata_discrepancy");
+  assert.deepEqual(
+    new Set(result.warnings[0].sourceRefs),
+    new Set(["s1", "s2", "s3"]),
+  );
+  assert.equal(
+    result.responses[0].classifications[0].label!.text,
+    context().body.classifications[0].labels[0].text,
+  );
+  for (const mutate of [
+    (a: any) => {
+      a.coverage = "unreadable";
+    },
+    (a: any) => {
+      a.issues.push({
+        kind: "source_conflict",
+        reason: "Due clausole opposte inventate.",
+        evidence: [{ sourceRef: "s1" }, { sourceRef: "s4" }],
+      });
+    },
+    (a: any) => {
+      a.issues.push({
+        kind: "object_uncertain",
+        reason: "Oggetto non determinabile.",
+        evidence: [{ sourceRef: "s1" }],
+      });
+    },
+  ]) {
+    const changed = structuredClone(input);
+    mutate(changed[0]);
+    const blocked = readSourceEvidenceReading(
+      recordSourceEvidenceReading(changed, plan, metadata),
+      plan,
+    )!;
+    assert.equal(blocked.accepted, false);
+    assert.equal(blocked.warnings.length, 1);
+    assert(blocked.findings.length > 0);
+  }
+  assert.equal(
+    readSourceEvidenceReading(
+      { ...value, version: "source-evidence-reading-v11" },
+      plan,
+    ),
+    null,
+  );
+});
+
+test("Metadata advisories require a selected original performance, not a code or administrative detail", () => {
+  const plan = buildSourceEvidenceReadingRequest(context(), config);
+  for (const refs of [["s2", "s3"], ["s4"]]) {
+    const input = responses(plan);
+    input[0].classifications[0].relationship = "metadata_discrepancy";
+    input[0].classifications[0].evidence = refs.map((sourceRef) => ({
+      sourceRef,
+    }));
+    assert.throws(
+      () => recordSourceEvidenceReading(input, plan, metadata),
+      /original performance in the same scope/,
+    );
+  }
+  const input = responses(plan);
+  input[0].classifications[0].relationship = "metadata_discrepancy";
+  input[0].classifications[0].evidence.push({ sourceRef: "s1" });
+  input[0].observations[0].kind = "condition";
+  assert.throws(
+    () => recordSourceEvidenceReading(input, plan, metadata),
+    /original performance in the same scope/,
+  );
+});
+
 test("Long original readings cover the entire tail and never use extraction-selected passages", () => {
   const base = context();
   const input: SourceInterpretationContext = {
