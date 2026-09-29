@@ -2,6 +2,7 @@ import {
   inventedSourceEvidence,
   inventedGroundedReviewRequests,
   inventedReadingRefs,
+  inventedSourceEvidenceAnswer,
 } from "./helpers/source-evidence-fixture";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -28,7 +29,9 @@ import {
 import {
   recordSourceSemanticReview,
   type SourceSemanticReviewRecord,
+  buildGroundedSourceReviewRequests,
 } from "../src/lib/source-semantic-review";
+import { recordSourceEvidenceReading } from "../src/lib/source-evidence-reading";
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 import {
   captureLotSourceSnapshot,
@@ -613,6 +616,135 @@ test("A source with a separate AI review supports a referenced comparison withou
   assert.equal(result.dependency.sourceInterpretationHash, source.hash);
   assert.ok(Object.isFrozen(request.passages));
   assert.ok(Object.isFrozen(result.evidence[0]));
+});
+
+test("A structured subcontract prohibition survives review and stored comparison with its original provenance", () => {
+  const detail = raw();
+  const input = fixture({
+    ...detail,
+    terms: { ...detail.terms, subContractorAllowed: false },
+  });
+  const request = buildAutomaticComparisonRequest(input);
+  const sourceRequest = buildAutomaticSourceRequest(request);
+  const index = sourceRequest.body.fields.findIndex(
+    (f) => f.rawPath === "/terms/subContractorAllowed",
+  );
+  assert(index >= 0);
+  const fieldId = `f${index}`;
+  const source = recordSourceInterpretation(
+    {
+      ...sourceResponse(request),
+      details: [
+        {
+          kind: "execution_condition",
+          scope: "project_context",
+          sourceRefs: [fieldId],
+          explanation: "Il subappalto non è consentito.",
+        },
+      ],
+    },
+    sourceRequest,
+    {
+      id: "invented-structured-source",
+      at: "2030-01-20T12:00:00.000Z",
+      model: automaticComparisonModel(),
+    },
+  );
+  const plan = buildAutomaticSourceSemanticReviewRequest(request, source);
+  const evidence = recordSourceEvidenceReading(
+    plan.evidencePlan.requests.map((r) => {
+      const body = JSON.parse(r.prompt),
+        answer = inventedSourceEvidenceAnswer(body);
+      const serviceRef = body.passages.find(
+        (p: any) => p.role === "service",
+      ).id;
+      answer.observations.push({
+        kind: "condition",
+        serviceRef,
+        evidence: [{ sourceRef: serviceRef }, { sourceRef: fieldId }],
+      });
+      return answer;
+    }),
+    plan.evidencePlan,
+    {
+      id: "invented-structured-reading",
+      at: "2030-01-20T12:01:00.000Z",
+      model: plan.model,
+    },
+  );
+  const grounded = buildGroundedSourceReviewRequests(plan, evidence);
+  const review = recordSourceSemanticReview(
+    grounded.map((r) => {
+      const body = JSON.parse(r.prompt);
+      return {
+        chunkId: r.id,
+        sourceEvidenceHash: evidence.hash,
+        coverage: "complete",
+        findings: [],
+        checks: r.assignedClaimIds.map((id) => {
+          const claim = plan.claims.find((c) => c.id === id)!;
+          return {
+            claimId: id,
+            verdict: "supported",
+            draftQuote: null,
+            reason:
+              "Risposta inventata per verificare la conservazione delle prove.",
+            sourceRefs: claim.sourceRefs,
+            readingRefs:
+              claim.kind === "detail"
+                ? [`o-${fieldId}`]
+                : inventedReadingRefs(body, claim),
+          };
+        }),
+      };
+    }),
+    plan,
+    {
+      id: "invented-structured-review",
+      at: "2030-01-20T12:02:00.000Z",
+      model: plan.model,
+      sourceEvidence: evidence,
+    },
+  );
+  const comparison = {
+    comparison: "Confronto inventato per la sola verifica del flusso.",
+    facts: {
+      companyIdentifiesService: true,
+      activitiesOverlap: true,
+      relatedActivity: "none",
+      sameContractualRole: true,
+      mainScopeCovered: true,
+      comparisonUncertain: false,
+    },
+    interpretationHash: source.hash,
+    reviewHash: review.hash,
+    componentRefs: ["u1"],
+    companyRefs: [request.companyPassages[0].id],
+  };
+  const stored = recordWithRequiredReview(comparison, request, {
+    id: "invented-structured-comparison",
+    at: "2030-01-20T12:03:00.000Z",
+    model: automaticComparisonModel(),
+    sourceInterpretation: source,
+    sourceReview: review,
+  });
+  const resolved = readAutomaticComparison(stored, request)!;
+  assert.equal(resolved.relation, "direct");
+  assert.equal(resolved.evidence.filter((p) => p.id === fieldId).length, 1);
+  assert.deepEqual(
+    resolved.evidence.find((p) => p.id === fieldId),
+    {
+      id: fieldId,
+      scope: "project_context",
+      role: "context",
+      rawPath: "/terms/subContractorAllowed",
+      text: "false",
+      startUtf16: 0,
+      endUtf16: 5,
+      url: request.passages[0].url,
+    },
+  );
+  assert.equal(input.history.length, 0);
 });
 
 test("Dedicated model configuration preserves the verified provider input and binding", () => {
@@ -1674,6 +1806,45 @@ test("Long-source reduction preserves complete CPV labels even when the map sele
   );
 });
 
+test("Long-source maps cannot discard delegation and execution clauses", () => {
+  const base = raw();
+  const detail = {
+    ...base,
+    terms: {
+      subContractorAllowed: "no",
+      subContractorNote: {
+        it: "Divieto di subappalto per tutte le prestazioni.",
+      },
+      qualificationCriteriaNote: { it: "Condizioni inventate. ".repeat(1600) },
+    },
+    procurement: {
+      ...base.procurement,
+      executionNote: { it: "Esecuzione in orario serale." },
+    },
+  };
+  const request = buildAutomaticComparisonRequest(fixture(detail));
+  assert(request.readingRequests.length > 1);
+  const reduced = buildAutomaticReductionRequest(
+    request.readingRequests.map((chunk) => ({
+      chunkId: chunk.id,
+      status: "complete",
+      sourceRefs: [],
+    })),
+    request,
+  );
+  const paths = [
+    "/terms/subContractorAllowed",
+    "/terms/subContractorNote/it",
+    "/procurement/executionNote/it",
+  ];
+  for (const rawPath of paths) {
+    const original = request.passages.find((p) => p.rawPath === rawPath)!;
+    assert(original);
+    assert(reduced.requiredContractClauseIds.includes(original.id));
+    assert(reduced.selectedIds.includes(original.id));
+  }
+});
+
 test("A concise source summary cannot erase the original domain context and grounded component from the final comparison", () => {
   const detail = {
     ...raw(),
@@ -2037,6 +2208,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v53",
     sourceVersion: "documentary-source-interpretation-v16",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v54",
+    sourceVersion: "documentary-source-interpretation-v16",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2070,7 +2245,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v54");
+    assert.equal(request.version, "documentary-service-comparison-v55");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(

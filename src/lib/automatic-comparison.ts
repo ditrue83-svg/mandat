@@ -40,9 +40,10 @@ import {
   type SourceSemanticReviewRecord,
 } from "./source-semantic-review";
 import { SOURCE_EVIDENCE_READING_VERSION } from "./source-evidence-reading";
+import { isContractScopeField } from "./source-contract-clauses";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v54";
+  "documentary-service-comparison-v55";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -621,7 +622,10 @@ function reducedPassageIds(
   // same-field neighbours so a sentence crossing a boundary remains readable.
   const ids = new Set([
     ...request.passages
-      .filter((passage) => passage.role === "service")
+      .filter(
+        (passage) =>
+          passage.role === "service" || isContractScopeField(passage.rawPath),
+      )
       .map((passage) => passage.id),
     // A map selecting only service prose must not discard the classification
     // labels needed to disambiguate it. Keep both scope and every exact span.
@@ -945,9 +949,15 @@ export function validateAutomaticComparison(
     ...(!value ? source.issues.flatMap((issue) => issue.sourceRefs) : []),
   ]);
   for (const passage of review?.evidence ?? []) sourceIds.add(passage.id);
-  const evidence = request.passages.filter((passage) =>
-    sourceIds.has(passage.id),
-  );
+  const evidence = [
+    ...new Map(
+      [
+        ...request.passages,
+        ...source.evidence,
+        ...(review?.evidence ?? []),
+      ].map((passage) => [passage.id, passage]),
+    ).values(),
+  ].filter((passage) => sourceIds.has(passage.id));
   const companyEvidence = value
     ? value.companyRefs.map((id) => {
         const passage = request.companyPassages.find((item) => item.id === id);

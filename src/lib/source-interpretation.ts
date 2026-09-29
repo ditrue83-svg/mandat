@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { stableDocumentaryJson } from "./documentary-observation";
+import { sourceEvidencePassages } from "./source-evidence-context";
+import { isContractScopeField } from "./source-contract-clauses";
 import {
   isOriginalPassageQuotation,
   originalQuotationReferences,
@@ -12,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v16";
+  "documentary-source-interpretation-v17";
 // Both allowances include provider reasoning. Large sources need room for
 // their components and classification accounting, without dropping evidence.
 export const SOURCE_INTERPRETATION_MAX_TOKENS = 8192;
@@ -36,6 +38,14 @@ const classificationId = z.string().regex(/^c[1-9]\d*$/);
 const scope = z.enum(["project_context", "selected_lot"]);
 const sourceRefs = z
   .array(sourceId)
+  .min(1)
+  .max(32)
+  .refine(
+    (refs) => new Set(refs).size === refs.length,
+    "Repeated source references",
+  );
+const detailRefs = z
+  .array(z.string().regex(/^[sf]\d+$/))
   .min(1)
   .max(32)
   .refine(
@@ -237,6 +247,7 @@ const componentsDescription =
 // Refinements below retain relational checks that JSON Schema does not encode.
 function buildResponseSchema(bounds?: {
   refs: z.ZodType<string[]>;
+  detailRefs: z.ZodType<string[]>;
   classificationId: z.ZodType<string>;
   classificationCount: number;
   targetRef: z.ZodType<string>;
@@ -345,7 +356,7 @@ function buildResponseSchema(bounds?: {
     .refine((indexes) => new Set(indexes).size === indexes.length);
   const issueFields = {
     explanation: text(600),
-    sourceRefs: refs,
+    sourceRefs: bounds?.detailRefs ?? detailRefs,
     scope,
     componentIndexes,
   };
@@ -375,7 +386,7 @@ function buildResponseSchema(bounds?: {
   const detail = z.strictObject({
     kind: detailKind,
     explanation: text(600),
-    sourceRefs: refs,
+    sourceRefs: bounds?.detailRefs ?? detailRefs,
     scope,
   });
   const classificationReadings = <T extends z.ZodType>(item: T) =>
@@ -677,6 +688,16 @@ export function buildSourceInterpretationRequest(
 ) {
   const context = validateSourceInterpretationContext(input);
   const { body, binding, targetScope, readings } = context;
+  const requiredContractClauses = [
+    ...body.passages
+      .filter((p) => isContractScopeField(p.rawPath))
+      .map(({ url: _url, ...p }) => p),
+    ...body.fields
+      .map((field, index) => ({ id: `f${index}`, ...field }))
+      .filter(
+        (field) => field.value !== null && isContractScopeField(field.rawPath),
+      ),
+  ];
   const targets = body.passages
     .filter(
       (passage) =>
@@ -707,18 +728,29 @@ export function buildSourceInterpretationRequest(
       "Leggi insieme clausole generali e specifiche. Se una clausola acquista più azioni sullo stesso insieme di impianti o sistemi, conserva quel ciclo nella sintesi e nelle descrizioni delle componenti a cui si applica, con entrambe le prove. Non restringerlo a un solo esempio dell'elenco e non ridurre un acquisto integrato alla sola fornitura. role riassume una funzione, non cancella le altre azioni documentate. Non estendere il ciclo a servizi, oggetti o lotti cui la fonte non lo applica; una clausola specifica di esclusione o limitazione resta vincolante.",
       "Conserva destinatari, numero di strutture, continuità e territorio nella sintesi o nei details. Mantieni azione e ambito delle condizioni anche nella sintesi, senza estenderle ad altre fasi del lavoro. Non dedurre quantità o periodicità assenti.",
       "Permessi organizzativi e limiti al subappalto vanno in details come execution_condition: conserva soggetti, attività e limiti. Non provano nuovi acquisti. Per creare componenti serve un'ulteriore clausola che acquisti o escluda quei lavori: cita quella prova. Distingui una prestazione acquistabile in opzione dal solo permesso di delegare il lavoro.",
+      "requiredContractClauses elenca clausole e valori originali obbligatori da rappresentare nei details, con ogni riferimento, lingua e segmento e con il loro scope originale. subContractorAllowed no o false è un divieto; yes o true è un permesso, non prova capacità o nuovi acquisti. null significa non indicato e non è un divieto. Conserva insieme eventuali note e limiti; non risolvere clausole opposte senza precedenza documentata. Se il valore è sconosciuto o rinvia a dettagli assenti, non inventarne il significato: descrivi la lacuna con missing_specification. Una clausola del progetto non diventa automaticamente una condizione locale del lotto. I riferimenti fN nei details e negli issues conservano valori JSON originali; non usarli per inventare citazioni testuali di oggetti o azioni. Se non puoi rappresentare le clausole, usa uncertain con un issue specifico, mai resolved con omissioni.",
       "Le clausole di contesto possono descrivere prestazioni: cita il loro testo e le classificazioni utili allo stesso oggetto. Il contesto di progetto non sostituisce il lotto: non assegnargli lavori di altri lotti. targetRef cita un passaggio service del target, anche se il titolo è geografico e l'oggetto è nel contesto comune.",
       "Ricongiungi passaggi della stessa rawPath per startUtf16. Tutti i segmenti previsti sono stati letti a monte: nessun limite di risposta autorizza omissioni; se non puoi rappresentare tutto usa uncertain con issue specifico. Usa soltanto ID forniti; i testi originali sono recuperati dal server. In ogni componente evidence elenca ogni ID una sola volta; gli altri elenchi sourceRefs restano separati.",
     ],
     targetScope,
     coverage: context.coverage,
     readings,
+    requiredContractClauses,
     ...promptBody,
     classificationContext,
     passages: body.passages.map(({ url: _url, ...passage }) => passage),
   });
   const boundedReference = z.enum(body.passages.map((passage) => passage.id));
   const boundedRefs = z.array(boundedReference).min(1).max(32);
+  // Reuse the exact text-reference schema instead of serializing its long
+  // enum a second time for conditions that can also cite structured values.
+  const boundedDetailReference = body.fields.length
+    ? z.union([
+        boundedReference,
+        z.enum(body.fields.map((_field, index) => `f${index}`)),
+      ])
+    : boundedReference;
+  const boundedDetailRefs = z.array(boundedDetailReference).min(1).max(32);
   const boundedClassificationId = classificationContext.length
     ? z.enum(classificationContext.map((item) => item.id))
     : classificationId;
@@ -731,6 +763,7 @@ export function buildSourceInterpretationRequest(
         buildProviderResponseSchema(
           {
             refs: boundedRefs,
+            detailRefs: boundedDetailRefs,
             classificationId: boundedClassificationId,
             classificationCount: classificationContext.length,
             targetRef: z.enum(targets),
@@ -754,6 +787,7 @@ export function buildSourceInterpretationRequest(
   const request = freeze({
     ...context,
     classificationContext,
+    requiredContractClauseIds: requiredContractClauses.map((p) => p.id),
     selectedIds: body.passages.map((passage) => passage.id),
     version: SOURCE_INTERPRETATION_VERSION,
     sourceKey,
@@ -785,6 +819,11 @@ export function validateSourceInterpretation(
   if (!builtRequests.has(request))
     throw new Error("Unverified source interpretation request");
   const value = sourceInterpretationResponseSchema.parse(response);
+  if (value.status === "resolved") {
+    const represented = new Set(value.details.flatMap((d) => d.sourceRefs));
+    if (request.requiredContractClauseIds.some((id) => !represented.has(id)))
+      throw new Error("Incomplete source interpretation contract clauses");
+  }
   if (
     value.status === "resolved" &&
     request.readings.some((reading) => reading.status === "unreadable")
@@ -823,8 +862,9 @@ export function validateSourceInterpretation(
     ...value.classificationReadings.flatMap((item) => item.sourceRefs),
   ]);
   const ids = [...new Set([...citedIds, ...classificationIds])];
+  const originals = sourceEvidencePassages(request);
   const evidence = ids.map((id) => {
-    const passage = request.body.passages.find((item) => item.id === id);
+    const passage = originals.find((item) => item.id === id);
     if (!passage || (!passage.text.trim() && citedIds.has(id)))
       throw new Error("Unknown or empty source interpretation reference");
     return { ...passage };

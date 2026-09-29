@@ -21,7 +21,7 @@ import type {
 import { sourceEvidencePassages } from "./source-evidence-context";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v21";
+  "documentary-source-semantic-review-v22";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -73,7 +73,7 @@ const checkShape = z.strictObject({
   reason: text(600),
   sourceRefs: refs,
   readingRefs: z
-    .array(z.string().regex(/^([ed][1-9]\d*-[1-9]\d*|c[1-9]\d*|o-s\d+)$/))
+    .array(z.string().regex(/^([ed][1-9]\d*-[1-9]\d*|c[1-9]\d*|o-[sf]\d+)$/))
     .min(1)
     .max(1024),
 });
@@ -208,7 +208,8 @@ export function buildSourceSemanticReviewRequest(
     stableDocumentaryJson(classificationContext)
   )
     throw new Error("Review classification context changed");
-  const byId = new Map(context.body.passages.map((item) => [item.id, item]));
+  const originalPassages = sourceEvidencePassages(context);
+  const byId = new Map(originalPassages.map((item) => [item.id, item]));
   const classificationRefs = (item: (typeof classificationContext)[number]) =>
     unique([
       ...(item.code?.sourceRefs ?? []),
@@ -332,9 +333,15 @@ ${item.meaning.statement}`,
     const passages = context.body.passages.filter((item) =>
       included.has(item.id),
     );
+    const fieldIndexes = unique([
+      ...group.fieldIndexes.map(String),
+      ...[...included]
+        .filter((id) => /^f\d+$/.test(id))
+        .map((id) => id.slice(1)),
+    ]).map(Number);
     const sourceIds = [
       ...passages.map((item) => item.id),
-      ...group.fieldIndexes.map((index) => `f${index}`),
+      ...fieldIndexes.map((index) => `f${index}`),
     ];
     const responseFormat: AutomaticResponseFormat = {
       type: "json_schema",
@@ -361,7 +368,7 @@ ${item.meaning.statement}`,
         "Per la completezza collega anche le clausole comuni del summary o dei details alle componenti del loro ambito esplicito. Un ciclo contrattuale dichiarato per tutti gli impianti o sistemi può valere per le componenti corrispondenti senza essere ripetuto parola per parola in ognuna; citarlo per un solo componente senza conservarne l'ambito generale non basta. Non estendere clausole a oggetti o lotti estranei. Ogni acquisto distinto deve restare rappresentato nelle components: menzionarlo soltanto come dettaglio non sostituisce una prestazione. Una descrizione sintetica non è una clausola di esclusione.",
         "Una categoria amministrativa e una descrizione specifica possono usare nomi diversi senza contraddirsi. La categoria non esclude di per sé un lavoro esplicito né aggiunge tutte le attività della sua etichetta. Verifica il lavoro contro la descrizione originale, mantenendo le classificazioni come dichiarate; non approvare correzioni del codice o nuovi servizi. Caratteristiche esplicite incompatibili e clausole opposte rimangono bloccanti. Un avviso sui metadati non sana ambiguità, omissioni o affermazioni false.",
         "Ogni check cita readingRefs della lettura indipendente oltre agli estratti originali. I riferimenti evidence della lettura indipendente rimandano al testo originale in passages; le citazioni di contesto non presenti in passages conservano anche text. Un draft che introduce un dominio incompatibile, una correzione della fonte o una discrepanza non presente nella lettura indipendente non può essere supported solo perché ripete il nome del prodotto. Per classification_reading cita la corrispondente classificazione indipendente cN.",
-        "Solo per i claim detail puoi citare in readingRefs gli originalFacts o-sN: sono rinvii del codice a passages originali, non giudizi AI. Servono anche quando la lettura preliminare omette cronologie o dettagli amministrativi. Verifica il testo originale e cita lo stesso sN in sourceRefs; non usare o-sN per summary, componenti o classificazioni. Una data non selezionata prima non è falsa per questo motivo.",
+        "Solo per i claim detail puoi citare in readingRefs gli originalFacts o-sN oppure o-fN: sono rinvii del codice a passaggi o valori JSON originali, non giudizi AI. Servono anche quando la lettura preliminare omette cronologie o dettagli amministrativi. Verifica testo, valore e percorso originali e cita lo stesso sN o fN in sourceRefs; non usare questi rinvii per summary, componenti o classificazioni. false è diverso da null. Una data non selezionata prima non è falsa per questo motivo.",
         "Una componente main richiede una performance indipendente pertinente. Componenti accessory o excluded possono essere verificate anche su una condition indipendente pertinente: leggi la clausola originale per distinguere un acquisto opzionale o un'esclusione da un semplice permesso organizzativo. Una condition non prova automaticamente un lavoro acquistato e non può sostenere una nuova prestazione principale.",
         "Controlla dominio dell'oggetto, azione contrattuale, applicabilità al target e importanza main/accessory/excluded separatamente. Non scambiare un settore, luogo o destinatario per un ruolo. Contesto generale, classificazioni ampie e opere di altri lotti non provano una prestazione locale.",
         "Per un lotto territoriale verifica insieme le performance comuni in project_context e la target_partition in selected_lot. Se le descrizioni originali del progetto e del lotto mostrano che il lotto ripartisce geograficamente quello stesso lavoro, il loro collegamento può sostenere summary, component_scope e component_importance: non occorre che il titolo geografico ripeta le azioni comuni. Cita entrambe le prove mantenendone gli ambiti originali. Un rinvio al dossier lascia ignote le specifiche, non cancella di per sé questo collegamento documentato.",
@@ -386,7 +393,7 @@ ${item.meaning.statement}`,
         fieldIndexes: group.fieldIndexes,
       },
       passages: passages.map(({ url: _url, ...item }) => item),
-      fields: group.fieldIndexes.map((index) => ({
+      fields: fieldIndexes.map((index) => ({
         id: `f${index}`,
         index,
         ...context.body.fields[index],
@@ -444,7 +451,7 @@ ${item.meaning.statement}`,
   // Greedy deterministic ownership follows original passage order, not the
   // extractor's selected citations. Every original field is also assigned.
   const position = new Map(
-    context.body.passages.map((item, index) => [item.id, index]),
+    originalPassages.map((item, index) => [item.id, index]),
   );
   const owners = new Map<string, Claim[]>();
   for (const claim of claims) {
@@ -461,12 +468,14 @@ ${item.meaning.statement}`,
     for (const claim of owners.get(passage.id) ?? [])
       append((group) => ({ ...group, claims: [...group.claims, claim] }));
   }
-  context.body.fields.forEach((_field, index) =>
+  context.body.fields.forEach((_field, index) => {
     append((group) => ({
       ...group,
       fieldIndexes: [...group.fieldIndexes, index],
-    })),
-  );
+    }));
+    for (const claim of owners.get(`f${index}`) ?? [])
+      append((group) => ({ ...group, claims: [...group.claims, claim] }));
+  });
   flush();
   if (!requests.length) throw new Error("Empty source semantic review");
   const sourceKey = draft.sourceKey;
@@ -603,7 +612,7 @@ export function buildGroundedSourceReviewRequests(
           )
           .flatMap((claim) => claim.sourceRefs),
       ).map((sourceRef) => {
-        const passage = plan.context.body.passages.find(
+        const passage = sourceEvidencePassages(plan.context).find(
           (p) => p.id === sourceRef,
         );
         if (!passage || !request.sourceIds.includes(sourceRef))

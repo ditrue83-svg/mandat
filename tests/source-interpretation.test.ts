@@ -183,6 +183,216 @@ function response(input = context()) {
     targetRef: "s1",
   };
 }
+
+test("A resolved draft cannot omit a structured subcontracting prohibition", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[0],
+          id: "s5",
+          role: "context",
+          rawPath: "/terms/subContractorAllowed",
+          text: "no",
+          startUtf16: 0,
+          endUtf16: 2,
+        },
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  assert.deepEqual(request.requiredContractClauseIds, ["s5"]);
+  assert.throws(
+    () => validateSourceInterpretation(response(input), request),
+    /Incomplete.*contract clauses/,
+  );
+  const complete = {
+    ...response(input),
+    details: [
+      {
+        kind: "execution_condition",
+        scope: "project_context",
+        sourceRefs: ["s5"],
+        explanation: "Il subappalto non è consentito.",
+      },
+    ],
+  };
+  assert.equal(
+    validateSourceInterpretation(complete, request).details.length,
+    1,
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        {
+          ...complete,
+          details: [
+            {
+              ...complete.details[0],
+              scope: "selected_lot",
+            },
+          ],
+        },
+        request,
+      ),
+    /Detail scope/,
+  );
+  // A clause cited only as component evidence does not document its condition.
+  const incidental = response(input);
+  incidental.components[0].sourceRefs.push("s5");
+  assert.throws(
+    () => validateSourceInterpretation(incidental, request),
+    /Incomplete.*contract clauses/,
+  );
+});
+
+test.each([false, true, 0, null])(
+  "Structured contract value %s keeps its exact JSON identity",
+  (value) => {
+    const base = context();
+    const input: SourceInterpretationContext = {
+      ...base,
+      body: {
+        ...base.body,
+        fields: [
+          {
+            scope: "project_context",
+            rawPath: "/terms/subContractorAllowed",
+            value,
+          },
+        ],
+      },
+    };
+    const request = buildSourceInterpretationRequest(input);
+    const prompt = JSON.parse(request.prompt);
+    assert.deepEqual(
+      request.requiredContractClauseIds,
+      value === null ? [] : ["f0"],
+    );
+    if (value === null) {
+      assert.equal(
+        validateSourceInterpretation(response(input), request).status,
+        "resolved",
+      );
+      return;
+    }
+    assert.equal(prompt.requiredContractClauses[0].value, value);
+    assert.throws(
+      () => validateSourceInterpretation(response(input), request),
+      /Incomplete.*contract clauses/,
+    );
+    const complete = {
+      ...response(input),
+      details: [
+        {
+          kind: value === 0 ? "missing_specification" : "execution_condition",
+          scope: "project_context",
+          sourceRefs: ["f0"],
+          explanation:
+            value === false
+              ? "Il subappalto non è consentito."
+              : value === true
+                ? "Il subappalto è consentito."
+                : "Valore originale 0: significato non precisato, da verificare.",
+        },
+      ],
+    };
+    assert(
+      new Ajv2020({ strict: false }).compile(
+        request.responseFormat.json_schema.schema,
+      )(wireResponse(complete)),
+    );
+    const recorded = recordSourceInterpretation(
+      wireResponse(complete),
+      request,
+      {
+        id: "invented-contract-field",
+        at: "2030-01-01T12:00:00.000Z",
+        model: input.binding.model,
+      },
+    );
+    const resolved = readSourceInterpretation(recorded, request)!;
+    assert.equal(
+      resolved.evidence.find((p) => p.id === "f0")?.text,
+      JSON.stringify(value),
+    );
+    assert.throws(() =>
+      validateSourceInterpretation(
+        {
+          ...complete,
+          details: [
+            {
+              ...complete.details[0],
+              sourceRefs: ["f999"],
+            },
+          ],
+        },
+        request,
+      ),
+    );
+    const fabricatedComponent = structuredClone(complete);
+    fabricatedComponent.components[0].sourceRefs = ["f0"];
+    assert.throws(() =>
+      validateSourceInterpretation(fabricatedComponent, request),
+    );
+  },
+);
+
+test("Contract note languages all remain required, unrelated fields do not", () => {
+  const base = context();
+  const clauses = [
+    ["/terms/subContractorNote/it", "Subappalto con limite del 30%."],
+    ["/terms/subContractorNote/de", "Untervergabe maximal 30%."],
+    ["/procurement/optionsNote/it", "Opzione: manutenzione annuale."],
+    ["/procurement/executionNote/it", "Esecuzione durante la chiusura."],
+    ["/metadata/subContractorAllowed", "no"],
+  ];
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        ...clauses.map(([rawPath, text], index) => ({
+          ...base.body.passages[0],
+          id: `s${index + 5}`,
+          role: "context" as const,
+          rawPath,
+          text,
+          startUtf16: 0,
+          endUtf16: text.length,
+        })),
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  assert.deepEqual(request.requiredContractClauseIds, ["s5", "s6", "s7", "s8"]);
+  const complete = {
+    ...response(input),
+    details: clauses.slice(0, 4).map(([, text], index) => ({
+      kind: "execution_condition",
+      scope: "project_context",
+      sourceRefs: [`s${index + 5}`],
+      explanation: text,
+    })),
+  };
+  assert.equal(
+    validateSourceInterpretation(complete, request).status,
+    "resolved",
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        { ...complete, details: complete.details.slice(0, 3) },
+        request,
+      ),
+    /Incomplete.*contract clauses/,
+  );
+});
 // Test fixtures keep the stored contract; encode their citations explicitly
 // when exercising the distinct provider JSON Schema.
 function wireResponse(value: any) {
@@ -1217,6 +1427,71 @@ test("A selected lot keeps shared classification contextual and requires its own
     },
   };
   const request = buildSourceInterpretationRequest(lot);
+  const withConditions = {
+    ...lot,
+    body: {
+      ...lot.body,
+      fields: [
+        {
+          scope: "project_context" as const,
+          rawPath: "/terms/subContractorAllowed",
+          value: true,
+        },
+        {
+          scope: "selected_lot" as const,
+          rawPath: "/lots/0/terms/subContractorAllowed",
+          value: false,
+        },
+      ],
+    },
+  };
+  const conditionRequest = buildSourceInterpretationRequest(withConditions);
+  const conditioned = {
+    ...response(lot),
+    targetRef: "s5",
+    details: [
+      {
+        kind: "execution_condition",
+        scope: "project_context",
+        sourceRefs: ["f0"],
+        explanation:
+          "Il progetto consente il subappalto nel contesto generale.",
+      },
+      {
+        kind: "execution_condition",
+        scope: "selected_lot",
+        sourceRefs: ["f1"],
+        explanation: "Il lotto vieta il subappalto.",
+      },
+    ],
+  };
+  assert.deepEqual(conditionRequest.requiredContractClauseIds, ["f0", "f1"]);
+  assert.equal(
+    validateSourceInterpretation(conditioned, conditionRequest).details.length,
+    2,
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        {
+          ...conditioned,
+          details: conditioned.details.map((d) => ({
+            ...d,
+            scope: "selected_lot",
+          })),
+        },
+        conditionRequest,
+      ),
+    /Detail scope/,
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        { ...conditioned, details: conditioned.details.slice(1) },
+        conditionRequest,
+      ),
+    /Incomplete.*contract clauses/,
+  );
   assert.throws(
     () => validateSourceInterpretation(response(), request),
     /selected-target/,
@@ -1856,9 +2131,10 @@ test.each([
   "documentary-source-interpretation-v13",
   "documentary-source-interpretation-v14",
   "documentary-source-interpretation-v15",
+  "documentary-source-interpretation-v16",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
-  assert.equal(request.version, "documentary-source-interpretation-v16");
+  assert.equal(request.version, "documentary-source-interpretation-v17");
   const current = recordSourceInterpretation(response(), request, metadata);
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");

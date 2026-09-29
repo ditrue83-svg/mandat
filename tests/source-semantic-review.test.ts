@@ -1573,6 +1573,117 @@ test("A detail absent from the work selection uses its exact original fact witho
   assert.throws(() => store(omitted));
 });
 
+test("A structured condition owns a review claim and retains false without becoming a text passage", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      fields: [
+        {
+          scope: "project_context",
+          rawPath: "/terms/subContractorAllowed",
+          value: false,
+        },
+      ],
+    },
+  };
+  const original = recordSourceInterpretation(
+    {
+      ...draft(base).response,
+      details: [
+        {
+          kind: "execution_condition",
+          scope: "project_context",
+          sourceRefs: ["f0"],
+          explanation: "Il subappalto non è consentito.",
+        },
+      ],
+    },
+    buildSourceInterpretationRequest(input),
+    { ...metadata, model: input.binding.model },
+  );
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  const selections = plan.evidencePlan.requests.map((r) => {
+    const body = JSON.parse(r.prompt);
+    const answer = inventedSourceEvidenceAnswer(body);
+    answer.observations.push({
+      kind: "condition",
+      serviceRef: "s1",
+      evidence: [{ sourceRef: "s1" }, { sourceRef: "f0" }],
+    });
+    return answer;
+  });
+  const evidence = recordSourceEvidenceReading(
+    selections,
+    plan.evidencePlan,
+    metadata,
+  );
+  const requests = buildGroundedSourceReviewRequests(plan, evidence);
+  const claim = plan.claims.find((c) => c.kind === "detail")!;
+  assert.deepEqual(claim.sourceRefs, ["f0"]);
+  assert.equal(
+    requests.flatMap((r) => r.assignedClaimIds).filter((id) => id === claim.id)
+      .length,
+    1,
+  );
+  const request = requests.find((r) => r.assignedClaimIds.includes(claim.id))!;
+  const body = JSON.parse(request.prompt);
+  assert.equal(body.fields.find((f: any) => f.id === "f0").value, false);
+  assert(!body.passages.some((p: any) => p.id === "f0"));
+  assert(
+    body.originalFacts.some(
+      (f: any) =>
+        f.id === "o-f0" && f.rawPath === "/terms/subContractorAllowed",
+    ),
+  );
+  const responses = requests.map((r) => {
+    const b = JSON.parse(r.prompt);
+    return {
+      chunkId: r.id,
+      sourceEvidenceHash: evidence.hash,
+      coverage: "complete",
+      findings: [],
+      checks: r.assignedClaimIds.map((id) => {
+        const c = plan.claims.find((x) => x.id === id)!;
+        return {
+          claimId: id,
+          verdict: "supported",
+          draftQuote: null,
+          reason: "Risposta inventata per verificare il contratto.",
+          sourceRefs: c.sourceRefs,
+          readingRefs:
+            c.kind === "detail" ? ["o-f0"] : inventedReadingRefs(b, c),
+        };
+      }),
+    };
+  });
+  for (const [i, r] of requests.entries())
+    assert(
+      new Ajv2020({ strict: false }).compile(
+        r.responseFormat.json_schema.schema,
+      )(wireResponse(responses[i])),
+    );
+  const record = productionRecordSourceSemanticReview(responses, plan, {
+    ...metadata,
+    sourceEvidence: evidence,
+  });
+  assert(readSourceSemanticReview(record, plan)?.accepted);
+  const wrong = structuredClone(responses);
+  const summary = plan.claims.find((c) => c.kind === "summary")!;
+  wrong
+    .flatMap((r) => r.checks)
+    .find((c) => c.claimId === summary.id)!.readingRefs = ["o-f0"];
+  assert.throws(
+    () =>
+      productionRecordSourceSemanticReview(wrong, plan, {
+        ...metadata,
+        sourceEvidence: evidence,
+      }),
+    /own detail claim/,
+  );
+});
+
 test("The generated review schema keeps each original fact with its own detail", () => {
   const base = context();
   const input: SourceInterpretationContext = {

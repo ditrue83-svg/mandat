@@ -8,6 +8,7 @@ import {
 } from "./source-interpretation";
 import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
+import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v14";
 const MAX_BYTES = 160_000;
@@ -117,12 +118,6 @@ const selectionSchema = responseSchema
     missingDetails: z.array(selectedDetail).max(32),
   });
 const unique = (values: string[]) => [...new Set(values)];
-// These original fields describe how the work may be performed or delegated.
-// Requiring their citations proves coverage, never their meaning or eligibility.
-const isContractScopeField = (rawPath: string) =>
-  /^(?:\/lots\/\d+)?\/(?:terms\/subContractor(?:Note|Allowed)|procurement\/(?:optionsNote|executionNote))(?:\/|$)/.test(
-    rawPath,
-  );
 function freeze<T>(value: T): T {
   if (value && typeof value === "object") {
     Object.values(value).forEach(freeze);
