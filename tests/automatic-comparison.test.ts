@@ -372,7 +372,7 @@ function response(
       companyIdentifiesService: true,
       activitiesOverlap: relation !== "different",
       relatedActivity: "none" as
-        "same_functional_object" | "incidental_context" | "none",
+        "shared_professional_function" | "incidental_context" | "none",
       sameContractualRole: true,
       mainScopeCovered: relation === "direct",
       comparisonUncertain: false,
@@ -1144,7 +1144,7 @@ test("Related installation and supply remain review candidates without inferring
   );
   // Simulated model facts exercise the product rule, not AI semantic quality.
   const related = response(request, source, "different");
-  related.facts.relatedActivity = "same_functional_object";
+  related.facts.relatedActivity = "shared_professional_function";
   related.facts.sameContractualRole = false;
   const value = validateAutomaticComparison(related, request, source);
   assert.equal(value.relation, "review");
@@ -1185,7 +1185,7 @@ test("Related activity cannot assert coverage, erase uncertainty or omit its new
   const request = buildAutomaticComparisonRequest(fixture());
   const source = sourceRecord(request);
   const related = response(request, source, "different");
-  related.facts.relatedActivity = "same_functional_object";
+  related.facts.relatedActivity = "shared_professional_function";
   related.facts.sameContractualRole = false;
   for (const change of [
     { sameContractualRole: true },
@@ -1931,6 +1931,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v42",
     sourceVersion: "documentary-source-interpretation-v11",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v43",
+    sourceVersion: "documentary-source-interpretation-v11",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -1964,7 +1968,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v43");
+    assert.equal(request.version, "documentary-service-comparison-v44");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(

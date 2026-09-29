@@ -206,7 +206,7 @@ export async function getRadarStatus(
 
 export async function listOpportunities(
   viewer: Viewer,
-  options: { includeInactive?: boolean } = {},
+  options: { includeInactive?: boolean; includeRelatedReview?: boolean } = {},
 ): Promise<Opportunity[]> {
   if (viewer.demo) return getDemoOpportunities();
   const now = new Date();
@@ -262,9 +262,10 @@ export async function listOpportunities(
       const match = matchByPublication.get(publication.id);
       const state = canonicalFeedback.get(publication.canonicalId);
       if (options.includeInactive) return !!state?.saved;
-      if (!match) return false;
-      if (!publication.documentarySnapshotId) return true;
-      return match.lotEvaluations !== null || !!state?.dismissed;
+      // Both human evaluations and automatic comparisons are resolved below
+      // against the current canonical source and company. A null human
+      // evaluation does not imply that an AI comparison is missing.
+      return !!match;
     }),
   );
   const result: Opportunity[] = [];
@@ -287,6 +288,7 @@ export async function listOpportunities(
       now,
       !!options.includeInactive,
       true,
+      !!options.includeRelatedReview,
     );
     if (item) result.push(item);
   }
@@ -350,13 +352,20 @@ function canonicalOpportunity(
   now: Date,
   includeInactive: boolean,
   filterRadar: boolean,
+  includeRelatedReview = false,
 ): Opportunity | null {
   const { publication, match, feedback: f, loaded, sourceReview } = row;
   if (!match || publication.visibleAt > now) return null;
   if (publication.documentarySnapshotId) {
     if (
       !loaded ||
-      (filterRadar && !lotOpportunityVisible(loaded, includeInactive, now))
+      (filterRadar &&
+        !lotOpportunityVisible(
+          loaded,
+          includeInactive,
+          now,
+          includeRelatedReview,
+        ))
     )
       return null;
     return presentLotOpportunity(loaded, !filterRadar);

@@ -465,6 +465,10 @@ it("A rejected semantic review beyond twenty older source-only rows is reused ac
   const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
   expect(loaded.project.targets[0].automatic?.serviceRelation).toBe("review");
   expect(loaded.project.signalEligible).toBe(false);
+  const { relatedReviewTargets, lotOpportunityVisible } =
+    await import("../src/lib/lot-readers");
+  expect(relatedReviewTargets(loaded)).toEqual([]);
+  expect(lotOpportunityVisible(loaded, false, now, true)).toBe(false);
   expect(loaded.project.qualityEventIds).toEqual([]);
   expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
     status: "skipped",
@@ -2047,4 +2051,161 @@ it("A source correction during independent reading prevents exposing the draft t
     "documentary-source-interpretation",
     "documentary-source-evidence",
   ]);
+});
+
+it("A verified related-role result has a separate customer view but never enables alerts or crosses companies", async () => {
+  const { listOpportunities, getOpportunity } =
+    await import("../src/lib/queries");
+  const { relatedReviewTargets, lotOpportunityVisible } =
+    await import("../src/lib/lot-readers");
+  const { demoViewer } = await import("../src/lib/demo");
+  const { f, companyId, job } = await automaticFixture(true);
+  // Deliberately simulated relationship facts test the reader/worker boundary,
+  // not the semantic quality of any real company or source.
+  vi.mocked(infer).mockImplementation(async (_pub, _purpose, prompt) => {
+    const answer = inventedAnswer(prompt);
+    if (!("facts" in answer)) return answer;
+    return {
+      ...answer,
+      facts: {
+        ...answer.facts,
+        activitiesOverlap: false,
+        relatedActivity: "shared_professional_function",
+        sameContractualRole: false,
+        mainScopeCovered: false,
+      },
+    };
+  });
+  await runAutomaticComparison(job, { now: () => now });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(now);
+  try {
+    const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
+    expect(loaded.project.signalEligible).toBe(false);
+    expect(loaded.project.qualityEventIds).toEqual([]);
+    expect(relatedReviewTargets(loaded)).toHaveLength(1);
+    expect(lotOpportunityVisible(loaded, false, now)).toBe(false);
+    expect(lotOpportunityVisible(loaded, false, now, true)).toBe(true);
+    expect(() =>
+      lotNoticeScope(loaded, loaded.project.targets[0].target, "positive"),
+    ).toThrow();
+    const who = {
+      ...demoViewer,
+      companyId,
+      profile: baseProfile,
+      demo: false,
+      admin: false,
+    };
+    expect(await listOpportunities(who)).toEqual([]);
+    const candidates = await listOpportunities(who, {
+      includeRelatedReview: true,
+    });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      id: f.p.id,
+      reviewCandidate: true,
+      score: 0,
+      assessment: "uncertain",
+    });
+    expect((await getOpportunity(who, f.p.id))?.reviewCandidate).toBe(true);
+    await db
+      .update(schema.publications)
+      .set({ status: "cancelled" })
+      .where(eq(schema.publications.id, f.p.id));
+    expect(
+      await listOpportunities(who, { includeRelatedReview: true }),
+    ).toEqual([]);
+    await db
+      .update(schema.publications)
+      .set({ status: "open", visibleAt: new Date(now.getTime() + 86_400_000) })
+      .where(eq(schema.publications.id, f.p.id));
+    expect(
+      await listOpportunities(who, { includeRelatedReview: true }),
+    ).toEqual([]);
+    await db
+      .update(schema.publications)
+      .set({ visibleAt: loaded.publication.visibleAt })
+      .where(eq(schema.publications.id, f.p.id));
+    expect(
+      await listOpportunities(who, { includeRelatedReview: true }),
+    ).toHaveLength(1);
+
+    const other = { ...who, companyId: randomUUID() };
+    expect(
+      await listOpportunities(other, { includeRelatedReview: true }),
+    ).toEqual([]);
+    expect(await getOpportunity(other, f.p.id)).toBeNull();
+    await db
+      .update(schema.companies)
+      .set({
+        profile: { ...baseProfile, activities: "Attività inventata cambiata" },
+      })
+      .where(eq(schema.companies.id, companyId));
+    expect(
+      await listOpportunities(who, { includeRelatedReview: true }),
+    ).toEqual([]);
+    expect((await getOpportunity(who, f.p.id))?.reviewCandidate).toBe(false);
+    await db
+      .update(schema.companies)
+      .set({ profile: baseProfile })
+      .where(eq(schema.companies.id, companyId));
+    expect(
+      await listOpportunities(who, { includeRelatedReview: true }),
+    ).toHaveLength(1);
+    const changed = structuredClone(f.raw);
+    changed.procurement.orderDescription.it +=
+      " Prestazione aggiuntiva inventata.";
+    await f.adopt((await f.observation(changed)).id);
+    expect(
+      await listOpportunities(who, { includeRelatedReview: true }),
+    ).toEqual([]);
+
+    expect(await db.select().from(schema.notifications)).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("A current AI result is visible without a human evaluation, and remains outside the related view", async () => {
+  const { listOpportunities } = await import("../src/lib/queries");
+  const { demoViewer } = await import("../src/lib/demo");
+  const { f, companyId, job } = await automaticFixture(true);
+  vi.mocked(infer).mockImplementation(async (_pub, _purpose, prompt) =>
+    inventedAnswer(prompt),
+  );
+  await runAutomaticComparison(job, { now: () => now });
+  const [match] = await db
+    .select()
+    .from(schema.matches)
+    .where(
+      and(
+        eq(schema.matches.publicationId, f.p.id),
+        eq(schema.matches.companyId, companyId),
+      ),
+    );
+  expect(match.lotEvaluations).toBeNull();
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(now);
+  try {
+    const who = {
+      ...demoViewer,
+      companyId,
+      profile: baseProfile,
+      demo: false,
+      admin: false,
+    };
+    for (const includeRelatedReview of [false, true]) {
+      const rows = await listOpportunities(who, { includeRelatedReview });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        id: f.p.id,
+        reviewCandidate: false,
+        score: 100,
+        assessment: "ai",
+      });
+    }
+    expect(await db.select().from(schema.notifications)).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+  }
 });

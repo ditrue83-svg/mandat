@@ -93,9 +93,14 @@ export function Dashboard({
     initialFilters.ordine === "scadenza" ? "deadline" : "relevance",
   );
   const [toast, setToast] = useState("");
-  const [showDismissed, setShowDismissed] = useState(
-    () => !savedOnly && initialFilters.vista === "escluse",
+  const [view, setView] = useState(() =>
+    !savedOnly &&
+    ["escluse", "da-verificare"].includes(initialFilters.vista ?? "")
+      ? initialFilters.vista!
+      : "selezionati",
   );
+  const showDismissed = view === "escluse";
+  const showReview = view === "da-verificare";
   const [pendingActions, setPendingActions] = useState<Record<string, boolean>>(
     {},
   );
@@ -156,10 +161,10 @@ export function Dashboard({
     if (query.trim()) params.set("q", query.trim().slice(0, 200));
     if (sector !== "all") params.set("settore", sector);
     if (sort === "deadline") params.set("ordine", "scadenza");
-    if (!savedOnly && showDismissed) params.set("vista", "escluse");
+    if (!savedOnly && view !== "selezionati") params.set("vista", view);
     const next = `${pathname}${params.size ? `?${params}` : ""}`;
     window.history.replaceState(window.history.state, "", next);
-  }, [pathname, query, savedOnly, sector, showDismissed, sort]);
+  }, [pathname, query, savedOnly, sector, view, sort]);
 
   useEffect(() => {
     if (
@@ -259,7 +264,8 @@ export function Dashboard({
       ? item.saved && !item.dismissed
       : showDismissed
         ? item.dismissed
-        : !item.dismissed,
+        : !item.dismissed &&
+          (showReview ? !!item.reviewCandidate : !item.reviewCandidate),
   );
   const visible = collection
     .filter(
@@ -288,6 +294,8 @@ export function Dashboard({
   const filteringEmpty = collection.length > 0 && visible.length === 0;
   const processingEmpty =
     !savedOnly &&
+    !showReview &&
+    !showDismissed &&
     !viewer.demo &&
     !aiProcessingBlocked &&
     radarStatus.state !== "ready" &&
@@ -297,9 +305,9 @@ export function Dashboard({
     if (query.trim()) params.set("q", query.trim().slice(0, 200));
     if (sector !== "all") params.set("settore", sector);
     if (sort === "deadline") params.set("ordine", "scadenza");
-    if (!savedOnly && showDismissed) params.set("vista", "escluse");
+    if (!savedOnly && view !== "selezionati") params.set("vista", view);
     return `${savedOnly ? "/salvati" : "/"}${params.size ? `?${params}` : ""}`;
-  }, [query, savedOnly, sector, showDismissed, sort]);
+  }, [query, savedOnly, sector, view, sort]);
 
   function clearFilters() {
     setQuery("");
@@ -359,6 +367,38 @@ export function Dashboard({
             </button>
           </div>
         )}
+      {!savedOnly && (
+        <div
+          className="collection-views"
+          role="group"
+          aria-label="Opportunità per la tua ditta"
+        >
+          {(
+            [
+              ["selezionati", "Selezionati"],
+              ["da-verificare", "Da verificare"],
+              ["escluse", "Esclusi"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={`button ${view === value ? "primary" : "secondary"}`}
+              aria-pressed={view === value}
+              onClick={() => setView(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {!savedOnly && showReview && (
+        <div className="notice">
+          Questi bandi riguardano attività collegate al tuo lavoro, ma
+          richiedono un ruolo diverso. Verifica se la tua ditta può e vuole
+          occuparsene: non sono inclusi nei riepiloghi email automatici.
+        </div>
+      )}
       <section
         className="collection-results"
         aria-label={savedOnly ? "Bandi salvati" : "Bandi per la tua ditta"}
@@ -375,7 +415,7 @@ export function Dashboard({
                     placeholder={
                       savedOnly
                         ? "Cerca nei tuoi salvati…"
-                        : "Cerca nei bandi selezionati per te…"
+                        : "Cerca in questa raccolta…"
                     }
                     value={query}
                     maxLength={200}
@@ -383,7 +423,7 @@ export function Dashboard({
                     aria-label={
                       savedOnly
                         ? "Cerca nei tuoi salvati"
-                        : "Cerca nei bandi selezionati per te"
+                        : "Cerca in questa raccolta"
                     }
                   />
                 </label>
@@ -429,7 +469,9 @@ export function Dashboard({
                     ? "Bandi salvati"
                     : showDismissed
                       ? "Bandi esclusi"
-                      : "Selezionati per la tua ditta"}
+                      : showReview
+                        ? "Opportunità da verificare"
+                        : "Selezionati per la tua ditta"}
                 </h2>
                 {(collection.length > 0 || hasFilters) && (
                   <p>
@@ -491,12 +533,13 @@ export function Dashboard({
                           assessment={item.assessment}
                           reason={item.reason}
                         />
-                        {item.reviewRequired && (
-                          <p className="publication-review-note">
-                            Dati del bando da verificare. Consulta gli avvisi
-                            nella scheda.
-                          </p>
-                        )}
+                        {item.reviewRequired &&
+                          item.reviewReasons.length > 0 && (
+                            <p className="publication-review-note">
+                              Dati del bando da verificare. Consulta gli avvisi
+                              nella scheda.
+                            </p>
+                          )}
                       </>
                     }
                     saveAction={
@@ -535,7 +578,7 @@ export function Dashboard({
                           }
                         >
                           {item.dismissed
-                            ? "Ripristina nella selezione"
+                            ? "Ripristina il bando"
                             : "Non interessa"}
                         </button>
                       ) : undefined
@@ -556,9 +599,11 @@ export function Dashboard({
                       ? "Nessun risultato corrisponde ai filtri."
                       : showDismissed
                         ? "Non hai escluso nessun bando."
-                        : savedOnly
-                          ? "Non hai ancora salvato nessun bando."
-                          : "Nessuna proposta ancora selezionata per la tua ditta."}
+                        : showReview
+                          ? "Nessuna opportunità da verificare."
+                          : savedOnly
+                            ? "Non hai ancora salvato nessun bando."
+                            : "Nessuna proposta ancora selezionata per la tua ditta."}
                 </h2>
                 <p>
                   {processingEmpty
@@ -569,19 +614,21 @@ export function Dashboard({
                       ? "Azzera ricerca e filtri per rivedere l’intera raccolta."
                       : showDismissed
                         ? "Qui ritroverai le proposte segnate come non interessanti."
-                        : savedOnly
-                          ? "Usa il pulsante “Salva” su un bando per conservarlo e ritrovarlo qui."
-                          : "Puoi già cercare tra i bandi raccolti. Una proposta compare qui dopo la verifica della pertinenza per la tua ditta."}
+                        : showReview
+                          ? "Qui troverai le attività collegate al tuo lavoro che richiedono una tua verifica."
+                          : savedOnly
+                            ? "Usa il pulsante “Salva” su un bando per conservarlo e ritrovarlo qui."
+                            : "Puoi già cercare tra i bandi raccolti. Una proposta compare qui dopo la verifica della pertinenza per la tua ditta."}
                 </p>
                 {filteringEmpty ? (
                   <button className="button secondary" onClick={clearFilters}>
                     Azzera i filtri
                   </button>
-                ) : showDismissed ? (
+                ) : showDismissed || showReview ? (
                   <button
                     type="button"
                     className="button secondary"
-                    onClick={() => setShowDismissed(false)}
+                    onClick={() => setView("selezionati")}
                   >
                     Torna ai bandi selezionati
                   </button>
@@ -593,16 +640,6 @@ export function Dashboard({
                   </Link>
                 )}
               </div>
-            )}
-            {!savedOnly && items.length > 0 && (
-              <button
-                className="subtle-button"
-                onClick={() => setShowDismissed(!showDismissed)}
-              >
-                {showDismissed
-                  ? "Torna ai bandi selezionati"
-                  : "Mostra i bandi esclusi"}
-              </button>
             )}
           </>
         )}

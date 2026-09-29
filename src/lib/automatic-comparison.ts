@@ -42,7 +42,7 @@ import {
 import { SOURCE_EVIDENCE_READING_VERSION } from "./source-evidence-reading";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v43";
+  "documentary-service-comparison-v44";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -140,9 +140,9 @@ export const automaticComparisonResponseSchema = z
           "Esiste almeno un'attività o prodotto concretamente comune, anche se il pacchetto del bando è più ampio. Lo stesso settore o ruolo non basta. False richiede una differenza concreta, null se non determinabile.",
         ),
       relatedActivity: z
-        .enum(["same_functional_object", "incidental_context", "none"])
+        .enum(["shared_professional_function", "incidental_context", "none"])
         .describe(
-          "Collegamento fra attività in ruoli diversi: same_functional_object per lo stesso bene o sistema concreto, anche una sua parte funzionale rispetto al sistema su cui la ditta dichiara di lavorare; incidental_context per solo settore, luogo, clientela, materiali generici o scarti prodotti; none se non c'è un collegamento o il ruolo coincide. Riconoscere una parte del sistema non attribuisce capacità non dichiarate.",
+          "Affinità professionale fra ruoli diversi: shared_professional_function se il lavoro dichiarato e il bene o servizio acquistato svolgono la stessa funzione professionale, anche con applicazione, scala o specifiche diverse; incidental_context per solo settore, luogo, clientela, materiali generici o scarti; none se non c’è collegamento o il ruolo coincide. L’affinità non attesta capacità di fornitura né idoneità.",
         ),
       sameContractualRole: z
         .boolean()
@@ -172,7 +172,7 @@ export const automaticComparisonResponseSchema = z
   })
   .superRefine((value, context) => {
     if (
-      value.facts.relatedActivity === "same_functional_object" &&
+      value.facts.relatedActivity === "shared_professional_function" &&
       (value.facts.sameContractualRole === true ||
         value.facts.mainScopeCovered === true)
     )
@@ -200,7 +200,7 @@ export function automaticBasisFromFacts(
 ) {
   if (facts.comparisonUncertain || !facts.companyIdentifiesService)
     return "insufficient_detail" as const;
-  if (facts.relatedActivity === "same_functional_object")
+  if (facts.relatedActivity === "shared_professional_function")
     return "related_activity" as const;
   if (facts.activitiesOverlap === null) return "insufficient_detail" as const;
   if (!facts.activitiesOverlap) return "different_service" as const;
@@ -814,9 +814,10 @@ export function buildInterpretedComparisonRequest(
       rules: [
         "Una prestazione principale e lo stesso ruolo consentono una corrispondenza professionale, senza pretendere quantità, modelli, qualifiche, certificazioni o ogni dettaglio tecnico nel profilo.",
         "activitiesOverlap=true richiede almeno un servizio o prodotto concretamente comune: un settore generale o un ruolo uguale non bastano. False richiede attività esplicitamente diverse; informazioni mancanti danno null.",
-        "Valuta separatamente relatedActivity: usa same_functional_object per attività in ruoli diversi sullo stesso bene o sistema concreto, oppure quando il bene richiesto è una parte che svolge una funzione propria nel sistema su cui la ditta dichiara di lavorare. Il profilo può nominare il sistema senza elencarne ogni componente: riconosci tale rapporto parte-sistema, senza esigere il nome del singolo prodotto. Questo prova soltanto un collegamento professionale potenziale, non che la ditta venda, produca o sappia fornire quella parte. Mantieni le differenze di ruolo e spiega il rapporto funzionale citando componentRefs e companyRefs.",
+        "relatedActivity valuta l’affinità professionale, separatamente dalla coincidenza delle prestazioni: shared_professional_function quando un bene richiesto svolge la stessa funzione professionale degli impianti o prodotti su cui la ditta dichiara di lavorare, anche come componente. Non richiedere identica destinazione d’uso, scala, modello, classe tecnica o applicazione per questa sola affinità. Il profilo non deve elencare ogni componente del proprio lavoro. Una differenza edificio/infrastruttura o installazione/fornitura resta da approfondire: non prova capacità di fornitura e non esclude da sola il collegamento. Spiega la funzione comune e la differenza da verificare, citando componentRefs e companyRefs.",
         "Usa incidental_context se il legame è soltanto lo stesso settore, luogo, clientela, materiale generico, filiera o uno scarto generato dall'attività. Un luogo dove si lavora, un bene soltanto utilizzato e uno scarto da smaltire non sono per questo componenti del sistema su cui si dichiara di lavorare. Questi legami non provano un rapporto funzionale e non rendono pertinente il lavoro. Se manca anche tale legame, usa none. Le attività negate o escluse nel profilo non dimostrano capacità né collegamento. Non affermare copertura parziale quando non esiste alcuna prestazione concretamente comune.",
-        "Se relatedActivity=same_functional_object non dichiarare sameContractualRole=true né mainScopeCovered=true. Conserva le differenze di ruolo e le informazioni mancanti. Attività realmente estranee restano diverse; un contesto incidentale non deve riaprire ogni gara dello stesso settore.",
+        "Esempi generali della distinzione: installare impianti idraulici e fornire valvole hanno la funzione idraulica in comune ma ruoli diversi; pulire uffici e fornire computer condividono soltanto un ambiente di lavoro. Gli esempi spiegano il criterio, non aggiungono prestazioni alla fonte o al profilo.",
+        "Se relatedActivity=shared_professional_function non dichiarare sameContractualRole=true né mainScopeCovered=true. Conserva le differenze di ruolo e le informazioni mancanti. Attività realmente estranee restano diverse; un contesto incidentale non deve riaprire ogni gara dello stesso settore.",
         "Un ruolo commerciale o una famiglia di prodotti generica non identifica necessariamente i prodotti trattati: companyIdentifiesService=false e mainScopeCovered=null se la descrizione non chiarisce il lavoro. Non inventare attività escluse o non dichiarate.",
         "mainScopeCovered riguarda tutte le componenti main della fonte: se true, cita ciascuna di esse in componentRefs. Una copertura parziale è false, anche con un ruolo principale diverso. Le componenti accessory non diventano automaticamente un altro mestiere; excluded non sono servizi richiesti al target.",
         "Il significato della fonte è già fissato: non puoi correggerlo o cambiare stato. Se non sai stabilire il confronto, comparisonUncertain=true e i fatti non determinabili null. Territorio, scadenze e importi sono controllati separatamente.",

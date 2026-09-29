@@ -47,6 +47,34 @@ export async function readCurrentLotMatch(
   });
 }
 
+// A verified relationship in a different professional role can be explored by
+// the customer. Missing/stale judgments and source problems stay in review.
+// This never changes signalEligible, approvals or notification eligibility.
+export function relatedReviewTargets(loaded: LoadedLotMatchReview) {
+  const project = loaded.project;
+  if (
+    project.state !== "review" ||
+    project.signalEligible ||
+    project.suppressed ||
+    project.dismissed ||
+    loaded.input.snapshot.acquisition.state !== "accepted"
+  )
+    return [];
+  return project.targets.filter(
+    (target) =>
+      target.state === "current" &&
+      !target.issue &&
+      !target.evaluation &&
+      target.preliminary?.eligible &&
+      target.automatic?.result === "review" &&
+      target.automatic.basis === "related_activity" &&
+      target.automatic.response?.facts.relatedActivity ===
+        "shared_professional_function" &&
+      !target.automatic.sourceBlocked &&
+      target.automatic.sourceReview?.accepted,
+  );
+}
+
 export function presentLotOpportunity(
   loaded: LoadedLotMatchReview,
   includeBrief = false,
@@ -59,6 +87,7 @@ export function presentLotOpportunity(
     acquisition.state === "refused",
   );
   const dto = projectLotAssessmentDto(project);
+  const related = relatedReviewTargets(loaded);
   const operational = dto.targets.filter(
     (lot) => lot.state !== "removed-or-unresolved" && lot.operational,
   );
@@ -102,6 +131,7 @@ export function presentLotOpportunity(
         " / ",
       ) || "Non indicato",
     score: project.signalEligible ? 100 : 0,
+    reviewCandidate: related.length > 0,
     assessment:
       project.quality === "approved"
         ? "reviewed"
@@ -116,7 +146,9 @@ export function presentLotOpportunity(
             (target) =>
               target.state === "current" && target.result === "direct",
           )?.reason ?? project.reason)
-        : project.reason,
+        : related.length
+          ? `${related[0]!.automatic!.response!.comparison}${related.length > 1 ? " Anche altri lotti presentano attività collegate: verifica le singole valutazioni nella scheda." : ""}`
+          : project.reason,
     reviewRequired:
       dto.targets.some(
         (lot) =>
@@ -149,6 +181,7 @@ export function lotOpportunityVisible(
   loaded: LoadedLotMatchReview,
   includeInactive: boolean,
   now: Date,
+  includeRelatedReview = false,
 ) {
   if (loaded.publication.visibleAt > now) return false;
   if (includeInactive) return loaded.project.saved;
@@ -156,9 +189,12 @@ export function lotOpportunityVisible(
     loaded.publication.status === "open" &&
     !loaded.project.suppressed &&
     // Pending, stale and refused assessments belong in the founder queue.
+    // The customer may separately explore current, verified related roles.
     // Explicit customer dismissals remain available under the Excluse filter;
     // they are never displayed among the selected opportunities or emailed.
-    (loaded.project.signalEligible || loaded.project.dismissed)
+    (loaded.project.signalEligible ||
+      loaded.project.dismissed ||
+      (includeRelatedReview && relatedReviewTargets(loaded).length > 0))
   );
 }
 

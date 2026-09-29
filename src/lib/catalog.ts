@@ -470,7 +470,11 @@ export function collectionReturnHref(
       if (query) params.set("q", query);
       if (sectorFilter(sector) !== "all") params.set("settore", sector!);
       if (order === "scadenza") params.set("ordine", order);
-      if (url.pathname === "/" && view === "escluse") params.set("vista", view);
+      if (
+        url.pathname === "/" &&
+        (view === "escluse" || view === "da-verificare")
+      )
+        params.set("vista", view);
       return `${url.pathname}${params.size ? `?${params}` : ""}`;
     }
     if (url.pathname !== "/esplora") return fallback;

@@ -29,7 +29,9 @@ export default async function Home({
   return (
     <Dashboard
       viewer={viewer}
-      opportunities={await listOpportunities(viewer)}
+      opportunities={await listOpportunities(viewer, {
+        includeRelatedReview: true,
+      })}
       radarStatus={radarStatus}
       aiProcessingBlocked={aiProcessingBlocked}
       initialFilters={Object.fromEntries(

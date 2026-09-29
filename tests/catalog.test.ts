@@ -382,6 +382,12 @@ it("cerca nel testo originale con accenti e ordine indipendenti; conserva i filt
       "/",
     ),
   ).toBe("/?q=verde&settore=giardinaggio&ordine=scadenza&vista=escluse");
+  expect(collectionReturnHref("/?q=quadri&vista=da-verificare", "/")).toBe(
+    "/?q=quadri&vista=da-verificare",
+  );
+  expect(collectionReturnHref("/salvati?vista=da-verificare", "/")).toBe(
+    "/salvati",
+  );
   expect(collectionReturnHref("//evil.invalid/", "/")).toBe("/");
 });
 it("pagina senza salti, limita parametri fuori intervallo e ordina scadenze mancanti in fondo", async () => {

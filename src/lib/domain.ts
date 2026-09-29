@@ -115,6 +115,7 @@ export type Opportunity = Publication & {
   tenderBrief?: import("./tender-brief").TenderBrief;
   lotReview?: ReturnType<typeof projectLotAssessmentDto>;
   catalogOnly?: boolean;
+  reviewCandidate?: boolean;
   score: number;
   reason: string;
   assessment: MatchAssessment;
