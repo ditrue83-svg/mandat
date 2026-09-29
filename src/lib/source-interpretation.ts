@@ -9,7 +9,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v12";
+  "documentary-source-interpretation-v13";
 // Both allowances include provider reasoning. Large sources need room for
 // their components and classification accounting, without dropping evidence.
 export const SOURCE_INTERPRETATION_MAX_TOKENS = 8192;
@@ -204,7 +204,7 @@ const meaningStatement = text(600).describe(
   "Significato concreto dell'oggetto nel suo dominio. Non basta ripetere o tradurre un termine ambiguo; non inventare dettagli o decodificare codici da memoria.",
 );
 const componentDescription = text(600).describe(
-  "Azione e prodotto/servizio acquistato, comprensibili da soli, con sole caratteristiche attestate. Non descrivere campi, intestazioni o funzioni dei dati.",
+  "Azioni e prodotto/servizio acquistato, comprensibili da soli, con sole caratteristiche attestate. Conserva le azioni contrattuali applicabili anche quando role ne riassume una sola. Non descrivere campi, intestazioni o funzioni dei dati.",
 );
 const componentRole = z
   .enum([
@@ -380,7 +380,9 @@ function buildResponseSchema(bounds?: {
       ? z.array(item).length(bounds.classificationCount)
       : z.array(item).max(1024);
   const commonFields = {
-    summary: text(1200),
+    summary: text(1200).describe(
+      "Sintesi del lavoro acquistato: oggetti, azioni contrattuali e ambito. Conserva le azioni comuni a più impianti o servizi; un elenco dei soli beni non rappresenta anche installazione, gestione o rimozione.",
+    ),
     targetRef: bounds?.targetRef ?? sourceId,
     details: z
       .array(detail)
@@ -678,6 +680,7 @@ export function buildSourceInterpretationRequest(
       "roleEvidence cita un estratto esatto, non tradotto e non classificatorio dell'azione; evidence con use role o role_and_meaning lo documenta nello stesso scope. Non scambiare settore, luogo o destinatario per ruolo contrattuale. Se indeterminato usa role null, roleEvidence unresolved e issue role_identity. Per details e roleEvidence scope è l'ambito dei passaggi; per issues è il target interessato. target_scope riguarda soltanto lotti e cita entrambi gli ambiti: contesto condiviso e lotto.",
       "source_conflict richiede status conflicting e due asserzioni materialmente incompatibili sullo stesso target, con riferimenti distinti nello stesso issue. Una tua interpretazione non è un'asserzione della fonte. Categoria ampia, descrizione specifica, traduzioni, ripetizioni o segmenti spezzati non costituiscono di per sé un conflitto. Una lettura unreadable vieta resolved.",
       "Descrivi ogni acquisto con azione e prodotto o servizio concreto, comprensibile da solo e coerente con la sintesi. Distingui oggetto, ruolo e opera a cui serve. Conserva tutte le prestazioni principali, accessorie ed escluse; non promuovere lavori di terzi. Non creare componenti da intestazioni, codici o traduzioni e non duplicare lo stesso acquisto per la classificazione. Servizi realmente acquistati di classificazione/catalogazione restano prestazioni, documentate dal testo.",
+      "Leggi insieme clausole generali e specifiche. Se una clausola acquista più azioni sullo stesso insieme di impianti o sistemi, conserva quel ciclo nella sintesi e nelle descrizioni delle componenti a cui si applica, con entrambe le prove. Non restringerlo a un solo esempio dell'elenco e non ridurre un acquisto integrato alla sola fornitura. role riassume una funzione, non cancella le altre azioni documentate. Non estendere il ciclo a servizi, oggetti o lotti cui la fonte non lo applica; una clausola specifica di esclusione o limitazione resta vincolante.",
       "Conserva destinatari, numero di strutture, continuità e territorio nella sintesi o nei details. Mantieni azione e ambito delle condizioni anche nella sintesi, senza estenderle ad altre fasi del lavoro. Non dedurre quantità o periodicità assenti.",
       "Permessi organizzativi e limiti al subappalto vanno in details come execution_condition: conserva soggetti, attività e limiti. Non provano nuovi acquisti. Per creare componenti serve un'ulteriore clausola che acquisti o escluda quei lavori: cita quella prova. Distingui una prestazione acquistabile in opzione dal solo permesso di delegare il lavoro.",
       "Le clausole di contesto possono descrivere prestazioni: cita il loro testo e le classificazioni utili allo stesso oggetto. Il contesto di progetto non sostituisce il lotto: non assegnargli lavori di altri lotti. targetRef cita un passaggio service del target, anche se il titolo è geografico e l'oggetto è nel contesto comune.",

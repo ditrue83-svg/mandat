@@ -1853,9 +1853,11 @@ test.each([
   "documentary-source-interpretation-v8",
   "documentary-source-interpretation-v9",
   "documentary-source-interpretation-v10",
+  "documentary-source-interpretation-v11",
+  "documentary-source-interpretation-v12",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
-  assert.equal(request.version, "documentary-source-interpretation-v12");
+  assert.equal(request.version, "documentary-source-interpretation-v13");
   const current = recordSourceInterpretation(response(), request, metadata);
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");

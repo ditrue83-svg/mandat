@@ -1141,6 +1141,49 @@ test("Negative inconclusive and unreadable reviews persist without repairing or 
   assert.equal(JSON.stringify(original), before);
 });
 
+test("A keyed review blocks omitted work even when every stated claim is supported", () => {
+  const base = context();
+  const sourceText =
+    "Fornitura di articoli inventati, installazione e rimozione finale.";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: base.body.passages.map((passage, index) =>
+        index === 0
+          ? { ...passage, text: sourceText, endUtf16: sourceText.length }
+          : passage,
+      ),
+    },
+  };
+  const original = draft(input);
+  const before = JSON.stringify(original);
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  const responses = answers(plan);
+  responses[0].findings.push({
+    kind: "omitted_scope",
+    reason:
+      "La fornitura è attestata, ma installazione e rimozione finale non sono rappresentate come lavori acquistati.",
+    sourceRefs: ["s1"],
+  });
+  const stored = recordSourceSemanticReview(
+    responses.map(wireResponse),
+    plan,
+    metadata,
+  );
+  assert(
+    stored.responses
+      .flatMap((r) => r.checks)
+      .every((c) => c.verdict === "supported"),
+  );
+  const reviewed = readSourceSemanticReview(stored, plan)!;
+  assert.equal(reviewed.accepted, false);
+  assert.equal(reviewed.findings.length, 1);
+  assert.equal(reviewed.findings[0].kind, "omitted_scope");
+  assert.equal(reviewed.evidence.find((p) => p.id === "s1")!.text, sourceText);
+  assert.equal(JSON.stringify(original), before);
+});
+
 test("Review records become stale for source draft configuration or version and reject tampering", () => {
   const input = context(),
     original = draft(input),
