@@ -43,7 +43,7 @@ import { SOURCE_EVIDENCE_READING_VERSION } from "./source-evidence-reading";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v57";
+  "documentary-service-comparison-v58";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -155,12 +155,12 @@ export const automaticComparisonResponseSchema = z
         .boolean()
         .nullable()
         .describe(
-          "Le attività dichiarate comprendono TUTTE le prestazioni principali del target. False se coprono soltanto una componente; null se il profilo non basta. Requisiti formali e dettagli tecnici non sono altre professioni.",
+          "Le attività dichiarate comprendono TUTTE le prestazioni principali del target. False se coprono soltanto una componente; null se il profilo o la fonte non chiariscono l'intero ambito. Una descrizione generale del servizio non dimostra copertura completa quando la fonte rinvia a prestazioni diverse, non disponibili, per ambienti non dichiarati dalla ditta. Requisiti formali e dettagli tecnici non sono altre professioni.",
         ),
       comparisonUncertain: z
         .boolean()
         .describe(
-          "Il confronto tra le attività dichiarate e le prestazioni già interpretate resta incerto. Questo non modifica lo stato o il significato della fonte.",
+          "Il confronto tra le attività dichiarate e le prestazioni già interpretate resta incerto, anche quando la fonte identifica il servizio generale ma rinvia a prestazioni diverse non disponibili per l'intero ambito. Questo non modifica lo stato o il significato della fonte.",
         ),
     }),
     interpretationHash: z.string().regex(/^[a-f0-9]{64}$/),
@@ -822,10 +822,11 @@ export function buildInterpretedComparisonRequest(
         "Valuta sameContractualRole separatamente dall’affinità: due prestazioni diverse possono entrambe richiedere installazione, fornitura o un altro stesso ruolo. Se il ruolo coincide conserva true, senza trasformarlo in sovrapposizione delle prestazioni. Con relatedActivity=shared_professional_function non dichiarare mainScopeCovered=true: spiega la differenza concreta ancora da verificare. Se attività, ruolo e intero ambito principale coincidono, usa relatedActivity=none. Attività realmente estranee restano diverse; un contesto incidentale non deve riaprire ogni gara dello stesso settore.",
         "Un ruolo commerciale o una famiglia di prodotti generica non identifica necessariamente i prodotti trattati: companyIdentifiesService=false e mainScopeCovered=null se la descrizione non chiarisce il lavoro. Non inventare attività escluse o non dichiarate.",
         "mainScopeCovered riguarda tutte le componenti main della fonte: se true, cita ciascuna di esse in componentRefs. Una copertura parziale è false, anche con un ruolo principale diverso. Le componenti accessory non diventano automaticamente un altro mestiere; excluded non sono servizi richiesti al target.",
+        "Distingui identità del servizio e copertura dell'intera commessa. Se il profilo limita il servizio a certi ambienti e la fonte richiede quel servizio in altri ambienti precisando che le prestazioni differiscono, ma rinvia a un documento non disponibile per sapere quali siano, conserva la sovrapposizione professionale e il ruolo comuni; usa mainScopeCovered=null e comparisonUncertain=true. Non dichiarare copertura totale o coincidenza delle prestazioni concrete sulla sola base della famiglia generale. Una quantità, un modello o un dettaglio tecnico mancante non crea da solo questa incertezza.",
         "Il significato della fonte è già fissato: non puoi correggerlo o cambiare stato. Se non sai stabilire il confronto, comparisonUncertain=true e i fatti non determinabili null. Territorio, scadenze e importi sono controllati separatamente.",
         "classificationContext conserva classificazioni originali e ambito; classificationReadings e meaning spiegano come sono state usate per identificare ogni componente. Mantieni quel significato senza reinterpretarlo secondo la ditta. Un contesto ampio o condiviso non sostituisce il servizio concreto del target e non prevale sul lotto selezionato.",
         "Le classificazioni non sono prestazioni: non trasformarle in componenti o in prova sufficiente di sovrapposizione. componentRefs accetta soltanto gli id delle componenti; i codici senza etichette non autorizzano decodifiche inventate.",
-        "details conserva specifiche non indicate, condizioni di esecuzione e contesto condiviso: non sono componenti acquistate o motivi per cambiare l'identità già accertata dell'oggetto. Non trasformarli in requisiti aziendali mancanti. roleEvidence conserva il testo dell'azione richiesto dalla fonte: mantieni il ruolo registrato, senza confondere esecuzione, fornitura, gestione e manutenzione.",
+        "details conserva specifiche non indicate, condizioni di esecuzione e contesto condiviso: non sono componenti acquistate né cambiano l'identità già accertata dell'oggetto. Una lacuna sulle prestazioni concrete può però impedire di attestare copertura completa secondo la regola precedente. Non trasformare dettagli tecnici mancanti in requisiti aziendali. roleEvidence conserva il testo dell'azione richiesto dalla fonte: mantieni il ruolo registrato, senza confondere esecuzione, fornitura, gestione e manutenzione.",
       ],
       sourceInterpretation: {
         hash: sourceRecord.hash,
