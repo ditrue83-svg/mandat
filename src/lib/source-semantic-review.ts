@@ -21,7 +21,7 @@ import type {
 import { sourceEvidencePassages } from "./source-evidence-context";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v18";
+  "documentary-source-semantic-review-v19";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -58,66 +58,72 @@ const claimId = z.string().regex(/^q[1-9]\d*$/);
 const verdict = z.enum(["supported", "contradicted", "not_verifiable"]);
 const findingKind = z.enum(["omitted_scope", "contradiction", "unverifiable"]);
 const chunkId = z.string().regex(/^review[1-9]\d*$/);
-function responseSchema(bounds?: {
+type ResponseBounds = {
   id: string;
   claimIds: string[];
   sourceIds: string[];
   evidenceHash?: string;
   readingIds?: string[];
   claimReadingGroups?: { claimIds: string[]; readingIds: string[] }[];
-}) {
-  const references = bounds
-    ? z.array(z.enum(bounds.sourceIds)).min(1).max(1024)
-    : refs;
-  const check = z.strictObject({
-    claimId:
-      bounds && bounds.claimIds.length ? z.enum(bounds.claimIds) : claimId,
-    verdict,
-    draftQuote: text(1200).nullable(),
-    reason: text(600),
-    sourceRefs: references,
-    readingRefs: bounds?.readingIds?.length
-      ? z.array(z.enum(bounds.readingIds)).min(1).max(1024)
-      : z
-          .array(z.string().regex(/^([ed][1-9]\d*-[1-9]\d*|c[1-9]\d*|o-s\d+)$/))
-          .min(1)
-          .max(1024),
-  });
-  // Enforce the same ownership at generation time as in validateResponses.
-  // Group claims sharing the allowed readings to avoid repeating the whole
-  // source vocabulary for every component dimension.
-  const boundChecks = bounds?.claimReadingGroups?.map((group) =>
-    check.extend({
-      claimId: z.enum(group.claimIds),
+};
+const checkShape = z.strictObject({
+  claimId,
+  verdict,
+  draftQuote: text(1200).nullable(),
+  reason: text(600),
+  sourceRefs: refs,
+  readingRefs: z
+    .array(z.string().regex(/^([ed][1-9]\d*-[1-9]\d*|c[1-9]\d*|o-s\d+)$/))
+    .min(1)
+    .max(1024),
+});
+const findingShape = z.strictObject({
+  kind: findingKind,
+  reason: text(600),
+  sourceRefs: refs,
+});
+const responseShape = z.strictObject({
+  chunkId,
+  sourceEvidenceHash: hash,
+  coverage: z.enum(["complete", "unreadable"]),
+  checks: z.array(checkShape).max(MAX_CHECKS),
+  findings: z.array(findingShape).max(32),
+});
+function providerResponseSchema(bounds: ResponseBounds) {
+  const references = z.array(z.enum(bounds.sourceIds)).min(1).max(1024);
+  const common = responseShape.shape.checks.element
+    .omit({ claimId: true })
+    .extend({
+      sourceRefs: references,
+      ...(bounds.readingIds?.length
+        ? { readingRefs: z.array(z.enum(bounds.readingIds)).min(1).max(1024) }
+        : {}),
+    });
+  // Reuse each ownership group's schema, but require every claim as a
+  // distinct object key. Array length alone permits duplicates and omissions.
+  const groups = bounds.claimReadingGroups?.map((group) => ({
+    ids: group.claimIds,
+    schema: common.extend({
       readingRefs: z.array(z.enum(group.readingIds)).min(1).max(1024),
     }),
-  );
-  const assignedCheck = boundChecks?.length
-    ? boundChecks.length === 1
-      ? boundChecks[0]
-      : z.union(boundChecks)
-    : check;
-  return z.strictObject({
-    chunkId: bounds ? z.literal(bounds.id) : chunkId,
-    sourceEvidenceHash: bounds?.evidenceHash
+  }));
+  return responseShape.omit({ checks: true }).extend({
+    chunkId: z.literal(bounds.id),
+    sourceEvidenceHash: bounds.evidenceHash
       ? z.literal(bounds.evidenceHash)
       : hash,
-    coverage: z.enum(["complete", "unreadable"]),
-    checks: bounds
-      ? z.array(assignedCheck).length(bounds.claimIds.length)
-      : z.array(assignedCheck).max(MAX_CHECKS),
-    findings: z
-      .array(
-        z.strictObject({
-          kind: findingKind,
-          reason: text(600),
-          sourceRefs: references,
-        }),
-      )
-      .max(32),
+    findings: z.array(findingShape.extend({ sourceRefs: references })).max(32),
+    checksFormat: z.literal("claim_keyed_v1"),
+    checksByClaim: z.strictObject(
+      Object.fromEntries(
+        bounds.claimIds.map((id) => [
+          id,
+          groups?.find((group) => group.ids.includes(id))?.schema ?? common,
+        ]),
+      ),
+    ),
   });
 }
-const responseShape = responseSchema();
 type Claim = {
   id: string;
   kind:
@@ -336,7 +342,7 @@ ${item.meaning.statement}`,
         name: "source_semantic_review",
         strict: true,
         schema: z.toJSONSchema(
-          responseSchema({
+          providerResponseSchema({
             id,
             claimIds: group.claims.map((item) => item.id),
             sourceIds,
@@ -349,7 +355,7 @@ ${item.meaning.statement}`,
       task: "Verifica assignedClaims contro le prove originali: passages, fields e classificationContext. independentReading è una lettura AI separata, registrata prima di vedere il draft: serve a individuare prove e prestazioni, non sostituisce la fonte. Verifica la fedeltà delle affermazioni e la completezza delle prestazioni rappresentate. Non riscrivere la lettura indipendente per conformarla al draft. La mancanza di una prestazione in un altro frammento non la confuta.",
       rules: [
         "Le observations della lettura indipendente selezionano e classificano passaggi originali senza riscriverli. Leggi direttamente evidence e passages per stabilire lavoro, soggetto che lo richiede, operatore che lo svolge, destinatario e carattere obbligatorio o facoltativo. kind e serviceRef aiutano a trovare le prove; non sono affermazioni del committente né sostituiscono il loro significato originale.",
-        "Per ogni assignedClaim verifica il suo text e restituisci un check. Non attribuirgli parole di altri claim o campi del draft. supported richiede sostegno reale; contradicted una controprova; not_verifiable sostegno insufficiente. Per ogni esito negativo, draftQuote deve essere un estratto esatto non vuoto del text assegnato che identifica l’affermazione problematica; supported può usare null. Spiega quel preciso difetto contro la fonte. Un problema nel summary va giudicato nel claim summary, anche se un detail distinto è corretto. Leggi insieme oggetto, classificazioni originali e relativo ambito.",
+        "Per ogni assignedClaim verifica il suo text e compila la sua chiave obbligatoria in checksByClaim, una sola volta. Non attribuirgli parole di altri claim o campi del draft. supported richiede sostegno reale; contradicted una controprova; not_verifiable sostegno insufficiente. Per ogni esito negativo, draftQuote deve essere un estratto esatto non vuoto del text assegnato che identifica l’affermazione problematica; supported può usare null. Spiega quel preciso difetto contro la fonte. Un problema nel summary va giudicato nel claim summary, anche se un detail distinto è corretto. Leggi insieme oggetto, classificazioni originali e relativo ambito.",
         "Una valutazione AI non è una nuova affermazione del committente. Per contradicted identifica l'affermazione precisa del draft e il fatto originale incompatibile: una diversa formulazione o precisione non basta. La mancanza di un sottotipo non cancella la famiglia esplicitamente dichiarata dalle etichette originali; queste non dimostrano da sole azioni accessorie o applicabilità a un lotto.",
         "Una categoria amministrativa e una descrizione specifica possono usare nomi diversi senza contraddirsi. La categoria non esclude di per sé un lavoro esplicito né aggiunge tutte le attività della sua etichetta. Verifica il lavoro contro la descrizione originale, mantenendo le classificazioni come dichiarate; non approvare correzioni del codice o nuovi servizi. Caratteristiche esplicite incompatibili e clausole opposte rimangono bloccanti. Un avviso sui metadati non sana ambiguità, omissioni o affermazioni false.",
         "Ogni check cita readingRefs della lettura indipendente oltre agli estratti originali. I riferimenti evidence della lettura indipendente rimandano al testo originale in passages; le citazioni di contesto non presenti in passages conservano anche text. Un draft che introduce un dominio incompatibile, una correzione della fonte o una discrepanza non presente nella lettura indipendente non può essere supported solo perché ripete il nome del prodotto. Per classification_reading cita la corrispondente classificazione indipendente cN.",
@@ -644,7 +650,7 @@ export function buildGroundedSourceReviewRequests(
           name: "source_semantic_review",
           strict: true,
           schema: z.toJSONSchema(
-            responseSchema({
+            providerResponseSchema({
               id: request.id,
               claimIds: request.assignedClaimIds,
               sourceIds: request.sourceIds,
@@ -672,7 +678,14 @@ export function buildGroundedSourceReviewRequests(
         ) > MAX_BYTES
       )
         throw new Error("source_semantic_review_grounded_capacity");
-      return { ...request, prompt, responseFormat, readingIds, originalFacts };
+      return {
+        ...request,
+        prompt,
+        responseFormat,
+        readingIds,
+        originalFacts,
+        claimReadingGroups: [...readingGroups.values()],
+      };
     }),
   );
 }
@@ -699,7 +712,37 @@ function validateResponses(
   const grounded = buildGroundedSourceReviewRequests(plan, sourceEvidence);
   if (values.length !== grounded.length)
     throw new Error("Incomplete source semantic review coverage");
-  const responses = values.map((value) => responseShape.parse(value));
+  const responses = values.map((value, index) => {
+    if (
+      value &&
+      typeof value === "object" &&
+      ("checksFormat" in value || "checksByClaim" in value)
+    ) {
+      const request = grounded[index];
+      const {
+        checksFormat: _format,
+        checksByClaim,
+        ...header
+      } = providerResponseSchema({
+        id: request.id,
+        claimIds: request.assignedClaimIds,
+        sourceIds: request.sourceIds,
+        evidenceHash: independent.hash,
+        readingIds: request.readingIds,
+        claimReadingGroups: request.claimReadingGroups,
+      }).parse(value);
+      return responseShape.parse({
+        ...header,
+        checks: request.assignedClaimIds.map((claimId) => ({
+          claimId,
+          ...checksByClaim[claimId],
+        })),
+      });
+    }
+    // Stored records keep the ordered list; its exact cardinality and
+    // ownership checks below still reject historical malformed responses.
+    return responseShape.parse(value);
+  });
   const claims = new Map(plan.claims.map((claim) => [claim.id, claim]));
   const originals = new Map(
     sourceEvidencePassages(plan.context).map((passage) => [
