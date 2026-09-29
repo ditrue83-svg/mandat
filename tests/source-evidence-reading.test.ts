@@ -180,6 +180,99 @@ test("A complete reading must preserve every original work clause, including lan
   );
 });
 
+for (const scope of ["project_context", "selected_lot"] as const) {
+  for (const value of ["no", "yes", false, true] as const) {
+    test(`Subcontracting ${String(value)} in ${scope} cannot disappear from a complete reading`, () => {
+      const base = scope === "selected_lot" ? lotContext() : context();
+      const rawPath = `${scope === "selected_lot" ? "/lots/0" : ""}/terms/subContractorAllowed`;
+      const anchor = base.body.passages.find(
+        (p) => p.scope === scope && p.role === "service",
+      )!;
+      const isText = typeof value === "string";
+      const ref = isText ? "s901" : `f${base.body.fields.length}`;
+      const input = {
+        ...base,
+        body: {
+          ...base.body,
+          passages: isText
+            ? [
+                ...base.body.passages,
+                {
+                  ...anchor,
+                  id: ref,
+                  rawPath,
+                  role: "context" as const,
+                  text: value,
+                  startUtf16: 0,
+                  endUtf16: value.length,
+                },
+              ]
+            : base.body.passages,
+          fields: isText
+            ? base.body.fields
+            : [...base.body.fields, { scope, rawPath, value }],
+        },
+      };
+      const plan = buildSourceEvidenceReadingRequest(input, config);
+      const index = plan.requests.findIndex((r) =>
+        r.requiredClauseIds.includes(ref),
+      );
+      assert(index >= 0);
+      const answers: any[] = responses(plan);
+      answers[index].observations = answers[index].observations.filter(
+        (o: any) => !o.evidence.some((q: any) => q.sourceRef === ref),
+      );
+      assert.throws(
+        () => recordSourceEvidenceReading(answers, plan, metadata),
+        /contractual clause evidence coverage/,
+      );
+      answers[index].observations.push({
+        kind: "condition",
+        serviceRef: anchor.id,
+        evidence: [{ sourceRef: ref }],
+      });
+      const record = recordSourceEvidenceReading(answers, plan, metadata);
+      assert(readSourceEvidenceReading(record, plan)?.accepted);
+      const condition = record.responses[index].observations.find((o) =>
+        o.evidence.some((q) => q.sourceRef === ref),
+      )!;
+      assert.equal(condition.scope, scope);
+      assert.equal(
+        condition.evidence.find((q) => q.sourceRef === ref)?.text,
+        String(value),
+      );
+    });
+  }
+}
+
+test("An unspecified subcontracting permission is not converted into a prohibition", () => {
+  const base = context();
+  const plan = buildSourceEvidenceReadingRequest(
+    {
+      ...base,
+      body: {
+        ...base.body,
+        fields: [
+          ...base.body.fields,
+          {
+            scope: "project_context",
+            rawPath: "/terms/subContractorAllowed",
+            value: null,
+          },
+        ],
+      },
+    },
+    config,
+  );
+  assert.equal(plan.requests.flatMap((r) => r.requiredClauseIds).length, 0);
+  assert(
+    readSourceEvidenceReading(
+      recordSourceEvidenceReading(responses(plan), plan, metadata),
+      plan,
+    )?.accepted,
+  );
+});
+
 test("Unreadable work clauses stay blocked and missing-detail quotations cannot move between scopes", () => {
   const plan = buildSourceEvidenceReadingRequest(contractContext(), config);
   const answer = responses(plan);
@@ -270,12 +363,74 @@ test("A clause near the end of a long lot source retains a same-scope descriptiv
   );
 });
 
+test("A structured project permission in a later lot chunk keeps the project anchor and scope", () => {
+  const base = lotContext();
+  const notes = Array.from({ length: 120 }, (_, i) => {
+    const text = `Contesto inventato ${i} `.padEnd(1500, "x");
+    return {
+      ...base.body.passages[0],
+      id: `s${i + 6}`,
+      role: "context" as const,
+      rawPath: `/context/${i}`,
+      text,
+      endUtf16: text.length,
+    };
+  });
+  const ref = `f${base.body.fields.length}`;
+  const plan = buildSourceEvidenceReadingRequest(
+    {
+      ...base,
+      body: {
+        ...base.body,
+        passages: [...base.body.passages, ...notes],
+        fields: [
+          ...base.body.fields,
+          {
+            scope: "project_context",
+            rawPath: "/terms/subContractorAllowed",
+            value: false,
+          },
+        ],
+      },
+    },
+    config,
+  );
+  const index = plan.requests.findIndex((r) =>
+    r.requiredClauseIds.includes(ref),
+  );
+  assert(index > 0);
+  const body = JSON.parse(plan.requests[index].prompt);
+  assert(
+    body.passages.some(
+      (p: any) => p.id === "s1" && p.scope === "project_context",
+    ),
+  );
+  assert.deepEqual(body.requiredClauseFields, [
+    {
+      sourceRef: ref,
+      scope: "project_context",
+      rawPath: "/terms/subContractorAllowed",
+    },
+  ]);
+  const answers: any[] = responses(plan);
+  answers[index].observations = answers[index].observations.slice(0, 31);
+  answers[index].observations.push({
+    kind: "condition",
+    serviceRef: "s5",
+    evidence: [{ sourceRef: ref }],
+  });
+  assert.throws(
+    () => recordSourceEvidenceReading(answers, plan, metadata),
+    /scope mismatch/,
+  );
+});
+
 test("Independent readings from before contractual-clause coverage cannot be reused", () => {
   const plan = buildSourceEvidenceReadingRequest(context(), config);
   const record = recordSourceEvidenceReading(responses(plan), plan, metadata);
   assert.equal(
     readSourceEvidenceReading(
-      { ...record, version: "source-evidence-reading-v12" },
+      { ...record, version: "source-evidence-reading-v13" },
       plan,
     ),
     null,
