@@ -1202,6 +1202,7 @@ test("Review records become stale for source draft configuration or version and 
   );
   for (const change of [
     { version: "historical-review" },
+    { version: "documentary-source-semantic-review-v20" },
     { sourceKey: "b".repeat(64) },
     { draftHash: "c".repeat(64) },
     { inputHash: "d".repeat(64) },
