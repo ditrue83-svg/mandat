@@ -12,7 +12,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v14";
+  "documentary-source-interpretation-v15";
 // Both allowances include provider reasoning. Large sources need room for
 // their components and classification accounting, without dropping evidence.
 export const SOURCE_INTERPRETATION_MAX_TOKENS = 8192;
@@ -247,7 +247,7 @@ function buildResponseSchema(bounds?: {
   const meaningFields = {
     statement: meaningStatement,
     objectText: text(600).describe(
-      "Estratto originale esatto che nomina l'oggetto o la prestazione nei passaggi scelti in evidence. Puoi omettere tag HTML e uniformare spazi; non tradurre o parafrasare. Non usare solo un verbo d'azione o un'etichetta classificatoria.",
+      "Estratto originale esatto che nomina l'oggetto o la prestazione nei passaggi scelti in evidence. Puoi omettere tag HTML e uniformare spazi e apostrofi tipografici interni alle parole; non tradurre o parafrasare. Non usare solo un verbo d'azione o un'etichetta classificatoria.",
     ),
     objectRefs: refs.describe(
       "Passaggi non classificatori che nominano l'oggetto o la prestazione; devono essere anche nelle sourceRefs della componente. Sono ammesse clausole di contesto.",
@@ -283,7 +283,7 @@ function buildResponseSchema(bounds?: {
   };
   const roleFields = {
     actionText: text(600).describe(
-      "Estratto originale esatto dell'azione o dell'indeterminatezza del ruolo. Puoi omettere tag HTML e uniformare spazi; non parafrasare, tradurre o sostituire parole.",
+      "Estratto originale esatto dell'azione o dell'indeterminatezza del ruolo. Puoi omettere tag HTML e uniformare spazi e apostrofi tipografici interni alle parole; non parafrasare, tradurre o sostituire parole.",
     ),
     sourceRefs: refs,
     scope,

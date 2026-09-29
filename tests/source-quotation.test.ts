@@ -129,6 +129,10 @@ test.each([
   ["Quantità&nbsp;5 &lt; 10", "Quantità 5 < 10"],
   ["Oggetto &#x1F333;", "Oggetto 🌳"],
   ["Prima\n  seconda\t terza", "Prima seconda terza"],
+  ["l'esecuzione e l'adeguamento", "l’esecuzione e l’adeguamento"],
+  ["l’esecuzione", "l'esecuzione"],
+  ["L‘oggetto", "L'oggetto"],
+  ["l&apos;esecuzione", "l’esecuzione"],
   ["<p>Testo originale</p>", "<p>Testo originale</p>"],
 ])("Literal source text survives formatting: %s", (source, quote) => {
   assert.equal(isOriginalSourceQuotation(source, quote), true);
@@ -156,6 +160,12 @@ test.each([
   ["&lt;b&gt;lavaggio&lt;/b&gt;", "<b>lavaggio</b> aggiuntivo"],
   ["&amp;lt;b&amp;gt;lavaggio&amp;lt;/b&amp;gt;", "<b>lavaggio</b>"],
   ["Fonte originale", "  "],
+  ["l'esecuzione", "l'esenzione"],
+  ["l'esecuzione non inclusa", "l’esecuzione inclusa"],
+  ["l'installazione", "installazione e manutenzione"],
+  ["‘testo’", "'testo'"],
+  ["5’", "5'"],
+  ["L’unità", "L'unita"],
 ])("Formatting cannot change or manufacture wording: %s", (source, quote) => {
   assert.equal(isOriginalSourceQuotation(source, quote), false);
 });

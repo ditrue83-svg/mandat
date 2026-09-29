@@ -1,4 +1,4 @@
-// Match wording, never paraphrases. Only source formatting is removed; the
+// Match wording, never paraphrases. Only source typography is normalized; the
 // original source and the supplied quotation remain unchanged in the record.
 export function isOriginalSourceQuotation(source: string, quotation: string) {
   if (!quotation.trim()) return false;
@@ -40,8 +40,14 @@ export function isOriginalSourceQuotation(source: string, quotation: string) {
           : entity;
       },
     );
-  const spaces = (value: string) => value.replace(/\s+/g, " ").trim();
-  return spaces(readable).includes(spaces(quotation));
+  const typography = (value: string) =>
+    value
+      // Curly apostrophes within words are typography, not different wording.
+      // Do not fold accents, case, quotes around text, primes or punctuation.
+      .replace(/(?<=[\p{L}\p{M}])[\u2018\u2019](?=[\p{L}\p{M}])/gu, "'")
+      .replace(/\s+/g, " ")
+      .trim();
+  return typography(readable).includes(typography(quotation));
 }
 
 // Never manufacture a quotation by joining different fields or skipped spans.
