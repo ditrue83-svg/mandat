@@ -187,7 +187,16 @@ function inventedAnswer(prompt: string) {
     );
     return {
       status: "resolved",
-      details: [],
+      details: data.requiredContractClauses.map(
+        (clause: { id: string; scope: string; text?: string }) => ({
+          kind: "execution_condition",
+          scope: clause.scope,
+          sourceRefs: [clause.id],
+          explanation: (
+            clause.text ?? "Condizione strutturata inventata."
+          ).slice(0, 600),
+        }),
+      ),
       summary:
         "Potatura degli alberi, fonte inventata per la verifica della coda.",
       classificationReadings: data.classificationContext.map(
@@ -717,11 +726,21 @@ it("Reads every long-source chunk before interpretation and reuses those reading
     .map((passage: { text: string }) => passage.text)
     .join("");
   expect(described).toBe(sourceText);
+  const retainedClauses = interpretationPrompt.passages.filter(
+    (passage: { rawPath: string }) =>
+      passage.rawPath === "/procurement/executionNote/it",
+  );
   expect(
-    interpretationPrompt.passages.some((passage: { text: string }) =>
-      passage.text.includes("ULTIMA CONDIZIONE NON SELEZIONATA DALLA MAPPA"),
+    retainedClauses.map((passage: { text: string }) => passage.text).join(""),
+  ).toBe(contextText);
+  const conditionRefs = first.sourceInterpretation.response.details.flatMap(
+    (detail) => detail.sourceRefs,
+  );
+  expect(
+    retainedClauses.every((passage: { id: string }) =>
+      conditionRefs.includes(passage.id),
     ),
-  ).toBe(false);
+  ).toBe(true);
   const reviewedPassages = new Map<
     string,
     { text: string; startUtf16: number }
