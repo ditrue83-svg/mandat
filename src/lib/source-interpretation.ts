@@ -12,7 +12,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v15";
+  "documentary-source-interpretation-v16";
 // Both allowances include provider reasoning. Large sources need room for
 // their components and classification accounting, without dropping evidence.
 export const SOURCE_INTERPRETATION_MAX_TOKENS = 8192;
@@ -226,7 +226,7 @@ const componentRole = z
 const componentImportance = z
   .enum(["main", "accessory", "excluded"])
   .describe(
-    "Prestazione principale, accessoria o esplicitamente esclusa; non importanza di dati/sezioni.",
+    "Ruolo della prestazione nell'acquisto: main ne costituisce l'oggetto principale; accessory lo completa o supporta; excluded è esplicitamente esclusa. Obbligatorietà e presenza nell'elenco non provano main.",
   );
 const componentRefsDescription =
   "Cita il testo che identifica la prestazione, anche se si trova in una clausola o nel contesto del progetto. Codici ed etichette classificatorie possono chiarire questo stesso oggetto, ma non sono da soli una prestazione distinta.";
@@ -703,6 +703,7 @@ export function buildSourceInterpretationRequest(
       "roleEvidence cita un estratto esatto, non tradotto e non classificatorio dell'azione; evidence lo documenta nello stesso scope. Non scambiare settore, luogo o destinatario per ruolo contrattuale. Se indeterminato usa role null, roleEvidence unresolved e issue role_identity. Per details e roleEvidence scope è l'ambito dei passaggi; per issues è il target interessato. target_scope riguarda soltanto lotti e cita entrambi gli ambiti: contesto condiviso e lotto.",
       "source_conflict richiede status conflicting e due asserzioni materialmente incompatibili sullo stesso target, con riferimenti distinti nello stesso issue. Una tua interpretazione non è un'asserzione della fonte. Categoria ampia, descrizione specifica, traduzioni, ripetizioni o segmenti spezzati non costituiscono di per sé un conflitto. Una lettura unreadable vieta resolved.",
       "Descrivi ogni acquisto con azione e prodotto o servizio concreto, comprensibile da solo e coerente con la sintesi. Distingui oggetto, ruolo e opera a cui serve. Conserva tutte le prestazioni principali, accessorie ed escluse; non promuovere lavori di terzi. Non creare componenti da intestazioni, codici o traduzioni e non duplicare lo stesso acquisto per la classificazione. Servizi realmente acquistati di classificazione/catalogazione restano prestazioni, documentate dal testo.",
+      "Determina importance dal rapporto tra prestazioni descritto dalla fonte. Se una clausola presenta servizi come complementari o di supporto all'acquisto principale, conserva quel rapporto con accessory, anche se sono obbligatori, acquistati e dotati di una propria classificazione. Main non significa ogni prestazione inclusa. Non dedurre però accessorietà dal solo ordine, da una frase introdotta con anche/inoltre, dal nome del servizio o dall'assenza di quantità: una prestazione di supporto può essere essa stessa l'oggetto principale della gara. Opzionalità e importanza sono distinte; conserva le condizioni in details.",
       "Leggi insieme clausole generali e specifiche. Se una clausola acquista più azioni sullo stesso insieme di impianti o sistemi, conserva quel ciclo nella sintesi e nelle descrizioni delle componenti a cui si applica, con entrambe le prove. Non restringerlo a un solo esempio dell'elenco e non ridurre un acquisto integrato alla sola fornitura. role riassume una funzione, non cancella le altre azioni documentate. Non estendere il ciclo a servizi, oggetti o lotti cui la fonte non lo applica; una clausola specifica di esclusione o limitazione resta vincolante.",
       "Conserva destinatari, numero di strutture, continuità e territorio nella sintesi o nei details. Mantieni azione e ambito delle condizioni anche nella sintesi, senza estenderle ad altre fasi del lavoro. Non dedurre quantità o periodicità assenti.",
       "Permessi organizzativi e limiti al subappalto vanno in details come execution_condition: conserva soggetti, attività e limiti. Non provano nuovi acquisti. Per creare componenti serve un'ulteriore clausola che acquisti o escluda quei lavori: cita quella prova. Distingui una prestazione acquistabile in opzione dal solo permesso di delegare il lavoro.",
