@@ -228,10 +228,13 @@ test("Every provider claim remains required when a large review is split into sm
   const original = recordSourceInterpretation(
     {
       ...baseline.response,
-      components: Array.from(
-        { length: 8 },
-        () => baseline.response.components[0],
-      ),
+      components: Array.from({ length: 8 }, (_, index) => ({
+        ...baseline.response.components[0],
+        description:
+          index === 7
+            ? "Fornitura di articoli inventati; trasporto escluso."
+            : baseline.response.components[0].description,
+      })),
     },
     buildSourceInterpretationRequest(input),
     { ...metadata, model: input.binding.model },
@@ -240,6 +243,38 @@ test("Every provider claim remains required when a large review is split into sm
   const requests = inventedGroundedReviewRequests(plan);
   assert(requests.some((r) => r.assignedClaimIds.length === 8));
   assert(requests.every((r) => r.assignedClaimIds.length <= 8));
+  const lastComponent = original.response.components[7];
+  assert(
+    requests.some(
+      (request) =>
+        !request.assignedClaimIds.some((id) =>
+          plan.claims
+            .find((claim) => claim.id === id)!
+            .subject.startsWith("/components/7/"),
+        ),
+    ),
+  );
+  for (const request of requests) {
+    const body = JSON.parse(request.prompt);
+    assert.deepEqual(
+      body.draftComponentsForCompleteness,
+      original.response.components.map((component, index) => ({
+        index,
+        description: component.description,
+        importance: component.importance,
+        sourceRefs: component.sourceRefs,
+      })),
+    );
+    assert(
+      body.rules.some((rule: string) =>
+        rule.includes("draftComponentsForCompleteness"),
+      ),
+    );
+    assert.equal(
+      body.draftComponentsForCompleteness[7].description,
+      lastComponent.description,
+    );
+  }
   const stored = answers(plan),
     wire = stored.map(wireResponse);
   const validators = requests.map((r) =>

@@ -22,7 +22,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v25";
+  "documentary-source-semantic-review-v26";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -403,7 +403,7 @@ ${item.meaning.statement}`,
         "Le observations della lettura indipendente selezionano e classificano passaggi originali senza riscriverli. Leggi direttamente evidence e passages per stabilire lavoro, soggetto che lo richiede, operatore che lo svolge, destinatario e carattere obbligatorio o facoltativo. kind e serviceRef aiutano a trovare le prove; non sono affermazioni del committente né sostituiscono il loro significato originale.",
         "Per ogni assignedClaim verifica il suo text e compila la sua chiave obbligatoria in checksByClaim, una sola volta. Non attribuirgli parole di altri claim o campi del draft. supported richiede sostegno reale; contradicted una controprova; not_verifiable sostegno insufficiente. Per ogni esito negativo, draftQuote deve essere un estratto esatto non vuoto del text assegnato che identifica l’affermazione problematica; supported può usare null. Spiega quel preciso difetto contro la fonte. Un problema nel summary va giudicato nel claim summary, anche se un detail distinto è corretto. Leggi insieme oggetto, classificazioni originali e relativo ambito.",
         "Una valutazione AI non è una nuova affermazione del committente. Per contradicted identifica l'affermazione precisa del draft e il fatto originale incompatibile: una diversa formulazione o precisione non basta. La mancanza di un sottotipo non cancella la famiglia esplicitamente dichiarata dalle etichette originali; queste non dimostrano da sole azioni accessorie o applicabilità a un lotto.",
-        "Fedeltà e completezza sono controlli distinti. Una lista di lavori veri resta supported anche se sintetica. Prima di segnalare omitted_scope cerca il lavoro nell'intero draft, comprese descrizioni e meaning di tutte le components, anche quelle i cui claim sono assegnati ad altri gruppi. Il summary può riassumere con un termine collettivo beni o servizi già identificati nelle componenti: non deve ripeterne l'elenco completo. Se il lavoro è davvero assente dalla rappresentazione, registra findings omitted_scope, che blocca l'approvazione; non usare contradicted o not_verifiable per la sola assenza. Una frase che esclude o limita falsamente il lavoro, per esempio dichiarando la sola fornitura quando sono acquistati anche servizi, resta invece contradicted nel proprio claim, anche se altri campi sono corretti.",
+        "Fedeltà e completezza sono controlli distinti. Una lista di lavori veri resta supported anche se sintetica. Prima di segnalare omitted_scope confronta il lavoro candidato con ogni voce di draftComponentsForCompleteness, comprese quelle i cui claim sono assegnati ad altri gruppi. Se una voce rappresenta già quel lavoro, non segnalarlo come omesso. Il summary può riassumere con un termine collettivo beni o servizi già identificati nelle componenti: non deve ripeterne l'elenco completo. Se il lavoro è davvero assente dalla rappresentazione, registra findings omitted_scope, che blocca l'approvazione; non usare contradicted o not_verifiable per la sola assenza. Una frase che esclude o limita falsamente il lavoro, per esempio dichiarando la sola fornitura quando sono acquistati anche servizi, resta invece contradicted nel proprio claim, anche se altri campi sono corretti.",
         "Per la completezza collega anche le clausole comuni del summary o dei details alle componenti del loro ambito esplicito. Un ciclo contrattuale dichiarato per tutti gli impianti o sistemi può valere per le componenti corrispondenti senza essere ripetuto parola per parola in ognuna; citarlo per un solo componente senza conservarne l'ambito generale non basta. Non estendere clausole a oggetti o lotti estranei. Ogni acquisto distinto deve restare rappresentato nelle components: menzionarlo soltanto come dettaglio non sostituisce una prestazione. Una descrizione sintetica non è una clausola di esclusione.",
         "Una categoria amministrativa e una descrizione specifica possono usare nomi diversi senza contraddirsi. La categoria non esclude di per sé un lavoro esplicito né aggiunge tutte le attività della sua etichetta. Verifica il lavoro contro la descrizione originale, mantenendo le classificazioni come dichiarate; non approvare correzioni del codice o nuovi servizi. Caratteristiche esplicite incompatibili e clausole opposte rimangono bloccanti. Un avviso sui metadati non sana ambiguità, omissioni o affermazioni false.",
         "Ogni check cita readingRefs della lettura indipendente oltre agli estratti originali. I riferimenti evidence della lettura indipendente rimandano al testo originale in passages; le citazioni di contesto non presenti in passages conservano anche text. Un draft che introduce un dominio incompatibile, una correzione della fonte o una discrepanza non presente nella lettura indipendente non può essere supported solo perché ripete il nome del prodotto. Per classification_reading cita la corrispondente classificazione indipendente cN.",
@@ -444,6 +444,14 @@ ${item.meaning.statement}`,
         index,
         ...context.body.fields[index],
       })),
+      draftComponentsForCompleteness: draft.response.components.map(
+        (item, index) => ({
+          index,
+          description: item.description,
+          importance: item.importance,
+          sourceRefs: item.sourceRefs,
+        }),
+      ),
     });
     return {
       id,
