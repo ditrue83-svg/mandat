@@ -9,7 +9,7 @@ import {
 import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v12";
+export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v13";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -117,6 +117,12 @@ const selectionSchema = responseSchema
     missingDetails: z.array(selectedDetail).max(32),
   });
 const unique = (values: string[]) => [...new Set(values)];
+// These original fields describe how the work may be performed or delegated.
+// Requiring their citations proves coverage, never their meaning or eligibility.
+const isContractScopeNote = (rawPath: string) =>
+  /^(?:\/lots\/\d+)?\/(?:terms\/subContractorNote|procurement\/(?:optionsNote|executionNote))(?:\/|$)/.test(
+    rawPath,
+  );
 function freeze<T>(value: T): T {
   if (value && typeof value === "object") {
     Object.values(value).forEach(freeze);
@@ -172,8 +178,23 @@ export function buildSourceEvidenceReadingRequest(
   });
   const makeRequest = (group: Group, number: number) => {
     const id = `evidence${number}`;
+    const requiredClausePassages = context.body.passages.filter(
+      (p) => group.passageIds.includes(p.id) && isContractScopeNote(p.rawPath),
+    );
+    const clauseAnchors = unique(
+      requiredClausePassages.flatMap((clause) => {
+        const anchor = context.body.passages.find(
+          (p) =>
+            p.scope === clause.scope &&
+            p.role === "service" &&
+            !classificationSourceRefs.has(p.id),
+        );
+        return anchor ? [anchor.id] : [];
+      }),
+    );
     const sourceIds = unique([
       ...mandatory,
+      ...clauseAnchors,
       ...group.passageIds,
       ...group.fieldIndexes.map((index) => `f${index}`),
     ]);
@@ -294,6 +315,7 @@ export function buildSourceEvidenceReadingRequest(
       },
       rules: [
         "Le observations sono selezioni di prove originali, non un riassunto. Scegli kind, serviceRef ed evidence per individuare tutte le prestazioni e condizioni rilevanti; non produrre parafrasi, traduzioni o un campo statement. Il codice conserva i passaggi integrali. Oggetto, azione, soggetto contrattuale, destinatario, permessi e obblighi rimangono nel testo originale selezionato, che il revisore dovrà leggere direttamente. La sola selezione di un riferimento non dimostra un significato né l'applicabilità al target.",
+        "requiredClausePassages elenca note originali su subappalto, opzioni o esecuzione assegnate a questa parte. Per coverage complete conserva ogni riferimento, incluse tutte le lingue e i segmenti, in observations, missingDetails o issues secondo il suo significato. Una clausola che delimita ruoli, parti delegabili, obblighi od opzioni va in condition con una descrizione del lavoro dello stesso ambito. Un rinvio privo dei dettagli necessari va in missingDetails; un impedimento materiale in issues. Se non riesci a coprirle usa unreadable. Non bastano una classificazione o il solo titolo; il nome del campo non prova prestazioni, restrizioni, capacità o idoneità non dichiarate dal testo.",
         "Le etichette classificatorie dichiarano il contesto originale. Una denominazione generica o polisemica non dimostra che la classificazione sia sbagliata: non inventare una discrepanza né un sottotipo. Una classificazione ampia non aggiunge tutte le attività della sua etichetta.",
         "Per ciascuna assignedClassificationIds restituisci una relazione con la descrizione. Non restituire label: il codice conserva codice ed etichette originali. In evidence scegli le prove della relazione; i riferimenti della classificazione sono aggiunti dal codice. consistent o broad_context conserva la famiglia compatibile; not_decisive non determina da sola la prestazione locale. metadata_discrepancy segnala una differenza di etichetta senza incompatibilità materiale: richiede in evidence il serviceRef di una performance esplicita dello stesso ambito e una spiegazione della differenza, senza correggere il codice. Non risolve oggetti ambigui, fonti incomplete o clausole opposte. conflicting richiede caratteristiche o affermazioni realmente incompatibili, con controprova originale esterna alla classificazione.",
         "Le osservazioni performance descrivono acquisti e azioni: fornitura di beni, esecuzione, gestione, installazione, manutenzione, progettazione o consulenza. Manutenzione conserva o ripristina un bene: luogo, destinatario o settore non la dimostrano. Metadati e classificazioni non sono prestazioni autonome.",
@@ -317,6 +339,9 @@ export function buildSourceEvidenceReadingRequest(
       targetScope: context.targetScope,
       classifications,
       assignedClassificationIds: group.classificationIds,
+      requiredClausePassages: requiredClausePassages.map(
+        ({ id, scope, rawPath }) => ({ sourceRef: id, scope, rawPath }),
+      ),
       coverage: {
         passageIds: group.passageIds,
         fieldIndexes: group.fieldIndexes,
@@ -337,6 +362,7 @@ export function buildSourceEvidenceReadingRequest(
       sourceIds,
       coverage: group,
       classificationIds: group.classificationIds,
+      requiredClauseIds: requiredClausePassages.map((p) => p.id),
     };
   };
   const requests: ReturnType<typeof makeRequest>[] = [];
@@ -680,6 +706,15 @@ function validate(values: unknown[], plan: SourceEvidenceReadingPlan) {
           "A missing detail requires its original service description",
         );
     });
+    if (value.coverage === "complete") {
+      const represented = new Set(
+        [...value.observations, ...value.missingDetails, ...value.issues]
+          .flatMap((item) => item.evidence)
+          .map((q) => q.sourceRef),
+      );
+      if (request.requiredClauseIds.some((id) => !represented.has(id)))
+        throw new Error("Incomplete contractual clause evidence coverage");
+    }
   }
   return responses;
 }
