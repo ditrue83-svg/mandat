@@ -227,6 +227,9 @@ function inventedAnswer(prompt: string) {
           meaning: {
             state: "identified",
             statement: "Potatura degli alberi",
+            objectText: Array.from(target.text as string)
+              .slice(0, 100)
+              .join(""),
             basis: "explicit_text",
             objectRefs: [target.id],
             classificationContextIds: [],

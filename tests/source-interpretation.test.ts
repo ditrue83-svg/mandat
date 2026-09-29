@@ -90,10 +90,20 @@ function context(): SourceInterpretationContext {
     readings: [],
   };
 }
-function meaning(statement: string, objectRefs: string[]) {
+function meaning(
+  statement: string,
+  objectRefs: string[],
+  input: SourceInterpretationContext = context(),
+) {
   return {
     state: "identified" as const,
     statement,
+    objectText: [
+      ...(input.body.passages.find((p) => p.id === objectRefs[0])?.text ??
+        statement),
+    ]
+      .slice(0, 100)
+      .join(""),
     basis: "explicit_text" as const,
     objectRefs,
     classificationContextIds: [] as string[],
@@ -146,7 +156,11 @@ function response(input = context()) {
         roleEvidence: roleEvidence(input, "s1"),
         importance: "main" as const,
         sourceRefs: ["s1", "s3"],
-        meaning: meaning("Prodotti inventati esplicitamente descritti", ["s1"]),
+        meaning: meaning(
+          "Prodotti inventati esplicitamente descritti",
+          ["s1"],
+          input,
+        ),
       },
       {
         description: "Posa",
@@ -154,7 +168,7 @@ function response(input = context()) {
         roleEvidence: roleEvidence(input, "s4"),
         importance: "accessory" as const,
         sourceRefs: ["s4"],
-        meaning: meaning("Posa accessoria", ["s4"]),
+        meaning: meaning("Posa accessoria", ["s4"], input),
       },
       {
         description: "Trasporto",
@@ -162,7 +176,7 @@ function response(input = context()) {
         roleEvidence: roleEvidence(input, "s4"),
         importance: "excluded" as const,
         sourceRefs: ["s4"],
-        meaning: meaning("Trasporto escluso", ["s4"]),
+        meaning: meaning("Trasporto escluso", ["s4"], input),
       },
     ],
     issues: [],
@@ -174,7 +188,7 @@ function response(input = context()) {
 function wireResponse(value: any) {
   return {
     ...value,
-    evidenceFormat: "component_evidence_v1",
+    evidenceFormat: "component_evidence_v2",
     components: value.components.map(
       ({ sourceRefs, roleEvidence, meaning, ...component }: any) => {
         const { sourceRefs: roleRefs, ...role } = roleEvidence ?? {};
@@ -203,6 +217,91 @@ const metadata = {
   at: "2030-01-01T12:00:00.000Z",
   model: "invented-model",
 };
+
+test("Meaning cannot borrow an object quotation from an action-only adjacent fragment", () => {
+  const base = context();
+  const first = "Fornitura e posa di pannelli informativi e porte temporanee. ";
+  const second = "Riscaldamento e deumidificazione dei locali.";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        { ...base.body.passages[0], text: first, endUtf16: first.length },
+        ...base.body.passages.slice(1),
+        {
+          ...base.body.passages[0],
+          id: "s5",
+          text: second,
+          startUtf16: first.length,
+          endUtf16: first.length + second.length,
+        },
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const value = response(input);
+  value.components = [
+    {
+      ...value.components[0],
+      sourceRefs: ["s1", "s5"],
+      meaning: {
+        ...value.components[0].meaning,
+        objectText: "pannelli informativi",
+        objectRefs: ["s5"],
+      },
+    },
+  ];
+  const wire = wireResponse(value);
+  const before = JSON.stringify(wire);
+  const accepts = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  assert(accepts(wire)); // The server checks the actual cited text.
+  assert.throws(
+    () => recordSourceInterpretation(wire, request, metadata),
+    /Meaning object must be an exact quotation/,
+  );
+  const corrected = wireResponse(value);
+  corrected.components[0].evidence = [
+    { sourceRef: "s1", use: "role_and_meaning" },
+    { sourceRef: "s5", use: "component" },
+  ];
+  assert(accepts(corrected));
+  assert.deepEqual(
+    recordSourceInterpretation(corrected, request, metadata).response
+      .components[0].meaning.objectRefs,
+    ["s1"],
+  );
+  assert.equal(JSON.stringify(wire), before);
+});
+
+test("Object quotations are required and cannot be translated or paraphrased", () => {
+  const request = buildSourceInterpretationRequest(context());
+  const wire = wireResponse(response());
+  const missing = structuredClone(wire);
+  delete missing.components[0].meaning.objectText;
+  const accepts = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  assert(!accepts(missing));
+  assert.throws(() => recordSourceInterpretation(missing, request, metadata));
+  const oldFormat = { ...wire, evidenceFormat: "component_evidence_v1" };
+  assert(!accepts(oldFormat));
+  assert.throws(() => recordSourceInterpretation(oldFormat, request, metadata));
+  for (const objectText of [
+    "Invented products",
+    "Apparecchiature inventate",
+    "FAMIGLIA_INVENTATA 🌳",
+  ]) {
+    const changed = structuredClone(wire);
+    changed.components[0].meaning.objectText = objectText;
+    assert.throws(
+      () => recordSourceInterpretation(changed, request, metadata),
+      /Meaning object must be an exact quotation/,
+    );
+  }
+});
 
 test("Provider evidence records a supporting title once and derives all existing reference lists", () => {
   const base = context();
@@ -615,6 +714,11 @@ test.each([
             actionText: quotation,
             sourceRefs: ["s5", "s1"],
             scope: "project_context",
+          },
+          meaning: {
+            ...response().components[0].meaning,
+            objectText: quotation,
+            objectRefs: ["s5", "s1"],
           },
         },
       ],
@@ -1483,7 +1587,7 @@ test("Compact source JSON preserves every long-source value and reference within
       const text =
         index === 379
           ? tail
-          : `Prestazione inventata numero ${index}: `.padEnd(230, "x");
+          : `Prestazione inventata numero ${index}: `.padEnd(220, "x");
       return {
         id: `s${index + 5}`,
         scope: "project_context" as const,
@@ -1663,7 +1767,7 @@ test("Concrete main accessory and excluded activities may be supported entirely 
           roleEvidence: roleEvidence(request, "s4"),
           importance: "main",
           sourceRefs: ["s4"],
-          meaning: meaning("Gestione del deposito", ["s4"]),
+          meaning: meaning("Gestione del deposito", ["s4"], request),
         },
         {
           description: "Pulizia del deposito.",
@@ -1671,7 +1775,7 @@ test("Concrete main accessory and excluded activities may be supported entirely 
           roleEvidence: roleEvidence(request, "s4"),
           importance: "accessory",
           sourceRefs: ["s4"],
-          meaning: meaning("Pulizia del deposito", ["s4"]),
+          meaning: meaning("Pulizia del deposito", ["s4"], request),
         },
         {
           description: "Manutenzione dei mezzi.",
@@ -1679,7 +1783,7 @@ test("Concrete main accessory and excluded activities may be supported entirely 
           roleEvidence: roleEvidence(request, "s4"),
           importance: "excluded",
           sourceRefs: ["s4"],
-          meaning: meaning("Manutenzione dei mezzi", ["s4"]),
+          meaning: meaning("Manutenzione dei mezzi", ["s4"], request),
         },
       ],
     },
@@ -1729,7 +1833,7 @@ test("A real purchased classification or cataloguing service is not rejected by 
           roleEvidence: roleEvidence(request, "s1"),
           importance: "main",
           sourceRefs: ["s1"],
-          meaning: meaning(serviceText, ["s1"]),
+          meaning: meaning(serviceText, ["s1"], request),
         },
       ],
     },
@@ -1751,7 +1855,7 @@ test.each([
   "documentary-source-interpretation-v10",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
-  assert.equal(request.version, "documentary-source-interpretation-v11");
+  assert.equal(request.version, "documentary-source-interpretation-v12");
   const current = recordSourceInterpretation(response(), request, metadata);
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");

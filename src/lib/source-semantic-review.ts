@@ -21,7 +21,7 @@ import type {
 import { sourceEvidencePassages } from "./source-evidence-context";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v17";
+  "documentary-source-semantic-review-v18";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -232,10 +232,8 @@ export function buildSourceSemanticReviewRequest(
     ...draft.response.components.flatMap((item) => item.sourceRefs),
   ]);
   draft.response.components.forEach((item, index) => {
-    const required = unique([
-      ...item.sourceRefs,
+    const domainRefs = unique([
       ...item.meaning.objectRefs,
-      ...item.roleEvidence.sourceRefs,
       ...item.meaning.classificationContextIds.flatMap((id) => {
         const classification = classes.get(id);
         if (!classification)
@@ -244,6 +242,11 @@ export function buildSourceSemanticReviewRequest(
           );
         return classificationRefs(classification);
       }),
+    ]);
+    const required = unique([
+      ...item.sourceRefs,
+      ...domainRefs,
+      ...item.roleEvidence.sourceRefs,
     ]);
     // Each dimension has one owner, with all original evidence retained there.
     for (const kind of [
@@ -261,9 +264,15 @@ ${item.roleEvidence.actionText ?? ""}`
           : kind === "component_importance"
             ? `${item.importance}
 ${item.description}`
-            : `${item.description}
+            : kind === "component_domain"
+              ? `${item.meaning.objectText}\n${item.meaning.statement}`
+              : `${item.description}
 ${item.meaning.statement}`,
-        required,
+        kind === "component_domain"
+          ? domainRefs
+          : kind === "component_role"
+            ? item.roleEvidence.sourceRefs
+            : required,
       );
   });
   draft.response.details.forEach((item, index) =>

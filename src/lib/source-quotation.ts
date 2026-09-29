@@ -43,3 +43,36 @@ export function isOriginalSourceQuotation(source: string, quotation: string) {
   const spaces = (value: string) => value.replace(/\s+/g, " ").trim();
   return spaces(readable).includes(spaces(quotation));
 }
+
+// Never manufacture a quotation by joining different fields or skipped spans.
+export function isOriginalPassageQuotation(
+  passages: readonly {
+    scope: string;
+    rawPath: string;
+    url: string;
+    startUtf16: number;
+    endUtf16: number;
+    text: string;
+  }[],
+  quotation: string,
+) {
+  const key = (p: (typeof passages)[number]) =>
+    JSON.stringify([p.scope, p.rawPath, p.url]);
+  const ordered = [...passages].sort(
+    (a, b) => key(a).localeCompare(key(b)) || a.startUtf16 - b.startUtf16,
+  );
+  let previousKey = "",
+    end = -1,
+    joined = "";
+  for (const passage of ordered) {
+    const currentKey = key(passage);
+    joined =
+      currentKey === previousKey && passage.startUtf16 === end
+        ? joined + passage.text
+        : passage.text;
+    if (isOriginalSourceQuotation(joined, quotation)) return true;
+    previousKey = currentKey;
+    end = passage.endUtf16;
+  }
+  return false;
+}

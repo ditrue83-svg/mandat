@@ -24,7 +24,10 @@ import {
   inventedGroundedReviewRequests,
   inventedReadingRefs,
 } from "./helpers/source-evidence-fixture";
-import { recordSourceEvidenceReading } from "../src/lib/source-evidence-reading";
+import {
+  recordSourceEvidenceReading,
+  readSourceEvidenceReading,
+} from "../src/lib/source-evidence-reading";
 import { openaiJsonSchema } from "../src/lib/openai-responses";
 function recordSourceSemanticReview(
   responses: unknown[],
@@ -154,6 +157,7 @@ function draft(input = context()) {
           meaning: {
             state: "identified",
             statement: "Articoli inventati.",
+            objectText: quote.text,
             objectRefs: ["s1"],
             classificationContextIds: ["c1"],
             basis: "explicit_text",
@@ -200,6 +204,82 @@ function answers(plan: SourceSemanticReviewPlan) {
     };
   });
 }
+
+test("A domain review must use its object references, not adjacent action-only evidence", () => {
+  const base = context();
+  const first = base.body.passages[0];
+  const text = "Gli articoli consistono in pannelli informativi.";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...first,
+          id: "s5",
+          text,
+          startUtf16: first.endUtf16,
+          endUtf16: first.endUtf16 + text.length,
+        },
+      ],
+    },
+  };
+  const baseline = draft(input);
+  const component = baseline.response.components[0];
+  const original = recordSourceInterpretation(
+    {
+      ...baseline.response,
+      components: [
+        {
+          ...component,
+          sourceRefs: ["s1", "s5"],
+          meaning: {
+            ...component.meaning,
+            objectText: "pannelli informativi",
+            objectRefs: ["s5"],
+          },
+        },
+      ],
+    },
+    buildSourceInterpretationRequest(input),
+    { ...metadata, model: input.binding.model },
+  );
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  const domain = plan.claims.find((c) => c.kind === "component_domain")!;
+  const role = plan.claims.find((c) => c.kind === "component_role")!;
+  assert.deepEqual(domain.sourceRefs, ["s5", "s2", "s3"]);
+  assert.deepEqual(role.sourceRefs, ["s1"]);
+  assert(domain.text.includes("pannelli informativi"));
+  const responses = answers(plan);
+  assert.equal(
+    readSourceSemanticReview(
+      recordSourceSemanticReview(responses, plan, metadata),
+      plan,
+    )?.accepted,
+    true,
+  );
+  const wrongSource = structuredClone(responses);
+  wrongSource
+    .flatMap((r) => r.checks)
+    .find((c) => c.claimId === domain.id)!.sourceRefs = ["s1"];
+  assert.throws(
+    () => recordSourceSemanticReview(wrongSource, plan, metadata),
+    /own source evidence/,
+  );
+  const wrongReading = structuredClone(responses);
+  const reading = readSourceEvidenceReading(
+    inventedSourceEvidence(plan),
+    plan.evidencePlan,
+  )!.observations.find((o) => o.evidence.some((q) => q.sourceRef === "s1"))!;
+  wrongReading
+    .flatMap((r) => r.checks)
+    .find((c) => c.claimId === domain.id)!.readingRefs = [reading.id];
+  assert.throws(
+    () => recordSourceSemanticReview(wrongReading, plan, metadata),
+    /own independent evidence/,
+  );
+});
 
 function languageVariantReview(
   rawPath = "/procurement/orderDescription/de",
@@ -1444,6 +1524,7 @@ test.each(["accessory", "excluded"] as const)(
       meaning: {
         state: "identified",
         statement: text,
+        objectText: text,
         objectRefs: ["s5"],
         classificationContextIds: [],
         basis: "explicit_text",
@@ -1661,7 +1742,7 @@ test("Classification references alone cannot approve the component's contractual
   }
   assert.throws(
     () => recordSourceSemanticReview(response, plan, metadata),
-    /independent performance/,
+    /own independent evidence/,
   );
 });
 

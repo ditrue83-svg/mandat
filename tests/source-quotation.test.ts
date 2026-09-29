@@ -1,6 +1,52 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { isOriginalSourceQuotation } from "../src/lib/source-quotation";
+import {
+  isOriginalPassageQuotation,
+  isOriginalSourceQuotation,
+} from "../src/lib/source-quotation";
+
+const firstSpan = {
+  scope: "project_context",
+  rawPath: "/description/it",
+  url: "https://example.invalid/source",
+  startUtf16: 0,
+  endUtf16: "Fornitura di quadri ".length,
+  text: "Fornitura di quadri ",
+};
+const secondSpan = {
+  ...firstSpan,
+  startUtf16: firstSpan.endUtf16,
+  endUtf16: firstSpan.endUtf16 + "elettrici 🌳.".length,
+  text: "elettrici 🌳.",
+};
+
+test("A quotation can span unordered contiguous references from one original field", () => {
+  assert.equal(
+    isOriginalPassageQuotation([secondSpan, firstSpan], "quadri elettrici 🌳"),
+    true,
+  );
+  assert.equal(isOriginalPassageQuotation([], "quadri"), false);
+  assert.equal(isOriginalPassageQuotation([firstSpan], ""), false);
+});
+
+test.each([
+  { startUtf16: secondSpan.startUtf16 + 1, endUtf16: secondSpan.endUtf16 + 1 },
+  { startUtf16: secondSpan.startUtf16 - 1, endUtf16: secondSpan.endUtf16 - 1 },
+  { rawPath: "/other/it" },
+  { scope: "selected_lot" },
+  { url: "https://example.invalid/other-source" },
+])(
+  "A quotation cannot bridge missing text or distinct origins: %j",
+  (change) => {
+    assert.equal(
+      isOriginalPassageQuotation(
+        [firstSpan, { ...secondSpan, ...change }],
+        "quadri elettrici 🌳",
+      ),
+      false,
+    );
+  },
+);
 
 test.each([
   ["<p>lavaggio </p><p>e stiratura</p>", "lavaggio e stiratura"],

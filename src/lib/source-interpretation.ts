@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { stableDocumentaryJson } from "./documentary-observation";
-import { isOriginalSourceQuotation } from "./source-quotation";
+import { isOriginalPassageQuotation } from "./source-quotation";
 import type {
   ComparisonPassage,
   AutomaticResponseFormat,
@@ -9,7 +9,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v11";
+  "documentary-source-interpretation-v12";
 // Both allowances include provider reasoning. Large sources need room for
 // their components and classification accounting, without dropping evidence.
 export const SOURCE_INTERPRETATION_MAX_TOKENS = 8192;
@@ -243,6 +243,9 @@ function buildResponseSchema(bounds?: {
   const contextId = bounds?.classificationId ?? classificationId;
   const meaningFields = {
     statement: meaningStatement,
+    objectText: text(600).describe(
+      "Estratto originale esatto che nomina l'oggetto o la prestazione, presente nei soli riferimenti meaning o role_and_meaning. Puoi omettere tag HTML e uniformare spazi; non tradurre o parafrasare. Non usare solo un verbo d'azione o un'etichetta classificatoria.",
+    ),
     objectRefs: refs.describe(
       "Passaggi non classificatori che nominano l'oggetto o la prestazione; devono essere anche nelle sourceRefs della componente. Sono ammesse clausole di contesto.",
     ),
@@ -470,7 +473,7 @@ function buildProviderResponseSchema(
       "Repeated component evidence",
     )
     .describe(
-      "Ogni ID una sola volta. Tutti sostengono la componente; role attesta actionText, meaning identifica l'oggetto, role_and_meaning entrambi. component aggiunge solo contesto. Ruolo e significato richiedono ciascuno prove non classificatorie.",
+      "Ogni ID una sola volta. Tutti sostengono la componente; role attesta actionText, meaning attesta objectText, role_and_meaning entrambi. Se azione e oggetto sono nello stesso passaggio usa role_and_meaning: non spostare il significato nel segmento adiacente. component aggiunge solo contesto. Ruolo e significato richiedono ciascuno prove non classificatorie.",
     );
   const identifiedComponent = identified
     .omit({ sourceRefs: true, roleEvidence: true, meaning: true })
@@ -489,7 +492,7 @@ function buildProviderResponseSchema(
         meaning: anyMeaning,
       }),
   ]);
-  const evidenceFormat = z.literal("component_evidence_v1");
+  const evidenceFormat = z.literal("component_evidence_v2");
   const unresolvedFields = {
     evidenceFormat,
     components: z.array(anyComponent).max(64).describe(componentsDescription),
@@ -669,6 +672,7 @@ export function buildSourceInterpretationRequest(
     rules: [
       "classificationContext è un registro immutabile separato dalle prestazioni: rendiconta ogni ID una volta, conservando codici, etichette, lingue e ambiti. clarifies_domain richiede un'etichetta originale; broad_context è una famiglia ampia, non prova una prestazione specifica; shared_project_only è contesto condiviso. Senza etichetta non decodificare codici da memoria. unresolved indica dubbio materiale; conflicting richiede asserzioni incompatibili.",
       "meaning identifica l'oggetto nel suo dominio: evidence con use meaning o role_and_meaning cita prove non classificatorie; classificationContextIds riporta le classificazioni usate. Non basta ripetere o tradurre un termine ambiguo: disambigua con le etichette originali, senza scegliere settori esterni o dichiarare errata la classificazione per salvare un'ipotesi. explicit_text si fonda sul testo; text_with_classification_context richiede un'etichetta del target. Solo per un lotto senza classificazioni proprie può usare un'etichetta condivisa insieme a prove locali del significato. Famiglie classificatorie non provano equivalenza, capacità o ammissibilità.",
+      "meaning.objectText cita le parole originali che nominano l'oggetto. Verifica che siano contenute nei passaggi marcati meaning o role_and_meaning, non semplicemente in un passaggio vicino della stessa rawPath. Se lo stesso passaggio attesta azione e oggetto usa role_and_meaning. Una citazione può attraversare solo frammenti contigui della stessa fonte, campo e ambito, citandoli tutti. Nelle spiegazioni delle classificazioni nomina il prodotto o servizio; non usare numeri o posizioni delle componenti, già collegate da classificationContextIds.",
       "resolved richiede oggetto e ruolo identificabili, anche come famiglia di prodotti senza sottotipo o dettagli tecnici. Non inventare dettagli: quantità, certificazioni o specifiche assenti non rendono da sole incerto il mestiere. details separa specifiche mancanti, condizioni esecutive e contesto condiviso; conserva quantità e unità originali. Non sono prestazioni aggiuntive né issues bloccanti.",
       "uncertain richiede un issue materiale tipizzato. object_identity collega componentIndexes (zero-based) a meaning ambiguous; role_identity a role null e roleEvidence unresolved; unreadable_source richiede una lettura unreadable. representation_incomplete cita prestazioni non rappresentate, non informazioni commerciali o specifiche assenti. Non inserire issues per dichiarare assenza di incertezza, e non dichiarare completa una rappresentazione incompleta.",
       "roleEvidence cita un estratto esatto, non tradotto e non classificatorio dell'azione; evidence con use role o role_and_meaning lo documenta nello stesso scope. Non scambiare settore, luogo o destinatario per ruolo contrattuale. Se indeterminato usa role null, roleEvidence unresolved e issue role_identity. Per details e roleEvidence scope è l'ambito dei passaggi; per issues è il target interessato. target_scope riguarda soltanto lotti e cita entrambi gli ambiti: contesto condiviso e lotto.",
@@ -881,26 +885,12 @@ export function validateSourceInterpretation(
       );
     // Quotes may cross contiguous fragments of the same original field; never
     // join unrelated fields or skip a gap to manufacture an exact quotation.
-    const spans = role.sourceRefs
-      .map((id) => passageById.get(id)!)
-      .sort(
-        (a, b) =>
-          a.rawPath.localeCompare(b.rawPath) || a.startUtf16 - b.startUtf16,
-      );
-    let quoteFound = false,
-      path = "",
-      end = -1,
-      joined = "";
-    for (const span of spans) {
-      joined =
-        span.rawPath === path && span.startUtf16 === end
-          ? joined + span.text
-          : span.text;
-      path = span.rawPath;
-      end = span.endUtf16;
-      if (isOriginalSourceQuotation(joined, role.actionText)) quoteFound = true;
-    }
-    if (!quoteFound)
+    if (
+      !isOriginalPassageQuotation(
+        role.sourceRefs.map((id) => passageById.get(id)!),
+        role.actionText,
+      )
+    )
       throw new Error(
         "Role action must be an exact quotation of its source evidence",
       );
@@ -912,6 +902,15 @@ export function validateSourceInterpretation(
     )
       throw new Error(
         "Meaning requires non-classification object evidence within the component",
+      );
+    if (
+      !isOriginalPassageQuotation(
+        meaning.objectRefs.map((id) => passageById.get(id)!),
+        meaning.objectText,
+      )
+    )
+      throw new Error(
+        "Meaning object must be an exact quotation of its own source evidence",
       );
     const contexts = meaning.classificationContextIds.map((id) => {
       const classification = classificationById.get(id);

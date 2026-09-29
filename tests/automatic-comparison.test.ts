@@ -167,10 +167,19 @@ function fixture(
     preliminary,
   };
 }
-function explicitMeaning(statement: string, objectRefs: string[]) {
+function explicitMeaning(
+  statement: string,
+  objectRefs: string[],
+  request: ReturnType<typeof buildAutomaticComparisonRequest>,
+) {
   return {
     state: "identified" as const,
     statement,
+    objectText: Array.from(
+      request.passages.find((p) => p.id === objectRefs[0])!.text,
+    )
+      .slice(0, 100)
+      .join(""),
     basis: "explicit_text" as const,
     objectRefs,
     classificationContextIds: [] as string[],
@@ -232,11 +241,16 @@ function sourceResponse(
             ? {
                 state: "ambiguous" as const,
                 statement: "Oggetto inventato non identificabile.",
+                objectText: roleEvidence(request, targetRef).actionText,
                 basis: "unresolved" as const,
                 objectRefs: [targetRef],
                 classificationContextIds: [],
               }
-            : explicitMeaning("Pulizia degli uffici inventati.", [targetRef]),
+            : explicitMeaning(
+                "Pulizia degli uffici inventati.",
+                [targetRef],
+                request,
+              ),
       },
     ],
     issues:
@@ -962,9 +976,11 @@ test("A claimed full match must cite every main interpreted component while part
           roleEvidence: roleEvidence(request, interpreted.targetRef),
           importance: "main",
           sourceRefs: [interpreted.targetRef],
-          meaning: explicitMeaning("Manutenzione degli impianti inventati.", [
-            interpreted.targetRef,
-          ]),
+          meaning: explicitMeaning(
+            "Manutenzione degli impianti inventati.",
+            [interpreted.targetRef],
+            request,
+          ),
         },
       ],
     },
@@ -1019,7 +1035,11 @@ test("An excluded component alone cannot justify a service rejection but remains
           roleEvidence: roleEvidence(request, serviceRef),
           importance: "main",
           sourceRefs: [serviceRef],
-          meaning: explicitMeaning("Pulizia degli uffici.", [serviceRef]),
+          meaning: explicitMeaning(
+            "Pulizia degli uffici.",
+            [serviceRef],
+            request,
+          ),
         },
         {
           description: "Fornitura dei detergenti.",
@@ -1027,7 +1047,11 @@ test("An excluded component alone cannot justify a service rejection but remains
           roleEvidence: roleEvidence(request, serviceRef),
           importance: "accessory",
           sourceRefs: [serviceRef],
-          meaning: explicitMeaning("Fornitura dei detergenti.", [serviceRef]),
+          meaning: explicitMeaning(
+            "Fornitura dei detergenti.",
+            [serviceRef],
+            request,
+          ),
         },
         {
           description: "Ristorazione.",
@@ -1035,7 +1059,11 @@ test("An excluded component alone cannot justify a service rejection but remains
           roleEvidence: roleEvidence(request, serviceRef),
           importance: "excluded",
           sourceRefs: [serviceRef],
-          meaning: explicitMeaning("Ristorazione esclusa.", [serviceRef]),
+          meaning: explicitMeaning(
+            "Ristorazione esclusa.",
+            [serviceRef],
+            request,
+          ),
         },
       ],
     },
@@ -1129,9 +1157,11 @@ test("Related installation and supply remain review candidates without inferring
           roleEvidence: roleEvidence(request, serviceRef),
           importance: "main",
           sourceRefs: [serviceRef],
-          meaning: explicitMeaning("Fornitura di quadri elettrici BT.", [
-            serviceRef,
-          ]),
+          meaning: explicitMeaning(
+            "Fornitura di quadri elettrici BT.",
+            [serviceRef],
+            request,
+          ),
         },
       ],
     },
@@ -1691,6 +1721,7 @@ test("A concise source summary cannot erase the original domain context and grou
             state: "identified",
             statement:
               "Prodotto X della famiglia di prodotti inventata dichiarata dalla fonte.",
+            objectText: roleEvidence(request, answer.targetRef).actionText,
             basis: "text_with_classification_context",
             objectRefs: [answer.targetRef],
             classificationContextIds: [classification.id],
@@ -1978,6 +2009,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v46",
     sourceVersion: "documentary-source-interpretation-v11",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v47",
+    sourceVersion: "documentary-source-interpretation-v11",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2011,7 +2046,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v47");
+    assert.equal(request.version, "documentary-service-comparison-v48");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(
