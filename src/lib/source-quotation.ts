@@ -76,3 +76,55 @@ export function isOriginalPassageQuotation(
   }
   return false;
 }
+
+// Locate a quotation only inside the passages already selected by the caller.
+// Return all minimal matching spans; never choose a different field, skip a
+// gap, add an uncited passage, or rewrite the quotation to obtain a match.
+export function originalQuotationReferences(
+  passages: readonly {
+    id: string;
+    scope: string;
+    rawPath: string;
+    url: string;
+    startUtf16: number;
+    endUtf16: number;
+    text: string;
+  }[],
+  quotation: string,
+): string[] {
+  if (!quotation.trim()) return [];
+  const key = (p: (typeof passages)[number]) =>
+    JSON.stringify([p.scope, p.rawPath, p.url]);
+  const ordered = [...passages].sort(
+    (a, b) => key(a).localeCompare(key(b)) || a.startUtf16 - b.startUtf16,
+  );
+  const matches: string[][] = [];
+  for (let start = 0; start < ordered.length; start++) {
+    let joined = "";
+    const ids: string[] = [];
+    for (let end = start; end < ordered.length; end++) {
+      const current = ordered[end];
+      if (
+        end > start &&
+        (key(current) !== key(ordered[end - 1]) ||
+          current.startUtf16 !== ordered[end - 1].endUtf16)
+      )
+        break;
+      joined += current.text;
+      ids.push(current.id);
+      if (isOriginalSourceQuotation(joined, quotation)) {
+        matches.push(ids);
+        break;
+      }
+    }
+  }
+  const minimal = matches.filter(
+    (ids) =>
+      !matches.some(
+        (other) =>
+          other.length < ids.length && other.every((id) => ids.includes(id)),
+      ),
+  );
+  const selected = new Set(minimal.flat());
+  return passages.filter((p) => selected.has(p.id)).map((p) => p.id);
+}

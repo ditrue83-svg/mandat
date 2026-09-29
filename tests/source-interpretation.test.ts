@@ -188,22 +188,15 @@ function response(input = context()) {
 function wireResponse(value: any) {
   return {
     ...value,
-    evidenceFormat: "component_evidence_v2",
+    evidenceFormat: "component_quotations_v3",
     components: value.components.map(
       ({ sourceRefs, roleEvidence, meaning, ...component }: any) => {
-        const { sourceRefs: roleRefs, ...role } = roleEvidence ?? {};
-        const { objectRefs, ...object } = meaning ?? {};
+        const { sourceRefs: _roleRefs, ...role } = roleEvidence ?? {};
+        const { objectRefs: _objectRefs, ...object } = meaning ?? {};
         return {
           ...component,
           evidence: sourceRefs.map((sourceRef: string) => ({
             sourceRef,
-            use: roleRefs?.includes(sourceRef)
-              ? objectRefs?.includes(sourceRef)
-                ? "role_and_meaning"
-                : "role"
-              : objectRefs?.includes(sourceRef)
-                ? "meaning"
-                : "component",
           })),
           roleEvidence: roleEvidence ? role : undefined,
           meaning: meaning ? object : undefined,
@@ -218,7 +211,7 @@ const metadata = {
   model: "invented-model",
 };
 
-test("Meaning cannot borrow an object quotation from an action-only adjacent fragment", () => {
+test("Stored meaning cannot borrow adjacent evidence; new wire quotations locate their own cited span", () => {
   const base = context();
   const first = "Fornitura e posa di pannelli informativi e porte temporanee. ";
   const second = "Riscaldamento e deumidificazione dei locali.";
@@ -257,21 +250,37 @@ test("Meaning cannot borrow an object quotation from an action-only adjacent fra
   const accepts = new Ajv2020({ strict: false }).compile(
     request.responseFormat.json_schema.schema,
   );
-  assert(accepts(wire)); // The server checks the actual cited text.
+  assert.equal(accepts(wire), true); // The server checks the actual cited text.
   assert.throws(
-    () => recordSourceInterpretation(wire, request, metadata),
+    () => recordSourceInterpretation(value, request, metadata),
     /Meaning object must be an exact quotation/,
   );
-  const corrected = wireResponse(value);
-  corrected.components[0].evidence = [
-    { sourceRef: "s1", use: "role_and_meaning" },
-    { sourceRef: "s5", use: "component" },
-  ];
-  assert(accepts(corrected));
   assert.deepEqual(
-    recordSourceInterpretation(corrected, request, metadata).response
-      .components[0].meaning.objectRefs,
+    recordSourceInterpretation(wire, request, metadata).response.components[0]
+      .meaning.objectRefs,
     ["s1"],
+  );
+  const outsideSelection = structuredClone(wire);
+  outsideSelection.components[0].evidence = [{ sourceRef: "s5" }];
+  outsideSelection.components[0].roleEvidence.actionText = "Riscaldamento";
+  assert.throws(
+    () => recordSourceInterpretation(outsideSelection, request, metadata),
+    /Meaning object must be an exact quotation/,
+  );
+  const legacyWire = {
+    ...wire,
+    evidenceFormat: "component_evidence_v2",
+    components: wire.components.map((component: any) => ({
+      ...component,
+      evidence: [
+        { sourceRef: "s1", use: "role" },
+        { sourceRef: "s5", use: "meaning" },
+      ],
+    })),
+  };
+  assert(!accepts(legacyWire));
+  assert.throws(() =>
+    recordSourceInterpretation(legacyWire, request, metadata),
   );
   assert.equal(JSON.stringify(wire), before);
 });
@@ -325,7 +334,8 @@ test("Provider evidence records a supporting title once and derives all existing
   };
   const request = buildSourceInterpretationRequest(input);
   const wire = wireResponse(response(input));
-  wire.components[0].evidence.push({ sourceRef: "s5", use: "meaning" });
+  wire.components[0].evidence.push({ sourceRef: "s5" });
+  wire.components[0].meaning.objectText = title;
   const before = JSON.stringify(wire);
   const accepts = new Ajv2020({ strict: false }).compile(
     request.responseFormat.json_schema.schema,
@@ -361,26 +371,14 @@ test("Provider evidence records a supporting title once and derives all existing
   );
 });
 
-test("Single-list evidence requires real role and meaning evidence without inferring its purpose", () => {
+test("Selected evidence must contain both quotations without adding missing references", () => {
   const request = buildSourceInterpretationRequest(context());
   const base = wireResponse(response());
   const first = base.components[0];
   const changes = [
-    {
-      evidence: first.evidence.map((item: any) => ({
-        ...item,
-        use: "component",
-      })),
-    },
-    { evidence: first.evidence.map((item: any) => ({ ...item, use: "role" })) },
-    {
-      evidence: first.evidence.map((item: any) => ({
-        ...item,
-        use: "meaning",
-      })),
-    },
-    { evidence: [{ sourceRef: "s3", use: "role_and_meaning" }] },
-    { evidence: [{ sourceRef: "s999", use: "role_and_meaning" }] },
+    { evidence: [{ sourceRef: "s3" }] },
+    { evidence: [{ sourceRef: "s999" }] },
+    { evidence: [{ sourceRef: "s1", use: "role_and_meaning" }] },
     {
       roleEvidence: {
         ...first.roleEvidence,
@@ -415,7 +413,7 @@ test("Provider schema requires the wire version, bounded IDs and a single unambi
       components: [
         {
           ...wire.components[0],
-          evidence: [{ sourceRef: "s999", use: "meaning" }],
+          evidence: [{ sourceRef: "s999" }],
         },
       ],
     },
@@ -1855,9 +1853,10 @@ test.each([
   "documentary-source-interpretation-v10",
   "documentary-source-interpretation-v11",
   "documentary-source-interpretation-v12",
+  "documentary-source-interpretation-v13",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
-  assert.equal(request.version, "documentary-source-interpretation-v13");
+  assert.equal(request.version, "documentary-source-interpretation-v14");
   const current = recordSourceInterpretation(response(), request, metadata);
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");

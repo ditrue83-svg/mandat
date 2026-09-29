@@ -3,6 +3,7 @@ import { test } from "vitest";
 import {
   isOriginalPassageQuotation,
   isOriginalSourceQuotation,
+  originalQuotationReferences,
 } from "../src/lib/source-quotation";
 
 const firstSpan = {
@@ -29,6 +30,64 @@ test("A quotation can span unordered contiguous references from one original fie
   assert.equal(isOriginalPassageQuotation([firstSpan], ""), false);
 });
 
+test("Quotation references select only the minimal cited spans containing the exact words", () => {
+  const passages = [
+    { ...secondSpan, id: "s2" },
+    { ...firstSpan, id: "s1" },
+  ];
+  assert.deepEqual(originalQuotationReferences(passages, "Fornitura"), ["s1"]);
+  assert.deepEqual(originalQuotationReferences(passages, "elettrici 🌳"), [
+    "s2",
+  ]);
+  assert.deepEqual(
+    originalQuotationReferences(passages, "quadri elettrici 🌳"),
+    ["s2", "s1"],
+  );
+  assert.deepEqual(originalQuotationReferences([passages[0]], "Fornitura"), []);
+  assert.deepEqual(
+    originalQuotationReferences(passages, "quadri idraulici"),
+    [],
+  );
+  assert.deepEqual(originalQuotationReferences(passages, ""), []);
+});
+
+test("Repeated quotations retain all cited origins without adding adjacent unrelated text", () => {
+  const passages = [
+    { ...firstSpan, id: "s1" },
+    { ...secondSpan, id: "s2" },
+    { ...firstSpan, id: "s3", rawPath: "/title/it" },
+  ];
+  const before = JSON.stringify(passages);
+  assert.deepEqual(originalQuotationReferences(passages, "Fornitura"), [
+    "s1",
+    "s3",
+  ]);
+  assert.equal(JSON.stringify(passages), before);
+});
+
+test("Quotation location preserves formatting and cannot bridge hidden content", () => {
+  const passage = (text: string) => ({
+    ...firstSpan,
+    id: "s1",
+    text,
+    endUtf16: text.length,
+  });
+  assert.deepEqual(
+    originalQuotationReferences(
+      [passage("<p>Fornitura di <b>beni</b>.</p>")],
+      "Fornitura di beni.",
+    ),
+    ["s1"],
+  );
+  assert.deepEqual(
+    originalQuotationReferences(
+      [passage("prima <!-- nascosto --> seconda")],
+      "prima seconda",
+    ),
+    [],
+  );
+});
+
 test.each([
   { startUtf16: secondSpan.startUtf16 + 1, endUtf16: secondSpan.endUtf16 + 1 },
   { startUtf16: secondSpan.startUtf16 - 1, endUtf16: secondSpan.endUtf16 - 1 },
@@ -44,6 +103,16 @@ test.each([
         "quadri elettrici 🌳",
       ),
       false,
+    );
+    assert.deepEqual(
+      originalQuotationReferences(
+        [
+          { ...firstSpan, id: "s1" },
+          { ...secondSpan, ...change, id: "s2" },
+        ],
+        "quadri elettrici 🌳",
+      ),
+      [],
     );
   },
 );
