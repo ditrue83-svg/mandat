@@ -246,7 +246,7 @@ function inventedAnswer(prompt: string) {
     facts: {
       companyIdentifiesService: true,
       activitiesOverlap: true,
-      relatedActivity: false,
+      relatedActivity: "none",
       sameContractualRole: true,
       mainScopeCovered: true,
       comparisonUncertain: false,
