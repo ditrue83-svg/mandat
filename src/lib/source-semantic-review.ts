@@ -21,7 +21,7 @@ import type {
 import { sourceEvidencePassages } from "./source-evidence-context";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v22";
+  "documentary-source-semantic-review-v23";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -64,7 +64,11 @@ type ResponseBounds = {
   sourceIds: string[];
   evidenceHash?: string;
   readingIds?: string[];
-  claimReadingGroups?: { claimIds: string[]; readingIds: string[] }[];
+  claimReadingGroups?: {
+    claimIds: string[];
+    readingIds: string[];
+    supportedReadingIds?: string[];
+  }[];
 };
 const checkShape = z.strictObject({
   claimId,
@@ -101,12 +105,31 @@ function providerResponseSchema(bounds: ResponseBounds) {
     });
   // Reuse each ownership group's schema, but require every claim as a
   // distinct object key. Array length alone permits duplicates and omissions.
-  const groups = bounds.claimReadingGroups?.map((group) => ({
-    ids: group.claimIds,
-    schema: common.extend({
+  const groups = bounds.claimReadingGroups?.map((group) => {
+    const schema = common.extend({
       readingRefs: z.array(z.enum(group.readingIds)).min(1).max(1024),
-    }),
-  }));
+    });
+    return {
+      ids: group.claimIds,
+      // A true detail must cite its own original fact or an independently
+      // selected passage for that detail. Keep all independent evidence
+      // available for criticism, including counterevidence elsewhere.
+      schema: group.supportedReadingIds
+        ? z.union([
+            schema.extend({
+              verdict: z.literal("supported"),
+              readingRefs: z
+                .array(z.enum(group.supportedReadingIds))
+                .min(1)
+                .max(1024),
+            }),
+            schema.extend({
+              verdict: z.enum(["contradicted", "not_verifiable"]),
+            }),
+          ])
+        : schema,
+    };
+  });
   return responseShape.omit({ checks: true }).extend({
     chunkId: z.literal(bounds.id),
     sourceEvidenceHash: bounds.evidenceHash
@@ -369,6 +392,7 @@ ${item.meaning.statement}`,
         "Una categoria amministrativa e una descrizione specifica possono usare nomi diversi senza contraddirsi. La categoria non esclude di per sé un lavoro esplicito né aggiunge tutte le attività della sua etichetta. Verifica il lavoro contro la descrizione originale, mantenendo le classificazioni come dichiarate; non approvare correzioni del codice o nuovi servizi. Caratteristiche esplicite incompatibili e clausole opposte rimangono bloccanti. Un avviso sui metadati non sana ambiguità, omissioni o affermazioni false.",
         "Ogni check cita readingRefs della lettura indipendente oltre agli estratti originali. I riferimenti evidence della lettura indipendente rimandano al testo originale in passages; le citazioni di contesto non presenti in passages conservano anche text. Un draft che introduce un dominio incompatibile, una correzione della fonte o una discrepanza non presente nella lettura indipendente non può essere supported solo perché ripete il nome del prodotto. Per classification_reading cita la corrispondente classificazione indipendente cN.",
         "Solo per i claim detail puoi citare in readingRefs gli originalFacts o-sN oppure o-fN: sono rinvii del codice a passaggi o valori JSON originali, non giudizi AI. Servono anche quando la lettura preliminare omette cronologie o dettagli amministrativi. Verifica testo, valore e percorso originali e cita lo stesso sN o fN in sourceRefs; non usare questi rinvii per summary, componenti o classificazioni. false è diverso da null. Una data non selezionata prima non è falsa per questo motivo.",
+        "Per supported di un detail usa soltanto i readingIds del suo detailEvidenceBindings: collegano i riferimenti del claim agli originali, senza approvarne il significato. Una condizione vicina sullo stesso servizio non prova un campo diverso. Se la lettura indipendente non ha selezionato quel campo, verifica e cita il suo o-sN/o-fN, senza attribuirlo a un’altra osservazione. Per contradicted o not_verifiable puoi citare anche altre letture come controprova; non inventare supporto per rispettare lo schema.",
         "Una componente main richiede una performance indipendente pertinente. Componenti accessory o excluded possono essere verificate anche su una condition indipendente pertinente: leggi la clausola originale per distinguere un acquisto opzionale o un'esclusione da un semplice permesso organizzativo. Una condition non prova automaticamente un lavoro acquistato e non può sostenere una nuova prestazione principale.",
         "Controlla dominio dell'oggetto, azione contrattuale, applicabilità al target e importanza main/accessory/excluded separatamente. Non scambiare un settore, luogo o destinatario per un ruolo. Contesto generale, classificazioni ampie e opere di altri lotti non provano una prestazione locale.",
         "Per un lotto territoriale verifica insieme le performance comuni in project_context e la target_partition in selected_lot. Se le descrizioni originali del progetto e del lotto mostrano che il lotto ripartisce geograficamente quello stesso lavoro, il loro collegamento può sostenere summary, component_scope e component_importance: non occorre che il titolo geografico ripeta le azioni comuni. Cita entrambe le prove mantenendone gli ambiti originali. Un rinvio al dossier lascia ignote le specifiche, non cancella di per sé questo collegamento documentato.",
@@ -635,7 +659,11 @@ export function buildGroundedSourceReviewRequests(
       ];
       const readingGroups = new Map<
         string,
-        { claimIds: string[]; readingIds: string[] }
+        {
+          claimIds: string[];
+          readingIds: string[];
+          supportedReadingIds?: string[];
+        }
       >();
       for (const claim of plan.claims.filter((c) =>
         request.assignedClaimIds.includes(c.id),
@@ -647,10 +675,36 @@ export function buildGroundedSourceReviewRequests(
               claim.sourceRefs.includes(fact.sourceRef),
           )
           .map((fact) => fact.id);
-        const key = JSON.stringify(ownFacts);
+        const supportedReadingIds =
+          claim.kind === "detail"
+            ? unique([
+                ...ownFacts,
+                ...[
+                  ...observations,
+                  ...readingClassifications,
+                  ...missingDetails,
+                ]
+                  .filter((item) =>
+                    item.evidence.some((quote) =>
+                      claim.sourceRefs.some(
+                        (ref) =>
+                          ref === quote.sourceRef ||
+                          areServiceLanguageVariants(
+                            originals,
+                            quote.sourceRef,
+                            ref,
+                          ),
+                      ),
+                    ),
+                  )
+                  .map((item) => item.id),
+              ])
+            : undefined;
+        const key = JSON.stringify([ownFacts, supportedReadingIds]);
         const group = readingGroups.get(key) ?? {
           claimIds: [],
           readingIds: [...independentReadingIds, ...ownFacts],
+          ...(supportedReadingIds ? { supportedReadingIds } : {}),
         };
         group.claimIds.push(claim.id);
         readingGroups.set(key, group);
@@ -677,6 +731,14 @@ export function buildGroundedSourceReviewRequests(
         ...JSON.parse(request.prompt),
         sourceEvidenceHash: independent.hash,
         originalFacts,
+        detailEvidenceBindings: [...readingGroups.values()].flatMap((group) =>
+          group.supportedReadingIds
+            ? group.claimIds.map((claimId) => ({
+                claimId,
+                readingIds: group.supportedReadingIds,
+              }))
+            : [],
+        ),
         independentReading: {
           observations,
           classifications: readingClassifications,
@@ -853,6 +915,18 @@ function validateResponses(
         throw new Error(
           "Supported claim requires its own independent evidence",
         );
+      if (claim.kind === "detail" && check.verdict === "supported") {
+        const ownReadings = request.claimReadingGroups.find((group) =>
+          group.claimIds.includes(claim.id),
+        )?.supportedReadingIds;
+        if (
+          !ownReadings ||
+          check.readingRefs.some((id) => !ownReadings.includes(id))
+        )
+          throw new Error(
+            "Supported detail cites unrelated independent evidence",
+          );
+      }
       if (
         check.verdict === "supported" &&
         (claim.kind === "summary" || claim.kind.startsWith("component_")) &&

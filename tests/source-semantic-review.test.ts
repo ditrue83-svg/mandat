@@ -1203,6 +1203,7 @@ test("Review records become stale for source draft configuration or version and 
   for (const change of [
     { version: "historical-review" },
     { version: "documentary-source-semantic-review-v20" },
+    { version: "documentary-source-semantic-review-v22" },
     { sourceKey: "b".repeat(64) },
     { draftHash: "c".repeat(64) },
     { inputHash: "d".repeat(64) },
@@ -1562,7 +1563,32 @@ test("A detail absent from the work selection uses its exact original fact witho
   wrongSelection.checks.find((c) => c.claimId === detail.id)!.readingRefs = [
     "e1-1",
   ];
+  assert(!wire(wireResponse(wrongSelection)));
+  assert(!openaiWire(wireResponse(wrongSelection)));
   assert.throws(() => store(wrongSelection), /own independent evidence/);
+  assert.deepEqual(
+    body.detailEvidenceBindings.find((b: any) => b.claimId === detail.id),
+    { claimId: detail.id, readingIds: ["o-s4"] },
+  );
+  const mixedEvidence = structuredClone(response);
+  mixedEvidence.checks
+    .find((c) => c.claimId === detail.id)!
+    .readingRefs.push("e1-1");
+  assert(!wire(wireResponse(mixedEvidence)));
+  assert(!openaiWire(wireResponse(mixedEvidence)));
+  assert.throws(() => store(mixedEvidence), /unrelated independent evidence/);
+  // A negative verdict may use other independent observations to explain
+  // why the detail is false or unverified; it must still quote that detail.
+  for (const verdict of ["contradicted", "not_verifiable"] as const) {
+    const negative = structuredClone(wrongSelection);
+    negative.checks.find((c) => c.claimId === detail.id)!.verdict = verdict;
+    assert(wire(wireResponse(negative)));
+    assert(openaiWire(wireResponse(negative)));
+    assert.equal(
+      readSourceSemanticReview(store(negative), plan)?.accepted,
+      false,
+    );
+  }
   const unknown = structuredClone(response);
   unknown.checks.find((c) => c.claimId === detail.id)!.readingRefs = ["o-s999"];
   assert(!wire(wireResponse(unknown)));
