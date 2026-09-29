@@ -1152,7 +1152,7 @@ test("Related installation and supply remain review candidates without inferring
   assert.equal(value.response!.facts.activitiesOverlap, false);
   assert.equal(value.response!.facts.mainScopeCovered, false);
   assert.equal(value.sourceInterpretation.components[0].role, "supply");
-  assert.match(value.reason, /ruolo diverso/);
+  assert.match(value.reason, /corrispondenza.*verificata/);
   const stored = recordAutomaticComparison(related, request, {
     id: "invented-related-role",
     at: "2030-01-20T12:00:00.000Z",
@@ -1181,6 +1181,37 @@ test("Related installation and supply remain review candidates without inferring
   assert.equal(sameSectorOnly.basis, "different_service");
 });
 
+test("Related work may share a contractual role without becoming a direct or approved match", () => {
+  const input = fixture();
+  const request = buildAutomaticComparisonRequest(input);
+  const source = sourceRecord(request);
+  const related = response(request, source, "different");
+  related.facts.relatedActivity = "shared_professional_function";
+  related.facts.sameContractualRole = true;
+  const compared = validateAutomaticComparison(related, request, source);
+  assert.equal(compared.relation, "review");
+  assert.equal(compared.basis, "related_activity");
+  assert.equal(compared.response!.facts.sameContractualRole, true);
+  assert.equal(compared.response!.facts.activitiesOverlap, false);
+  assert.equal(compared.response!.facts.mainScopeCovered, false);
+  assert.doesNotMatch(compared.reason, /ruolo diverso/);
+  const stored = recordAutomaticComparison(related, request, {
+    id: "invented-related-same-role",
+    at: "2030-01-20T12:00:00.000Z",
+    model: automaticComparisonModel(),
+    sourceInterpretation: source,
+  });
+  const result = resolveProjectLotAssessment({
+    ...input,
+    now: new Date("2030-01-20T12:00:00.000Z"),
+    evaluationSet: null,
+    automaticComparisons: [stored],
+  });
+  assert.equal(result.signalEligible, false);
+  assert.equal(result.quality, "unresolved");
+  assert.deepEqual(result.qualityEventIds, []);
+});
+
 test("Related activity cannot assert coverage, erase uncertainty or omit its new fact", () => {
   const request = buildAutomaticComparisonRequest(fixture());
   const source = sourceRecord(request);
@@ -1188,8 +1219,8 @@ test("Related activity cannot assert coverage, erase uncertainty or omit its new
   related.facts.relatedActivity = "shared_professional_function";
   related.facts.sameContractualRole = false;
   for (const change of [
-    { sameContractualRole: true },
     { mainScopeCovered: true },
+    { sameContractualRole: true, mainScopeCovered: true },
   ])
     assert.throws(
       () =>
@@ -1939,6 +1970,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v44",
     sourceVersion: "documentary-source-interpretation-v11",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v45",
+    sourceVersion: "documentary-source-interpretation-v11",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -1972,7 +2007,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v45");
+    assert.equal(request.version, "documentary-service-comparison-v46");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(
