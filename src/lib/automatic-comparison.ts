@@ -42,7 +42,7 @@ import {
 import { SOURCE_EVIDENCE_READING_VERSION } from "./source-evidence-reading";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v40";
+  "documentary-service-comparison-v41";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -139,6 +139,11 @@ export const automaticComparisonResponseSchema = z
         .describe(
           "Esiste almeno un'attività o prodotto concretamente comune, anche se il pacchetto del bando è più ampio. Lo stesso settore o ruolo non basta. False richiede una differenza concreta, null se non determinabile.",
         ),
+      relatedActivity: z
+        .boolean()
+        .describe(
+          "Esiste un collegamento professionale concreto con lo stesso tipo di impianto, prodotto o funzione tecnica, ma in un ruolo diverso, come fornitura rispetto a installazione o manutenzione. Non basta lo stesso settore. Non afferma che la ditta svolga il ruolo richiesto o copra la commessa.",
+        ),
       sameContractualRole: z
         .boolean()
         .nullable()
@@ -167,6 +172,16 @@ export const automaticComparisonResponseSchema = z
   })
   .superRefine((value, context) => {
     if (
+      value.facts.relatedActivity &&
+      (value.facts.sameContractualRole === true ||
+        value.facts.mainScopeCovered === true)
+    )
+      context.addIssue({
+        code: "custom",
+        message:
+          "Related activity cannot assert the same role or full coverage",
+      });
+    if (
       value.facts.mainScopeCovered === true &&
       (value.facts.activitiesOverlap === false ||
         value.facts.sameContractualRole === false)
@@ -183,17 +198,15 @@ export const automaticComparisonResponseSchema = z
 export function automaticBasisFromFacts(
   facts: z.infer<typeof automaticComparisonResponseSchema>["facts"],
 ) {
-  if (
-    facts.comparisonUncertain ||
-    !facts.companyIdentifiesService ||
-    facts.activitiesOverlap === null
-  )
+  if (facts.comparisonUncertain || !facts.companyIdentifiesService)
     return "insufficient_detail" as const;
+  if (facts.relatedActivity) return "related_activity" as const;
+  if (facts.activitiesOverlap === null) return "insufficient_detail" as const;
   if (!facts.activitiesOverlap) return "different_service" as const;
   // A shared service may be only one component of an integrated contract.
   // A different primary role must not hide that partial overlap.
   if (facts.mainScopeCovered === false) return "partial_scope" as const;
-  if (facts.sameContractualRole === false) return "different_role" as const;
+  if (facts.sameContractualRole === false) return "related_activity" as const;
   if (facts.mainScopeCovered === null || facts.sameContractualRole === null)
     return "insufficient_detail" as const;
   return "same_service" as const;
@@ -204,7 +217,7 @@ export const automaticRelationFromBasis = (
 ) =>
   basis === "same_service"
     ? ("direct" as const)
-    : basis === "different_service" || basis === "different_role"
+    : basis === "different_service"
       ? ("different" as const)
       : ("review" as const);
 
@@ -800,6 +813,8 @@ export function buildInterpretedComparisonRequest(
       rules: [
         "Una prestazione principale e lo stesso ruolo consentono una corrispondenza professionale, senza pretendere quantità, modelli, qualifiche, certificazioni o ogni dettaglio tecnico nel profilo.",
         "activitiesOverlap=true richiede almeno un servizio o prodotto concretamente comune: un settore generale o un ruolo uguale non bastano. False richiede attività esplicitamente diverse; informazioni mancanti danno null.",
+        "Valuta separatamente relatedActivity: attività in ruoli diversi ma collegate allo stesso tipo concreto di impianto, prodotto o funzione tecnica restano da verificare anche senza sovrapposizione della prestazione. Un collegamento tra fornitura, installazione o manutenzione non prova che la ditta venda, produca o sappia eseguire il lavoro richiesto. Spiega il collegamento concreto citando componentRefs e companyRefs; la sola appartenenza allo stesso settore non basta.",
+        "Se relatedActivity=true non dichiarare sameContractualRole=true né mainScopeCovered=true. Conserva le differenze di ruolo e le informazioni mancanti. Attività realmente estranee senza collegamento concreto restano diverse; non usare relatedActivity per riaprire ogni gara dello stesso settore.",
         "Un ruolo commerciale o una famiglia di prodotti generica non identifica necessariamente i prodotti trattati: companyIdentifiesService=false e mainScopeCovered=null se la descrizione non chiarisce il lavoro. Non inventare attività escluse o non dichiarate.",
         "mainScopeCovered riguarda tutte le componenti main della fonte: se true, cita ciascuna di esse in componentRefs. Una copertura parziale è false, anche con un ruolo principale diverso. Le componenti accessory non diventano automaticamente un altro mestiere; excluded non sono servizi richiesti al target.",
         "Il significato della fonte è già fissato: non puoi correggerlo o cambiare stato. Se non sai stabilire il confronto, comparisonUncertain=true e i fatti non determinabili null. Territorio, scadenze e importi sono controllati separatamente.",
@@ -836,8 +851,8 @@ const reasonByBasis = {
     "Le prestazioni richieste corrispondono ai servizi dichiarati dalla ditta.",
   different_service:
     "Le prestazioni richieste sono diverse dai servizi dichiarati dalla ditta.",
-  different_role:
-    "Il ruolo richiesto dalla commessa è diverso dall’attività dichiarata.",
+  related_activity:
+    "La commessa riguarda attività vicine, ma richiede un ruolo diverso: verifica se interessa alla ditta.",
   partial_scope:
     "Le attività dichiarate coprono soltanto una parte della commessa: serve una verifica.",
   insufficient_detail:

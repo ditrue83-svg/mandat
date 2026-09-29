@@ -371,6 +371,7 @@ function response(
     facts: {
       companyIdentifiesService: true,
       activitiesOverlap: relation !== "different",
+      relatedActivity: false,
       sameContractualRole: true,
       mainScopeCovered: relation === "direct",
       comparisonUncertain: false,
@@ -1106,6 +1107,120 @@ test("A shared component or a vague profile cannot be promoted to a positive by 
   );
 });
 
+test("Related installation and supply remain review candidates without inferring supply capability", () => {
+  const detail = raw();
+  detail.procurement.orderDescription.it = "Fornitura di quadri elettrici BT.";
+  const input = fixture(detail, {
+    activities: "Installazione di impianti elettrici e cablaggi BT.",
+    sectors: ["impianti"],
+  });
+  const request = buildAutomaticComparisonRequest(input);
+  const serviceRef = request.passages.find(
+    (passage) => passage.rawPath === "/procurement/orderDescription/it",
+  )!.id;
+  const source = recordSourceInterpretation(
+    {
+      ...sourceResponse(request),
+      components: [
+        {
+          description: "Fornitura di quadri elettrici BT.",
+          role: "supply",
+          roleEvidence: roleEvidence(request, serviceRef),
+          importance: "main",
+          sourceRefs: [serviceRef],
+          meaning: explicitMeaning("Fornitura di quadri elettrici BT.", [
+            serviceRef,
+          ]),
+        },
+      ],
+    },
+    buildAutomaticSourceRequest(request),
+    {
+      id: "invented-switchboard-source",
+      at: "2030-01-20T12:00:00.000Z",
+      model: automaticComparisonModel(),
+    },
+  );
+  // Simulated model facts exercise the product rule, not AI semantic quality.
+  const related = response(request, source, "different");
+  related.facts.relatedActivity = true;
+  related.facts.sameContractualRole = false;
+  const value = validateAutomaticComparison(related, request, source);
+  assert.equal(value.relation, "review");
+  assert.equal(value.basis, "related_activity");
+  assert.equal(value.response!.facts.activitiesOverlap, false);
+  assert.equal(value.response!.facts.mainScopeCovered, false);
+  assert.equal(value.sourceInterpretation.components[0].role, "supply");
+  assert.match(value.reason, /ruolo diverso/);
+  const stored = recordAutomaticComparison(related, request, {
+    id: "invented-related-role",
+    at: "2030-01-20T12:00:00.000Z",
+    model: automaticComparisonModel(),
+    sourceInterpretation: source,
+  });
+  const result = resolveProjectLotAssessment({
+    ...input,
+    now: new Date("2030-01-20T12:00:00.000Z"),
+    evaluationSet: null,
+    automaticComparisons: [stored],
+  });
+  assert.equal(result.projectAssessment!.automatic?.serviceRelation, "review");
+  assert.equal(result.signalEligible, false);
+  assert.equal(result.quality, "unresolved");
+  assert.deepEqual(result.qualityEventIds, []);
+  const dto = projectLotAssessmentDto(result);
+  assert.equal(dto.targets[0].origin, "ai");
+  assert.deepEqual(dto.targets[0].companyEvidence, [input.profile.activities]);
+  const sameSectorOnly = validateAutomaticComparison(
+    { ...related, facts: { ...related.facts, relatedActivity: false } },
+    request,
+    source,
+  );
+  assert.equal(sameSectorOnly.relation, "different");
+  assert.equal(sameSectorOnly.basis, "different_service");
+});
+
+test("Related activity cannot assert coverage, erase uncertainty or omit its new fact", () => {
+  const request = buildAutomaticComparisonRequest(fixture());
+  const source = sourceRecord(request);
+  const related = response(request, source, "different");
+  related.facts.relatedActivity = true;
+  related.facts.sameContractualRole = false;
+  for (const change of [
+    { sameContractualRole: true },
+    { mainScopeCovered: true },
+  ])
+    assert.throws(
+      () =>
+        validateAutomaticComparison(
+          { ...related, facts: { ...related.facts, ...change } },
+          request,
+          source,
+        ),
+      /Related activity cannot assert/,
+    );
+  for (const change of [
+    { companyIdentifiesService: false },
+    { comparisonUncertain: true },
+  ]) {
+    const value = validateAutomaticComparison(
+      { ...related, facts: { ...related.facts, ...change } },
+      request,
+      source,
+    );
+    assert.equal(value.relation, "review");
+    assert.equal(value.basis, "insufficient_detail");
+  }
+  const { relatedActivity: _missing, ...oldFacts } = related.facts;
+  assert.throws(() =>
+    validateAutomaticComparison(
+      { ...related, facts: oldFacts },
+      request,
+      source,
+    ),
+  );
+});
+
 test("Each relation has a consistent basis and exact bilateral evidence, never arbitrary prose or scores", () => {
   const request = buildAutomaticComparisonRequest(fixture());
   const source = sourceRecord(request);
@@ -1766,6 +1881,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v39",
     sourceVersion: "documentary-source-interpretation-v11",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v40",
+    sourceVersion: "documentary-source-interpretation-v11",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -1799,7 +1918,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v40");
+    assert.equal(request.version, "documentary-service-comparison-v41");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(
