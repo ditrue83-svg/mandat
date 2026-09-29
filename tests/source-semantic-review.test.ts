@@ -222,7 +222,7 @@ function wireResponse({ checks, ...header }: any) {
   };
 }
 
-test("Every provider claim is a required distinct key, including a full 32-check group", () => {
+test("Every provider claim remains required when a large review is split into small groups", () => {
   const input = context(),
     baseline = draft(input);
   const original = recordSourceInterpretation(
@@ -238,7 +238,8 @@ test("Every provider claim is a required distinct key, including a full 32-check
   );
   const plan = buildSourceSemanticReviewRequest(input, original, config);
   const requests = inventedGroundedReviewRequests(plan);
-  assert(requests.some((r) => r.assignedClaimIds.length === 32));
+  assert(requests.some((r) => r.assignedClaimIds.length === 8));
+  assert(requests.every((r) => r.assignedClaimIds.length <= 8));
   const stored = answers(plan),
     wire = stored.map(wireResponse);
   const validators = requests.map((r) =>
@@ -907,7 +908,7 @@ test("An explicit output limit binds the review and independent evidence while p
     );
 });
 
-test("A large review gets more output without repeating or changing its independent source reading", () => {
+test("A large review uses bounded groups while an explicit output limit changes only the review", () => {
   const input = context();
   input.body.passages[0].text =
     "Fornitura di articoli inventati A, B, C e D; trasporto escluso.";
@@ -929,28 +930,29 @@ test("A large review gets more output without repeating or changing its independ
     { ...metadata, model: input.binding.model },
   );
   const automatic = buildSourceSemanticReviewRequest(input, complex, config);
-  const bounded = buildSourceSemanticReviewRequest(input, complex, {
+  const expanded = buildSourceSemanticReviewRequest(input, complex, {
     ...config,
-    maxTokens: 8192,
+    maxTokens: 16_384,
   });
   assert.equal(automatic.claims.length, 19);
-  assert.equal(automatic.maxTokens, 16_384);
-  assert.equal(bounded.maxTokens, 8192);
-  assert.deepEqual(automatic.evidencePlan, bounded.evidencePlan);
-  assert.deepEqual(automatic.claims, bounded.claims);
+  assert.equal(automatic.maxTokens, 8192);
+  assert.equal(expanded.maxTokens, 16_384);
+  assert(automatic.requests.every((request) => request.assignedClaimIds.length <= 8));
+  assert.notEqual(automatic.evidencePlan.inputHash, expanded.evidencePlan.inputHash);
+  assert.deepEqual(automatic.claims, expanded.claims);
   assert.deepEqual(
     automatic.requests.map(({ maxTokens: _, ...request }) => request),
-    bounded.requests.map(({ maxTokens: _, ...request }) => request),
+    expanded.requests.map(({ maxTokens: _, ...request }) => request),
   );
-  assert.notEqual(automatic.inputHash, bounded.inputHash);
+  assert.notEqual(automatic.inputHash, expanded.inputHash);
   const record = recordSourceSemanticReview(
     answers(automatic),
     automatic,
     metadata,
   );
-  assert.equal(record.maxTokens, 16_384);
+  assert.equal(record.maxTokens, undefined);
   assert.equal(readSourceSemanticReview(record, automatic)?.accepted, true);
-  assert.equal(readSourceSemanticReview(record, bounded), null);
+  assert.equal(readSourceSemanticReview(record, expanded), null);
 });
 
 test("Independent review is source-only and binds every server claim without changing the draft", () => {
@@ -1939,7 +1941,9 @@ test.each(["accessory", "excluded"] as const)(
     const componentClaim = valid.plan.claims.find(
       (c) => c.kind === "component_scope" && c.subject === "/components/1",
     )!;
-    unrelated[0].checks.find(
+    unrelated.find((part) =>
+      part.checks.some((check) => check.claimId === componentClaim.id),
+    )!.checks.find(
       (c) => c.claimId === componentClaim.id,
     )!.readingRefs = ["c1"];
     assert.throws(
