@@ -269,6 +269,9 @@ test.each([false, true, 0, null])(
     };
     const request = buildSourceInterpretationRequest(input);
     const prompt = JSON.parse(request.prompt);
+    assert.equal(prompt.fields[0].value, value);
+    assert.equal(prompt.fields[0].id, value === null ? undefined : "f0");
+    assert.deepEqual(request.citableFieldIds, value === null ? [] : ["f0"]);
     assert.deepEqual(
       request.requiredContractClauseIds,
       value === null ? [] : ["f0"],
@@ -341,6 +344,76 @@ test.each([false, true, 0, null])(
     );
   },
 );
+
+test("A text citation cannot gain an unrelated null field with the same numeric suffix", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      fields: Array.from({ length: 6 }, (_, index) => ({
+        scope: "project_context" as const,
+        rawPath:
+          index === 0
+            ? "/procurement/quantity"
+            : `/project-info/address/${index}`,
+        value: index === 0 ? 0 : null,
+      })),
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[0],
+          id: "s5",
+          role: "context",
+          rawPath: "/terms/subContractorAllowed",
+          text: "no",
+          startUtf16: 0,
+          endUtf16: 2,
+        },
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const prompt = JSON.parse(request.prompt);
+  assert.deepEqual(request.citableFieldIds, ["f0"]);
+  assert.equal(prompt.fields[0].id, "f0");
+  assert.equal(prompt.fields[0].value, 0);
+  assert.equal(prompt.fields[5].value, null);
+  assert.equal("id" in prompt.fields[5], false);
+  const valid = {
+    ...response(input),
+    details: [
+      {
+        kind: "execution_condition",
+        scope: "project_context",
+        sourceRefs: ["s5"],
+        explanation: "Il subappalto è vietato.",
+      },
+    ],
+  };
+  const validateWire = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  assert(validateWire(wireResponse(valid)));
+  const invalid = {
+    ...valid,
+    details: [{ ...valid.details[0], sourceRefs: ["s5", "f5"] }],
+  };
+  const before = JSON.stringify(invalid);
+  assert(!validateWire(wireResponse(invalid)));
+  assert.throws(
+    () => recordSourceInterpretation(wireResponse(invalid), request, metadata),
+    /absent structured value/,
+  );
+  assert.equal(JSON.stringify(invalid), before);
+  assert.equal(
+    readSourceInterpretation(
+      recordSourceInterpretation(wireResponse(valid), request, metadata),
+      request,
+    )?.status,
+    "resolved",
+  );
+});
 
 test("Contract note languages all remain required, unrelated fields do not", () => {
   const base = context();
@@ -1906,6 +1979,11 @@ test("Compact source JSON preserves every long-source value and reference within
     coverage: large.coverage,
     readings: large.readings,
     ...large.body,
+    fields: [
+      large.body.fields[0],
+      { ...large.body.fields[1], id: "f1" },
+      { ...large.body.fields[2], id: "f2" },
+    ],
     passages: passages.map(({ url: _url, ...passage }) => passage),
   };
   delete expected.classifications;
@@ -2132,9 +2210,10 @@ test.each([
   "documentary-source-interpretation-v14",
   "documentary-source-interpretation-v15",
   "documentary-source-interpretation-v16",
+  "documentary-source-interpretation-v17",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
-  assert.equal(request.version, "documentary-source-interpretation-v17");
+  assert.equal(request.version, "documentary-source-interpretation-v18");
   const current = recordSourceInterpretation(response(), request, metadata);
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");

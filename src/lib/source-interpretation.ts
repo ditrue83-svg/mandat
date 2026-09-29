@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v17";
+  "documentary-source-interpretation-v18";
 // Both allowances include provider reasoning. Large sources need room for
 // their components and classification accounting, without dropping evidence.
 export const SOURCE_INTERPRETATION_MAX_TOKENS = 8192;
@@ -688,6 +688,15 @@ export function buildSourceInterpretationRequest(
 ) {
   const context = validateSourceInterpretationContext(input);
   const { body, binding, targetScope, readings } = context;
+  // An absent value stays in the original context, but cannot prove a fact.
+  // Publish the namespace explicitly: f17 never means the text passage s17.
+  const fields = body.fields.map((field, index) => ({
+    ...field,
+    ...(field.value !== null ? { id: `f${index}` } : {}),
+  }));
+  const citableFieldIds = fields.flatMap((field) =>
+    field.id ? [field.id] : [],
+  );
   const requiredContractClauses = [
     ...body.passages
       .filter((p) => isContractScopeField(p.rawPath))
@@ -729,6 +738,7 @@ export function buildSourceInterpretationRequest(
       "Conserva destinatari, numero di strutture, continuità e territorio nella sintesi o nei details. Mantieni azione e ambito delle condizioni anche nella sintesi, senza estenderle ad altre fasi del lavoro. Non dedurre quantità o periodicità assenti.",
       "Permessi organizzativi e limiti al subappalto vanno in details come execution_condition: conserva soggetti, attività e limiti. Non provano nuovi acquisti. Per creare componenti serve un'ulteriore clausola che acquisti o escluda quei lavori: cita quella prova. Distingui una prestazione acquistabile in opzione dal solo permesso di delegare il lavoro.",
       "requiredContractClauses elenca clausole e valori originali obbligatori da rappresentare nei details, con ogni riferimento, lingua e segmento e con il loro scope originale. subContractorAllowed no o false è un divieto; yes o true è un permesso, non prova capacità o nuovi acquisti. null significa non indicato e non è un divieto. Conserva insieme eventuali note e limiti; non risolvere clausole opposte senza precedenza documentata. Se il valore è sconosciuto o rinvia a dettagli assenti, non inventarne il significato: descrivi la lacuna con missing_specification. Una clausola del progetto non diventa automaticamente una condizione locale del lotto. I riferimenti fN nei details e negli issues conservano valori JSON originali; non usarli per inventare citazioni testuali di oggetti o azioni. Se non puoi rappresentare le clausole, usa uncertain con un issue specifico, mai resolved con omissioni.",
+      "In fields puoi citare soltanto gli ID fN esplicitamente presenti accanto a un valore non nullo. I campi null restano contesto di informazione non indicata, non prove da citare. false e 0 sono valori presenti. Le serie sN e fN sono indipendenti: lo stesso numero non collega testo e campo. Per ogni riferimento verifica insieme ID, rawPath, valore e scope; non aggiungere riferimenti estranei al fatto descritto.",
       "Le clausole di contesto possono descrivere prestazioni: cita il loro testo e le classificazioni utili allo stesso oggetto. Il contesto di progetto non sostituisce il lotto: non assegnargli lavori di altri lotti. targetRef cita un passaggio service del target, anche se il titolo è geografico e l'oggetto è nel contesto comune.",
       "Ricongiungi passaggi della stessa rawPath per startUtf16. Tutti i segmenti previsti sono stati letti a monte: nessun limite di risposta autorizza omissioni; se non puoi rappresentare tutto usa uncertain con issue specifico. Usa soltanto ID forniti; i testi originali sono recuperati dal server. In ogni componente evidence elenca ogni ID una sola volta; gli altri elenchi sourceRefs restano separati.",
     ],
@@ -737,6 +747,7 @@ export function buildSourceInterpretationRequest(
     readings,
     requiredContractClauses,
     ...promptBody,
+    fields,
     classificationContext,
     passages: body.passages.map(({ url: _url, ...passage }) => passage),
   });
@@ -744,11 +755,8 @@ export function buildSourceInterpretationRequest(
   const boundedRefs = z.array(boundedReference).min(1).max(32);
   // Reuse the exact text-reference schema instead of serializing its long
   // enum a second time for conditions that can also cite structured values.
-  const boundedDetailReference = body.fields.length
-    ? z.union([
-        boundedReference,
-        z.enum(body.fields.map((_field, index) => `f${index}`)),
-      ])
+  const boundedDetailReference = citableFieldIds.length
+    ? z.union([boundedReference, z.enum(citableFieldIds)])
     : boundedReference;
   const boundedDetailRefs = z.array(boundedDetailReference).min(1).max(32);
   const boundedClassificationId = classificationContext.length
@@ -788,6 +796,7 @@ export function buildSourceInterpretationRequest(
     ...context,
     classificationContext,
     requiredContractClauseIds: requiredContractClauses.map((p) => p.id),
+    citableFieldIds,
     selectedIds: body.passages.map((passage) => passage.id),
     version: SOURCE_INTERPRETATION_VERSION,
     sourceKey,
@@ -862,6 +871,12 @@ export function validateSourceInterpretation(
     ...value.classificationReadings.flatMap((item) => item.sourceRefs),
   ]);
   const ids = [...new Set([...citedIds, ...classificationIds])];
+  if (
+    ids.some((id) => /^f\d+$/.test(id) && !request.citableFieldIds.includes(id))
+  )
+    throw new Error(
+      "Source interpretation cannot cite an absent structured value",
+    );
   const originals = sourceEvidencePassages(request);
   const evidence = ids.map((id) => {
     const passage = originals.find((item) => item.id === id);
