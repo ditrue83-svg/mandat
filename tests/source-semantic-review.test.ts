@@ -197,7 +197,11 @@ function answers(plan: SourceSemanticReviewPlan) {
         };
       }),
       findings: [] as {
-        kind: "omitted_scope" | "contradiction" | "unverifiable";
+        kind:
+          | "omitted_scope"
+          | "omitted_contract_condition"
+          | "contradiction"
+          | "unverifiable";
         reason: string;
         sourceRefs: string[];
       }[],
@@ -1182,6 +1186,71 @@ test("A keyed review blocks omitted work even when every stated claim is support
   assert.equal(reviewed.findings[0].kind, "omitted_scope");
   assert.equal(reviewed.evidence.find((p) => p.id === "s1")!.text, sourceText);
   assert.equal(JSON.stringify(original), before);
+});
+
+test("A cited compound contract note can still omit a separate bidding permission", () => {
+  const base = context();
+  const note =
+    "Subappalto ammesso fino al 70%. Le candidature multiple in più offerte sono possibili.";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[0],
+          id: "s5",
+          role: "context",
+          rawPath: "/terms/subContractorNote/it",
+          text: note,
+          startUtf16: 0,
+          endUtf16: note.length,
+        },
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const original = recordSourceInterpretation(
+    {
+      ...draft().response,
+      details: [
+        {
+          kind: "execution_condition",
+          scope: "project_context",
+          sourceRefs: ["s5"],
+          explanation: "Subappalto ammesso fino al 70%.",
+        },
+      ],
+    },
+    request,
+    { ...metadata, model: input.binding.model },
+  );
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  const grounded = inventedGroundedReviewRequests(plan);
+  assert(
+    grounded.some((part) =>
+      JSON.parse(part.prompt).requiredContractClauses.some(
+        (clause: { id: string; text: string }) =>
+          clause.id === "s5" && clause.text === note,
+      ),
+    ),
+  );
+  const responses = answers(plan);
+  const index = grounded.findIndex((part) => part.sourceIds.includes("s5"));
+  responses[index].findings.push({
+    kind: "omitted_contract_condition",
+    reason: "Il draft omette il permesso di comparire in più offerte.",
+    sourceRefs: ["s5"],
+  });
+  const stored = recordSourceSemanticReview(
+    responses.map(wireResponse),
+    plan,
+    metadata,
+  );
+  const reviewed = readSourceSemanticReview(stored, plan)!;
+  assert.equal(reviewed.accepted, false);
+  assert.equal(reviewed.findings[0].kind, "omitted_contract_condition");
 });
 
 test("Review records become stale for source draft configuration or version and reject tampering", () => {

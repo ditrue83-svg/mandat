@@ -466,6 +466,37 @@ test("Contract note languages all remain required, unrelated fields do not", () 
     /Incomplete.*contract clauses/,
   );
 });
+
+test("A compound subcontracting note is presented as multiple required facts", () => {
+  const base = context();
+  const note =
+    "Subappalto ammesso fino al 70%. I subappaltatori vanno elencati. Le candidature multiple in più offerte sono possibili.";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[0],
+          id: "s5",
+          role: "context",
+          rawPath: "/terms/subContractorNote/it",
+          text: note,
+          startUtf16: 0,
+          endUtf16: note.length,
+        },
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const prompt = JSON.parse(request.prompt);
+  assert.equal(prompt.requiredContractClauses[0].text, note);
+  assert.match(
+    prompt.rules.join(" "),
+    /ogni proposizione autonoma.*candidature multiple in più offerte/,
+  );
+});
 // Test fixtures keep the stored contract; encode their citations explicitly
 // when exercising the distinct provider JSON Schema.
 function wireResponse(value: any) {
@@ -2213,7 +2244,7 @@ test.each([
   "documentary-source-interpretation-v17",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
-  assert.equal(request.version, "documentary-source-interpretation-v18");
+  assert.equal(request.version, "documentary-source-interpretation-v19");
   const current = recordSourceInterpretation(response(), request, metadata);
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
