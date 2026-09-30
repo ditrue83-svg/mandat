@@ -34,7 +34,7 @@
     "lucide-react": "^1.44.0",
     "luxon": "^3.7.2",
     "next": "^16.3.4",
-    "nodemailer": "^10.0.3",
+    "nodemailer": "^10.0.13",
     "pdfjs-dist": "^6.3.289",
     "pg": "^8.23.0",
     "pg-boss": "^12.31.0",
