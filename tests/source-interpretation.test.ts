@@ -252,6 +252,125 @@ test("An explicit purchase with unstated hierarchy remains resolved without inve
     );
 });
 
+test("A renewal note cannot hide the opposing original extension flag", () => {
+  const base = context();
+  const notes = [
+    ["/procurement/executionNote/it", "Il contratto è rinnovabile di un anno."],
+    ["/procurement/canContractBeExtended", "no"],
+  ];
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        ...notes.map(([rawPath, text], index) => ({
+          ...base.body.passages[3],
+          id: `s${index + 5}`,
+          rawPath,
+          text,
+          endUtf16: text.length,
+        })),
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  assert.deepEqual(request.requiredContractClauseIds, ["s5", "s6"]);
+  const incomplete = {
+    ...response(input),
+    details: [
+      {
+        kind: "execution_condition",
+        scope: "project_context",
+        explanation: "Il contratto è rinnovabile di un anno.",
+        sourceRefs: ["s5"],
+      },
+    ],
+  };
+  assert.throws(
+    () => validateSourceInterpretation(incomplete, request),
+    /Incomplete.*contract clauses/,
+  );
+  const conflict = validateSourceInterpretation(
+    {
+      ...incomplete,
+      status: "conflicting",
+      issues: [
+        {
+          ...issueFields("source_conflict"),
+          explanation:
+            "La nota prevede rinnovo, il campo originale lo esclude; nessuna precedenza indicata.",
+          sourceRefs: ["s5", "s6"],
+        },
+      ],
+    },
+    request,
+  );
+  assert.equal(conflict.status, "conflicting");
+  assert.deepEqual(conflict.issues[0].sourceRefs, ["s5", "s6"]);
+  assert.equal(conflict.evidence.find((p) => p.id === "s6")!.text, "no");
+});
+
+test.each([false, true, null])(
+  "Extension value %s is kept beside its note without treating null as prohibition",
+  (value) => {
+    const base = context();
+    const input: SourceInterpretationContext = {
+      ...base,
+      body: {
+        ...base.body,
+        fields: [
+          {
+            scope: "project_context",
+            rawPath: "/procurement/canContractBeExtended",
+            value,
+          },
+        ],
+        passages: [
+          ...base.body.passages,
+          {
+            ...base.body.passages[3],
+            id: "s5",
+            rawPath: "/procurement/canContractBeExtendedNote/it",
+            text: "Condizioni della proroga da verificare nel dossier.",
+            endUtf16: "Condizioni della proroga da verificare nel dossier."
+              .length,
+          },
+        ],
+      },
+    };
+    const request = buildSourceInterpretationRequest(input);
+    assert.deepEqual(
+      request.requiredContractClauseIds,
+      value === null ? ["s5"] : ["s5", "f0"],
+    );
+    const prompt = JSON.parse(request.prompt);
+    assert.equal(prompt.fields[0].value, value);
+    assert.equal(prompt.fields[0].id, value === null ? undefined : "f0");
+    const noteOnly = {
+      ...response(input),
+      details: [
+        {
+          kind: "missing_specification",
+          scope: "project_context",
+          explanation: "Condizioni della proroga nel dossier non fornito.",
+          sourceRefs: ["s5"],
+        },
+      ],
+    };
+    if (value === null)
+      assert.equal(
+        validateSourceInterpretation(noteOnly, request).status,
+        "resolved",
+      );
+    else
+      assert.throws(
+        () => validateSourceInterpretation(noteOnly, request),
+        /Incomplete.*contract clauses/,
+      );
+  },
+);
+
 test("A resolved draft cannot omit a structured subcontracting prohibition", () => {
   const base = context();
   const input: SourceInterpretationContext = {
@@ -2311,9 +2430,12 @@ test.each([
   "documentary-source-interpretation-v15",
   "documentary-source-interpretation-v16",
   "documentary-source-interpretation-v17",
+  "documentary-source-interpretation-v18",
+  "documentary-source-interpretation-v19",
+  "documentary-source-interpretation-v20",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
-  assert.equal(request.version, "documentary-source-interpretation-v20");
+  assert.equal(request.version, SOURCE_INTERPRETATION_VERSION);
   const current = recordSourceInterpretation(response(), request, metadata);
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");

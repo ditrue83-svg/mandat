@@ -1,6 +1,7 @@
-// These original fields delimit execution or delegation. Requiring their
-// coverage does not interpret their values or establish bidder eligibility.
+// These original fields delimit execution, delegation or the contract period.
+// Keep extension flags beside their notes: either can contradict the other.
+// Requiring coverage does not interpret values or establish bidder eligibility.
 export const isContractScopeField = (rawPath: string) =>
-  /^(?:\/lots\/\d+)?\/(?:terms\/subContractor(?:Note|Allowed)|procurement\/(?:optionsNote|executionNote))(?:\/|$)/.test(
+  /^(?:\/lots\/\d+)?\/(?:terms\/subContractor(?:Note|Allowed)|procurement\/(?:optionsNote|executionNote|canContractBeExtended(?:Note)?))(?:\/|$)/.test(
     rawPath,
   );

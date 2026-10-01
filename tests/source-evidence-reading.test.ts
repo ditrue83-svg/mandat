@@ -616,6 +616,61 @@ test("Independent classification conflicts, uncertainty and incomplete readings 
   );
 });
 
+test("An extension conflict blocks approval while retaining both original assertions", () => {
+  const base = context();
+  const notes = [
+    ["/procurement/canContractBeExtended", "no"],
+    ["/procurement/executionNote/it", "La fornitura è rinnovabile di un anno."],
+  ];
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        ...notes.map(([rawPath, text], i) => ({
+          ...base.body.passages[3],
+          id: `s${i + 5}`,
+          rawPath,
+          text,
+          endUtf16: text.length,
+        })),
+      ],
+    },
+  };
+  const plan = buildSourceEvidenceReadingRequest(input, config);
+  const required = plan.requests.flatMap((r) =>
+    JSON.parse(r.prompt).requiredClausePassages.map(
+      (p: { sourceRef: string }) => p.sourceRef,
+    ),
+  );
+  assert.deepEqual(required, ["s5", "s6"]);
+  const answers = responses(plan);
+  answers[0].issues.push({
+    kind: "source_conflict",
+    reason:
+      "Il campo esclude la proroga, la nota prevede rinnovo dello stesso contratto; nessuna precedenza.",
+    evidence: [{ sourceRef: "s5" }, { sourceRef: "s6" }],
+  });
+  const record = recordSourceEvidenceReading(answers, plan, metadata);
+  const result = readSourceEvidenceReading(record, plan)!;
+  assert.equal(result.accepted, false);
+  assert.equal(result.findings[0].kind, "source_conflict");
+  assert.deepEqual(result.findings[0].sourceRefs, ["s5", "s6"]);
+  assert.equal(
+    result.responses[0].issues[0].evidence.find((p) => p.sourceRef === "s5")!
+      .text,
+    "no",
+  );
+  assert.equal(
+    readSourceEvidenceReading(
+      { ...record, version: "source-evidence-reading-v14" },
+      plan,
+    ),
+    null,
+  );
+});
+
 test("A metadata advisory preserves original evidence and cannot clear material findings", () => {
   const plan = buildSourceEvidenceReadingRequest(context(), config);
   const input = responses(plan);
