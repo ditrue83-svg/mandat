@@ -645,13 +645,21 @@ test("An extension conflict blocks approval while retaining both original assert
     ),
   );
   assert.deepEqual(required, ["s5", "s6"]);
-  const answers = responses(plan);
-  answers[0].issues.push({
-    kind: "source_conflict",
-    reason:
-      "Il campo esclude la proroga, la nota prevede rinnovo dello stesso contratto; nessuna precedenza.",
-    evidence: [{ sourceRef: "s5" }, { sourceRef: "s6" }],
-  });
+  const answers = responses(plan).map((answer, index) =>
+    index === 0
+      ? {
+          ...answer,
+          issues: [
+            {
+              kind: "source_conflict" as const,
+              reason:
+                "Il campo esclude la proroga, la nota prevede rinnovo dello stesso contratto; nessuna precedenza.",
+              evidence: [{ sourceRef: "s5" }, { sourceRef: "s6" }],
+            },
+          ],
+        }
+      : answer,
+  );
   const record = recordSourceEvidenceReading(answers, plan, metadata);
   const result = readSourceEvidenceReading(record, plan)!;
   assert.equal(result.accepted, false);
