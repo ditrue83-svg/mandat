@@ -2373,6 +2373,58 @@ test("Grounded review keeps numeric evidence and missing details without letting
   );
 });
 
+test("An AI uncertainty note cannot replace the original allocation of aggregate quantities", () => {
+  const input = context();
+  const original =
+    "Fornitura di articoli inventati per le sedi A e B. Quantità principali: 100 pezzi.";
+  const passage = input.body.passages.find((item) => item.id === "s1")!;
+  passage.text = original;
+  passage.endUtf16 = original.length;
+  const plan = buildSourceSemanticReviewRequest(input, draft(input), config);
+  const wire: any[] = plan.evidencePlan.requests.map((request) =>
+    inventedSourceEvidenceAnswer(JSON.parse(request.prompt)),
+  );
+  const speculation = "Le quantità si riferiscono soltanto alla sede A.";
+  wire[0].missingDetails.push({
+    serviceRef: "s1",
+    description: speculation,
+    evidence: [{ sourceRef: "s1" }],
+  });
+  const evidence = recordSourceEvidenceReading(wire, plan.evidencePlan, {
+    ...metadata,
+    model: plan.model,
+  });
+  const before = stableDocumentaryJson(evidence);
+  const requests = buildGroundedSourceReviewRequests(plan, evidence);
+  const body = JSON.parse(requests[0].prompt);
+  const note = body.independentReading.missingDetails.find(
+    (item: any) => item.id === "d1-1",
+  );
+
+  assert.equal(note.authority, "unverified_ai_note");
+  assert.equal(note.description, speculation);
+  assert.equal(note.evidence[0].sourceRef, "s1");
+  assert.equal(
+    body.passages.find((item: any) => item.id === "s1").text,
+    original,
+  );
+  assert.equal(body.sourceEvidenceHash, evidence.hash);
+  assert.equal(stableDocumentaryJson(evidence), before);
+});
+
+test("Version 28 approvals cannot be reused with the corrected uncertainty-note contract", () => {
+  const plan = buildSourceSemanticReviewRequest(context(), draft(), config);
+  const record = recordSourceSemanticReview(answers(plan), plan, metadata);
+  const { hash: _hash, ...old } = {
+    ...record,
+    version: "documentary-source-semantic-review-v28",
+  };
+  assert.equal(
+    readSourceSemanticReview({ ...old, hash: digest(old) }, plan),
+    null,
+  );
+});
+
 test("Review criticisms quote their assigned text without confusing summary and detail", () => {
   const input = context();
   const exactCondition =

@@ -22,7 +22,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v28";
+  "documentary-source-semantic-review-v29";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -417,7 +417,7 @@ ${item.meaning.statement}`,
         "target_partition è una proposta della lettura AI, non una prova automatica di applicabilità: controlla i testi originali. Non usare questa composizione per lotti con beni o prestazioni differenti, per estendere lavori di altri lotti, per assegnare servizi accessori o ubicazioni puntuali non attestati. Una classificazione comune o una coincidenza geografica non basta. Se manca la prova del lavoro comune o della sua ripartizione nel lotto, oppure una clausola locale la contraddice, l'applicabilità resta da verificare.",
         "Per component_domain verifica il significato dichiarato, non la sola presenza di classificationContextIds. Ripetere o tradurre un nome ambiguo senza conservarne il dominio attestato non basta a identificarlo. Non ignorare una spiegazione classificatoria incompatibile con quel significato.",
         "Una famiglia di prodotti identificata può non specificare sottotipi, quantità o requisiti: non inventarli e non usare la loro assenza come ambiguità del mestiere. Il nome del bene non è una specifica di composizione, materiale, modello o sottotipo: descriverlo come generico può essere compatibile con il conservarne il nome. Se invece una caratteristica è esplicita nella fonte, negarne la presenza resta contradicted. Verifica che details riporti soltanto condizioni o dettagli, non prestazioni espulse dalle componenti.",
-        "independentReading.missingDetails conserva dettagli non precisati: non sono conflitti o prestazioni ulteriori. Se il draft presenta come certo un valore che la fonte non determina, non approvarlo. Puoi citare dN-M per motivare not_verifiable. I riferimenti fN indicano il valore JSON originale in fields al relativo rawPath; non inventarne il significato e distingui 0, false e null.",
+        "independentReading.missingDetails contiene note AI non verificate: description non è una nuova affermazione del committente. Rileggi le loro evidence originali prima di usare dN-M per motivare not_verifiable; una supposizione nella nota non prova una diversa attribuzione del lavoro o delle quantità. Un elenco di quantità dell'appalto può essere riportato senza una ripartizione per edificio, sottoarea o lotto: non attribuire al draft una ripartizione che non afferma. Una ripartizione o applicabilità puntuale effettivamente affermata deve invece essere provata, e quantità inventate o non determinate dalla fonte restano non verificabili. I riferimenti fN indicano il valore JSON originale in fields al relativo rawPath; non inventarne il significato e distingui 0, false e null.",
         "Ogni claim è affidato a una sola richiesta con tutte le sue citazioni; i passaggi aggiunti sono contesto, non una selezione che sostituisce coverage. Esamina tutti i passaggi e campi di coverage. Non richiedere che tutti gli acquisti siano ripetuti in ogni frammento. Usa findings per problemi materiali nel significato del lavoro; nessuna autocorrezione.",
         "omitted_scope richiede una prestazione principale, accessoria o esclusa mancante, oppure un limite che cambi concretamente oggetto, azione, ruolo o applicabilità al target. In reason identifica quale lavoro risulterebbe omesso o diverso. Una condition nella lettura indipendente è una prova di contesto, non un obbligo di copiarla nel draft. Periodi contrattuali, proroghe temporali, scadenze e contatti non devono essere ripetuti quando non cambiano le prestazioni. La loro sola assenza non produce findings né not_verifiable.",
         "Eccezione esplicita: requiredContractClauses contiene condizioni che il draft deve riportare nei details, anche quando non cambiano le prestazioni. Per ciascuna nota composta controlla separatamente ogni obbligo, limite, eccezione e permesso originale: una stessa citazione sN non prova che tutte le sue proposizioni siano state rappresentate. Se manca un fatto, registra omitted_contract_condition con la clausola originale in sourceRefs e nomina in reason la proposizione assente; non chiamarlo omitted_scope se riguarda solo modalità amministrative. Per esempio, il limite percentuale al subappalto non sostituisce il permesso di comparire in più offerte. Cerca prima nell'intero draft e non pretendere una copia letterale, ma non considerare una citazione sufficiente senza il fatto. Le condizioni amministrative fuori da requiredContractClauses restano facoltative salvo che il draft le affermi falsamente.",
@@ -655,7 +655,11 @@ export function buildGroundedSourceReviewRequests(
       }));
       const missingDetails = independent.missingDetails
         .filter((d) => relevant(d, true))
-        .map((d) => ({ ...d, evidence: projectQuotes(d.evidence) }));
+        .map((d) => ({
+          ...d,
+          authority: "unverified_ai_note",
+          evidence: projectQuotes(d.evidence),
+        }));
       // Dates and other facts in a summary or detail may be absent from the
       // independent work selection. Supply only their own original pointers;
       // a summary still requires a relevant independent performance below.
