@@ -2347,11 +2347,15 @@ test("Source output allowance is bounded, independent from thinking and part of 
 
 test("Large source output allowance has fixed limits and rejects malformed size inputs", () => {
   assert.equal(
-    sourceInterpretationTokenLimit({ sourceUtf16: 32_000, classifications: 7 }),
+    sourceInterpretationTokenLimit({ sourceUtf16: 8_000, classifications: 7 }),
     8192,
   );
   assert.equal(
-    sourceInterpretationTokenLimit({ sourceUtf16: 32_001, classifications: 7 }),
+    sourceInterpretationTokenLimit({ sourceUtf16: 8_001, classifications: 7 }),
+    16_384,
+  );
+  assert.equal(
+    sourceInterpretationTokenLimit({ sourceUtf16: 8_837, classifications: 3 }),
     16_384,
   );
   assert.equal(

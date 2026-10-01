@@ -15,8 +15,9 @@ import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
   "documentary-source-interpretation-v19";
-// Both allowances include provider reasoning. Large sources need room for
-// their components and classification accounting, without dropping evidence.
+// Both allowances include provider reasoning. A multi-service source can
+// exhaust 8192 tokens well before 32000 characters; leave room for its
+// components, contractual conditions and classification accounting.
 export const SOURCE_INTERPRETATION_MAX_TOKENS = 8192;
 export const LARGE_SOURCE_INTERPRETATION_MAX_TOKENS = 16_384;
 export function sourceInterpretationTokenLimit(input: {
@@ -26,7 +27,7 @@ export function sourceInterpretationTokenLimit(input: {
   for (const value of [input.sourceUtf16, input.classifications])
     if (!Number.isSafeInteger(value) || value < 0)
       throw new Error("Invalid source size");
-  return input.sourceUtf16 > 32_000 || input.classifications >= 8
+  return input.sourceUtf16 > 8_000 || input.classifications >= 8
     ? LARGE_SOURCE_INTERPRETATION_MAX_TOKENS
     : SOURCE_INTERPRETATION_MAX_TOKENS;
 }

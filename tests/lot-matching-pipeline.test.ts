@@ -708,7 +708,7 @@ it("Reads every long-source chunk before interpretation and reuses those reading
   const interpretationCall = calls.find(
     (call) => call[1] === "documentary-source-interpretation",
   )!;
-  expect(interpretationCall[3]).toBe(8192);
+  expect(interpretationCall[3]).toBe(16_384);
   expect(interpretationCall[7]).toMatchObject({
     model: first.sourceInterpretation.model,
     reasoningEffort: "none",
