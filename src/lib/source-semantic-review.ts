@@ -22,7 +22,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v26";
+  "documentary-source-semantic-review-v27";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -264,10 +264,12 @@ export function buildSourceSemanticReviewRequest(
       sourceRefs,
     });
   };
-  add("summary", "/summary", draft.response.summary, [
-    draft.response.targetRef,
-    ...draft.response.components.flatMap((item) => item.sourceRefs),
-  ]);
+  add(
+    "summary",
+    "/summary",
+    draft.response.summary,
+    draft.response.summarySourceRefs,
+  );
   draft.response.components.forEach((item, index) => {
     const domainRefs = unique([
       ...item.meaning.objectRefs,
@@ -407,10 +409,10 @@ ${item.meaning.statement}`,
         "Per la completezza collega anche le clausole comuni del summary o dei details alle componenti del loro ambito esplicito. Un ciclo contrattuale dichiarato per tutti gli impianti o sistemi può valere per le componenti corrispondenti senza essere ripetuto parola per parola in ognuna; citarlo per un solo componente senza conservarne l'ambito generale non basta. Non estendere clausole a oggetti o lotti estranei. Ogni acquisto distinto deve restare rappresentato nelle components: menzionarlo soltanto come dettaglio non sostituisce una prestazione. Una descrizione sintetica non è una clausola di esclusione.",
         "Una categoria amministrativa e una descrizione specifica possono usare nomi diversi senza contraddirsi. La categoria non esclude di per sé un lavoro esplicito né aggiunge tutte le attività della sua etichetta. Verifica il lavoro contro la descrizione originale, mantenendo le classificazioni come dichiarate; non approvare correzioni del codice o nuovi servizi. Caratteristiche esplicite incompatibili e clausole opposte rimangono bloccanti. Un avviso sui metadati non sana ambiguità, omissioni o affermazioni false.",
         "Ogni check cita readingRefs della lettura indipendente oltre agli estratti originali. I riferimenti evidence della lettura indipendente rimandano al testo originale in passages; le citazioni di contesto non presenti in passages conservano anche text. Un draft che introduce un dominio incompatibile, una correzione della fonte o una discrepanza non presente nella lettura indipendente non può essere supported solo perché ripete il nome del prodotto. Per classification_reading cita la corrispondente classificazione indipendente cN.",
-        "Solo per i claim detail puoi citare in readingRefs gli originalFacts o-sN oppure o-fN: sono rinvii del codice a passaggi o valori JSON originali, non giudizi AI. Servono anche quando la lettura preliminare omette cronologie o dettagli amministrativi. Verifica testo, valore e percorso originali e cita lo stesso sN o fN in sourceRefs; non usare questi rinvii per summary, componenti o classificazioni. false è diverso da null. Una data non selezionata prima non è falsa per questo motivo.",
+        "Per i claim summary e detail puoi citare in readingRefs i loro originalFacts o-sN oppure o-fN: sono rinvii del codice a passaggi o valori JSON originali, non giudizi AI. Servono anche quando la lettura preliminare omette cronologie o dettagli amministrativi. Verifica ogni fatto indipendente, testo, valore e percorso originali e cita lo stesso sN o fN in sourceRefs. Per summary devi anche citare una performance pertinente della lettura indipendente: i soli originalFacts non provano oggetto, azione o completezza del lavoro. Non usare questi rinvii per componenti o classificazioni. false è diverso da null. Una data non selezionata prima non è falsa per questo motivo.",
         "Per supported di un detail usa soltanto i readingIds del suo detailEvidenceBindings: collegano i riferimenti del claim agli originali, senza approvarne il significato. Una condizione vicina sullo stesso servizio non prova un campo diverso. Se la lettura indipendente non ha selezionato quel campo, verifica e cita il suo o-sN/o-fN, senza attribuirlo a un’altra osservazione. Per contradicted o not_verifiable puoi citare anche altre letture come controprova; non inventare supporto per rispettare lo schema.",
-        "Una componente main richiede una performance indipendente pertinente. Componenti accessory o excluded possono essere verificate anche su una condition indipendente pertinente: leggi la clausola originale per distinguere un acquisto opzionale o un'esclusione da un semplice permesso organizzativo. Una condition non prova automaticamente un lavoro acquistato e non può sostenere una nuova prestazione principale.",
-        "Controlla dominio dell'oggetto, azione contrattuale, applicabilità al target e importanza main/accessory/excluded separatamente. Non scambiare un settore, luogo o destinatario per un ruolo. Contesto generale, classificazioni ampie e opere di altri lotti non provano una prestazione locale.",
+        "Una componente main o not_stated richiede una performance indipendente pertinente. Componenti accessory o excluded possono essere verificate anche su una condition indipendente pertinente: leggi la clausola originale per distinguere un acquisto opzionale o un'esclusione da un semplice permesso organizzativo. Una condition non prova automaticamente un lavoro acquistato e non può sostenere una nuova prestazione principale.",
+        "Controlla dominio dell'oggetto, azione contrattuale, applicabilità al target e importanza separatamente. main e accessory richiedono una gerarchia attestata; not_stated conserva un acquisto senza gerarchia indicata, non lo esclude né lo rende accessorio. Nomi e ordine dell'elenco non ne provano l'importanza. Non scambiare settore, luogo o destinatario per ruolo. Contesto generale, classificazioni ampie e opere di altri lotti non provano una prestazione locale.",
         "Per un lotto territoriale verifica insieme le performance comuni in project_context e la target_partition in selected_lot. Se le descrizioni originali del progetto e del lotto mostrano che il lotto ripartisce geograficamente quello stesso lavoro, il loro collegamento può sostenere summary, component_scope e component_importance: non occorre che il titolo geografico ripeta le azioni comuni. Cita entrambe le prove mantenendone gli ambiti originali. Un rinvio al dossier lascia ignote le specifiche, non cancella di per sé questo collegamento documentato.",
         "target_partition è una proposta della lettura AI, non una prova automatica di applicabilità: controlla i testi originali. Non usare questa composizione per lotti con beni o prestazioni differenti, per estendere lavori di altri lotti, per assegnare servizi accessori o ubicazioni puntuali non attestati. Una classificazione comune o una coincidenza geografica non basta. Se manca la prova del lavoro comune o della sua ripartizione nel lotto, oppure una clausola locale la contraddice, l'applicabilità resta da verificare.",
         "Per component_domain verifica il significato dichiarato, non la sola presenza di classificationContextIds. Ripetere o tradurre un nome ambiguo senza conservarne il dominio attestato non basta a identificarlo. Non ignorare una spiegazione classificatoria incompatibile con quel significato.",
@@ -654,14 +656,14 @@ export function buildGroundedSourceReviewRequests(
       const missingDetails = independent.missingDetails
         .filter((d) => relevant(d, true))
         .map((d) => ({ ...d, evidence: projectQuotes(d.evidence) }));
-      // Administrative details may be intentionally absent from the AI's
-      // work selection. Give these claims explicit pointers to the immutable
-      // original passages, without inventing independent AI observations.
+      // Dates and other facts in a summary or detail may be absent from the
+      // independent work selection. Supply only their own original pointers;
+      // a summary still requires a relevant independent performance below.
       const originalFacts = unique(
         plan.claims
           .filter(
             (claim) =>
-              claim.kind === "detail" &&
+              (claim.kind === "detail" || claim.kind === "summary") &&
               request.assignedClaimIds.includes(claim.id),
           )
           .flatMap((claim) => claim.sourceRefs),
@@ -670,7 +672,7 @@ export function buildGroundedSourceReviewRequests(
           (p) => p.id === sourceRef,
         );
         if (!passage || !request.sourceIds.includes(sourceRef))
-          throw new Error("Original detail evidence outside its request");
+          throw new Error("Original claim evidence outside its request");
         return {
           id: `o-${sourceRef}`,
           sourceRef,
@@ -701,7 +703,7 @@ export function buildGroundedSourceReviewRequests(
         const ownFacts = originalFacts
           .filter(
             (fact) =>
-              claim.kind === "detail" &&
+              (claim.kind === "detail" || claim.kind === "summary") &&
               claim.sourceRefs.includes(fact.sourceRef),
           )
           .map((fact) => fact.id);
@@ -897,7 +899,7 @@ function validateResponses(
       );
       if (
         directFacts.length &&
-        (claim.kind !== "detail" ||
+        ((claim.kind !== "detail" && claim.kind !== "summary") ||
           directFacts.some(
             (fact) =>
               !claim.sourceRefs.includes(fact.sourceRef) ||
@@ -905,7 +907,7 @@ function validateResponses(
           ))
       )
         throw new Error(
-          "Original fact pointers require their own detail claim and source evidence",
+          "Original fact pointers require their own summary or detail claim and source evidence",
         );
       const independentRefs = (id: string) =>
         independent.observations

@@ -135,6 +135,12 @@ function response(input = context()) {
     status: "resolved" as const,
     summary:
       "Fornitura di prodotti inventati con posa accessoria, senza trasporto.",
+    summarySourceRefs: [
+      input.body.passages.find(
+        (p) => p.scope === input.targetScope && p.role === "service",
+      )!.id,
+      "s4",
+    ],
     details: [],
     classificationReadings: input.body.classifications.map((item, index) => ({
       classificationId: `c${index + 1}`,
@@ -183,6 +189,68 @@ function response(input = context()) {
     targetRef: "s1",
   };
 }
+
+test("A summary keeps its own date evidence and rejects missing, foreign or classification-only citations", () => {
+  const base = context();
+  const date = "2030-01-01";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[3],
+          id: "s5",
+          rawPath: "/procurement/contractPeriod/dateRange/0",
+          text: date,
+          endUtf16: date.length,
+        },
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const answer = {
+    ...response(input),
+    summary: "Fornitura di prodotti inventati dal 1 gennaio 2030.",
+    summarySourceRefs: ["s1", "s5"],
+  };
+  const value = validateSourceInterpretation(answer, request);
+  assert.deepEqual(value.summarySourceRefs, ["s1", "s5"]);
+  assert.equal(value.evidence.find((p) => p.id === "s5")!.text, date);
+  assert(value.components.every((c) => !c.sourceRefs.includes("s5")));
+  const { summarySourceRefs: _refs, ...missing } = answer;
+  assert.throws(() => validateSourceInterpretation(missing, request));
+  for (const refs of [[], ["s3"], ["s4"], ["s1", "s999"], ["s1", "f0"]])
+    assert.throws(() =>
+      validateSourceInterpretation(
+        { ...answer, summarySourceRefs: refs },
+        request,
+      ),
+    );
+});
+
+test("An explicit purchase with unstated hierarchy remains resolved without inventing a main or accessory role", () => {
+  const request = buildSourceInterpretationRequest(context());
+  const answer = response();
+  const result = validateSourceInterpretation(
+    {
+      ...answer,
+      components: [{ ...answer.components[0], importance: "not_stated" }],
+    },
+    request,
+  );
+  assert.equal(result.status, "resolved");
+  assert.equal(result.components[0].importance, "not_stated");
+  assert.deepEqual(result.issues, []);
+  for (const importance of ["accessory", "excluded"])
+    assert.throws(() =>
+      validateSourceInterpretation(
+        { ...answer, components: [{ ...answer.components[0], importance }] },
+        request,
+      ),
+    );
+});
 
 test("A resolved draft cannot omit a structured subcontracting prohibition", () => {
   const base = context();
@@ -1601,7 +1669,7 @@ test("A selected lot keeps shared classification contextual and requires its own
     /selected-target/,
   );
   assert.equal(
-    validateSourceInterpretation({ ...response(), targetRef: "s5" }, request)
+    validateSourceInterpretation({ ...response(lot), targetRef: "s5" }, request)
       .targetRef,
     "s5",
   );
@@ -1670,6 +1738,7 @@ test("A selected lot keeps shared classification contextual and requires its own
         {
           ...scopeQuestion,
           targetRef: "s1",
+          summarySourceRefs: response(input).summarySourceRefs,
           classificationReadings: response(input).classificationReadings,
           details: [],
           issues: [
@@ -2244,7 +2313,7 @@ test.each([
   "documentary-source-interpretation-v17",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
-  assert.equal(request.version, "documentary-source-interpretation-v19");
+  assert.equal(request.version, "documentary-source-interpretation-v20");
   const current = recordSourceInterpretation(response(), request, metadata);
   const digest = (value: unknown) =>
     createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");

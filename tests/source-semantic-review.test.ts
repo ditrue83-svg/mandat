@@ -133,6 +133,7 @@ function draft(input = context()) {
     {
       status: "resolved",
       summary: "Fornitura di articoli inventati.",
+      summarySourceRefs: ["s1"],
       targetRef: "s1",
       classificationReadings: [
         {
@@ -178,6 +179,133 @@ function draft(input = context()) {
     { ...metadata, id: "invented-draft", model: input.binding.model },
   );
 }
+
+test("Summary dates absent from the independent work selection keep their own original proof and still require independent work evidence", () => {
+  const base = context();
+  const date = "2030-01-01";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[3],
+          id: "s5",
+          rawPath: "/procurement/contractPeriod/dateRange/0",
+          text: date,
+          endUtf16: date.length,
+        },
+      ],
+    },
+  };
+  const source = recordSourceInterpretation(
+    {
+      ...draft(input).response,
+      summary: "Fornitura di articoli inventati dal 1 gennaio 2030.",
+      summarySourceRefs: ["s1", "s5"],
+      details: [],
+    },
+    buildSourceInterpretationRequest(input),
+    { ...metadata, model: input.binding.model },
+  );
+  const plan = buildSourceSemanticReviewRequest(input, source, config);
+  const evidence = recordSourceEvidenceReading(
+    plan.evidencePlan.requests.map((r) => {
+      const value = inventedSourceEvidenceAnswer(JSON.parse(r.prompt));
+      value.observations = value.observations.filter(
+        (o) => !o.evidence.some((q) => q.sourceRef === "s5"),
+      );
+      return value;
+    }),
+    plan.evidencePlan,
+    metadata,
+  );
+  const requests = buildGroundedSourceReviewRequests(plan, evidence);
+  const summary = plan.claims.find((c) => c.kind === "summary")!;
+  assert.deepEqual(summary.sourceRefs, ["s1", "s5"]);
+  const request = requests.find((r) =>
+    r.assignedClaimIds.includes(summary.id),
+  )!;
+  const body = JSON.parse(request.prompt);
+  assert(body.originalFacts.some((f: any) => f.id === "o-s5"));
+  assert(!JSON.stringify(body.independentReading).includes('"s5"'));
+  assert.equal(body.passages.find((p: any) => p.id === "s5").text, date);
+  const responses = requests.map((r) => {
+    const body = JSON.parse(r.prompt);
+    return {
+      chunkId: r.id,
+      sourceEvidenceHash: evidence.hash,
+      coverage: "complete",
+      checks: r.assignedClaimIds.map((id) => {
+        const claim = plan.claims.find((c) => c.id === id)!;
+        return {
+          claimId: id,
+          verdict: "supported",
+          draftQuote: null as string | null,
+          reason: "Risposta inventata per verificare il contratto delle prove.",
+          sourceRefs: claim.sourceRefs,
+          readingRefs: [
+            ...inventedReadingRefs(body, claim),
+            ...(claim.kind === "summary" ? ["o-s5"] : []),
+          ],
+        };
+      }),
+      findings: [],
+    };
+  });
+  const store = (value: unknown[]) =>
+    productionRecordSourceSemanticReview(value, plan, {
+      ...metadata,
+      sourceEvidence: evidence,
+    });
+  assert.equal(
+    readSourceSemanticReview(store(responses), plan)?.accepted,
+    true,
+  );
+  const altered = (
+    mutate: (check: (typeof responses)[number]["checks"][number]) => void,
+  ) => {
+    const value = structuredClone(responses);
+    mutate(
+      value.flatMap((r) => r.checks).find((c) => c.claimId === summary.id)!,
+    );
+    return value;
+  };
+  assert.throws(
+    () =>
+      store(
+        altered((c) => {
+          c.readingRefs = ["o-s1", "o-s5"];
+        }),
+      ),
+    /independent performance/,
+  );
+  assert.throws(
+    () =>
+      store(
+        altered((c) => {
+          c.sourceRefs = ["s1"];
+        }),
+      ),
+    /own summary or detail/,
+  );
+  const unrelated = structuredClone(responses);
+  const component = plan.claims.find((c) => c.kind === "component_domain")!;
+  unrelated
+    .flatMap((r) => r.checks)
+    .find((c) => c.claimId === component.id)!
+    .readingRefs.push("o-s5");
+  assert.throws(() => store(unrelated), /own summary or detail/);
+  const negative = altered((c) => {
+    c.verdict = "not_verifiable";
+    c.draftQuote = "dal 1 gennaio 2030";
+  });
+  assert.equal(
+    readSourceSemanticReview(store(negative), plan)?.accepted,
+    false,
+  );
+});
 function answers(plan: SourceSemanticReviewPlan) {
   return inventedGroundedReviewRequests(plan).map((request) => {
     const body = JSON.parse(request.prompt);
@@ -773,6 +901,7 @@ test("Territorial review keeps common work and local partition separate without 
   };
   const value = structuredClone(draft().response);
   value.targetRef = "s5";
+  value.summarySourceRefs = ["s1", "s5"];
   value.summary = "Fornitura di articoli inventati per la Regione Est.";
   value.components[0].sourceRefs.push("s5");
   value.components[0].meaning.classificationContextIds = [];
@@ -972,8 +1101,13 @@ test("A large review uses bounded groups while an explicit output limit changes 
   assert.equal(automatic.claims.length, 19);
   assert.equal(automatic.maxTokens, 8192);
   assert.equal(expanded.maxTokens, 16_384);
-  assert(automatic.requests.every((request) => request.assignedClaimIds.length <= 8));
-  assert.notEqual(automatic.evidencePlan.inputHash, expanded.evidencePlan.inputHash);
+  assert(
+    automatic.requests.every((request) => request.assignedClaimIds.length <= 8),
+  );
+  assert.notEqual(
+    automatic.evidencePlan.inputHash,
+    expanded.evidencePlan.inputHash,
+  );
   assert.deepEqual(automatic.claims, expanded.claims);
   assert.deepEqual(
     automatic.requests.map(({ maxTokens: _, ...request }) => request),
@@ -1594,6 +1728,12 @@ test("A detail absent from the work selection uses its exact original fact witho
   const body = JSON.parse(request.prompt);
   assert.deepEqual(body.originalFacts, [
     {
+      id: "o-s1",
+      sourceRef: "s1",
+      scope: "project_context",
+      rawPath: input.body.passages[0].rawPath,
+    },
+    {
       id: "o-s4",
       sourceRef: "s4",
       scope: "project_context",
@@ -1650,21 +1790,21 @@ test("A detail absent from the work selection uses its exact original fact witho
       `${kind} cannot add a detail-only pointer`,
     );
     assert(!openaiWire(wireResponse(extraPointer)));
-    assert.throws(() => store(extraPointer), /own detail claim/);
+    assert.throws(() => store(extraPointer), /own summary or detail claim/);
     changed.checks.find((c) => c.claimId === claim.id)!.readingRefs = ["o-s4"];
     assert(
       !wire(wireResponse(changed)),
       `${kind} cannot substitute a detail-only pointer`,
     );
     assert(!openaiWire(wireResponse(changed)));
-    assert.throws(() => store(changed), /own detail claim/);
+    assert.throws(() => store(changed), /own summary or detail claim/);
   }
   const detail = plan.claims.find((c) => c.kind === "detail")!;
   const wrongOriginal = structuredClone(response);
   wrongOriginal.checks.find((c) => c.claimId === detail.id)!.sourceRefs = [
     "s1",
   ];
-  assert.throws(() => store(wrongOriginal), /own detail claim/);
+  assert.throws(() => store(wrongOriginal), /own summary or detail claim/);
   const wrongSelection = structuredClone(response);
   wrongSelection.checks.find((c) => c.claimId === detail.id)!.readingRefs = [
     "e1-1",
@@ -1812,7 +1952,7 @@ test("A structured condition owns a review claim and retains false without becom
         ...metadata,
         sourceEvidence: evidence,
       }),
-    /own detail claim/,
+    /own summary or detail claim/,
   );
 });
 
@@ -1886,7 +2026,7 @@ test("The generated review schema keeps each original fact with its own detail",
         ...metadata,
         sourceEvidence: evidence,
       }),
-    /own detail claim/,
+    /own summary or detail claim/,
   );
 });
 
@@ -1976,11 +2116,13 @@ test.each(["accessory", "excluded"] as const)(
     const componentClaim = valid.plan.claims.find(
       (c) => c.kind === "component_scope" && c.subject === "/components/1",
     )!;
-    unrelated.find((part) =>
-      part.checks.some((check) => check.claimId === componentClaim.id),
-    )!.checks.find(
-      (c) => c.claimId === componentClaim.id,
-    )!.readingRefs = ["c1"];
+    unrelated
+      .find((part) =>
+        part.checks.some((check) => check.claimId === componentClaim.id),
+      )!
+      .checks.find((c) => c.claimId === componentClaim.id)!.readingRefs = [
+      "c1",
+    ];
     assert.throws(
       () =>
         productionRecordSourceSemanticReview(unrelated, valid.plan, {

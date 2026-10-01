@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v19";
+  "documentary-source-interpretation-v20";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -235,9 +235,9 @@ const componentRole = z
     "Azione contrattuale, non settore/luogo/destinatario. supply: beni; execute: svolgere/organizzare; design: progettare; install: mettere in opera; maintain: conservare/ripristinare funzionalità; operate: gestione continuativa; advise: consulenza; other: altra azione identificata.",
   );
 const componentImportance = z
-  .enum(["main", "accessory", "excluded"])
+  .enum(["main", "accessory", "excluded", "not_stated"])
   .describe(
-    "Ruolo della prestazione nell'acquisto: main ne costituisce l'oggetto principale; accessory lo completa o supporta; excluded è esplicitamente esclusa. Obbligatorietà e presenza nell'elenco non provano main.",
+    "main: acquisto principale; accessory: complemento attestato; excluded: esclusione esplicita; not_stated: acquisto senza gerarchia indicata. L'elenco non prova main o accessory.",
   );
 const componentRefsDescription =
   "Cita il testo che identifica la prestazione, anche se si trova in una clausola o nel contesto del progetto. Codici ed etichette classificatorie possono chiarire questo stesso oggetto, ma non sono da soli una prestazione distinta.";
@@ -396,8 +396,11 @@ function buildResponseSchema(bounds?: {
       : z.array(item).max(1024);
   const commonFields = {
     summary: text(1200).describe(
-      "Sintesi del lavoro acquistato: oggetti, azioni contrattuali e ambito. Conserva le azioni comuni a più impianti o servizi; un elenco dei soli beni non rappresenta anche installazione, gestione o rimozione.",
+      "Sintesi di oggetti, azioni contrattuali e ambito. Conserva tutte le azioni comuni: i soli beni non rappresentano anche installazione o gestione. Ogni fatto richiede summarySourceRefs.",
     ),
+    // Share the exact reference schema with details; another described clone
+    // would repeat the long source enum in the provider's JSON Schema.
+    summarySourceRefs: bounds?.detailRefs ?? detailRefs,
     targetRef: bounds?.targetRef ?? sourceId,
     details: z
       .array(detail)
@@ -437,11 +440,15 @@ function buildResponseSchema(bounds?: {
     .superRefine((value, context) => {
       if (
         value.status === "resolved" &&
-        !value.components.some((item) => item.importance === "main")
+        !value.components.some(
+          (item) =>
+            item.importance === "main" || item.importance === "not_stated",
+        )
       )
         context.addIssue({
           code: "custom",
-          message: "Resolved source requires a main component",
+          message:
+            "Resolved source requires a main component or a requested component with unstated importance",
         });
       if (
         value.status === "conflicting" &&
@@ -734,7 +741,8 @@ export function buildSourceInterpretationRequest(
       "roleEvidence cita un estratto esatto, non tradotto e non classificatorio dell'azione; evidence lo documenta nello stesso scope. Non scambiare settore, luogo o destinatario per ruolo contrattuale. Se indeterminato usa role null, roleEvidence unresolved e issue role_identity. Per details e roleEvidence scope è l'ambito dei passaggi; per issues è il target interessato. target_scope riguarda soltanto lotti e cita entrambi gli ambiti: contesto condiviso e lotto.",
       "source_conflict richiede status conflicting e due asserzioni materialmente incompatibili sullo stesso target, con riferimenti distinti nello stesso issue. Una tua interpretazione non è un'asserzione della fonte. Categoria ampia, descrizione specifica, traduzioni, ripetizioni o segmenti spezzati non costituiscono di per sé un conflitto. Una lettura unreadable vieta resolved.",
       "Descrivi ogni acquisto con azione e prodotto o servizio concreto, comprensibile da solo e coerente con la sintesi. Distingui oggetto, ruolo e opera a cui serve. Conserva tutte le prestazioni principali, accessorie ed escluse; non promuovere lavori di terzi. Non creare componenti da intestazioni, codici o traduzioni e non duplicare lo stesso acquisto per la classificazione. Servizi realmente acquistati di classificazione/catalogazione restano prestazioni, documentate dal testo.",
-      "Determina importance dal rapporto tra prestazioni descritto dalla fonte. Se una clausola presenta servizi come complementari o di supporto all'acquisto principale, conserva quel rapporto con accessory, anche se sono obbligatori, acquistati e dotati di una propria classificazione. Main non significa ogni prestazione inclusa. Non dedurre però accessorietà dal solo ordine, da una frase introdotta con anche/inoltre, dal nome del servizio o dall'assenza di quantità: una prestazione di supporto può essere essa stessa l'oggetto principale della gara. Opzionalità e importanza sono distinte; conserva le condizioni in details.",
+      "importance dipende dalla gerarchia attestata: main principale; accessory complemento/supporto al principale anche se obbligatorio e classificato; excluded esplicita. Non ogni voce è main. Nome, ordine, anche/inoltre o quantità mancanti non provano accessory: un supporto può essere il principale. Senza gerarchia usa not_stated, acquisto da coprire interamente; non inventare main per resolved né issues d'identità. Opzionalità distinta, condizioni in details.",
+      "Cita in summarySourceRefs ogni fatto della sintesi con i suoi passaggi o valori originali: anche date, luoghi, quantità e condizioni. Non ereditare prove delle componenti.",
       "Leggi insieme clausole generali e specifiche. Se una clausola acquista più azioni sullo stesso insieme di impianti o sistemi, conserva quel ciclo nella sintesi e nelle descrizioni delle componenti a cui si applica, con entrambe le prove. Non restringerlo a un solo esempio dell'elenco e non ridurre un acquisto integrato alla sola fornitura. role riassume una funzione, non cancella le altre azioni documentate. Non estendere il ciclo a servizi, oggetti o lotti cui la fonte non lo applica; una clausola specifica di esclusione o limitazione resta vincolante.",
       "Conserva destinatari, numero di strutture, continuità e territorio nella sintesi o nei details. Mantieni azione e ambito delle condizioni anche nella sintesi, senza estenderle ad altre fasi del lavoro. Non dedurre quantità o periodicità assenti.",
       "Permessi organizzativi e limiti al subappalto vanno in details come execution_condition: conserva soggetti, attività e limiti. Non provano nuovi acquisti. Per creare componenti serve un'ulteriore clausola che acquisti o escluda quei lavori: cita quella prova. Distingui una prestazione acquistabile in opzione dal solo permesso di delegare il lavoro.",
@@ -786,11 +794,13 @@ export function buildSourceInterpretationRequest(
       ),
     },
   };
-  if (
-    Buffer.byteLength(system + prompt + JSON.stringify(responseFormat)) >
-    160_000
-  )
-    throw new Error("source_interpretation_prompt_capacity");
+  const requestBytes = Buffer.byteLength(
+    system + prompt + JSON.stringify(responseFormat),
+  );
+  if (requestBytes > 160_000)
+    throw new Error(
+      `source_interpretation_prompt_capacity (${requestBytes} bytes)`,
+    );
   const sourceKey = sourceInterpretationKey(binding);
   const maxTokens = binding.maxTokens;
   const request = freeze({
@@ -862,6 +872,7 @@ export function validateSourceInterpretation(
   );
   const citedIds = new Set([
     value.targetRef,
+    ...value.summarySourceRefs,
     ...value.components.flatMap((item) => [
       ...item.sourceRefs,
       ...item.meaning.objectRefs,
@@ -890,6 +901,15 @@ export function validateSourceInterpretation(
     throw new Error(
       "Source interpretation requires selected-target service evidence",
     );
+  if (
+    !value.summarySourceRefs.some((id) => {
+      const passage = originals.find((item) => item.id === id);
+      return (
+        passage?.scope === request.targetScope && passage.role === "service"
+      );
+    })
+  )
+    throw new Error("Source summary requires its own target service evidence");
   if (
     value.components.some((component) =>
       component.sourceRefs.every((id) => classificationIds.has(id)),
@@ -1141,6 +1161,7 @@ export function validateSourceInterpretation(
     response: value,
     status: value.status,
     summary: value.summary,
+    summarySourceRefs: value.summarySourceRefs,
     targetRef: value.targetRef,
     issues: value.issues,
     details: value.details,

@@ -199,6 +199,7 @@ function inventedAnswer(prompt: string) {
       ),
       summary:
         "Potatura degli alberi, fonte inventata per la verifica della coda.",
+      summarySourceRefs: [target.id],
       classificationReadings: data.classificationContext.map(
         (classification: {
           id: string;

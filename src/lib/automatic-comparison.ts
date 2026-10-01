@@ -43,7 +43,7 @@ import { SOURCE_EVIDENCE_READING_VERSION } from "./source-evidence-reading";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v61";
+  "documentary-service-comparison-v62";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -821,7 +821,7 @@ export function buildInterpretedComparisonRequest(
         "Esempi generali della distinzione: installare impianti idraulici e fornire valvole hanno la funzione idraulica in comune ma ruoli diversi; pulire uffici e fornire computer condividono soltanto un ambiente di lavoro. Gli esempi spiegano il criterio, non aggiungono prestazioni alla fonte o al profilo.",
         "Valuta sameContractualRole separatamente dall’affinità: due prestazioni diverse possono entrambe richiedere installazione, fornitura o un altro stesso ruolo. Se il ruolo coincide conserva true, senza trasformarlo in sovrapposizione delle prestazioni. Con relatedActivity=shared_professional_function non dichiarare mainScopeCovered=true: spiega la differenza concreta ancora da verificare. Se attività, ruolo e intero ambito principale coincidono, usa relatedActivity=none. Attività realmente estranee restano diverse; un contesto incidentale non deve riaprire ogni gara dello stesso settore.",
         "Un ruolo commerciale o una famiglia di prodotti generica non identifica necessariamente i prodotti trattati: companyIdentifiesService=false e mainScopeCovered=null se la descrizione non chiarisce il lavoro. Non inventare attività escluse o non dichiarate.",
-        "mainScopeCovered riguarda tutte le componenti main della fonte: se true, cita ciascuna di esse in componentRefs. Una copertura parziale è false, anche con un ruolo principale diverso. Le componenti accessory non diventano automaticamente un altro mestiere; excluded non sono servizi richiesti al target.",
+        "mainScopeCovered riguarda tutte le componenti main e not_stated della fonte: se true, cita ciascuna di esse in componentRefs. not_stated indica una prestazione acquistata senza gerarchia precisata: non presumere che sia accessoria e non ometterla dalla copertura. Una copertura parziale è false, anche con un ruolo principale diverso. Le componenti accessory non diventano automaticamente un altro mestiere; excluded non sono servizi richiesti al target.",
         "Distingui identità del servizio e copertura dell'intera commessa. Se il profilo limita il servizio a certi ambienti e la fonte richiede quel servizio in altri ambienti precisando che le prestazioni differiscono, ma rinvia a un documento non disponibile per sapere quali siano, conserva la sovrapposizione professionale e il ruolo comuni; usa mainScopeCovered=null e comparisonUncertain=true. Non dichiarare copertura totale o coincidenza delle prestazioni concrete sulla sola base della famiglia generale. Una quantità, un modello o un dettaglio tecnico mancante non crea da solo questa incertezza.",
         "Il significato della fonte è già fissato: non puoi correggerlo o cambiare stato. Se non sai stabilire il confronto, comparisonUncertain=true e i fatti non determinabili null. Territorio, scadenze e importi sono controllati separatamente.",
         "classificationContext conserva classificazioni originali e ambito; classificationReadings e meaning spiegano come sono state usate per identificare ogni componente. Mantieni quel significato senza reinterpretarlo secondo la ditta. Un contesto ampio o condiviso non sostituisce il servizio concreto del target e non prevale sul lotto selezionato.",
@@ -912,12 +912,13 @@ export function validateAutomaticComparison(
     value?.facts.mainScopeCovered === true &&
     source.components.some(
       (component) =>
-        component.importance === "main" &&
+        (component.importance === "main" ||
+          component.importance === "not_stated") &&
         !value.componentRefs.includes(component.id),
     )
   )
     throw new Error(
-      "Complete coverage requires evidence for every main component",
+      "Complete coverage requires evidence for every main component or unranked requested component",
     );
   const components = value
     ? value.componentRefs.map((id) => {
@@ -937,6 +938,7 @@ export function validateAutomaticComparison(
     );
   const sourceIds = new Set([
     source.targetRef,
+    ...source.summarySourceRefs,
     ...components.flatMap((component) => component.sourceRefs),
     ...components.flatMap((component) => component.roleEvidence.sourceRefs),
     ...source.details.flatMap((detail) => detail.sourceRefs),

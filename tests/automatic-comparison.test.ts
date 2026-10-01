@@ -217,6 +217,7 @@ function sourceResponse(
     details: [],
     summary:
       "Servizi inventati, interpretazione simulata per verificare il contratto.",
+    summarySourceRefs: [targetRef],
     classificationReadings: sourceRequest.classificationContext.map(
       (classification) => ({
         classificationId: classification.id,
@@ -1089,62 +1090,65 @@ test("An identified object with an unresolved role stays in review without a com
   assert.deepEqual(outcome.companyEvidence, []);
 });
 
-test("A claimed full match must cite every main interpreted component while partial scope may cite one", () => {
-  const detail = raw();
-  detail.procurement.orderDescription.it =
-    "Pulizia degli uffici e manutenzione degli impianti inventati.";
-  const request = buildAutomaticComparisonRequest(
-    fixture(detail, { activities: detail.procurement.orderDescription.it }),
-  );
-  const interpreted = sourceResponse(request);
-  const source = recordSourceInterpretation(
-    {
-      ...interpreted,
-      components: [
-        ...interpreted.components,
-        {
-          description: "Manutenzione degli impianti inventati.",
-          role: "maintain",
-          roleEvidence: roleEvidence(request, interpreted.targetRef),
-          importance: "main",
-          sourceRefs: [interpreted.targetRef],
-          meaning: explicitMeaning(
-            "Manutenzione degli impianti inventati.",
-            [interpreted.targetRef],
-            request,
-          ),
-        },
-      ],
-    },
-    buildAutomaticSourceRequest(request),
-    {
-      id: "invented-two-main",
-      at: "2030-01-20T12:00:00.000Z",
-      model: automaticComparisonModel(),
-    },
-  );
-  assert.throws(
-    () =>
-      validateAutomaticComparison(response(request, source), request, source),
-    /main|principali|component/i,
-  );
-  assert.equal(
-    validateAutomaticComparison(
-      { ...response(request, source), componentRefs: ["u1", "u2"] },
-      request,
-      source,
-    ).relation,
-    "direct",
-  );
-  assert.equal(
-    validateAutomaticComparison(
-      response(request, source, "review"),
-      request,
-      source,
-    ).relation,
-    "review",
-  );
-});
+test.each(["main", "not_stated"] as const)(
+  "A full match covers every %s requested component while partial scope may cite one",
+  (importance) => {
+    const detail = raw();
+    detail.procurement.orderDescription.it =
+      "Pulizia degli uffici e manutenzione degli impianti inventati.";
+    const request = buildAutomaticComparisonRequest(
+      fixture(detail, { activities: detail.procurement.orderDescription.it }),
+    );
+    const interpreted = sourceResponse(request);
+    const source = recordSourceInterpretation(
+      {
+        ...interpreted,
+        components: [
+          ...interpreted.components,
+          {
+            description: "Manutenzione degli impianti inventati.",
+            role: "maintain",
+            roleEvidence: roleEvidence(request, interpreted.targetRef),
+            importance,
+            sourceRefs: [interpreted.targetRef],
+            meaning: explicitMeaning(
+              "Manutenzione degli impianti inventati.",
+              [interpreted.targetRef],
+              request,
+            ),
+          },
+        ],
+      },
+      buildAutomaticSourceRequest(request),
+      {
+        id: "invented-two-main",
+        at: "2030-01-20T12:00:00.000Z",
+        model: automaticComparisonModel(),
+      },
+    );
+    assert.throws(
+      () =>
+        validateAutomaticComparison(response(request, source), request, source),
+      /main|principali|component/i,
+    );
+    assert.equal(
+      validateAutomaticComparison(
+        { ...response(request, source), componentRefs: ["u1", "u2"] },
+        request,
+        source,
+      ).relation,
+      "direct",
+    );
+    assert.equal(
+      validateAutomaticComparison(
+        response(request, source, "review"),
+        request,
+        source,
+      ).relation,
+      "review",
+    );
+  },
+);
 
 test("An excluded component alone cannot justify a service rejection but remains valid counterevidence with requested work", () => {
   const detail = raw();
@@ -2220,6 +2224,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v56",
     sourceVersion: "documentary-source-interpretation-v19",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v61",
+    sourceVersion: "documentary-source-interpretation-v19",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2253,7 +2261,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v61");
+    assert.equal(request.version, "documentary-service-comparison-v62");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(
