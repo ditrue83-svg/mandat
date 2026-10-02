@@ -2412,16 +2412,50 @@ test("An AI uncertainty note cannot replace the original allocation of aggregate
   assert.equal(stableDocumentaryJson(evidence), before);
 });
 
-test("Version 28 approvals cannot be reused with the corrected uncertainty-note contract", () => {
+test("Earlier approvals cannot be reused with the bounded review-reference contract", () => {
   const plan = buildSourceSemanticReviewRequest(context(), draft(), config);
   const record = recordSourceSemanticReview(answers(plan), plan, metadata);
-  const { hash: _hash, ...old } = {
-    ...record,
-    version: "documentary-source-semantic-review-v28",
-  };
-  assert.equal(
-    readSourceSemanticReview({ ...old, hash: digest(old) }, plan),
-    null,
+  for (const version of [
+    "documentary-source-semantic-review-v28",
+    "documentary-source-semantic-review-v29",
+  ]) {
+    const { hash: _hash, ...old } = { ...record, version };
+    assert.equal(
+      readSourceSemanticReview({ ...old, hash: digest(old) }, plan),
+      null,
+    );
+  }
+});
+
+test("Provider reference bounds reject repetition floods without removing independent evidence", () => {
+  const plan = buildSourceSemanticReviewRequest(context(), draft(), config);
+  const evidence = inventedSourceEvidence(plan);
+  const request = buildGroundedSourceReviewRequests(plan, evidence)[0];
+  const body = JSON.parse(request.prompt);
+  const response = answers(plan)[0];
+  const validate = new Ajv2020({ strict: false }).compile(
+    openaiJsonSchema(request.responseFormat.json_schema.schema),
+  );
+  const claim = plan.claims.find((c) => c.kind === "classification_reading")!;
+  const check = response.checks.find((c) => c.claimId === claim.id)!;
+  const independentIds = [
+    ...body.independentReading.observations,
+    ...body.independentReading.classifications,
+    ...body.independentReading.missingDetails,
+  ].map((item: { id: string }) => item.id);
+  check.readingRefs = independentIds;
+  check.sourceRefs = request.sourceIds;
+  assert(validate(wireResponse(response)), JSON.stringify(validate.errors));
+  assert.equal(new Set(independentIds).size, independentIds.length);
+  check.readingRefs = Array.from({ length: 1024 }, () => independentIds[0]);
+  assert(!validate(wireResponse(response)));
+  check.readingRefs = [independentIds[0], independentIds[0]];
+  assert.throws(
+    () => recordSourceSemanticReview([response], plan, metadata),
+    /unknown independent reading/,
+  );
+  assert(
+    body.rules.some((rule: string) => rule.includes("ciascuno una sola volta")),
   );
 });
 

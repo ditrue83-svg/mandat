@@ -22,7 +22,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v29";
+  "documentary-source-semantic-review-v30";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -101,20 +101,24 @@ const responseShape = z.strictObject({
   findings: z.array(findingShape).max(32),
 });
 function providerResponseSchema(bounds: ResponseBounds) {
-  const references = z.array(z.enum(bounds.sourceIds)).min(1).max(1024);
+  // References identify a set. Its cardinality bounds the wire response while
+  // keeping every available piece of evidence and the strict uniqueness gate.
+  const boundedRefs = (ids: string[]) =>
+    z.array(z.enum(ids)).min(1).max(Math.min(1024, new Set(ids).size));
+  const references = boundedRefs(bounds.sourceIds);
   const common = responseShape.shape.checks.element
     .omit({ claimId: true })
     .extend({
       sourceRefs: references,
       ...(bounds.readingIds?.length
-        ? { readingRefs: z.array(z.enum(bounds.readingIds)).min(1).max(1024) }
+        ? { readingRefs: boundedRefs(bounds.readingIds) }
         : {}),
     });
   // Reuse each ownership group's schema, but require every claim as a
   // distinct object key. Array length alone permits duplicates and omissions.
   const groups = bounds.claimReadingGroups?.map((group) => {
     const schema = common.extend({
-      readingRefs: z.array(z.enum(group.readingIds)).min(1).max(1024),
+      readingRefs: boundedRefs(group.readingIds),
     });
     return {
       ids: group.claimIds,
@@ -125,10 +129,7 @@ function providerResponseSchema(bounds: ResponseBounds) {
         ? z.union([
             schema.extend({
               verdict: z.literal("supported"),
-              readingRefs: z
-                .array(z.enum(group.supportedReadingIds))
-                .min(1)
-                .max(1024),
+              readingRefs: boundedRefs(group.supportedReadingIds),
             }),
             schema.extend({
               verdict: z.enum(["contradicted", "not_verifiable"]),
@@ -409,6 +410,7 @@ ${item.meaning.statement}`,
         "Per la completezza collega anche le clausole comuni del summary o dei details alle componenti del loro ambito esplicito. Un ciclo contrattuale dichiarato per tutti gli impianti o sistemi può valere per le componenti corrispondenti senza essere ripetuto parola per parola in ognuna; citarlo per un solo componente senza conservarne l'ambito generale non basta. Non estendere clausole a oggetti o lotti estranei. Ogni acquisto distinto deve restare rappresentato nelle components: menzionarlo soltanto come dettaglio non sostituisce una prestazione. Una descrizione sintetica non è una clausola di esclusione.",
         "Una categoria amministrativa e una descrizione specifica possono usare nomi diversi senza contraddirsi. La categoria non esclude di per sé un lavoro esplicito né aggiunge tutte le attività della sua etichetta. Verifica il lavoro contro la descrizione originale, mantenendo le classificazioni come dichiarate; non approvare correzioni del codice o nuovi servizi. Caratteristiche esplicite incompatibili e clausole opposte rimangono bloccanti. Un avviso sui metadati non sana ambiguità, omissioni o affermazioni false.",
         "Ogni check cita readingRefs della lettura indipendente oltre agli estratti originali. I riferimenti evidence della lettura indipendente rimandano al testo originale in passages; le citazioni di contesto non presenti in passages conservano anche text. Un draft che introduce un dominio incompatibile, una correzione della fonte o una discrepanza non presente nella lettura indipendente non può essere supported solo perché ripete il nome del prodotto. Per classification_reading cita la corrispondente classificazione indipendente cN.",
+        "sourceRefs e readingRefs sono insiemi di identificativi: cita soltanto quelli necessari a motivare quel preciso giudizio, ciascuno una sola volta. Non ripetere riferimenti né riempire gli array fino al limite dello schema; il limite è solo la quantità di prove disponibili, non un numero di citazioni da raggiungere. Le duplicazioni invalidano la risposta.",
         "Per i claim summary e detail puoi citare in readingRefs i loro originalFacts o-sN oppure o-fN: sono rinvii del codice a passaggi o valori JSON originali, non giudizi AI. Servono anche quando la lettura preliminare omette cronologie o dettagli amministrativi. Verifica ogni fatto indipendente, testo, valore e percorso originali e cita lo stesso sN o fN in sourceRefs. Per summary devi anche citare una performance pertinente della lettura indipendente: i soli originalFacts non provano oggetto, azione o completezza del lavoro. Non usare questi rinvii per componenti o classificazioni. false è diverso da null. Una data non selezionata prima non è falsa per questo motivo.",
         "Per supported di un detail usa soltanto i readingIds del suo detailEvidenceBindings: collegano i riferimenti del claim agli originali, senza approvarne il significato. Una condizione vicina sullo stesso servizio non prova un campo diverso. Se la lettura indipendente non ha selezionato quel campo, verifica e cita il suo o-sN/o-fN, senza attribuirlo a un’altra osservazione. Per contradicted o not_verifiable puoi citare anche altre letture come controprova; non inventare supporto per rispettare lo schema.",
         "Una componente main o not_stated richiede una performance indipendente pertinente. Componenti accessory o excluded possono essere verificate anche su una condition indipendente pertinente: leggi la clausola originale per distinguere un acquisto opzionale o un'esclusione da un semplice permesso organizzativo. Una condition non prova automaticamente un lavoro acquistato e non può sostenere una nuova prestazione principale.",
