@@ -43,7 +43,7 @@ import { SOURCE_EVIDENCE_READING_VERSION } from "./source-evidence-reading";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v63";
+  "documentary-service-comparison-v64";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -138,7 +138,7 @@ export const automaticComparisonResponseSchema = z
         .boolean()
         .nullable()
         .describe(
-          "Esiste almeno un'attività o prodotto concretamente comune, anche se il pacchetto del bando è più ampio. Lo stesso settore o ruolo non basta. False richiede una differenza concreta, null se non determinabile.",
+          "Esiste almeno un'attività o prodotto concretamente comune, anche se il pacchetto del bando è più ampio. Lo stesso settore o ruolo non basta. False richiede una differenza concreta; una voce aziendale ampia con oggetto o azione non chiariti resta null, anche accanto ad attività precise.",
         ),
       relatedActivity: z
         .enum(["shared_professional_function", "incidental_context", "none"])
@@ -160,7 +160,7 @@ export const automaticComparisonResponseSchema = z
       comparisonUncertain: z
         .boolean()
         .describe(
-          "Il confronto tra le attività dichiarate e le prestazioni già interpretate resta incerto, anche quando la fonte identifica il servizio generale ma rinvia a prestazioni diverse non disponibili per l'intero ambito. Questo non modifica lo stato o il significato della fonte.",
+          "Il confronto resta incerto se una voce aziendale plausibilmente riferita al lavoro non ne chiarisce oggetto o azione, oppure la fonte rinvia a prestazioni diverse non disponibili. Non inventare capacità e non trasformare informazioni mancanti in incompatibilità. Questo non modifica la fonte.",
         ),
     }),
     interpretationHash: z.string().regex(/^[a-f0-9]{64}$/),
@@ -816,6 +816,7 @@ export function buildInterpretedComparisonRequest(
       rules: [
         "Una prestazione principale e lo stesso ruolo consentono una corrispondenza professionale, senza pretendere quantità, modelli, qualifiche, certificazioni o ogni dettaglio tecnico nel profilo.",
         "activitiesOverlap=true richiede almeno un servizio o prodotto concretamente comune: un settore generale o un ruolo uguale non bastano. False richiede attività esplicitamente diverse; informazioni mancanti danno null.",
+        "Esamina tutte le attività aziendali, anche più attività nello stesso passaggio. Una voce precisa non rende precise le altre: se una voce ampia plausibilmente riferita al lavoro non chiarisce oggetto o azione, conserva activitiesOverlap=null, mainScopeCovered=null e comparisonUncertain=true finché manca una prova di sovrapposizione o differenza concreta. Non dichiarato non significa escluso. Lo stesso settore da solo non rende una voce pertinente; quantità, certificazioni o dettagli tecnici mancanti non rendono incerto un mestiere identificato.",
         "relatedActivity valuta l’affinità professionale, separatamente dalla coincidenza delle prestazioni: shared_professional_function quando un bene richiesto svolge la stessa funzione professionale degli impianti o prodotti su cui la ditta dichiara di lavorare, anche come componente. Non richiedere identica destinazione d’uso, scala, modello, classe tecnica o applicazione per questa sola affinità. Il profilo non deve elencare ogni componente del proprio lavoro. Una differenza edificio/infrastruttura o installazione/fornitura resta da approfondire: non prova capacità di fornitura e non esclude da sola il collegamento. Spiega la funzione comune e la differenza da verificare, citando componentRefs e companyRefs.",
         "Usa incidental_context se il legame è soltanto lo stesso settore, luogo, clientela, materiale generico, filiera o uno scarto generato dall'attività. Un luogo dove si lavora, un bene soltanto utilizzato e uno scarto da smaltire non sono per questo componenti del sistema su cui si dichiara di lavorare. Questi legami non provano un rapporto funzionale e non rendono pertinente il lavoro. Se manca anche tale legame, usa none. Le attività negate o escluse nel profilo non dimostrano capacità né collegamento. Non affermare copertura parziale quando non esiste alcuna prestazione concretamente comune.",
         "Esempi generali della distinzione: installare impianti idraulici e fornire valvole hanno la funzione idraulica in comune ma ruoli diversi; pulire uffici e fornire computer condividono soltanto un ambiente di lavoro. Gli esempi spiegano il criterio, non aggiungono prestazioni alla fonte o al profilo.",

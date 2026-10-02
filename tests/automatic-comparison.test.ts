@@ -1131,6 +1131,52 @@ test("The company comparison keeps explicit maintenance separate from source exe
   assert.equal(JSON.stringify(source), before);
 });
 
+test("A mixed precise and broad company scope stays reviewable without invented coverage", () => {
+  const activities = "Pulizie di vetri esterni e altri servizi per immobili.";
+  const input = fixture(raw(), { activities });
+  const request = buildAutomaticComparisonRequest(input);
+  const source = sourceRecord(request);
+  const before = JSON.stringify(source);
+  const body = JSON.parse(
+    buildInterpretedComparisonRequest(request, source).prompt,
+  );
+  assert.equal(body.company.activities[0].text, activities);
+  assert.match(
+    body.rules.join(" "),
+    /anche più attività nello stesso passaggio/,
+  );
+  assert.match(body.rules.join(" "), /Non dichiarato non significa escluso/);
+  const baseAnswer = response(request, source, "review");
+  const answer = {
+    ...baseAnswer,
+    facts: {
+      ...baseAnswer.facts,
+      activitiesOverlap: null,
+      mainScopeCovered: null,
+      comparisonUncertain: true,
+    },
+  };
+  const record = recordAutomaticComparison(answer, request, {
+    id: "invented-mixed-company-scope",
+    at: "2030-01-20T12:00:00.000Z",
+    model: automaticComparisonModel(),
+    sourceInterpretation: source,
+  });
+  const compared = resolveAutomaticComparison(input, [record]).comparison!;
+  assert.equal(compared.relation, "review");
+  assert.equal(compared.basis, "insufficient_detail");
+  assert.equal(compared.response!.facts.activitiesOverlap, null);
+  assert.equal(compared.response!.facts.mainScopeCovered, null);
+  const assessment = resolveProjectLotAssessment({
+    ...input,
+    evaluationSet: null,
+    automaticComparisons: [record],
+    now: new Date("2030-01-20T12:00:00.000Z"),
+  });
+  assert.equal(assessment.targets[0].signalEligible, false);
+  assert.equal(JSON.stringify(source), before);
+});
+
 test.each(["main", "not_stated"] as const)(
   "A full match covers every %s requested component while partial scope may cite one",
   (importance) => {
@@ -2273,6 +2319,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v62",
     sourceVersion: "documentary-source-interpretation-v21",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v63",
+    sourceVersion: "documentary-source-interpretation-v21",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2306,7 +2356,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v63");
+    assert.equal(request.version, "documentary-service-comparison-v64");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(
