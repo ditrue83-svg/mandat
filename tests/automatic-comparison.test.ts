@@ -1359,6 +1359,52 @@ test("A shared component or a vague profile cannot be promoted to a positive by 
   );
 });
 
+test("An unresolved role cannot assert a fully resolved match, but distinct work needs no invented role", () => {
+  const input = fixture();
+  const request = buildAutomaticComparisonRequest(input);
+  const source = sourceRecord(request);
+  const before = JSON.stringify(source);
+  const full = response(request, source);
+  const unresolved = {
+    ...full,
+    facts: { ...full.facts, sameContractualRole: null },
+  };
+  assert.throws(
+    () => validateAutomaticComparison(unresolved, request, source),
+    /Unresolved contractual role requires uncertainty/,
+  );
+  const uncertain = {
+    ...unresolved,
+    facts: { ...unresolved.facts, comparisonUncertain: true },
+  };
+  const record = recordAutomaticComparison(uncertain, request, {
+    id: "invented-unresolved-company-role",
+    at: "2030-01-20T12:00:00.000Z",
+    model: automaticComparisonModel(),
+    sourceInterpretation: source,
+  });
+  const assessment = resolveProjectLotAssessment({
+    ...input,
+    evaluationSet: null,
+    automaticComparisons: [record],
+    now: new Date("2030-01-20T12:00:00.000Z"),
+  });
+  assert.equal(assessment.targets[0].signalEligible, false);
+  assert.equal(
+    resolveAutomaticComparison(input, [record]).comparison!.basis,
+    "insufficient_detail",
+  );
+  const distinct = response(request, source, "different");
+  const comparison = validateAutomaticComparison(
+    { ...distinct, facts: { ...distinct.facts, sameContractualRole: null } },
+    request,
+    source,
+  );
+  assert.equal(comparison.relation, "different");
+  assert.equal(comparison.basis, "different_service");
+  assert.equal(JSON.stringify(source), before);
+});
+
 test("Related installation and supply remain review candidates without inferring supply capability", () => {
   const detail = raw();
   detail.procurement.orderDescription.it = "Fornitura di quadri elettrici BT.";
@@ -2323,6 +2369,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v63",
     sourceVersion: "documentary-source-interpretation-v21",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v64",
+    sourceVersion: "documentary-source-interpretation-v21",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2356,7 +2406,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v64");
+    assert.equal(request.version, "documentary-service-comparison-v65");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(

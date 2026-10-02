@@ -43,7 +43,7 @@ import { SOURCE_EVIDENCE_READING_VERSION } from "./source-evidence-reading";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v64";
+  "documentary-service-comparison-v65";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -149,7 +149,7 @@ export const automaticComparisonResponseSchema = z
         .boolean()
         .nullable()
         .describe(
-          "Il ruolo coincide: eseguire, progettare, fornire, installare, mantenere o gestire. Null se non determinabile.",
+          "Il ruolo coincide: eseguire, progettare, fornire, installare, mantenere o gestire. Leggi il significato professionale delle attività anche in forma nominale: non occorre un verbo esplicito. Null se il ruolo resta realmente non determinabile.",
         ),
       mainScopeCovered: z
         .boolean()
@@ -160,7 +160,7 @@ export const automaticComparisonResponseSchema = z
       comparisonUncertain: z
         .boolean()
         .describe(
-          "Il confronto resta incerto se una voce aziendale plausibilmente riferita al lavoro non ne chiarisce oggetto o azione, oppure la fonte rinvia a prestazioni diverse non disponibili. Non inventare capacità e non trasformare informazioni mancanti in incompatibilità. Questo non modifica la fonte.",
+          "Il confronto resta incerto se una voce aziendale plausibilmente riferita al lavoro non ne chiarisce oggetto o azione, oppure la fonte rinvia a prestazioni diverse non disponibili. Con mainScopeCovered=true e sameContractualRole=null conserva true: il confronto non è interamente risolto. Non inventare capacità e non trasformare informazioni mancanti in incompatibilità. Questo non modifica la fonte.",
         ),
     }),
     interpretationHash: z.string().regex(/^[a-f0-9]{64}$/),
@@ -188,6 +188,15 @@ export const automaticComparisonResponseSchema = z
       context.addIssue({
         code: "custom",
         message: "Contradictory service coverage",
+      });
+    if (
+      value.facts.mainScopeCovered === true &&
+      value.facts.sameContractualRole === null &&
+      !value.facts.comparisonUncertain
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Unresolved contractual role requires uncertainty",
       });
     for (const references of [value.componentRefs, value.companyRefs])
       if (new Set(references).size !== references.length)
@@ -821,6 +830,7 @@ export function buildInterpretedComparisonRequest(
         "Usa incidental_context se il legame è soltanto lo stesso settore, luogo, clientela, materiale generico, filiera o uno scarto generato dall'attività. Un luogo dove si lavora, un bene soltanto utilizzato e uno scarto da smaltire non sono per questo componenti del sistema su cui si dichiara di lavorare. Questi legami non provano un rapporto funzionale e non rendono pertinente il lavoro. Se manca anche tale legame, usa none. Le attività negate o escluse nel profilo non dimostrano capacità né collegamento. Non affermare copertura parziale quando non esiste alcuna prestazione concretamente comune.",
         "Esempi generali della distinzione: installare impianti idraulici e fornire valvole hanno la funzione idraulica in comune ma ruoli diversi; pulire uffici e fornire computer condividono soltanto un ambiente di lavoro. Gli esempi spiegano il criterio, non aggiungono prestazioni alla fonte o al profilo.",
         "Per sameContractualRole applica alle attività esplicite della ditta le stesse categorie di contractualRoleTaxonomy già usate per component.role della fonte. Confronta le categorie identificate, non il generico fatto che entrambe le parti svolgano un lavoro. Mantieni maintain, install, supply, design e operate distinti da execute. Se il ruolo aziendale non è determinabile usa null, senza inventarlo; la coincidenza del ruolo non prova sovrapposizione delle prestazioni.",
+        "company.activities contiene attività dichiarate dalla ditta, spesso come elenco senza verbi. Leggi i nomi di servizi, opere e lavorazioni nel loro significato professionale comune: la forma nominale può identificare lo svolgimento di una prestazione, la progettazione, l'installazione o la manutenzione. L'assenza di un verbo non rende da sola ignoto il ruolo. Distingui questi nomi da un elenco di beni o da una famiglia generica: non presumere vendita, installazione, esecuzione o altre capacità se le parole e il contesto delle attività non li identificano. Motiva il ruolo con il significato delle attività citate, senza usare il settore o la fonte per inventarlo. Se il ruolo resta ignoto e mainScopeCovered=true, conserva comparisonUncertain=true e spiega ciò che manca.",
         "Valuta sameContractualRole separatamente dall’affinità: due prestazioni diverse possono entrambe richiedere installazione, fornitura o un altro stesso ruolo. Se il ruolo coincide conserva true, senza trasformarlo in sovrapposizione delle prestazioni. Con relatedActivity=shared_professional_function non dichiarare mainScopeCovered=true: spiega la differenza concreta ancora da verificare. Se attività, ruolo e intero ambito principale coincidono, usa relatedActivity=none. Attività realmente estranee restano diverse; un contesto incidentale non deve riaprire ogni gara dello stesso settore.",
         "Un ruolo commerciale o una famiglia di prodotti generica non identifica necessariamente i prodotti trattati: companyIdentifiesService=false e mainScopeCovered=null se la descrizione non chiarisce il lavoro. Non inventare attività escluse o non dichiarate.",
         "mainScopeCovered riguarda tutte le componenti main e not_stated della fonte: se true, cita ciascuna di esse in componentRefs. not_stated indica una prestazione acquistata senza gerarchia precisata: non presumere che sia accessoria e non ometterla dalla copertura. Una copertura parziale è false, anche con un ruolo principale diverso. Le componenti accessory non diventano automaticamente un altro mestiere; excluded non sono servizi richiesti al target.",
