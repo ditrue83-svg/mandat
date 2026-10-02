@@ -43,7 +43,7 @@ import { SOURCE_EVIDENCE_READING_VERSION } from "./source-evidence-reading";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v62";
+  "documentary-service-comparison-v63";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -819,6 +819,7 @@ export function buildInterpretedComparisonRequest(
         "relatedActivity valuta l’affinità professionale, separatamente dalla coincidenza delle prestazioni: shared_professional_function quando un bene richiesto svolge la stessa funzione professionale degli impianti o prodotti su cui la ditta dichiara di lavorare, anche come componente. Non richiedere identica destinazione d’uso, scala, modello, classe tecnica o applicazione per questa sola affinità. Il profilo non deve elencare ogni componente del proprio lavoro. Una differenza edificio/infrastruttura o installazione/fornitura resta da approfondire: non prova capacità di fornitura e non esclude da sola il collegamento. Spiega la funzione comune e la differenza da verificare, citando componentRefs e companyRefs.",
         "Usa incidental_context se il legame è soltanto lo stesso settore, luogo, clientela, materiale generico, filiera o uno scarto generato dall'attività. Un luogo dove si lavora, un bene soltanto utilizzato e uno scarto da smaltire non sono per questo componenti del sistema su cui si dichiara di lavorare. Questi legami non provano un rapporto funzionale e non rendono pertinente il lavoro. Se manca anche tale legame, usa none. Le attività negate o escluse nel profilo non dimostrano capacità né collegamento. Non affermare copertura parziale quando non esiste alcuna prestazione concretamente comune.",
         "Esempi generali della distinzione: installare impianti idraulici e fornire valvole hanno la funzione idraulica in comune ma ruoli diversi; pulire uffici e fornire computer condividono soltanto un ambiente di lavoro. Gli esempi spiegano il criterio, non aggiungono prestazioni alla fonte o al profilo.",
+        "Per sameContractualRole applica alle attività esplicite della ditta le stesse categorie di contractualRoleTaxonomy già usate per component.role della fonte. Confronta le categorie identificate, non il generico fatto che entrambe le parti svolgano un lavoro. Mantieni maintain, install, supply, design e operate distinti da execute. Se il ruolo aziendale non è determinabile usa null, senza inventarlo; la coincidenza del ruolo non prova sovrapposizione delle prestazioni.",
         "Valuta sameContractualRole separatamente dall’affinità: due prestazioni diverse possono entrambe richiedere installazione, fornitura o un altro stesso ruolo. Se il ruolo coincide conserva true, senza trasformarlo in sovrapposizione delle prestazioni. Con relatedActivity=shared_professional_function non dichiarare mainScopeCovered=true: spiega la differenza concreta ancora da verificare. Se attività, ruolo e intero ambito principale coincidono, usa relatedActivity=none. Attività realmente estranee restano diverse; un contesto incidentale non deve riaprire ogni gara dello stesso settore.",
         "Un ruolo commerciale o una famiglia di prodotti generica non identifica necessariamente i prodotti trattati: companyIdentifiesService=false e mainScopeCovered=null se la descrizione non chiarisce il lavoro. Non inventare attività escluse o non dichiarate.",
         "mainScopeCovered riguarda tutte le componenti main e not_stated della fonte: se true, cita ciascuna di esse in componentRefs. not_stated indica una prestazione acquistata senza gerarchia precisata: non presumere che sia accessoria e non ometterla dalla copertura. Una copertura parziale è false, anche con un ruolo principale diverso. Le componenti accessory non diventano automaticamente un altro mestiere; excluded non sono servizi richiesti al target.",
@@ -828,6 +829,17 @@ export function buildInterpretedComparisonRequest(
         "Le classificazioni non sono prestazioni: non trasformarle in componenti o in prova sufficiente di sovrapposizione. componentRefs accetta soltanto gli id delle componenti; i codici senza etichette non autorizzano decodifiche inventate.",
         "details conserva specifiche non indicate, condizioni di esecuzione e contesto condiviso: non sono componenti acquistate né cambiano l'identità già accertata dell'oggetto. Una lacuna sulle prestazioni concrete può però impedire di attestare copertura completa secondo la regola precedente. Non trasformare dettagli tecnici mancanti in requisiti aziendali. roleEvidence conserva il testo dell'azione richiesto dalla fonte: mantieni il ruolo registrato, senza confondere esecuzione, fornitura, gestione e manutenzione.",
       ],
+      contractualRoleTaxonomy: {
+        supply: "Fornire beni.",
+        execute: "Svolgere o organizzare una prestazione.",
+        design: "Progettare.",
+        install: "Mettere in opera.",
+        maintain:
+          "Conservare o ripristinare la funzionalità, anche tramite manutenzione e riparazione.",
+        operate: "Gestione continuativa.",
+        advise: "Consulenza.",
+        other: "Altra azione identificata.",
+      },
       sourceInterpretation: {
         hash: sourceRecord.hash,
         reviewHash: sourceReview.hash,

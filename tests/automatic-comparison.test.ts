@@ -1090,6 +1090,47 @@ test("An identified object with an unresolved role stays in review without a com
   assert.deepEqual(outcome.companyEvidence, []);
 });
 
+test("The company comparison keeps explicit maintenance separate from source execution", () => {
+  const activities =
+    "Manutenzione ordinaria di piccoli edifici, riparazioni di porte e sostituzione di accessori.";
+  const request = buildAutomaticComparisonRequest(
+    fixture(raw(), { activities }),
+  );
+  const source = sourceRecord(request);
+  const before = JSON.stringify(source);
+  const body = JSON.parse(
+    buildInterpretedComparisonRequest(request, source).prompt,
+  );
+  const roleSchemas: { enum: string[] }[] = [];
+  const findRoles = (value: any) => {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value.enum) && value.enum.includes("maintain"))
+      roleSchemas.push(value);
+    for (const child of Object.values(value)) findRoles(child);
+  };
+  findRoles(
+    buildAutomaticSourceRequest(request).responseFormat.json_schema.schema,
+  );
+  assert.equal(roleSchemas.length, 1);
+  const roles = roleSchemas[0].enum;
+  assert.deepEqual(
+    Object.keys(body.contractualRoleTaxonomy).sort(),
+    [...roles].sort(),
+  );
+  assert.match(body.contractualRoleTaxonomy.maintain, /riparazione/);
+  assert.notEqual(
+    body.contractualRoleTaxonomy.maintain,
+    body.contractualRoleTaxonomy.execute,
+  );
+  assert.match(
+    body.rules.join(" "),
+    /Mantieni maintain, install, supply, design e operate distinti da execute/,
+  );
+  assert.equal(body.sourceInterpretation.components[0].role, "execute");
+  assert.equal(body.company.activities[0].text, activities);
+  assert.equal(JSON.stringify(source), before);
+});
+
 test.each(["main", "not_stated"] as const)(
   "A full match covers every %s requested component while partial scope may cite one",
   (importance) => {
@@ -2228,6 +2269,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v61",
     sourceVersion: "documentary-source-interpretation-v19",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v62",
+    sourceVersion: "documentary-source-interpretation-v21",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2261,7 +2306,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v62");
+    assert.equal(request.version, "documentary-service-comparison-v63");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(
