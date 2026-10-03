@@ -4,6 +4,7 @@ import {
   openaiResponseProjection,
   openaiJsonSchema,
   openaiErrorDiagnostic,
+  readOpenaiResponseStream,
 } from "../src/lib/openai-responses";
 import { z } from "zod";
 import Ajv2020 from "ajv/dist/2020.js";
@@ -116,6 +117,117 @@ function response() {
     },
   };
 }
+
+function streamedResponse(events: unknown[], splitAt?: number) {
+  const text = events
+    .map((e) => `event: lifecycle\r\ndata: ${JSON.stringify(e)}\r\n\r\n`)
+    .join("");
+  const bytes = new TextEncoder().encode(text);
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        if (splitAt !== undefined) {
+          controller.enqueue(bytes.slice(0, splitAt));
+          controller.enqueue(bytes.slice(splitAt));
+        } else {
+          for (const byte of bytes) controller.enqueue(new Uint8Array([byte]));
+        }
+        controller.close();
+      },
+    }),
+  );
+}
+
+it("streams large outputs while preserving stateless storage and small request wires", () => {
+  const large = openaiResponseBody(
+    "gpt-6-luna",
+    "instructions",
+    "source",
+    16_384,
+  );
+  expect(large).toMatchObject({
+    stream: true,
+    store: false,
+    background: false,
+  });
+  expect(
+    openaiResponseBody("gpt-6-luna", "instructions", "source", 8192).stream,
+  ).toBe(false);
+});
+
+it("reads split SSE frames and UTF8 through the complete terminal response only", async () => {
+  const final = {
+    ...response(),
+    id: "resp_invented",
+    output: [
+      { type: "message", content: [{ type: "output_text", text: "Città 🏠" }] },
+    ],
+  };
+  const events = [
+    {
+      type: "response.created",
+      response: { id: final.id, status: "in_progress" },
+    },
+    { type: "response.output_text.delta", delta: "partial-untrusted-text" },
+    { type: "response.completed", response: final },
+  ];
+  expect(await readOpenaiResponseStream(streamedResponse(events))).toEqual(
+    final,
+  );
+});
+
+it.each(["response.incomplete", "response.failed"])(
+  "preserves terminal %s and its usage for the existing rejection gate",
+  async (type) => {
+    const final = { ...response(), id: "resp_invented", status: type.slice(9) };
+    const result = await readOpenaiResponseStream(
+      streamedResponse([
+        { type: "response.created", response: { id: final.id } },
+        { type, response: final },
+      ]),
+    );
+    expect(result).toEqual(final);
+    const projected = openaiResponseProjection(result);
+    expect(projected).toMatchObject({
+      choices: [{ finish_reason: "other" }],
+      usage: { prompt_tokens: 100, completion_tokens: 500 },
+    });
+  },
+);
+
+it("rejects a truncated stream, mismatched terminal and provider error without using deltas", async () => {
+  const created = {
+    type: "response.created",
+    response: { id: "resp_invented" },
+  };
+  await expect(
+    readOpenaiResponseStream(
+      streamedResponse([
+        created,
+        { type: "response.output_text.delta", delta: "plausible final answer" },
+      ]),
+    ),
+  ).rejects.toThrow("without terminal");
+  await expect(
+    readOpenaiResponseStream(
+      streamedResponse([
+        created,
+        {
+          type: "response.completed",
+          response: { ...response(), id: "resp_other" },
+        },
+      ]),
+    ),
+  ).rejects.toThrow("identity mismatch");
+  await expect(
+    readOpenaiResponseStream(
+      streamedResponse([
+        created,
+        { type: "error", message: "private-credential-and-source" },
+      ]),
+    ),
+  ).rejects.toThrow("OpenAI stream error");
+});
 
 it("keeps instructions and source separate with the original local constraints", () => {
   const schema = {

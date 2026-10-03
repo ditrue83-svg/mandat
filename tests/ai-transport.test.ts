@@ -284,6 +284,79 @@ describe("OpenAI native Responses", () => {
     };
   }
   beforeEach(() => vi.stubEnv("OPENAI_API_KEY", "openai-test-key"));
+  it.each([true, false])(
+    "settles a large streaming response only when terminalCompleted=%s, with one POST",
+    async (terminalCompleted) => {
+      const responseId = "resp_invented_stream";
+      const events = [
+        {
+          type: "response.created",
+          response: { id: responseId, status: "in_progress" },
+        },
+        { type: "response.output_text.delta", delta: privateResponseText },
+        ...(terminalCompleted
+          ? [
+              {
+                type: "response.completed",
+                response: { ...answer(), id: responseId },
+              },
+            ]
+          : []),
+      ];
+      const bytes = new TextEncoder().encode(
+        events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join(""),
+      );
+      const fetcher = vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(bytes);
+                controller.close();
+              },
+            }),
+            { headers: { "Content-Type": "text/event-stream" } },
+          ),
+      );
+      vi.stubGlobal("fetch", fetcher);
+      const result = await infer(
+        publication,
+        "luna-streaming",
+        "source",
+        16_384,
+        configuredTransport,
+        "instructions",
+        undefined,
+        options,
+      ).catch((e: unknown) => e);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(
+        JSON.parse(
+          String(
+            (fetcher.mock.calls[0] as unknown as [URL, RequestInit])[1].body,
+          ),
+        ),
+      ).toMatchObject({ stream: true, store: false, background: false });
+      const [row] = await db.select().from(schema.aiUsage);
+      if (terminalCompleted) {
+        expect(result).toEqual(summary);
+        expect(row).toMatchObject({
+          status: "completed",
+          costChf: "0.000394",
+          inputTokens: 100,
+          outputTokens: 500,
+        });
+      } else {
+        expect(result).toBeInstanceOf(Error);
+        expect(readAiResponseDiagnostic(result)?.code).toBe(
+          "response_unreadable",
+        );
+        expect(row).toMatchObject({ status: "uncertain", costChf: null });
+        expect(Number(row.reservedChf)).toBeGreaterThan(0);
+      }
+      expect(JSON.stringify(row)).not.toContain(privateResponseText);
+    },
+  );
   it.each([false, true])(
     "preserves native HTTP error categories and usageKnown=%s without retrying",
     async (usageKnown) => {

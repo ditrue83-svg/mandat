@@ -351,7 +351,9 @@ export function openaiResponseBody(
     service_tier: "default",
     store: false,
     background: false,
-    stream: false,
+    // Large reasoning outputs can spend minutes before returning JSON.
+    // Receive lifecycle events immediately without enabling stored responses.
+    stream: maxTokens >= 16_384,
     truncation: "disabled",
     ...(format
       ? {
@@ -370,6 +372,74 @@ export function openaiResponseBody(
   if (Buffer.byteLength(JSON.stringify(body), "utf8") + 1000 > 200_000)
     throw new Error("Fonte OpenAI troppo grande per la tariffa configurata");
   return body;
+}
+
+// Accept only a complete terminal Response object, never accumulated deltas.
+// If the connection breaks, the caller retains an uncertain usage reservation
+// rather than using partial text or issuing another generation automatically.
+export async function readOpenaiResponseStream(response: Response) {
+  if (!response.body) throw new Error("OpenAI stream body missing");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let buffer = "";
+  let totalBytes = 0;
+  let responseId: string | null = null;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      totalBytes += chunk.value.byteLength;
+      if (totalBytes > 8_000_000) throw new Error("OpenAI stream size limit");
+      buffer += decoder.decode(chunk.value, { stream: true });
+      if (buffer.length > 2_000_000)
+        throw new Error("OpenAI stream frame limit");
+      let boundary: RegExpExecArray | null;
+      while ((boundary = /\r?\n\r?\n/.exec(buffer))) {
+        const frame = buffer.slice(0, boundary.index);
+        buffer = buffer.slice(boundary.index + boundary[0].length);
+        const data = frame
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).replace(/^ /, ""))
+          .join("\n");
+        if (!data) continue; // Includes keepalive comments.
+        let event: any;
+        try {
+          event = JSON.parse(data);
+        } catch {
+          throw new Error("OpenAI stream event unreadable");
+        }
+        if (!event || typeof event !== "object" || Array.isArray(event))
+          throw new Error("OpenAI stream event invalid");
+        if (event.type === "error") throw new Error("OpenAI stream error");
+        if (event.type === "response.created") {
+          if (
+            responseId !== null ||
+            typeof event.response?.id !== "string" ||
+            !/^resp_[A-Za-z0-9_-]{1,200}$/.test(event.response.id)
+          )
+            throw new Error("OpenAI stream response identity invalid");
+          responseId = event.response.id;
+        }
+        if (
+          [
+            "response.completed",
+            "response.incomplete",
+            "response.failed",
+          ].includes(event.type)
+        ) {
+          if (!responseId || event.response?.id !== responseId)
+            throw new Error("OpenAI stream terminal identity mismatch");
+          // Existing projection validates status, output, model and usage.
+          return event.response as unknown;
+        }
+      }
+    }
+    throw new Error("OpenAI stream ended without terminal response");
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 }
 
 const count = z.number().int().min(0).max(2_147_483_647);

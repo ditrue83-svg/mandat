@@ -28,6 +28,7 @@ import {
   openaiResponseBody,
   openaiResponseProjection,
   openaiErrorDiagnostic,
+  readOpenaiResponseStream,
   OPENAI_INPUT_COST_MULTIPLIER,
 } from "@/lib/openai-responses";
 const summarySchema = z.object({
@@ -580,7 +581,10 @@ export const configuredTransport: AiTransport = {
     });
     let value: unknown;
     try {
-      value = await response.json();
+      value =
+        provider === "openai" && body.stream && response.ok
+          ? await readOpenaiResponseStream(response)
+          : await response.json();
     } catch {
       throw new AiResponseRejected(
         response.ok
