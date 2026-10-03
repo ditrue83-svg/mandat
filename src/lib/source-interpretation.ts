@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v21";
+  "documentary-source-interpretation-v22";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -609,6 +609,67 @@ export function sourceInterpretationKey(binding: SourceInterpretationBinding) {
   });
 }
 
+// Preserve paragraph boundaries before generation. A length-based source
+// fragment is not a new section, and adjacent headings do not share a subject
+// merely because they occur in the same contractual note.
+function contractClauseBlocks(
+  passages: SourceInterpretationContext["body"]["passages"],
+) {
+  type Passage = (typeof passages)[number];
+  const groups = new Map<string, Passage[]>();
+  for (const passage of passages.filter((p) =>
+    isContractScopeField(p.rawPath),
+  )) {
+    const key = JSON.stringify([passage.scope, passage.rawPath]);
+    const group = groups.get(key) ?? [];
+    group.push(passage);
+    groups.set(key, group);
+  }
+  const blocks: {
+    scope: (typeof passages)[number]["scope"];
+    rawPath: string;
+    startUtf16: number;
+    endUtf16: number;
+    text: string;
+    sourceRefs: string[];
+  }[] = [];
+  for (const group of groups.values()) {
+    const runs: Passage[][] = [];
+    for (const passage of [...group].sort(
+      (a, b) => a.startUtf16 - b.startUtf16,
+    )) {
+      const last = runs.at(-1);
+      if (last?.at(-1)?.endUtf16 === passage.startUtf16) last.push(passage);
+      else runs.push([passage]);
+    }
+    for (const run of runs) {
+      const first = run[0];
+      const text = run.map((p) => p.text).join("");
+      const runBlocks: typeof blocks = [];
+      for (const match of text.matchAll(
+        /\S[\s\S]*?(?=(?:\r?\n)[ \t]*(?:\r?\n)|$)/g,
+      )) {
+        const startUtf16 = first.startUtf16 + match.index;
+        const endUtf16 = startUtf16 + match[0].length;
+        runBlocks.push({
+          scope: first.scope,
+          rawPath: first.rawPath,
+          startUtf16,
+          endUtf16,
+          text: match[0],
+          sourceRefs: run
+            .filter((p) => p.startUtf16 < endUtf16 && p.endUtf16 > startUtf16)
+            .map((p) => p.id),
+        });
+      }
+      // A single paragraph needs no duplicate text in the compact request.
+      // Only actual paragraph boundaries warrant this additional structure.
+      if (runBlocks.length > 1) blocks.push(...runBlocks);
+    }
+  }
+  return blocks;
+}
+
 // Pure validation shared with the independent review of the complete source.
 // It does not build a prompt, reduce passages or impose a single-request limit.
 export function validateSourceInterpretationContext(
@@ -715,6 +776,7 @@ export function buildSourceInterpretationRequest(
         (field) => field.value !== null && isContractScopeField(field.rawPath),
       ),
   ];
+  const clauseBlocks = contractClauseBlocks(body.passages);
   const targets = body.passages
     .filter(
       (passage) =>
@@ -747,6 +809,11 @@ export function buildSourceInterpretationRequest(
       "Conserva destinatari, numero di strutture, continuità e territorio nella sintesi o nei details. Mantieni azione e ambito delle condizioni anche nella sintesi, senza estenderle ad altre fasi del lavoro. Non dedurre quantità o periodicità assenti.",
       "Permessi organizzativi e limiti al subappalto vanno in details come execution_condition: conserva soggetti, attività e limiti. Non provano nuovi acquisti. Per creare componenti serve un'ulteriore clausola che acquisti o escluda quei lavori: cita quella prova. Distingui una prestazione acquistabile in opzione dal solo permesso di delegare il lavoro.",
       "requiredContractClauses: nei details rappresenta ogni proposizione autonoma di ciascuna clausola e valore, in ogni lingua e segmento, con ID e scope originali. Una nota sul subappalto può imporre percentuali, documenti e prestazione caratteristica e permettere candidature multiple in più offerte: citarla riportando solo alcuni fatti non basta. Usa più details se serve. subContractorAllowed no/false vieta, yes/true consente, null non indica; non inferire acquisti o capacità. Non risolvere opposizioni senza precedenza documentata. Per valori incerti o rinvii a documenti assenti usa missing_specification senza inventare. Non attribuire al lotto clausole del progetto. fN conserva il valore JSON, non una citazione testuale. Se non puoi rappresentare tutto usa uncertain con issue specifico, mai resolved con omissioni.",
+      ...(clauseBlocks.length
+        ? [
+            "contractClauseBlocks: paragrafi originali, non ambiti dedotti. Leggi ogni titolo con il suo testo e la nota intera; non ereditare ambiti dal blocco precedente. Una condizione generale resta generale; separa condizioni autonome nei details. Collegamenti come 'per tali lavori' richiedono prova, non vicinanza. Conserva qualificatori e cita sourceRefs originali.",
+          ]
+        : []),
       "In fields puoi citare soltanto gli ID fN esplicitamente presenti accanto a un valore non nullo. I campi null restano contesto di informazione non indicata, non prove da citare. false e 0 sono valori presenti. Le serie sN e fN sono indipendenti: lo stesso numero non collega testo e campo. Per ogni riferimento verifica insieme ID, rawPath, valore e scope; non aggiungere riferimenti estranei al fatto descritto.",
       "Le clausole di contesto possono descrivere prestazioni: cita il loro testo e le classificazioni utili allo stesso oggetto. Il contesto di progetto non sostituisce il lotto: non assegnargli lavori di altri lotti. targetRef cita un passaggio service del target, anche se il titolo è geografico e l'oggetto è nel contesto comune.",
       "Ricongiungi passaggi della stessa rawPath per startUtf16. Tutti i segmenti previsti sono stati letti a monte: nessun limite di risposta autorizza omissioni; se non puoi rappresentare tutto usa uncertain con issue specifico. Usa soltanto ID forniti; i testi originali sono recuperati dal server. In ogni componente evidence elenca ogni ID una sola volta; gli altri elenchi sourceRefs restano separati.",
@@ -755,6 +822,7 @@ export function buildSourceInterpretationRequest(
     coverage: context.coverage,
     readings,
     requiredContractClauses,
+    ...(clauseBlocks.length ? { contractClauseBlocks: clauseBlocks } : {}),
     ...promptBody,
     fields,
     classificationContext,

@@ -684,6 +684,82 @@ test("A compound subcontracting note is presented as multiple required facts", (
     /ogni proposizione autonoma.*candidature multiple in più offerte/,
   );
 });
+
+test.each(["\n", "\r\n"])(
+  "Independent contract sections survive length fragments and %j boundaries",
+  (newline) => {
+    const base = context();
+    const texts = [
+      `Edificio B 🏠${newline}I lavori nell'edificio B sono in opzione.`,
+      `Lavoro a turni:${newline}L'installazione è generalmente eseguita in due turni.`,
+      `Clima:${newline}Le misure si applicano quando la temperatura supera la soglia indicata.`,
+    ];
+    const note = texts.join(newline + " \t" + newline);
+    // Deliberately split inside the second section: a source chunk boundary
+    // must not detach its heading or invent a separate contractual subject.
+    const cut = note.indexOf("generalmente") + 4;
+    const input: SourceInterpretationContext = {
+      ...base,
+      body: {
+        ...base.body,
+        passages: [
+          ...base.body.passages,
+          ...[note.slice(0, cut), note.slice(cut)].map((text, index) => ({
+            ...base.body.passages[0],
+            id: `s${index + 5}`,
+            role: "context" as const,
+            rawPath: "/procurement/executionNote/it",
+            text,
+            startUtf16: index === 0 ? 0 : cut,
+            endUtf16: index === 0 ? cut : note.length,
+          })),
+        ],
+      },
+    };
+    const request = buildSourceInterpretationRequest(input);
+    const prompt = JSON.parse(request.prompt);
+    assert.deepEqual(
+      prompt.contractClauseBlocks.map((b: any) => b.text),
+      texts,
+    );
+    assert.deepEqual(
+      prompt.contractClauseBlocks.map((b: any) => b.sourceRefs),
+      [["s5"], ["s5", "s6"], ["s6"]],
+    );
+    for (const block of prompt.contractClauseBlocks) {
+      assert.equal(note.slice(block.startUtf16, block.endUtf16), block.text);
+      assert.equal(block.scope, "project_context");
+      assert.equal(block.rawPath, "/procurement/executionNote/it");
+    }
+    assert.equal(
+      prompt.requiredContractClauses.map((p: any) => p.text).join(""),
+      note,
+    );
+    assert.match(
+      prompt.rules.join(" "),
+      /non ereditare ambiti dal blocco precedente/,
+    );
+    assert.match(prompt.rules.join(" "), /condizione generale resta generale/);
+    assert.match(
+      prompt.rules.join(" "),
+      /separa condizioni autonome nei details/,
+    );
+    assert.equal(request.version, "documentary-source-interpretation-v22");
+    const oldKey = createHash("sha256")
+      .update(
+        stableDocumentaryJson({
+          version: "documentary-source-interpretation-v21",
+          binding: input.binding,
+        }),
+      )
+      .digest("hex");
+    assert.notEqual(request.sourceKey, oldKey);
+    assert.deepEqual(
+      input.body.passages.slice(-2).map((p) => p.text),
+      [note.slice(0, cut), note.slice(cut)],
+    );
+  },
+);
 // Test fixtures keep the stored contract; encode their citations explicitly
 // when exercising the distinct provider JSON Schema.
 function wireResponse(value: any) {
