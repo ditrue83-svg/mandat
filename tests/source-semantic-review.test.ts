@@ -1048,11 +1048,11 @@ test("Territorial review keeps common work and local partition separate without 
   );
 });
 
-test("An explicit output limit binds the review and independent evidence while preserving the default hash", () => {
+test("Review output allowance is independent from source reading and explicit limits remain bound", () => {
   const input = context();
   const original = draft(input);
   const standard = buildSourceSemanticReviewRequest(input, original, config);
-  const explicitDefault = buildSourceSemanticReviewRequest(input, original, {
+  const explicitSmaller = buildSourceSemanticReviewRequest(input, original, {
     ...config,
     maxTokens: 8192,
   });
@@ -1060,14 +1060,18 @@ test("An explicit output limit binds the review and independent evidence while p
     ...config,
     maxTokens: 16_384,
   });
-  assert.equal(standard.maxTokens, 8192);
-  assert(standard.requests.every((request) => request.maxTokens === 8192));
-  assert.equal(explicitDefault.inputHash, standard.inputHash);
+  assert.equal(standard.maxTokens, 16_384);
+  assert(standard.requests.every((request) => request.maxTokens === 16_384));
+  assert.equal(standard.evidencePlan.maxTokens, 8192);
+  assert.equal(explicitSmaller.maxTokens, 8192);
+  assert(
+    explicitSmaller.requests.every((request) => request.maxTokens === 8192),
+  );
+  assert.notEqual(explicitSmaller.inputHash, standard.inputHash);
   assert.equal(
-    explicitDefault.evidencePlan.inputHash,
+    explicitSmaller.evidencePlan.inputHash,
     standard.evidencePlan.inputHash,
   );
-  assert.deepEqual(explicitDefault.requests, standard.requests);
   assert.equal(expanded.maxTokens, 16_384);
   assert.equal(expanded.evidencePlan.maxTokens, 16_384);
   assert(expanded.requests.every((request) => request.maxTokens === 16_384));
@@ -1092,7 +1096,15 @@ test("An explicit output limit binds the review and independent evidence while p
     metadata,
   );
   assert.equal("maxTokens" in standardRecord, false);
-  assert.equal(expandedRecord.maxTokens, 16_384);
+  assert.equal("maxTokens" in expandedRecord, false);
+  const smallerRecord = recordSourceSemanticReview(
+    answers(explicitSmaller),
+    explicitSmaller,
+    metadata,
+  );
+  assert.equal(smallerRecord.maxTokens, 8192);
+  assert.equal(readSourceSemanticReview(smallerRecord, standard), null);
+  assert.equal(readSourceSemanticReview(standardRecord, explicitSmaller), null);
   assert.equal(
     readSourceSemanticReview(expandedRecord, expanded)?.accepted,
     true,
@@ -1138,7 +1150,7 @@ test("A large review uses bounded groups while an explicit output limit changes 
     automatic.claims.filter((c) => c.kind !== "scope_coverage").length,
     19,
   );
-  assert.equal(automatic.maxTokens, 8192);
+  assert.equal(automatic.maxTokens, 16_384);
   assert.equal(expanded.maxTokens, 16_384);
   assert(
     automatic.requests.every((request) => request.assignedClaimIds.length <= 8),
@@ -1171,7 +1183,7 @@ test("Independent review is source-only and binds every server claim without cha
   assert.equal(plan.version, SOURCE_SEMANTIC_REVIEW_VERSION);
   assert.equal(plan.sourceKey, original.sourceKey);
   assert.equal(plan.draftHash, original.hash);
-  assert.equal(plan.maxTokens, 8192);
+  assert.equal(plan.maxTokens, 16_384);
   assert.equal(plan.claims.length, 8); // fidelity checks plus mandatory source completeness
   const prompt = JSON.parse(plan.requests[0].prompt);
   assert.deepEqual(prompt.draft.details, original.response.details);
