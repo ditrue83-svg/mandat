@@ -849,7 +849,7 @@ test.each(["\n", "\r\n"])(
       prompt.rules.join(" "),
       /separa condizioni autonome nei details/,
     );
-    assert.equal(request.version, "documentary-source-interpretation-v31");
+    assert.equal(request.version, "documentary-source-interpretation-v32");
     const oldKey = createHash("sha256")
       .update(
         stableDocumentaryJson({
@@ -907,7 +907,7 @@ function wireResponse(
   };
 }
 
-test("Partial-offer and language-precedence clauses require separate original evidence", () => {
+test("Partial offers, language authority and purchase reservations require separate original evidence", () => {
   const base = context();
   const conditions = [
     [
@@ -919,6 +919,11 @@ test("Partial-offer and language-precedence clauses require separate original ev
       "s6",
       "/project-info/documentsLanguagesNote/fr",
       "La version française fait foi en cas de divergences.",
+    ],
+    [
+      "s7",
+      "/terms/otherRequirements/fr",
+      "Les crédits annuels sont réservés. Les prestations peuvent être destinées à d'autres services fédéraux et les options commandées en tout, en partie ou pas du tout.",
     ],
   ];
   const input: SourceInterpretationContext = {
@@ -947,7 +952,7 @@ test("Partial-offer and language-precedence clauses require separate original ev
   };
   const before = JSON.stringify(input);
   const request = buildSourceInterpretationRequest(input);
-  assert.deepEqual(request.requiredContractClauseIds, ["s5", "s6", "f0"]);
+  assert.deepEqual(request.requiredContractClauseIds, ["s5", "s6", "s7", "f0"]);
   const value = {
     ...response(input),
     details: [
@@ -966,6 +971,13 @@ test("Partial-offer and language-precedence clauses require separate original ev
       {
         kind: "execution_condition",
         scope: "project_context",
+        sourceRefs: ["s7"],
+        explanation:
+          "Sono riservati i crediti annuali; le prestazioni possono servire altri servizi federali e le opzioni possono essere ordinate interamente, parzialmente o per nulla.",
+      },
+      {
+        kind: "execution_condition",
+        scope: "project_context",
         sourceRefs: ["f0"],
         explanation:
           "Il valore positivo resta distinto dal limite descritto nella nota.",
@@ -975,7 +987,7 @@ test("Partial-offer and language-precedence clauses require separate original ev
   const wire = wireResponse(value, request);
   const record = recordSourceInterpretation(wire, request, metadata);
   assert.deepEqual(record.response.details, value.details);
-  for (const id of ["s5", "s6", "f0"]) {
+  for (const id of ["s5", "s6", "s7", "f0"]) {
     const missing = structuredClone(wire);
     delete missing.contractClausesById[id];
     assert.throws(() => recordSourceInterpretation(missing, request, metadata));
@@ -2979,6 +2991,7 @@ test.each([
   "documentary-source-interpretation-v19",
   "documentary-source-interpretation-v20",
   "documentary-source-interpretation-v30",
+  "documentary-source-interpretation-v31",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
   assert.equal(request.version, SOURCE_INTERPRETATION_VERSION);

@@ -1943,12 +1943,14 @@ test("Long-source reduction preserves complete CPV labels even when the map sele
   );
 });
 
-test("Long-source maps retain partial-offer restrictions and official language precedence", () => {
+test("Long-source maps retain partial offers, language authority and independent purchase reservations", () => {
   const base = raw(true);
   const languageNote =
     "En cas de divergences entre les versions, la version française fait foi.";
   const partialNote =
     "Sono ammesse offerte per interi lotti, non per frazioni dello stesso lotto.";
+  const purchaseReservations =
+    "Sono riservati i crediti annuali della Confederazione. Il committente può richiedere le prestazioni anche per ulteriori servizi federali e ordinare le opzioni interamente, parzialmente o per nulla.";
   const detail = {
     ...base,
     "project-info": {
@@ -1956,6 +1958,7 @@ test("Long-source maps retain partial-offer restrictions and official language p
     },
     terms: {
       qualificationCriteriaNote: { it: "Condizioni inventate. ".repeat(1600) },
+      otherRequirements: { it: purchaseReservations },
     },
     lots: base.lots.map((lot, index) => ({
       ...lot,
@@ -1982,6 +1985,7 @@ test("Long-source maps retain partial-offer restrictions and official language p
     "/project-info/documentsLanguagesNote/fr",
     "/lots/0/partialOffers",
     "/lots/0/partialOffersNote/it",
+    "/terms/otherRequirements/it",
   ]) {
     const original = request.passages.find((p) => p.rawPath === rawPath)!;
     assert(original);
@@ -2434,6 +2438,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v65",
     sourceVersion: "documentary-source-interpretation-v30",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v66",
+    sourceVersion: "documentary-source-interpretation-v31",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2467,7 +2475,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v66");
+    assert.equal(request.version, "documentary-service-comparison-v67");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(

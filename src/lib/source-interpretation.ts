@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v31";
+  "documentary-source-interpretation-v32";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -957,6 +957,13 @@ export function buildSourceInterpretationRequest(
       )
         ? [
             "documentsLanguagesNote: conserva ogni disponibilità linguistica e l'eventuale precedenza ufficiale esplicitamente stabilita dalla fonte. Disponibilità, ordine e maggioranza delle traduzioni non provano precedenza. Se una versione fa fede, cita anche questa prova quando spieghi condizioni discordanti e nella sintesi che le risolve; conserva comunque le formulazioni originali nei dettagli. Senza precedenza documentata non risolvere opposizioni materiali.",
+          ]
+        : []),
+      ...(requiredContractClauses.some((p) =>
+        /\/terms\/otherRequirements(?:\/|$)/.test(p.rawPath),
+      )
+        ? [
+            "otherRequirements: conserva separatamente ogni riserva o diritto sul servizio acquistato, inclusi crediti annuali, ulteriori destinatari e acquisto intero, parziale o nullo delle opzioni quando attestati. Dire soltanto che un'opzione è facoltativa non rappresenta le altre proposizioni. Non trasformare destinatari o condizioni del committente in ulteriori prestazioni acquistate.",
           ]
         : []),
       "classificationContext è un registro immutabile separato dalle prestazioni: rendiconta ogni ID una volta, conservando codici, etichette, lingue e ambiti. clarifies_domain richiede un'etichetta originale; broad_context è una famiglia ampia, non prova una prestazione specifica; shared_project_only è contesto condiviso. Senza etichetta non decodificare codici da memoria. unresolved indica dubbio materiale; conflicting richiede asserzioni incompatibili.",
