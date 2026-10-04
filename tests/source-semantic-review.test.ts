@@ -636,7 +636,7 @@ function languageVariantReview(
     checks: request.assignedClaimIds.map((id) => {
       const claim = plan.claims.find((c) => c.id === id)!;
       const classification = claim.kind === "classification_reading",
-        detail = claim.kind === "detail";
+        detail = claim.kind === "detail" || claim.kind === "scope_coverage";
       return {
         claimId: id,
         draftQuote: claim.text,
@@ -738,7 +738,12 @@ test("A language variant needs the draft citation and an explicit independent re
   const claimId = plan.claims.find((c) => c.kind === "component_role")!.id;
   const withoutDuplicate = structuredClone(responses);
   for (const check of withoutDuplicate.flatMap((r) => r.checks)) {
-    check.sourceRefs = check.sourceRefs.filter((ref) => ref !== "s5");
+    // Original-fact completeness must keep its own pointer. This regression
+    // concerns translation-backed fidelity, which can use the other variant.
+    if (
+      plan.claims.find((c) => c.id === check.claimId)!.kind !== "scope_coverage"
+    )
+      check.sourceRefs = check.sourceRefs.filter((ref) => ref !== "s5");
   }
   const unchanged = JSON.stringify(withoutDuplicate);
   assert.equal(read(withoutDuplicate).accepted, true);
@@ -2169,6 +2174,116 @@ test("Long review covers every original passage and scalar including the unselec
     plan.requests,
     buildSourceSemanticReviewRequest(full, original, config).requests,
   );
+});
+
+test("A rich draft with many small original facts still fits grounded review without losing work or scalar coverage", () => {
+  const base = context();
+  const passages = [
+    ...base.body.passages,
+    ...Array.from({ length: 180 }, (_, i) => {
+      const text = `Condizione inventata ${i}. `.padEnd(300, "x");
+      return {
+        ...base.body.passages[3],
+        id: `s${i + 5}`,
+        rawPath: `/conditions/${i}/it`,
+        text,
+        endUtf16: text.length,
+      };
+    }),
+  ];
+  const fields = [
+    ...base.body.fields,
+    ...Array.from({ length: 300 }, (_, i) => ({
+      scope: "project_context" as const,
+      rawPath: `/metadata/${i}`,
+      value: `Valore originale inventato ${i}. `.padEnd(220, "x"),
+    })),
+  ];
+  const reduced = {
+    ...base,
+    coverage: {
+      ...base.coverage,
+      sourceUtf16: passages.reduce((n, p) => n + p.text.length, 0),
+      fields: passages.length + fields.length,
+      chunks: 2,
+    },
+    readings: [
+      { chunkId: "chunk1", status: "complete" as const, sourceRefs: ["s1"] },
+      { chunkId: "chunk2", status: "complete" as const, sourceRefs: [] },
+    ],
+  };
+  const seed = draft(reduced).response;
+  const original = recordSourceInterpretation(
+    {
+      ...seed,
+      components: Array.from({ length: 12 }, (_, i) => ({
+        ...seed.components[0],
+        description: `Prestazione inventata ${i}. `.padEnd(500, "x"),
+      })),
+      details: Array.from({ length: 17 }, (_, i) => ({
+        ...seed.details[0],
+        explanation: `Dettaglio inventato ${i}. `.padEnd(500, "x"),
+      })),
+    },
+    buildSourceInterpretationRequest(reduced),
+    { ...metadata, model: reduced.binding.model },
+  );
+  const full = { ...reduced, body: { ...base.body, passages, fields } },
+    before = JSON.stringify(full),
+    draftBefore = JSON.stringify(original);
+  const plan = buildSourceSemanticReviewRequest(full, original, config);
+  const requests = inventedGroundedReviewRequests(plan);
+  assert(requests.length > 1 && requests.length <= 32);
+  assert.deepEqual(
+    requests.flatMap((r) => r.coverage.passageIds),
+    passages.map((p) => p.id),
+  );
+  assert.deepEqual(
+    requests.flatMap((r) => r.coverage.fieldIndexes),
+    fields.map((_f, i) => i),
+  );
+  for (const request of requests) {
+    assert(
+      Buffer.byteLength(
+        request.system +
+          request.prompt +
+          JSON.stringify(request.responseFormat),
+      ) <= 160000,
+    );
+    assert(request.assignedClaimIds.length <= 8);
+    const body = JSON.parse(request.prompt);
+    assert.deepEqual(
+      body.draft.components.map((c: any) => c.description),
+      original.response.components.map((c) => c.description),
+    );
+    assert.deepEqual(body.draft.details, original.response.details);
+    for (const ref of request.ownedScopeCoverageIds)
+      assert(body.originalFacts.some((f: any) => f.sourceRef === ref));
+  }
+  const responses = answers(plan),
+    lastRef = `f${fields.length - 1}`;
+  const index = requests.findIndex((r) =>
+    r.ownedScopeCoverageIds.includes(lastRef),
+  );
+  const claim = requests[index].scopeCoverageClaim!;
+  Object.assign(
+    responses[index].checks.find((c) => c.claimId === claim.id)!,
+    {
+      verdict: "not_verifiable",
+      draftQuote: "Tutte le prestazioni acquistate",
+      reason:
+        "Giudizio negativo inventato sulla completezza: la verifica resta obbligatoria anche nell'ultimo gruppo.",
+    },
+  );
+  assert.equal(
+    readSourceSemanticReview(
+      recordSourceSemanticReview(responses.map(wireResponse), plan, metadata),
+      plan,
+    )?.accepted,
+    false,
+  );
+  assert.equal(JSON.stringify(full), before);
+  assert.equal(JSON.stringify(original), draftBefore);
 });
 
 test("Review capacity fails explicitly without truncating an indivisible original field", () => {

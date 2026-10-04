@@ -22,11 +22,11 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v35";
+  "documentary-source-semantic-review-v36";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
-const READING_CONTEXT_RESERVE_BYTES = 32_000;
+const READING_CONTEXT_RESERVE_BYTES = 64_000;
 const MAX_REQUESTS = 32;
 // Smaller review groups bound reasoning and response size for long sources.
 const MAX_CHECKS = 8;
