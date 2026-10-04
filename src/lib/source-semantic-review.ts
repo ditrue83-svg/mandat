@@ -22,7 +22,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v36";
+  "documentary-source-semantic-review-v37";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -102,7 +102,7 @@ const responseShape = z.strictObject({
   checks: z.array(checkShape).max(MAX_CHECKS),
   findings: z.array(findingShape).max(32),
 });
-function providerResponseSchema(bounds: ResponseBounds) {
+function providerResponseSchema(bounds: ResponseBounds, keyedReadings = false) {
   // References identify a set. Its cardinality bounds the wire response while
   // keeping every available piece of evidence and the strict uniqueness gate.
   const boundedRefs = (ids: string[]) =>
@@ -111,19 +111,29 @@ function providerResponseSchema(bounds: ResponseBounds) {
       .min(1)
       .max(Math.min(1024, new Set(ids).size));
   const references = boundedRefs(bounds.sourceIds);
+  // A keyed selection represents each available reference exactly once.
+  // False preserves available but unused evidence; only true selects a citation.
+  const readingSelection = (ids?: string[]) =>
+    keyedReadings && ids
+      ? {
+          readingRefsById: z.strictObject(
+            Object.fromEntries(ids.map((id) => [id, z.boolean()])),
+          ),
+        }
+      : {
+          readingRefs: ids ? boundedRefs(ids) : checkShape.shape.readingRefs,
+        };
   const common = responseShape.shape.checks.element
-    .omit({ claimId: true })
+    .omit({ claimId: true, readingRefs: true })
     .extend({
       sourceRefs: references,
-      ...(bounds.readingIds?.length
-        ? { readingRefs: boundedRefs(bounds.readingIds) }
-        : {}),
+      ...readingSelection(bounds.readingIds),
     });
   // Reuse each ownership group's schema, but require every claim as a
   // distinct object key. Array length alone permits duplicates and omissions.
   const groups = bounds.claimReadingGroups?.map((group) => {
     const schema = common.extend({
-      readingRefs: boundedRefs(group.readingIds),
+      ...readingSelection(group.readingIds),
     });
     return {
       ids: group.claimIds,
@@ -134,7 +144,7 @@ function providerResponseSchema(bounds: ResponseBounds) {
         ? z.union([
             schema.extend({
               verdict: z.literal("supported"),
-              readingRefs: boundedRefs(group.supportedReadingIds),
+              ...readingSelection(group.supportedReadingIds),
             }),
             schema.extend({
               verdict: z.enum(["contradicted", "not_verifiable"]),
@@ -171,7 +181,9 @@ function providerResponseSchema(bounds: ResponseBounds) {
       ? z.literal(bounds.evidenceHash)
       : hash,
     findings: z.array(z.union(materialFindings)).max(32),
-    checksFormat: z.literal("claim_keyed_v1"),
+    checksFormat: z.literal(
+      keyedReadings ? "claim_keyed_refs_v2" : "claim_keyed_v1",
+    ),
     checksByClaim: z.strictObject(
       Object.fromEntries(
         bounds.claimIds.map((id) => [
@@ -867,22 +879,29 @@ export function buildGroundedSourceReviewRequests(
           name: "source_semantic_review",
           strict: true,
           schema: z.toJSONSchema(
-            providerResponseSchema({
-              id: request.id,
-              claimIds: request.assignedClaimIds,
-              sourceIds: request.sourceIds,
-              ownedContractClauseIds: request.ownedContractClauseIds,
-              ownedScopeCoverageIds: request.ownedScopeCoverageIds,
-              evidenceHash: independent.hash,
-              readingIds,
-              claimReadingGroups: [...readingGroups.values()],
-            }),
+            providerResponseSchema(
+              {
+                id: request.id,
+                claimIds: request.assignedClaimIds,
+                sourceIds: request.sourceIds,
+                ownedContractClauseIds: request.ownedContractClauseIds,
+                ownedScopeCoverageIds: request.ownedScopeCoverageIds,
+                evidenceHash: independent.hash,
+                readingIds,
+                claimReadingGroups: [...readingGroups.values()],
+              },
+              true,
+            ),
             { reused: "ref" },
           ),
         },
       };
       const prompt = JSON.stringify({
         ...JSON.parse(request.prompt),
+        referenceSelectionFormat: {
+          checksFormat: "claim_keyed_refs_v2",
+          rule: "Ogni check contiene readingRefsById, con una chiave booleana obbligatoria per ciascun identificativo previsto dal suo schema. Usa true soltanto per le prove necessarie al giudizio e false per le altre. Almeno una prova deve essere true. Non aggiungere readingRefs, nuove chiavi o riferimenti ripetuti; le regole sul sostegno proprio di ogni claim restano invariate.",
+        },
         sourceEvidenceHash: independent.hash,
         originalFacts,
         detailEvidenceBindings: [...readingGroups.values()].flatMap((group) =>
@@ -950,22 +969,35 @@ function validateResponses(
         checksFormat: _format,
         checksByClaim,
         ...header
-      } = providerResponseSchema({
-        id: request.id,
-        claimIds: request.assignedClaimIds,
-        sourceIds: request.sourceIds,
-        ownedContractClauseIds: request.ownedContractClauseIds,
-        ownedScopeCoverageIds: request.ownedScopeCoverageIds,
-        evidenceHash: independent.hash,
-        readingIds: request.readingIds,
-        claimReadingGroups: request.claimReadingGroups,
-      }).parse(value);
+      } = providerResponseSchema(
+        {
+          id: request.id,
+          claimIds: request.assignedClaimIds,
+          sourceIds: request.sourceIds,
+          ownedContractClauseIds: request.ownedContractClauseIds,
+          ownedScopeCoverageIds: request.ownedScopeCoverageIds,
+          evidenceHash: independent.hash,
+          readingIds: request.readingIds,
+          claimReadingGroups: request.claimReadingGroups,
+        },
+        "checksFormat" in value && value.checksFormat === "claim_keyed_refs_v2",
+      ).parse(value);
       return responseShape.parse({
         ...header,
-        checks: request.assignedClaimIds.map((claimId) => ({
-          claimId,
-          ...checksByClaim[claimId],
-        })),
+        checks: request.assignedClaimIds.map((claimId) => {
+          const check = checksByClaim[claimId];
+          if ("readingRefsById" in check) {
+            const { readingRefsById, ...rest } = check;
+            return {
+              claimId,
+              ...rest,
+              readingRefs: Object.entries(
+                readingRefsById as Record<string, boolean>,
+              ).flatMap(([id, selected]) => (selected ? [id] : [])),
+            };
+          }
+          return { claimId, ...check };
+        }),
       });
     }
     // Stored records keep the ordered list; its exact cardinality and

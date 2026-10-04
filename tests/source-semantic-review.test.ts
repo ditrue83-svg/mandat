@@ -339,8 +339,39 @@ function answers(plan: SourceSemanticReviewPlan) {
 
 // Encode invented stored fixtures for the distinct provider contract. Never
 // hide duplicate IDs while converting: malformed stored lists remain invalid.
-function wireResponse({ checks, ...header }: any) {
+function wireResponse({ checks, ...header }: any, request?: any) {
   assert.equal(new Set(checks.map((c: any) => c.claimId)).size, checks.length);
+  if (request?.claimReadingGroups) {
+    return {
+      ...header,
+      checksFormat: "claim_keyed_refs_v2",
+      checksByClaim: Object.fromEntries(
+        checks.map(({ claimId, readingRefs, ...check }: any) => {
+          assert.equal(new Set(readingRefs).size, readingRefs.length);
+          const group = request.claimReadingGroups.find((g: any) =>
+            g.claimIds.includes(claimId),
+          );
+          const ids =
+            check.verdict === "supported" && group?.supportedReadingIds
+              ? group.supportedReadingIds
+              : (group?.readingIds ?? request.readingIds);
+          return [
+            claimId,
+            {
+              ...check,
+              readingRefsById: Object.fromEntries([
+                ...ids.map((id: string) => [id, readingRefs.includes(id)]),
+                // Invalid fixtures stay invalid; do not hide unknown IDs.
+                ...readingRefs
+                  .filter((id: string) => !ids.includes(id))
+                  .map((id: string) => [id, true]),
+              ]),
+            },
+          ];
+        }),
+      ),
+    };
+  }
   return {
     ...header,
     checksFormat: "claim_keyed_v1",
@@ -404,7 +435,7 @@ test("Every provider claim remains required when a large review is split into sm
     );
   }
   const stored = answers(plan),
-    wire = stored.map(wireResponse);
+    wire = stored.map((part, index) => wireResponse(part, requests[index]));
   const validators = requests.map((r) =>
     new Ajv2020({ strict: false }).compile(
       openaiJsonSchema(r.responseFormat.json_schema.schema),
@@ -1175,14 +1206,20 @@ test("Independent review is source-only and binds every server claim without cha
     const validate = new Ajv2020({ strict: false }).compile(
       JSON.parse(JSON.stringify(request.responseFormat.json_schema.schema)),
     );
-    assert.equal(validate(wireResponse(response[index])), true);
+    assert.equal(validate(wireResponse(response[index], request)), true);
     assert.equal(validate({ accepted: true }), false);
     assert.equal(
-      validate({ ...wireResponse(response[index]), checksByClaim: {} }),
+      validate({
+        ...wireResponse(response[index], request),
+        checksByClaim: {},
+      }),
       false,
     );
     assert.equal(
-      validate({ ...wireResponse(response[index]), chunkId: "review999" }),
+      validate({
+        ...wireResponse(response[index], request),
+        chunkId: "review999",
+      }),
       false,
     );
   }
@@ -2453,8 +2490,8 @@ test("A detail absent from the work selection uses its exact original fact witho
   const openaiWire = new Ajv2020({ strict: false }).compile(
     openaiJsonSchema(request.responseFormat.json_schema.schema),
   );
-  assert(wire(wireResponse(response)));
-  assert(openaiWire(wireResponse(response)));
+  assert(wire(wireResponse(response, request)));
+  assert(openaiWire(wireResponse(response, request)));
   const store = (answer: typeof response) =>
     productionRecordSourceSemanticReview([answer], plan, {
       ...metadata,
@@ -2473,17 +2510,17 @@ test("A detail absent from the work selection uses its exact original fact witho
       .find((c) => c.claimId === claim.id)!
       .readingRefs.push("o-s4");
     assert(
-      !wire(wireResponse(extraPointer)),
+      !wire(wireResponse(extraPointer, request)),
       `${kind} cannot add a detail-only pointer`,
     );
-    assert(!openaiWire(wireResponse(extraPointer)));
+    assert(!openaiWire(wireResponse(extraPointer, request)));
     assert.throws(() => store(extraPointer), /own summary or detail claim/);
     changed.checks.find((c) => c.claimId === claim.id)!.readingRefs = ["o-s4"];
     assert(
-      !wire(wireResponse(changed)),
+      !wire(wireResponse(changed, request)),
       `${kind} cannot substitute a detail-only pointer`,
     );
-    assert(!openaiWire(wireResponse(changed)));
+    assert(!openaiWire(wireResponse(changed, request)));
     assert.throws(() => store(changed), /own summary or detail claim/);
   }
   const detail = plan.claims.find((c) => c.kind === "detail")!;
@@ -2496,8 +2533,8 @@ test("A detail absent from the work selection uses its exact original fact witho
   wrongSelection.checks.find((c) => c.claimId === detail.id)!.readingRefs = [
     "e1-1",
   ];
-  assert(!wire(wireResponse(wrongSelection)));
-  assert(!openaiWire(wireResponse(wrongSelection)));
+  assert(!wire(wireResponse(wrongSelection, request)));
+  assert(!openaiWire(wireResponse(wrongSelection, request)));
   assert.throws(() => store(wrongSelection), /own independent evidence/);
   assert.deepEqual(
     body.detailEvidenceBindings.find((b: any) => b.claimId === detail.id),
@@ -2507,16 +2544,16 @@ test("A detail absent from the work selection uses its exact original fact witho
   mixedEvidence.checks
     .find((c) => c.claimId === detail.id)!
     .readingRefs.push("e1-1");
-  assert(!wire(wireResponse(mixedEvidence)));
-  assert(!openaiWire(wireResponse(mixedEvidence)));
+  assert(!wire(wireResponse(mixedEvidence, request)));
+  assert(!openaiWire(wireResponse(mixedEvidence, request)));
   assert.throws(() => store(mixedEvidence), /unrelated independent evidence/);
   // A negative verdict may use other independent observations to explain
   // why the detail is false or unverified; it must still quote that detail.
   for (const verdict of ["contradicted", "not_verifiable"] as const) {
     const negative = structuredClone(wrongSelection);
     negative.checks.find((c) => c.claimId === detail.id)!.verdict = verdict;
-    assert(wire(wireResponse(negative)));
-    assert(openaiWire(wireResponse(negative)));
+    assert(wire(wireResponse(negative, request)));
+    assert(openaiWire(wireResponse(negative, request)));
     assert.equal(
       readSourceSemanticReview(store(negative), plan)?.accepted,
       false,
@@ -2524,11 +2561,12 @@ test("A detail absent from the work selection uses its exact original fact witho
   }
   const unknown = structuredClone(response);
   unknown.checks.find((c) => c.claimId === detail.id)!.readingRefs = ["o-s999"];
-  assert(!wire(wireResponse(unknown)));
+  assert(!wire(wireResponse(unknown, request)));
   assert.throws(() => store(unknown), /unknown independent reading/);
   const omitted = structuredClone(response);
   omitted.checks.find((c) => c.claimId === detail.id)!.readingRefs = [];
-  assert(!wire(wireResponse(omitted)));
+  assert(wire(wireResponse(omitted, request)));
+  assert.throws(() => store(wireResponse(omitted, request)));
   assert.throws(() => store(omitted));
 });
 
@@ -2621,7 +2659,7 @@ test("A structured condition owns a review claim and retains false without becom
     assert(
       new Ajv2020({ strict: false }).compile(
         r.responseFormat.json_schema.schema,
-      )(wireResponse(responses[i])),
+      )(wireResponse(responses[i], r)),
     );
   const record = productionRecordSourceSemanticReview(responses, plan, {
     ...metadata,
@@ -2701,12 +2739,12 @@ test("The generated review schema keeps each original fact with its own detail",
   const wire = new Ajv2020({ strict: false }).compile(
     openaiJsonSchema(request.responseFormat.json_schema.schema),
   );
-  assert(wire(wireResponse(response)));
+  assert(wire(wireResponse(response, request)));
   const claim = plan.claims.find(
     (c) => c.kind === "detail" && c.sourceRefs.includes("s4"),
   )!;
   response.checks.find((c) => c.claimId === claim.id)!.readingRefs.push("o-s5");
-  assert(!wire(wireResponse(response)));
+  assert(!wire(wireResponse(response, request)));
   assert.throws(
     () =>
       productionRecordSourceSemanticReview(
@@ -3039,7 +3077,7 @@ test("Grounded review keeps numeric evidence and missing details without letting
   assert(
     new Ajv2020({ strict: false }).compile(
       requests[0].responseFormat.json_schema.schema,
-    )(wireResponse(responses[0])),
+    )(wireResponse(responses[0], requests[0])),
   );
   const record = productionRecordSourceSemanticReview(responses, plan, {
     ...metadata,
@@ -3136,10 +3174,13 @@ test("Provider reference bounds reject repetition floods without removing indepe
   ].map((item: { id: string }) => item.id);
   check.readingRefs = independentIds;
   check.sourceRefs = request.sourceIds;
-  assert(validate(wireResponse(response)), JSON.stringify(validate.errors));
+  assert(
+    validate(wireResponse(response, request)),
+    JSON.stringify(validate.errors),
+  );
   assert.equal(new Set(independentIds).size, independentIds.length);
   check.readingRefs = Array.from({ length: 1024 }, () => independentIds[0]);
-  assert(!validate(wireResponse(response)));
+  assert.throws(() => wireResponse(response, request));
   check.readingRefs = [independentIds[0], independentIds[0]];
   assert.throws(
     () => recordSourceSemanticReview([response], plan, metadata),
@@ -3148,6 +3189,86 @@ test("Provider reference bounds reject repetition floods without removing indepe
   assert(
     body.rules.some((rule: string) => rule.includes("ciascuno una sola volta")),
   );
+});
+
+test("Keyed reading selections preserve evidence and reject malformed or empty selections", () => {
+  const plan = buildSourceSemanticReviewRequest(context(), draft(), config);
+  const evidence = inventedSourceEvidence(plan);
+  const requests = buildGroundedSourceReviewRequests(plan, evidence);
+  const stored = answers(plan);
+  const wire = stored.map((response, index) =>
+    wireResponse(response, requests[index]),
+  );
+  const validators = requests.map((request) =>
+    new Ajv2020({ strict: false }).compile(
+      openaiJsonSchema(request.responseFormat.json_schema.schema),
+    ),
+  );
+  wire.forEach((response, index) =>
+    assert(
+      validators[index](response),
+      JSON.stringify(validators[index].errors),
+    ),
+  );
+  const before = JSON.stringify(wire);
+  const record = productionRecordSourceSemanticReview(wire, plan, {
+    ...metadata,
+    sourceEvidence: evidence,
+  });
+  assert.deepEqual(record.responses, stored);
+  assert(readSourceSemanticReview(record, plan)?.accepted);
+  assert.equal(JSON.stringify(wire), before);
+  assert.equal(wire[0].checksFormat, "claim_keyed_refs_v2");
+  const claimId = requests[0].assignedClaimIds[0];
+  const selected = wire[0].checksByClaim[claimId].readingRefsById;
+  assert(Object.values(selected).some((value) => value === true));
+  for (const mutate of [
+    (check: any) => {
+      check.readingRefsById["o-s999"] = true;
+    },
+    (check: any) => {
+      delete check.readingRefsById[Object.keys(selected)[0]];
+    },
+    (check: any) => {
+      check.readingRefsById[Object.keys(selected)[0]] = "true";
+    },
+    (check: any) => {
+      check.readingRefs = ["e1-1", "e1-1"];
+    },
+  ]) {
+    const changed = structuredClone(wire);
+    mutate(changed[0].checksByClaim[claimId]);
+    assert(!validators[0](changed[0]));
+    assert.throws(() =>
+      productionRecordSourceSemanticReview(changed, plan, {
+        ...metadata,
+        sourceEvidence: evidence,
+      }),
+    );
+  }
+  const empty = structuredClone(wire);
+  for (const id of Object.keys(selected))
+    empty[0].checksByClaim[claimId].readingRefsById[id] = false;
+  // The semantic validator still requires an actual citation; flags alone
+  // never grant approval or fabricate support for an empty selection.
+  assert.throws(() =>
+    productionRecordSourceSemanticReview(empty, plan, {
+      ...metadata,
+      sourceEvidence: evidence,
+    }),
+  );
+  // Older wire lists are validated, never repaired into a keyed selection.
+  const legacy = stored.map((response) => wireResponse(response));
+  const originalRef = legacy[0].checksByClaim[claimId].readingRefs[0];
+  legacy[0].checksByClaim[claimId].readingRefs = [originalRef, originalRef];
+  const legacyBefore = JSON.stringify(legacy);
+  assert.throws(() =>
+    productionRecordSourceSemanticReview(legacy, plan, {
+      ...metadata,
+      sourceEvidence: evidence,
+    }),
+  );
+  assert.equal(JSON.stringify(legacy), legacyBefore);
 });
 
 test("Review criticisms quote their assigned text without confusing summary and detail", () => {
