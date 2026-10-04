@@ -849,7 +849,7 @@ test.each(["\n", "\r\n"])(
       prompt.rules.join(" "),
       /separa condizioni autonome nei details/,
     );
-    assert.equal(request.version, "documentary-source-interpretation-v30");
+    assert.equal(request.version, "documentary-source-interpretation-v31");
     const oldKey = createHash("sha256")
       .update(
         stableDocumentaryJson({
@@ -906,6 +906,82 @@ function wireResponse(
     ),
   };
 }
+
+test("Partial-offer and language-precedence clauses require separate original evidence", () => {
+  const base = context();
+  const conditions = [
+    [
+      "s5",
+      "/procurement/partialOffersNote/it",
+      "Solo interi lotti, nessuna frazione del lotto.",
+    ],
+    [
+      "s6",
+      "/project-info/documentsLanguagesNote/fr",
+      "La version française fait foi en cas de divergences.",
+    ],
+  ];
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      fields: [
+        {
+          scope: "project_context",
+          rawPath: "/procurement/partialOffers",
+          value: true,
+        },
+      ],
+      passages: [
+        ...base.body.passages,
+        ...conditions.map(([id, rawPath, text]) => ({
+          ...base.body.passages[0],
+          id,
+          rawPath,
+          text,
+          role: "context" as const,
+          endUtf16: text.length,
+        })),
+      ],
+    },
+  };
+  const before = JSON.stringify(input);
+  const request = buildSourceInterpretationRequest(input);
+  assert.deepEqual(request.requiredContractClauseIds, ["s5", "s6", "f0"]);
+  const value = {
+    ...response(input),
+    details: [
+      {
+        kind: "execution_condition",
+        scope: "project_context",
+        sourceRefs: ["s5"],
+        explanation: "Sono ammesse offerte per interi lotti, non per frazioni.",
+      },
+      {
+        kind: "execution_condition",
+        scope: "project_context",
+        sourceRefs: ["s6"],
+        explanation: "In caso di divergenze fa fede la versione francese.",
+      },
+      {
+        kind: "execution_condition",
+        scope: "project_context",
+        sourceRefs: ["f0"],
+        explanation:
+          "Il valore positivo resta distinto dal limite descritto nella nota.",
+      },
+    ],
+  };
+  const wire = wireResponse(value, request);
+  const record = recordSourceInterpretation(wire, request, metadata);
+  assert.deepEqual(record.response.details, value.details);
+  for (const id of ["s5", "s6", "f0"]) {
+    const missing = structuredClone(wire);
+    delete missing.contractClausesById[id];
+    assert.throws(() => recordSourceInterpretation(missing, request, metadata));
+  }
+  assert.equal(JSON.stringify(input), before);
+});
 
 test("Resolved wire requires every contractual clause separately with its own scoped original ID", () => {
   const base = context();
@@ -2902,6 +2978,7 @@ test.each([
   "documentary-source-interpretation-v18",
   "documentary-source-interpretation-v19",
   "documentary-source-interpretation-v20",
+  "documentary-source-interpretation-v30",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
   assert.equal(request.version, SOURCE_INTERPRETATION_VERSION);

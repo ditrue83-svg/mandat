@@ -1943,6 +1943,63 @@ test("Long-source reduction preserves complete CPV labels even when the map sele
   );
 });
 
+test("Long-source maps retain partial-offer restrictions and official language precedence", () => {
+  const base = raw(true);
+  const languageNote =
+    "En cas de divergences entre les versions, la version française fait foi.";
+  const partialNote =
+    "Sono ammesse offerte per interi lotti, non per frazioni dello stesso lotto.";
+  const detail = {
+    ...base,
+    "project-info": {
+      documentsLanguagesNote: { fr: languageNote },
+    },
+    terms: {
+      qualificationCriteriaNote: { it: "Condizioni inventate. ".repeat(1600) },
+    },
+    lots: base.lots.map((lot, index) => ({
+      ...lot,
+      partialOffers: "yes",
+      partialOffersNote: {
+        it:
+          index === 0 ? partialNote : "SOLO_LOTTO_B: nessuna offerta parziale.",
+      },
+    })),
+  };
+  const request = buildAutomaticComparisonRequest(fixture(detail));
+  assert(request.readingRequests.length > 1);
+  const before = JSON.stringify(request);
+  const reduced = buildAutomaticSourceRequest(
+    request,
+    request.readingRequests.map((chunk) => ({
+      chunkId: chunk.id,
+      status: "complete",
+      sourceRefs: [],
+    })),
+  );
+  const body = JSON.parse(reduced.prompt);
+  for (const rawPath of [
+    "/project-info/documentsLanguagesNote/fr",
+    "/lots/0/partialOffers",
+    "/lots/0/partialOffersNote/it",
+  ]) {
+    const original = request.passages.find((p) => p.rawPath === rawPath)!;
+    assert(original);
+    assert(reduced.selectedIds.includes(original.id), rawPath);
+    assert(reduced.requiredContractClauseIds.includes(original.id), rawPath);
+    assert.deepEqual(
+      body.passages.find((p: { id: string }) => p.id === original.id),
+      (({ url: _url, ...passage }) => passage)(original),
+    );
+  }
+  assert(
+    !body.passages.some((p: { text: string }) =>
+      p.text.includes("SOLO_LOTTO_B"),
+    ),
+  );
+  assert.equal(JSON.stringify(request), before);
+});
+
 test("Long-source maps cannot discard delegation and execution clauses", () => {
   const base = raw();
   const detail = {
@@ -2373,6 +2430,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v64",
     sourceVersion: "documentary-source-interpretation-v21",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v65",
+    sourceVersion: "documentary-source-interpretation-v30",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2406,7 +2467,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v65");
+    assert.equal(request.version, "documentary-service-comparison-v66");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(

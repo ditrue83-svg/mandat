@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v30";
+  "documentary-source-interpretation-v31";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -945,6 +945,20 @@ export function buildSourceInterpretationRequest(
           ]
         : []),
       "canContractBeExtended yes/true consente la proroga, no/false la vieta, senza inventare durata. subContractorAllowed riguarda il ricorso a subappaltatori, non la subfornitura: yes/true consente, no/false vieta, con valore e note. null non indicato; altro valore da verificare.",
+      ...(requiredContractClauses.some((p) =>
+        /\/partialOffers(?:Note)?(?:\/|$)/.test(p.rawPath),
+      )
+        ? [
+            "partialOffers e relative note vanno letti insieme: conserva la distinzione fra offerte per interi lotti e offerte per frazioni del medesimo lotto. Un flag positivo non cancella un limite esplicito nella nota. Non attestare l'ammissibilità di una ditta né trasformare una partecipazione parziale in una prestazione autonoma acquistata.",
+          ]
+        : []),
+      ...(requiredContractClauses.some((p) =>
+        /^\/project-info\/documentsLanguagesNote(?:\/|$)/.test(p.rawPath),
+      )
+        ? [
+            "documentsLanguagesNote: conserva ogni disponibilità linguistica e l'eventuale precedenza ufficiale esplicitamente stabilita dalla fonte. Disponibilità, ordine e maggioranza delle traduzioni non provano precedenza. Se una versione fa fede, cita anche questa prova quando spieghi condizioni discordanti e nella sintesi che le risolve; conserva comunque le formulazioni originali nei dettagli. Senza precedenza documentata non risolvere opposizioni materiali.",
+          ]
+        : []),
       "classificationContext è un registro immutabile separato dalle prestazioni: rendiconta ogni ID una volta, conservando codici, etichette, lingue e ambiti. clarifies_domain richiede un'etichetta originale; broad_context è una famiglia ampia, non prova una prestazione specifica; shared_project_only è contesto condiviso. Senza etichetta non decodificare codici da memoria. unresolved indica dubbio materiale; conflicting richiede asserzioni incompatibili.",
       "meaning identifica l'oggetto nel suo dominio: evidence cita prove non classificatorie; classificationContextIds riporta le classificazioni usate. Non basta ripetere o tradurre un termine ambiguo: disambigua con le etichette originali, senza scegliere settori esterni o dichiarare errata la classificazione per salvare un'ipotesi. explicit_text si fonda sul testo; text_with_classification_context richiede un'etichetta del target. Solo per un lotto senza classificazioni proprie può usare un'etichetta condivisa insieme a prove locali del significato. Famiglie classificatorie non provano equivalenza, capacità o ammissibilità.",
       "Copia meaning.objectText e actionText da evidence, con maiuscole/minuscole e punteggiatura originali: non adattare la citazione alla frase della descrizione. Il server localizza oggetto e azione separatamente nei soli passaggi scelti, senza correggere parole. Attraversa solo frammenti contigui della stessa fonte, campo e ambito, citandoli tutti. Nelle spiegazioni classificatorie nomina il prodotto/servizio, non posizioni di componenti già collegate da classificationContextIds.",
