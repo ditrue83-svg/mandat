@@ -840,7 +840,7 @@ test.each(["\n", "\r\n"])(
       prompt.rules.join(" "),
       /separa condizioni autonome nei details/,
     );
-    assert.equal(request.version, "documentary-source-interpretation-v26");
+    assert.equal(request.version, "documentary-source-interpretation-v27");
     const oldKey = createHash("sha256")
       .update(
         stableDocumentaryJson({
@@ -983,6 +983,47 @@ test("Object quotations are required and cannot be translated or paraphrased", (
       /Meaning object must be an exact quotation/,
     );
   }
+});
+
+test("Provider quotations preserve original initials instead of adapting them to a description", () => {
+  const base = context();
+  const original =
+    "Fornitura di Quadri di distribuzione inventati; posa accessoria; trasporto escluso.";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: base.body.passages.map((passage, index) =>
+        index === 0
+          ? { ...passage, text: original, endUtf16: original.length }
+          : passage,
+      ),
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const wire = wireResponse(response(input));
+  wire.components[0].roleEvidence.actionText = "Fornitura";
+  wire.components[0].meaning.objectText = "Quadri di distribuzione inventati";
+  const before = JSON.stringify(wire);
+  const record = recordSourceInterpretation(wire, request, metadata);
+  assert.equal(
+    readSourceInterpretation(record, request)!.components[0].meaning.objectText,
+    "Quadri di distribuzione inventati",
+  );
+  for (const field of ["object", "action"] as const) {
+    const changed = structuredClone(wire);
+    if (field === "object")
+      changed.components[0].meaning.objectText =
+        "quadri di distribuzione inventati";
+    else changed.components[0].roleEvidence.actionText = "fornitura";
+    const negativeBefore = JSON.stringify(changed);
+    assert.throws(
+      () => recordSourceInterpretation(changed, request, metadata),
+      /must be an exact quotation/,
+    );
+    assert.equal(JSON.stringify(changed), negativeBefore);
+  }
+  assert.equal(JSON.stringify(wire), before);
 });
 
 test("Provider evidence records a supporting title once and derives all existing reference lists", () => {
