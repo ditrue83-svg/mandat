@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v27";
+  "documentary-source-interpretation-v28";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -807,7 +807,7 @@ export function buildSourceInterpretationRequest(
     requiredContractClauseIds: requiredContractClauses.map((p) => p.id),
     rules: [
       "requiredContractClauseIds: ogni ID va nei details con la propria condizione completa. Non bastano summary/evidence e non aggiungere riferimenti estranei.",
-      "canContractBeExtended yes/true consente la proroga, no/false la vieta, senza inventare durata. subContractorAllowed yes/true consente, no/false vieta: cita valore e note. null non indicato; altro valore ignoto da verificare.",
+      "canContractBeExtended yes/true consente la proroga, no/false la vieta, senza inventare durata. subContractorAllowed riguarda il ricorso a subappaltatori, non la subfornitura: yes/true consente, no/false vieta, con valore e note. null non indicato; altro valore da verificare.",
       "classificationContext è un registro immutabile separato dalle prestazioni: rendiconta ogni ID una volta, conservando codici, etichette, lingue e ambiti. clarifies_domain richiede un'etichetta originale; broad_context è una famiglia ampia, non prova una prestazione specifica; shared_project_only è contesto condiviso. Senza etichetta non decodificare codici da memoria. unresolved indica dubbio materiale; conflicting richiede asserzioni incompatibili.",
       "meaning identifica l'oggetto nel suo dominio: evidence cita prove non classificatorie; classificationContextIds riporta le classificazioni usate. Non basta ripetere o tradurre un termine ambiguo: disambigua con le etichette originali, senza scegliere settori esterni o dichiarare errata la classificazione per salvare un'ipotesi. explicit_text si fonda sul testo; text_with_classification_context richiede un'etichetta del target. Solo per un lotto senza classificazioni proprie può usare un'etichetta condivisa insieme a prove locali del significato. Famiglie classificatorie non provano equivalenza, capacità o ammissibilità.",
       "Copia meaning.objectText e actionText da evidence, con maiuscole/minuscole e punteggiatura originali: non adattare la citazione alla frase della descrizione. Il server localizza oggetto e azione separatamente nei soli passaggi scelti, senza correggere parole. Attraversa solo frammenti contigui della stessa fonte, campo e ambito, citandoli tutti. Nelle spiegazioni classificatorie nomina il prodotto/servizio, non posizioni di componenti già collegate da classificationContextIds.",

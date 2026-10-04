@@ -840,7 +840,7 @@ test.each(["\n", "\r\n"])(
       prompt.rules.join(" "),
       /separa condizioni autonome nei details/,
     );
-    assert.equal(request.version, "documentary-source-interpretation-v27");
+    assert.equal(request.version, "documentary-source-interpretation-v28");
     const oldKey = createHash("sha256")
       .update(
         stableDocumentaryJson({

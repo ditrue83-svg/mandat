@@ -7,7 +7,15 @@ import {
   recordSourceEvidenceReading,
   readSourceEvidenceReading,
 } from "../src/lib/source-evidence-reading";
-import type { SourceInterpretationContext } from "../src/lib/source-interpretation";
+import {
+  buildSourceInterpretationRequest,
+  recordSourceInterpretation,
+  type SourceInterpretationContext,
+} from "../src/lib/source-interpretation";
+import {
+  buildSourceSemanticReviewRequest,
+  buildGroundedSourceReviewRequests,
+} from "../src/lib/source-semantic-review";
 import { inventedSourceEvidenceAnswer } from "./helpers/source-evidence-fixture";
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 
@@ -178,6 +186,168 @@ test("A complete reading must preserve every original work clause, including lan
     () => recordSourceEvidenceReading(classificationOnly, plan, metadata),
     /contractual clause evidence coverage/,
   );
+});
+
+test.each([
+  [
+    "canContractBeExtendedNote",
+    "Una proroga è possibile prima del termine indicato.",
+  ],
+  ["optionsNote", "La seconda sede è opzionale."],
+  ["executionNote", "La posa inizia dopo l'autorizzazione del committente."],
+])(
+  "Flat lot %s conditions cannot disappear from source generation or independent reading",
+  (field, text) => {
+    const base = lotContext("Fornitura di prodotti Alfa inventati.");
+    const input: SourceInterpretationContext = {
+      ...base,
+      body: {
+        ...base.body,
+        passages: [
+          ...base.body.passages,
+          {
+            ...base.body.passages.find((p) => p.id === "s5")!,
+            id: "s901",
+            role: "context",
+            rawPath: `/lots/0/${field}/it`,
+            text,
+            endUtf16: text.length,
+          },
+        ],
+      },
+    };
+    const sourceRequest = buildSourceInterpretationRequest(input);
+    assert(sourceRequest.requiredContractClauseIds.includes("s901"));
+    const plan = buildSourceEvidenceReadingRequest(input, config);
+    assert(
+      plan.requests.some((part) => part.requiredClauseIds.includes("s901")),
+    );
+    const complete = responses(plan);
+    assert(
+      readSourceEvidenceReading(
+        recordSourceEvidenceReading(complete, plan, metadata),
+        plan,
+      )?.accepted,
+    );
+    const missing = structuredClone(complete);
+    for (const part of missing)
+      part.observations = part.observations.filter(
+        (observation) =>
+          !observation.evidence.some((e) => e.sourceRef === "s901"),
+      );
+    assert.throws(
+      () => recordSourceEvidenceReading(missing, plan, metadata),
+      /contractual clause evidence coverage/,
+    );
+  },
+);
+
+test("A flat lot extension deadline reaches semantic review even when a cited draft detail omits it", () => {
+  const base = lotContext("Fornitura di prodotti Alfa inventati.");
+  const note =
+    "Il committente può chiedere nuovi prezzi prima della scadenza indicata. È ammessa una sola proroga di due anni.";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages.find((p) => p.id === "s5")!,
+          id: "s901",
+          role: "context",
+          rawPath: "/lots/0/canContractBeExtendedNote/it",
+          text: note,
+          endUtf16: note.length,
+        },
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const answer = {
+    status: "resolved",
+    summary: "Fornitura di prodotti Alfa inventati.",
+    summarySourceRefs: ["s5"],
+    targetRef: "s5",
+    details: [
+      {
+        kind: "execution_condition",
+        scope: "selected_lot",
+        sourceRefs: ["s901"],
+        explanation: "È ammessa una sola proroga di due anni.",
+      },
+    ],
+    classificationReadings: [
+      {
+        classificationId: "c1",
+        use: "shared_project_only",
+        sourceRefs: ["s2", "s3"],
+        explanation:
+          "Categoria condivisa del progetto, senza prestazione aggiuntiva.",
+      },
+    ],
+    components: [
+      {
+        description: "Fornitura di prodotti Alfa inventati.",
+        importance: "not_stated",
+        role: "supply",
+        sourceRefs: ["s5"],
+        roleEvidence: {
+          state: "identified",
+          actionText: "Fornitura",
+          sourceRefs: ["s5"],
+          scope: "selected_lot",
+        },
+        meaning: {
+          state: "identified",
+          statement: "Prodotti Alfa inventati.",
+          objectText: "prodotti Alfa inventati",
+          objectRefs: ["s5"],
+          classificationContextIds: [],
+          basis: "explicit_text",
+        },
+      },
+    ],
+    issues: [],
+  };
+  const before = JSON.stringify(answer);
+  assert.throws(
+    () =>
+      recordSourceInterpretation({ ...answer, details: [] }, request, {
+        ...metadata,
+        model: input.binding.model,
+      }),
+    /Incomplete.*contract clauses/,
+  );
+  // A reference alone cannot prove semantic completeness. Keep the entire
+  // original note beside the partial candidate for the separate review.
+  const source = recordSourceInterpretation(answer, request, {
+    ...metadata,
+    model: input.binding.model,
+  });
+  const plan = buildSourceSemanticReviewRequest(input, source, config);
+  const reading = recordSourceEvidenceReading(
+    responses(plan.evidencePlan),
+    plan.evidencePlan,
+    metadata,
+  );
+  const parts = buildGroundedSourceReviewRequests(plan, reading);
+  const bodies = parts.map((part) => JSON.parse(part.prompt));
+  assert(
+    bodies.some((body) =>
+      body.requiredContractClauses.some(
+        (clause: { id: string; text: string }) =>
+          clause.id === "s901" && clause.text === note,
+      ),
+    ),
+  );
+  const binding = bodies
+    .flatMap((body) => body.contractClauseDraftBindings)
+    .find((item: { sourceRef: string }) => item.sourceRef === "s901");
+  assert.deepEqual(binding.candidateDetails, [
+    { index: 0, explanation: "È ammessa una sola proroga di due anni." },
+  ]);
+  assert.equal(JSON.stringify(answer), before);
 });
 
 for (const scope of ["project_context", "selected_lot"] as const) {

@@ -22,7 +22,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v31";
+  "documentary-source-semantic-review-v32";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -104,7 +104,10 @@ function providerResponseSchema(bounds: ResponseBounds) {
   // References identify a set. Its cardinality bounds the wire response while
   // keeping every available piece of evidence and the strict uniqueness gate.
   const boundedRefs = (ids: string[]) =>
-    z.array(z.enum(ids)).min(1).max(Math.min(1024, new Set(ids).size));
+    z
+      .array(z.enum(ids))
+      .min(1)
+      .max(Math.min(1024, new Set(ids).size));
   const references = boundedRefs(bounds.sourceIds);
   const common = responseShape.shape.checks.element
     .omit({ claimId: true })
