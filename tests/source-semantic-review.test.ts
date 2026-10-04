@@ -1399,6 +1399,12 @@ test("A cited compound contract note can still omit a separate bidding permissio
   );
   const plan = buildSourceSemanticReviewRequest(input, original, config);
   const grounded = inventedGroundedReviewRequests(plan);
+  const binding = grounded
+    .flatMap((part) => JSON.parse(part.prompt).contractClauseDraftBindings)
+    .find((item: { sourceRef: string }) => item.sourceRef === "s5");
+  assert.deepEqual(binding.candidateDetails, [
+    { index: 0, explanation: "Subappalto ammesso fino al 70%." },
+  ]);
   assert(
     grounded.some((part) =>
       JSON.parse(part.prompt).requiredContractClauses.some(
@@ -1422,6 +1428,71 @@ test("A cited compound contract note can still omit a separate bidding permissio
   const reviewed = readSourceSemanticReview(stored, plan)!;
   assert.equal(reviewed.accepted, false);
   assert.equal(reviewed.findings[0].kind, "omitted_contract_condition");
+});
+
+test("Contract completeness locates a detail even when its claim belongs to another review group", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[3],
+          id: "s5",
+          rawPath: "/terms/subContractorAllowed",
+          text: "yes",
+          endUtf16: 3,
+        },
+      ],
+    },
+  };
+  const response = draft().response;
+  const explanation = "Il ricorso a subappaltatori è consentito.";
+  const original = recordSourceInterpretation(
+    {
+      ...response,
+      summary:
+        "Fornitura di articoli inventati; ricorso a subappaltatori consentito.",
+      summarySourceRefs: ["s1", "s5"],
+      components: Array.from({ length: 3 }, () => response.components[0]),
+      details: [
+        ...response.details,
+        {
+          kind: "execution_condition",
+          scope: "project_context",
+          sourceRefs: ["s5"],
+          explanation,
+        },
+      ],
+    },
+    buildSourceInterpretationRequest(input),
+    { ...metadata, model: input.binding.model },
+  );
+  const before = JSON.stringify(original);
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  const detailClaim = plan.claims.find((c) => c.subject === "/details/1")!;
+  const elsewhere = inventedGroundedReviewRequests(plan).filter((part) => {
+    const body = JSON.parse(part.prompt);
+    return (
+      !part.assignedClaimIds.includes(detailClaim.id) &&
+      body.requiredContractClauses.some((c: { id: string }) => c.id === "s5")
+    );
+  });
+  assert(elsewhere.length > 0);
+  for (const part of elsewhere) {
+    const body = JSON.parse(part.prompt);
+    assert.deepEqual(body.contractClauseDraftBindings, [
+      {
+        sourceRef: "s5",
+        scope: "project_context",
+        candidateDetails: [{ index: 1, explanation }],
+      },
+    ]);
+    assert.deepEqual(body.draft.details, original.response.details);
+  }
+  assert.equal(JSON.stringify(original), before);
 });
 
 test("Review records become stale for source draft configuration or version and reject tampering", () => {

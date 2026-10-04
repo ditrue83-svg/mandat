@@ -22,7 +22,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v30";
+  "documentary-source-semantic-review-v31";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -385,6 +385,20 @@ ${item.meaning.statement}`,
       ...passages.map((item) => item.id),
       ...fieldIndexes.map((index) => `f${index}`),
     ];
+    const contractClauses = requiredContractClauses.filter((item) =>
+      sourceIds.includes(item.id),
+    );
+    // These are lookup candidates from the entire draft, not confirmations.
+    // A matching reference can still omit part of a compound condition.
+    const contractClauseDraftBindings = contractClauses.map((clause) => ({
+      sourceRef: clause.id,
+      scope: clause.scope,
+      candidateDetails: draft.response.details.flatMap((detail, index) =>
+        detail.scope === clause.scope && detail.sourceRefs.includes(clause.id)
+          ? [{ index, explanation: detail.explanation }]
+          : [],
+      ),
+    }));
     const responseFormat: AutomaticResponseFormat = {
       type: "json_schema",
       json_schema: {
@@ -423,6 +437,7 @@ ${item.meaning.statement}`,
         "Ogni claim è affidato a una sola richiesta con tutte le sue citazioni; i passaggi aggiunti sono contesto, non una selezione che sostituisce coverage. Esamina tutti i passaggi e campi di coverage. Non richiedere che tutti gli acquisti siano ripetuti in ogni frammento. Usa findings per problemi materiali nel significato del lavoro; nessuna autocorrezione.",
         "omitted_scope richiede una prestazione principale, accessoria o esclusa mancante, oppure un limite che cambi concretamente oggetto, azione, ruolo o applicabilità al target. In reason identifica quale lavoro risulterebbe omesso o diverso. Una condition nella lettura indipendente è una prova di contesto, non un obbligo di copiarla nel draft. Periodi contrattuali, proroghe temporali, scadenze e contatti non devono essere ripetuti quando non cambiano le prestazioni. La loro sola assenza non produce findings né not_verifiable.",
         "Eccezione esplicita: requiredContractClauses contiene condizioni che il draft deve riportare nei details, anche quando non cambiano le prestazioni. Per ciascuna nota composta controlla separatamente ogni obbligo, limite, eccezione e permesso originale: una stessa citazione sN non prova che tutte le sue proposizioni siano state rappresentate. Se manca un fatto, registra omitted_contract_condition con la clausola originale in sourceRefs e nomina in reason la proposizione assente; non chiamarlo omitted_scope se riguarda solo modalità amministrative. Per esempio, il limite percentuale al subappalto non sostituisce il permesso di comparire in più offerte. Cerca prima nell'intero draft e non pretendere una copia letterale, ma non considerare una citazione sufficiente senza il fatto. Le condizioni amministrative fuori da requiredContractClauses restano facoltative salvo che il draft le affermi falsamente.",
+        "contractClauseDraftBindings localizza i dettagli candidati nell'intero draft, anche se il loro claim è assegnato a un altro gruppo. Prima di dichiarare un'omissione leggi quei testi e confronta ogni proposizione con la clausola originale. Sono rinvii, non approvazioni: un riferimento corrispondente non prova completezza o correttezza. Non confondere l'assenza dai tuoi assignedClaims con l'assenza dal draft; controlla comunque tutti i details.",
         "Distinzione obbligatoria: omettere la data di inizio di una fornitura non omette una prestazione; omettere un servizio di installazione opzionale omette un lavoro acquistabile. Una data o condizione che il draft afferma in modo falso resta contradicted: l'assenza di un dettaglio e un'affermazione falsa sono casi diversi. Esclusioni di lavoro, obblighi accessori e limiti territoriali che cambiano l'ambito restano da controllare.",
         "coverage complete significa che hai esaminato tutto il gruppo, non che il draft debba ripeterne ogni dato o che sia approvato. Se non puoi esaminarlo usa unreadable; non dare supported a ciò che non puoi verificare. Cita soltanto gli ID originali visibili. Nessun giudizio aziendale, di idoneità o di partecipazione.",
       ],
@@ -431,11 +446,8 @@ ${item.meaning.statement}`,
       targetScope: context.targetScope,
       originalCoverage: context.coverage,
       classificationContext,
-      requiredContractClauses: requiredContractClauses.filter((item) =>
-        item.id.startsWith("s")
-          ? passages.some((passage) => passage.id === item.id)
-          : fieldIndexes.some((index) => `f${index}` === item.id),
-      ),
+      requiredContractClauses: contractClauses,
+      contractClauseDraftBindings,
       draft: draftView,
       assignedClaims: group.claims,
       coverage: {
