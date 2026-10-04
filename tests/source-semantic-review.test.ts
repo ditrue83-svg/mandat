@@ -395,7 +395,7 @@ test("Every provider claim remains required when a large review is split into sm
     );
     assert(
       body.rules.some((rule: string) =>
-        rule.includes("draftComponentsForCompleteness"),
+        rule.includes("rappresentazione COMPLETA"),
       ),
     );
     assert.equal(
@@ -1098,7 +1098,10 @@ test("A large review uses bounded groups while an explicit output limit changes 
     ...config,
     maxTokens: 16_384,
   });
-  assert.equal(automatic.claims.length, 19);
+  assert.equal(
+    automatic.claims.filter((c) => c.kind !== "scope_coverage").length,
+    19,
+  );
   assert.equal(automatic.maxTokens, 8192);
   assert.equal(expanded.maxTokens, 16_384);
   assert(
@@ -1133,7 +1136,7 @@ test("Independent review is source-only and binds every server claim without cha
   assert.equal(plan.sourceKey, original.sourceKey);
   assert.equal(plan.draftHash, original.hash);
   assert.equal(plan.maxTokens, 8192);
-  assert.equal(plan.claims.length, 7); // summary + four dimensions + detail + classification
+  assert.equal(plan.claims.length, 8); // fidelity checks plus mandatory source completeness
   const prompt = JSON.parse(plan.requests[0].prompt);
   assert.deepEqual(prompt.draft.details, original.response.details);
   assert.deepEqual(
@@ -1357,6 +1360,151 @@ test("A keyed review blocks omitted work even when every stated claim is support
   assert.equal(reviewed.findings[0].kind, "omitted_scope");
   assert.equal(reviewed.evidence.find((p) => p.id === "s1")!.text, sourceText);
   assert.equal(JSON.stringify(original), before);
+});
+
+test("Mandatory work completeness uses every component even when the summary uses a collective name", () => {
+  const base = context();
+  const purchased =
+    "Fornitura di pannelli, porte e apparecchi di climatizzazione; realizzazione e rimozione di segnaletica.";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: base.body.passages.map((p) =>
+        p.id === "s1"
+          ? { ...p, text: purchased, endUtf16: purchased.length }
+          : p,
+      ),
+    },
+  };
+  const seed = draft(input).response;
+  const component = seed.components[0];
+  const descriptions = [
+    "Fornitura di pannelli.",
+    "Fornitura di porte.",
+    "Fornitura di apparecchi di climatizzazione.",
+    "Realizzazione e rimozione di segnaletica.",
+  ];
+  const make = (complete: boolean) =>
+    recordSourceInterpretation(
+      {
+        ...seed,
+        summary: "Fornitura di attrezzature e realizzazione di segnaletica.",
+        components: descriptions
+          .slice(0, complete ? 4 : 3)
+          .map((description) => ({
+            ...component,
+            description,
+            meaning: { ...component.meaning, statement: description },
+          })),
+      },
+      buildSourceInterpretationRequest(input),
+      { ...metadata, model: input.binding.model },
+    );
+  const original = make(true),
+    before = JSON.stringify(original);
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  const requests = inventedGroundedReviewRequests(plan);
+  const coverageClaims = plan.claims.filter((c) => c.kind === "scope_coverage");
+  assert.deepEqual(
+    coverageClaims.flatMap((c) => c.sourceRefs).sort(),
+    [
+      ...input.body.passages.map((p) => p.id),
+      ...input.body.fields.map((_f, i) => `f${i}`),
+    ].sort(),
+  );
+  assert.equal(new Set(coverageClaims.flatMap((c) => c.sourceRefs)).size, 6);
+  for (const claim of coverageClaims) {
+    const representation = JSON.parse(
+      claim.text.slice(claim.text.indexOf("\n") + 1),
+    );
+    assert.deepEqual(
+      representation.components.map((c: any) => c.description),
+      descriptions,
+    );
+    assert.equal(representation.summary, original.response.summary);
+    const owner = requests.filter((r) => r.assignedClaimIds.includes(claim.id));
+    assert.equal(owner.length, 1);
+    assert.deepEqual(owner[0].ownedScopeCoverageIds, claim.sourceRefs);
+    assert(owner[0].assignedClaimIds.length <= 8);
+  }
+  const valid = answers(plan);
+  assert.equal(
+    readSourceSemanticReview(
+      recordSourceSemanticReview(valid.map(wireResponse), plan, metadata),
+      plan,
+    )?.accepted,
+    true,
+  );
+  const ownerIndex = requests.findIndex((r) =>
+    r.ownedScopeCoverageIds.includes("s1"),
+  );
+  const nonOwner = requests.findIndex(
+    (r) =>
+      !r.ownedScopeCoverageIds.includes("s1") && r.sourceIds.includes("s1"),
+  );
+  assert(nonOwner >= 0);
+  const invalid = structuredClone(valid);
+  invalid[nonOwner].findings.push({
+    kind: "omitted_scope",
+    reason:
+      "La sintesi breve viene erroneamente scambiata per tutte le componenti.",
+    sourceRefs: ["s1"],
+  });
+  assert.throws(() =>
+    recordSourceSemanticReview(invalid.map(wireResponse), plan, metadata),
+  );
+  assert.throws(
+    () => recordSourceSemanticReview(invalid, plan, metadata),
+    /mandatory source coverage owner/,
+  );
+  const missingCheck = structuredClone(valid);
+  missingCheck[ownerIndex].checks = missingCheck[ownerIndex].checks.filter(
+    (c) => c.claimId !== requests[ownerIndex].scopeCoverageClaim!.id,
+  );
+  assert.throws(() =>
+    recordSourceSemanticReview(missingCheck.map(wireResponse), plan, metadata),
+  );
+  assert.throws(
+    () => recordSourceSemanticReview(missingCheck, plan, metadata),
+    /exactly one check/,
+  );
+
+  const incomplete = make(false),
+    incompleteBefore = JSON.stringify(incomplete);
+  const missingPlan = buildSourceSemanticReviewRequest(
+    input,
+    incomplete,
+    config,
+  );
+  const missingCoverage = missingPlan.claims.find(
+    (c) => c.kind === "scope_coverage" && c.sourceRefs.includes("s1"),
+  )!;
+  const negative = answers(missingPlan);
+  Object.assign(
+    negative
+      .flatMap((r) => r.checks)
+      .find((c) => c.claimId === missingCoverage.id)!,
+    {
+      verdict: "not_verifiable",
+      draftQuote: "Tutte le prestazioni acquistate, accessorie o escluse",
+      reason:
+        "La fonte acquista anche realizzazione e rimozione di segnaletica; la rappresentazione completa non contiene questa componente.",
+    },
+  );
+  assert.equal(
+    readSourceSemanticReview(
+      recordSourceSemanticReview(
+        negative.map(wireResponse),
+        missingPlan,
+        metadata,
+      ),
+      missingPlan,
+    )?.accepted,
+    false,
+  );
+  assert.equal(JSON.stringify(original), before);
+  assert.equal(JSON.stringify(incomplete), incompleteBefore);
 });
 
 test("A cited compound contract note can still omit a separate bidding permission", () => {
@@ -1975,7 +2123,9 @@ test("Long review covers every original passage and scalar including the unselec
     for (const claim of chunk.assignedClaims)
       for (const id of claim.sourceRefs)
         assert.ok(
-          chunk.passages.some((item: { id: string }) => item.id === id),
+          [...chunk.passages, ...chunk.fields].some(
+            (item: { id: string }) => item.id === id,
+          ),
         );
     assert.deepEqual(
       chunk.classificationContext,
@@ -2140,21 +2290,29 @@ test("A detail absent from the work selection uses its exact original fact witho
   );
   const request = buildGroundedSourceReviewRequests(plan, evidence)[0];
   const body = JSON.parse(request.prompt);
-  assert.deepEqual(body.originalFacts, [
-    {
-      id: "o-s1",
-      sourceRef: "s1",
-      scope: "project_context",
-      rawPath: input.body.passages[0].rawPath,
-    },
-    {
-      id: "o-s4",
-      sourceRef: "s4",
-      scope: "project_context",
-      rawPath: date.rawPath,
-    },
-  ]);
+  assert.deepEqual(
+    body.originalFacts.filter((f: any) => ["s1", "s4"].includes(f.sourceRef)),
+    [
+      {
+        id: "o-s1",
+        sourceRef: "s1",
+        scope: "project_context",
+        rawPath: input.body.passages[0].rawPath,
+      },
+      {
+        id: "o-s4",
+        sourceRef: "s4",
+        scope: "project_context",
+        rawPath: date.rawPath,
+      },
+    ],
+  );
   assert.equal(body.passages.find((p: any) => p.id === "s4").text, date.text);
+  assert(
+    request.ownedScopeCoverageIds.every((ref) =>
+      body.originalFacts.some((f: any) => f.sourceRef === ref),
+    ),
+  );
   assert(!JSON.stringify(body.independentReading).includes('"s4"'));
   const response = {
     chunkId: request.id,
@@ -2436,10 +2594,14 @@ test("The generated review schema keeps each original fact with its own detail",
   assert(!wire(wireResponse(response)));
   assert.throws(
     () =>
-      productionRecordSourceSemanticReview([response], plan, {
-        ...metadata,
-        sourceEvidence: evidence,
-      }),
+      productionRecordSourceSemanticReview(
+        [response, ...answers(plan).slice(1)],
+        plan,
+        {
+          ...metadata,
+          sourceEvidence: evidence,
+        },
+      ),
     /own summary or detail claim/,
   );
 });

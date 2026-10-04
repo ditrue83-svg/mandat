@@ -98,7 +98,8 @@ export function inventedReadingRefs(
   claim: { sourceRefs: string[]; kind?: string },
 ) {
   return [
-    ...(claim.kind === "contract_clause_coverage"
+    ...(claim.kind === "contract_clause_coverage" ||
+    claim.kind === "scope_coverage"
       ? body.originalFacts
           .filter((f: any) => claim.sourceRefs.includes(f.sourceRef))
           .map((f: any) => f.id)
