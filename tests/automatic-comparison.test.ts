@@ -1131,6 +1131,131 @@ test("The company comparison keeps explicit maintenance separate from source exe
   assert.equal(JSON.stringify(source), before);
 });
 
+test("Evaluation context preserves only the selected lot's original non-price descriptions", () => {
+  const detail = raw(true);
+  const criterion = "Funzione professionale inventata. ".repeat(45);
+  Object.assign(detail.procurement, {
+    awardCriteria: [{ description: { it: "CRITERIO_DI_PROGETTO" } }],
+  });
+  Object.assign(detail.lots[0], {
+    awardCriteria: [
+      { description: { it: criterion }, isPriceCriterion: false },
+      { description: { it: "PREZZO_NON_FUNZIONE" }, isPriceCriterion: true },
+    ],
+    qualificationCriteria: [{ description: { it: "REQUISITO_DEL_PERSONALE" } }],
+  });
+  Object.assign(detail.lots[1], {
+    awardCriteria: [{ description: { it: "CRITERIO_ALTRO_LOTTO" } }],
+  });
+  Object.assign(detail.metadata, {
+    awardCriteria: [{ description: { it: "CRITERIO_METADATA" } }],
+  });
+  const original = JSON.stringify(detail);
+  const input = fixture(detail);
+  const request = buildAutomaticComparisonRequest(input);
+  const source = sourceRecord(request);
+  const before = JSON.stringify(source);
+  const body = JSON.parse(
+    buildInterpretedComparisonRequest(request, source).prompt,
+  );
+  const context = body.sourceInterpretation.evaluationContext;
+  const passages = request.passages.filter(
+    (item) => item.rawPath === "/lots/0/awardCriteria/0/description/it",
+  );
+  assert.ok(passages.length > 1);
+  assert.deepEqual(
+    context,
+    passages.map(({ id, scope, rawPath, startUtf16, endUtf16, text }) => ({
+      sourceRef: id,
+      scope,
+      rawPath,
+      startUtf16,
+      endUtf16,
+      text,
+    })),
+  );
+  assert.equal(
+    context.map((item: { text: string }) => item.text).join(""),
+    criterion,
+  );
+  assert.equal(JSON.stringify(source), before);
+  assert.equal(JSON.stringify(detail), original);
+  assert.deepEqual(
+    body.sourceInterpretation.components,
+    source.response.components.map((component, index) => ({
+      id: `u${index + 1}`,
+      ...component,
+    })),
+  );
+  assert.deepEqual(body.sourceInterpretation.details, source.response.details);
+  const other = buildAutomaticComparisonRequest({
+    ...input,
+    profile: {
+      ...input.profile,
+      activities: "Servizio inventato completamente diverso.",
+    },
+  });
+  const otherBody = JSON.parse(
+    buildInterpretedComparisonRequest(other, source).prompt,
+  );
+  assert.deepEqual(otherBody.sourceInterpretation.evaluationContext, context);
+  assert.equal(source.hash, body.sourceInterpretation.hash);
+});
+
+test("Project evaluation context excludes qualification, metadata and explicit price criteria", () => {
+  const detail = raw();
+  Object.assign(detail, {
+    criteria: {
+      awardCriteria: [
+        {
+          description: { de: "ORIGINAL_DE", it: "ORIGINALE_IT" },
+          isPriceCriterion: false,
+        },
+        { description: { it: "PREZZO_ESCLUSO" }, isPriceCriterion: true },
+      ],
+      qualificationCriteria: [
+        { description: { it: "IDONEITA_NON_PRESTAZIONE" } },
+      ],
+    },
+  });
+  Object.assign(detail.metadata, {
+    awardCriteria: [{ description: { it: "METADATA_NON_AUTOREVOLE" } }],
+  });
+  const request = buildAutomaticComparisonRequest(fixture(detail));
+  const source = sourceRecord(request);
+  const before = JSON.stringify(source);
+  const body = JSON.parse(
+    buildInterpretedComparisonRequest(request, source).prompt,
+  );
+  const context = body.sourceInterpretation.evaluationContext;
+  assert.deepEqual(
+    context.map((item: { text: string; scope: string }) => [
+      item.text,
+      item.scope,
+    ]),
+    [
+      ["ORIGINAL_DE", "project_context"],
+      ["ORIGINALE_IT", "project_context"],
+    ],
+  );
+  for (const item of context) {
+    const original = request.passages.find(
+      (passage) => passage.id === item.sourceRef,
+    )!;
+    assert.equal(item.rawPath, original.rawPath);
+    assert.equal(item.text, original.text);
+    assert.equal(item.startUtf16, original.startUtf16);
+    assert.equal(item.endUtf16, original.endUtf16);
+  }
+  assert.equal(JSON.stringify(source), before);
+  assert.deepEqual(body.sourceInterpretation.details, []);
+  const without = buildAutomaticComparisonRequest(fixture());
+  const withoutBody = JSON.parse(
+    buildInterpretedComparisonRequest(without, sourceRecord(without)).prompt,
+  );
+  assert.equal("evaluationContext" in withoutBody.sourceInterpretation, false);
+});
+
 test("A mixed precise and broad company scope stays reviewable without invented coverage", () => {
   const activities = "Pulizie di vetri esterni e altri servizi per immobili.";
   const input = fixture(raw(), { activities });
@@ -2454,6 +2579,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v69",
     sourceVersion: "documentary-source-interpretation-v34",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v70",
+    sourceVersion: "documentary-source-interpretation-v35",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2487,7 +2616,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v70");
+    assert.equal(request.version, "documentary-service-comparison-v71");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(

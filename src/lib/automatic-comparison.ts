@@ -43,7 +43,7 @@ import { SOURCE_EVIDENCE_READING_VERSION } from "./source-evidence-reading";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v70";
+  "documentary-service-comparison-v71";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -804,6 +804,39 @@ export function buildInterpretedComparisonRequest(
   );
   if (!review?.accepted)
     throw new Error("Source semantic review must be current and accepted");
+  // Original target criteria can identify a function worth checking without
+  // establishing a separately purchased service. Preserve that distinction,
+  // and do not infer context from another lot or the company's description.
+  const evaluationContext = request.passages.flatMap((passage) => {
+    if (passage.scope !== request.targetScope) return [];
+    const roots = request.promptBody.target.lot
+      ? [request.promptBody.target.lot.path]
+      : ["/criteria", "/procurement", "/project-info", ""];
+    const root = roots.find((value) =>
+      passage.rawPath.startsWith(`${value}/awardCriteria/`),
+    );
+    if (root === undefined) return [];
+    const field = /^awardCriteria\/(\d+)\/description(?:\/[^/]+)?$/.exec(
+      passage.rawPath.slice(root.length + 1),
+    );
+    if (!field || !passage.text.trim()) return [];
+    const price = request.promptBody.fields.find(
+      (value) =>
+        value.scope === request.targetScope &&
+        value.rawPath === `${root}/awardCriteria/${field[1]}/isPriceCriterion`,
+    );
+    if (price?.value === true) return [];
+    return [
+      {
+        sourceRef: passage.id,
+        scope: passage.scope,
+        rawPath: passage.rawPath,
+        startUtf16: passage.startUtf16,
+        endUtf16: passage.endUtf16,
+        text: passage.text,
+      },
+    ];
+  });
   const componentIds = source.components.map((component) => component.id);
   const responseFormat = structuredFormat(
     "interpreted_service_comparison",
@@ -839,6 +872,11 @@ export function buildInterpretedComparisonRequest(
         "classificationContext conserva classificazioni originali e ambito; classificationReadings e meaning spiegano come sono state usate per identificare ogni componente. Mantieni quel significato senza reinterpretarlo secondo la ditta. Un contesto ampio o condiviso non sostituisce il servizio concreto del target e non prevale sul lotto selezionato.",
         "Le classificazioni non sono prestazioni: non trasformarle in componenti o in prova sufficiente di sovrapposizione. componentRefs accetta soltanto gli id delle componenti; i codici senza etichette non autorizzano decodifiche inventate.",
         "details conserva specifiche non indicate, condizioni di esecuzione e contesto condiviso: non sono componenti acquistate né cambiano l'identità già accertata dell'oggetto. Una lacuna sulle prestazioni concrete può però impedire di attestare copertura completa secondo la regola precedente. Non trasformare dettagli tecnici mancanti in requisiti aziendali. roleEvidence conserva il testo dell'azione richiesto dalla fonte: mantieni il ruolo registrato, senza confondere esecuzione, fornitura, gestione e manutenzione.",
+        ...(evaluationContext.length
+          ? [
+              "evaluationContext riporta soltanto descrizioni ORIGINALI di criteri di aggiudicazione del target, con riferimenti e ambito. Sono criteri, non prestazioni autonome: non aggiungerli alle components né considerarli prova di un incarico separato o di copertura completa. Se un criterio valuta esplicitamente una funzione professionale concreta dichiarata dalla ditta, ma le prestazioni già identificate non chiariscono se tale funzione faccia parte del pacchetto, non escludere definitivamente quel possibile interesse: conserva activitiesOverlap=null, mainScopeCovered=false e comparisonUncertain=true e spiega la funzione e ciò che manca, citando il sourceRef del criterio nella comparison, componentRefs e companyRefs. Non dichiarare una sovrapposizione certa o capacità non dichiarate. Prezzo, qualità generale, sostenibilità, requisiti di personale/organizzazione e lo stesso ambiente, settore o clientela non identificano da soli una funzione professionale acquistata; non riaprire su questa base attività concretamente estranee. Se il lavoro coincide già nelle componenti, non renderlo incerto per la sola presenza di un criterio.",
+            ]
+          : []),
       ],
       contractualRoleTaxonomy: {
         supply: "Fornire beni.",
@@ -861,6 +899,7 @@ export function buildInterpretedComparisonRequest(
         components: source.components,
         details: source.details,
         issues: source.issues,
+        ...(evaluationContext.length ? { evaluationContext } : {}),
       },
       company: { activities: request.companyPassages },
     },
