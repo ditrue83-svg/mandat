@@ -849,7 +849,7 @@ test.each(["\n", "\r\n"])(
       prompt.rules.join(" "),
       /separa condizioni autonome nei details/,
     );
-    assert.equal(request.version, "documentary-source-interpretation-v33");
+    assert.equal(request.version, "documentary-source-interpretation-v34");
     const oldKey = createHash("sha256")
       .update(
         stableDocumentaryJson({
@@ -2288,6 +2288,14 @@ test("An opening selected-lot identifier uses its explicit number and its own fi
     { sourceRef: "f0", value: 4 },
     { sourceRef: "f1", value: 4 },
   ]);
+  assert(
+    JSON.parse(request.prompt).rules.some(
+      (rule: string) =>
+        rule.includes("summarySourceRefs") &&
+        rule.includes("targetNumberEvidence: f0, f1") &&
+        rule.includes("I passaggi sN non provano quel numero"),
+    ),
+  );
   const valid = {
     ...response(input),
     targetRef: "s5",
@@ -3097,6 +3105,7 @@ test.each([
   "documentary-source-interpretation-v30",
   "documentary-source-interpretation-v31",
   "documentary-source-interpretation-v32",
+  "documentary-source-interpretation-v33",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
   assert.equal(request.version, SOURCE_INTERPRETATION_VERSION);

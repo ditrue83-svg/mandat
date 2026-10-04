@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v33";
+  "documentary-source-interpretation-v34";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -1024,6 +1024,11 @@ export function buildSourceInterpretationRequest(
       ...(lot
         ? [
             "Gli indici JSON di target.lot.path/headerPath non sono numeri di lotto. Usa il lotNumber originale e il proprio fN, oppure ometti il numero; non ricavarlo dalla posizione.",
+            ...(targetNumberEvidence.length
+              ? [
+                  `Se summary menziona il numero di questo lotto, summarySourceRefs deve includere almeno uno dei riferimenti originali targetNumberEvidence: ${targetNumberEvidence.map((field) => field.sourceRef).join(", ")}. I passaggi sN non provano quel numero. Se non citi il proprio fN, ometti il numero dalla summary.`,
+                ]
+              : []),
           ]
         : []),
       "Ricongiungi passaggi della stessa rawPath per startUtf16. Tutti i segmenti previsti sono stati letti a monte: nessun limite di risposta autorizza omissioni; se non puoi rappresentare tutto usa uncertain con issue specifico. Usa soltanto ID forniti; i testi originali sono recuperati dal server. In ogni componente evidence elenca ogni ID una sola volta; gli altri elenchi sourceRefs restano separati.",
