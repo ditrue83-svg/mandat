@@ -590,10 +590,10 @@ test.each([false, true, 0, null])(
     assert(
       new Ajv2020({ strict: false }).compile(
         request.responseFormat.json_schema.schema,
-      )(wireResponse(complete)),
+      )(wireResponse(complete, request)),
     );
     const recorded = recordSourceInterpretation(
-      wireResponse(complete),
+      wireResponse(complete, request),
       request,
       {
         id: "invented-contract-field",
@@ -677,21 +677,30 @@ test("A text citation cannot gain an unrelated null field with the same numeric 
   const validateWire = new Ajv2020({ strict: false }).compile(
     request.responseFormat.json_schema.schema,
   );
-  assert(validateWire(wireResponse(valid)));
+  assert(validateWire(wireResponse(valid, request)));
   const invalid = {
     ...valid,
     details: [{ ...valid.details[0], sourceRefs: ["s5", "f5"] }],
   };
   const before = JSON.stringify(invalid);
-  assert(!validateWire(wireResponse(invalid)));
+  assert(!validateWire(wireResponse(invalid, request)));
   assert.throws(
-    () => recordSourceInterpretation(wireResponse(invalid), request, metadata),
-    /absent structured value/,
+    () =>
+      recordSourceInterpretation(
+        wireResponse(invalid, request),
+        request,
+        metadata,
+      ),
+    /own scoped source/,
   );
   assert.equal(JSON.stringify(invalid), before);
   assert.equal(
     readSourceInterpretation(
-      recordSourceInterpretation(wireResponse(valid), request, metadata),
+      recordSourceInterpretation(
+        wireResponse(valid, request),
+        request,
+        metadata,
+      ),
       request,
     )?.status,
     "resolved",
@@ -840,7 +849,7 @@ test.each(["\n", "\r\n"])(
       prompt.rules.join(" "),
       /separa condizioni autonome nei details/,
     );
-    assert.equal(request.version, "documentary-source-interpretation-v29");
+    assert.equal(request.version, "documentary-source-interpretation-v30");
     const oldKey = createHash("sha256")
       .update(
         stableDocumentaryJson({
@@ -858,10 +867,29 @@ test.each(["\n", "\r\n"])(
 );
 // Test fixtures keep the stored contract; encode their citations explicitly
 // when exercising the distinct provider JSON Schema.
-function wireResponse(value: any) {
+function wireResponse(
+  value: any,
+  request?: ReturnType<typeof buildSourceInterpretationRequest>,
+) {
+  const required = request?.requiredContractClauseIds ?? [];
+  const clauseDetails = Object.fromEntries(
+    required.map((id) => [
+      id,
+      value.details.filter((detail: any) => detail.sourceRefs.includes(id)),
+    ]),
+  );
   return {
     ...value,
-    evidenceFormat: "component_quotations_v4",
+    evidenceFormat: "component_quotations_v5",
+    ...(value.status === "resolved" && required.length
+      ? {
+          contractClausesById: clauseDetails,
+          details: value.details.filter(
+            (detail: any) =>
+              !detail.sourceRefs.some((id: string) => required.includes(id)),
+          ),
+        }
+      : {}),
     components: value.components.map(
       ({ sourceRefs, roleEvidence, meaning, ...component }: any) => {
         const { sourceRefs: _roleRefs, ...role } = roleEvidence ?? {};
@@ -878,6 +906,116 @@ function wireResponse(value: any) {
     ),
   };
 }
+
+test("Resolved wire requires every contractual clause separately with its own scoped original ID", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      fields: [
+        {
+          scope: "project_context",
+          rawPath: "/procurement/canContractBeExtended",
+          value: false,
+        },
+      ],
+      passages: [
+        ...base.body.passages,
+        ...[
+          ["s5", "/terms/subContractorAllowed", "yes"],
+          [
+            "s6",
+            "/terms/subContractorNote/it",
+            "Subappalto massimo 70%, da elencare nell’offerta.",
+          ],
+        ].map(([id, rawPath, text]) => ({
+          ...base.body.passages[0],
+          id,
+          rawPath,
+          text,
+          role: "context" as const,
+          endUtf16: text.length,
+        })),
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  assert.deepEqual(request.requiredContractClauseIds, ["s5", "s6", "f0"]);
+  const value = {
+    ...response(input),
+    details: [
+      {
+        kind: "execution_condition",
+        explanation: "Il ricorso a subappaltatori è consentito.",
+        scope: "project_context",
+        sourceRefs: ["s5"],
+      },
+      {
+        kind: "execution_condition",
+        explanation: "Subappalto massimo 70%, con elenco nell’offerta.",
+        scope: "project_context",
+        sourceRefs: ["s6"],
+      },
+      {
+        kind: "execution_condition",
+        explanation: "La proroga del contratto è vietata.",
+        scope: "project_context",
+        sourceRefs: ["f0"],
+      },
+    ],
+  };
+  const wire = wireResponse(value, request);
+  const originalWire = JSON.stringify(wire);
+  const accepts = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  assert.equal(accepts(wire), true);
+  const record = recordSourceInterpretation(wire, request, metadata);
+  assert.deepEqual(record.response.details, value.details);
+  assert.equal("contractClausesById" in record.response, false);
+  assert.equal(
+    readSourceInterpretation(record, request)!.evidence.find(
+      (p) => p.id === "f0",
+    )!.text,
+    "false",
+  );
+  assert.equal(JSON.stringify(wire), originalWire);
+  for (const mutate of [
+    (v: any) => {
+      delete v.contractClausesById.s5;
+      v.details = value.details;
+    },
+    (v: any) => {
+      v.contractClausesById.s5 = [];
+    },
+    (v: any) => {
+      v.contractClausesById.s5[0].sourceRefs = ["s6"];
+    },
+    (v: any) => {
+      v.contractClausesById.s5[0].scope = "selected_lot";
+    },
+    (v: any) => {
+      v.contractClausesById.s999 = v.contractClausesById.s5;
+    },
+  ]) {
+    const changed = structuredClone(wire);
+    mutate(changed);
+    const before = JSON.stringify(changed);
+    assert.equal(accepts(changed), false);
+    assert.throws(() => recordSourceInterpretation(changed, request, metadata));
+    assert.equal(JSON.stringify(changed), before);
+  }
+  // The provider map cannot exceed the unchanged aggregate stored limit.
+  const overflow = structuredClone(wire);
+  overflow.details = Array.from({ length: 30 }, () => ({
+    kind: "technical_specification",
+    explanation: "Specifiche inventate per il test del limite.",
+    scope: "project_context",
+    sourceRefs: ["s1"],
+  }));
+  assert.throws(() => recordSourceInterpretation(overflow, request, metadata));
+});
 const metadata = {
   id: "invented-source-record",
   at: "2030-01-01T12:00:00.000Z",

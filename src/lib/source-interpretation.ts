@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v29";
+  "documentary-source-interpretation-v30";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -479,6 +479,7 @@ export const sourceInterpretationResponseSchema = buildResponseSchema();
 function buildProviderResponseSchema(
   bounds?: Parameters<typeof buildResponseSchema>[0],
   reference: z.ZodType<string> = z.string().regex(/^[sg]\d+$/),
+  requiredClauses?: readonly { id: string; scope: z.infer<typeof scope> }[],
 ) {
   const [resolved, uncertain, conflicting] =
     buildResponseSchema(bounds).options;
@@ -523,7 +524,26 @@ function buildProviderResponseSchema(
         meaning: anyMeaning,
       }),
   ]);
-  const evidenceFormat = z.literal("component_quotations_v4");
+  const evidenceFormat = z.literal("component_quotations_v5");
+  const detail = resolved.shape.details.element;
+  const contractClausesById = requiredClauses
+    ? z.strictObject(
+        Object.fromEntries(
+          requiredClauses.map((clause) => [
+            clause.id,
+            z
+              .array(
+                detail.extend({
+                  sourceRefs: z.array(z.literal(clause.id)).length(1),
+                  scope: z.literal(clause.scope),
+                }),
+              )
+              .min(1)
+              .max(32),
+          ]),
+        ),
+      )
+    : z.record(z.string().regex(/^[sf]\d+$/), z.array(detail).min(1).max(32));
   const unresolvedFields = {
     evidenceFormat,
     components: z.array(anyComponent).max(64).describe(componentsDescription),
@@ -531,6 +551,15 @@ function buildProviderResponseSchema(
   return z.discriminatedUnion("status", [
     resolved.extend({
       evidenceFormat,
+      ...(requiredClauses?.length === 0
+        ? {}
+        : {
+            contractClausesById: requiredClauses
+              ? contractClausesById.describe(
+                  "Una voce per ogni clausola, con tutte le condizioni e solo il suo ID/scope originali. I details esterni contengono altri fatti. Totale massimo 32 dettagli.",
+                )
+              : contractClausesById.optional(),
+          }),
       components: z
         .array(identifiedComponent)
         .min(1)
@@ -603,11 +632,48 @@ function decodeProviderResponse(
     !("evidenceFormat" in response)
   )
     return response;
-  const {
-    evidenceFormat: _format,
-    components,
-    ...value
-  } = providerResponseSchema.parse(response);
+  const parsed = providerResponseSchema.parse(response);
+  const { evidenceFormat: _format, components, ...value } = parsed;
+  let details = value.details;
+  if (parsed.status === "resolved") {
+    // Zod validates the dynamic object; Object.fromEntries cannot express its
+    // source-dependent keys in TypeScript's inferred object type.
+    const clauses = parsed.contractClausesById as
+      | Record<
+          string,
+          z.infer<typeof sourceInterpretationResponseSchema>["details"]
+        >
+      | undefined;
+    if (!request.requiredContractClauseIds.length && clauses !== undefined)
+      throw new Error("Unexpected source interpretation contract clause map");
+    if (
+      JSON.stringify(Object.keys(clauses ?? {}).sort()) !==
+      JSON.stringify([...request.requiredContractClauseIds].sort())
+    )
+      throw new Error("Incomplete source interpretation contract clause map");
+    const originals = sourceEvidencePassages(request);
+    const clauseDetails = request.requiredContractClauseIds.flatMap((id) => {
+      const original = originals.find((passage) => passage.id === id);
+      if (
+        !original ||
+        clauses![id].some(
+          (detail) =>
+            detail.sourceRefs.length !== 1 ||
+            detail.sourceRefs[0] !== id ||
+            detail.scope !== original.scope,
+        )
+      )
+        throw new Error(
+          "Contract clause detail must cite its own scoped source",
+        );
+      return clauses![id];
+    });
+    details = [...details, ...clauseDetails];
+  }
+  // The map is a provider contract, not part of the stored interpretation.
+  const storedValue = Object.fromEntries(
+    Object.entries(value).filter(([key]) => key !== "contractClausesById"),
+  );
   const classificationRefs = new Set(
     request.classificationContext.flatMap((item) => [
       ...(item.code?.sourceRefs ?? []),
@@ -621,7 +687,8 @@ function decodeProviderResponse(
     ]),
   );
   return {
-    ...value,
+    ...storedValue,
+    details,
     components: components.map(
       ({ evidence, roleEvidence, meaning, ...component }) => {
         const sourceRefs = evidence.flatMap(({ sourceRef }) => {
@@ -872,6 +939,11 @@ export function buildSourceInterpretationRequest(
     requiredContractClauseIds: requiredContractClauses.map((p) => p.id),
     rules: [
       "requiredContractClauseIds: ogni ID va nei details con la propria condizione completa. Non bastano summary/evidence e non aggiungere riferimenti estranei.",
+      ...(requiredContractClauses.length
+        ? [
+            "Con status resolved, contractClausesById rendiconta ogni requiredContractClauseId con tutte le sue proposizioni autonome, una o più spiegazioni, solo il suo ID/scope. Anche yes/no è una clausola propria, distinta dalle note. La mappa confluisce nei details memorizzati; details esterni contiene altri fatti. Totale massimo 32 dettagli. Riferimenti o spiegazioni vuote non bastano: i giudizi verificano significato e completezza.",
+          ]
+        : []),
       "canContractBeExtended yes/true consente la proroga, no/false la vieta, senza inventare durata. subContractorAllowed riguarda il ricorso a subappaltatori, non la subfornitura: yes/true consente, no/false vieta, con valore e note. null non indicato; altro valore da verificare.",
       "classificationContext è un registro immutabile separato dalle prestazioni: rendiconta ogni ID una volta, conservando codici, etichette, lingue e ambiti. clarifies_domain richiede un'etichetta originale; broad_context è una famiglia ampia, non prova una prestazione specifica; shared_project_only è contesto condiviso. Senza etichetta non decodificare codici da memoria. unresolved indica dubbio materiale; conflicting richiede asserzioni incompatibili.",
       "meaning identifica l'oggetto nel suo dominio: evidence cita prove non classificatorie; classificationContextIds riporta le classificazioni usate. Non basta ripetere o tradurre un termine ambiguo: disambigua con le etichette originali, senza scegliere settori esterni o dichiarare errata la classificazione per salvare un'ipotesi. explicit_text si fonda sul testo; text_with_classification_context richiede un'etichetta del target. Solo per un lotto senza classificazioni proprie può usare un'etichetta condivisa insieme a prove locali del significato. Famiglie classificatorie non provano equivalenza, capacità o ammissibilità.",
@@ -906,7 +978,9 @@ export function buildSourceInterpretationRequest(
     readings,
     requiredContractClauses,
     ...(clauseBlocks.length ? { contractClauseBlocks: clauseBlocks } : {}),
-    ...(evidenceGroups.length ? { componentEvidenceGroups: evidenceGroups } : {}),
+    ...(evidenceGroups.length
+      ? { componentEvidenceGroups: evidenceGroups }
+      : {}),
     ...promptBody,
     fields,
     classificationContext,
@@ -944,6 +1018,7 @@ export function buildSourceInterpretationRequest(
                 ...evidenceGroups.map((group) => group.id),
               ])
             : boundedReference,
+          requiredContractClauses.map(({ id, scope }) => ({ id, scope })),
         ),
         // Repeated reference enums share a JSON Schema definition. Preserve
         // their exact bounds without charging the long source multiple copies.
