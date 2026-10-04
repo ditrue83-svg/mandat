@@ -849,7 +849,7 @@ test.each(["\n", "\r\n"])(
       prompt.rules.join(" "),
       /separa condizioni autonome nei details/,
     );
-    assert.equal(request.version, "documentary-source-interpretation-v34");
+    assert.equal(request.version, "documentary-source-interpretation-v35");
     const oldKey = createHash("sha256")
       .update(
         stableDocumentaryJson({
@@ -2239,6 +2239,107 @@ test("Unknown, duplicated or out-of-target evidence cannot support a source inte
   );
 });
 
+test("Provider details keep original project and selected-lot references in separate scopes", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    binding: {
+      ...base.binding,
+      target: {
+        kind: "lot",
+        publicationId: "invented-publication",
+        sourceProjectId: "invented-project",
+        lotId: "invented-lot",
+      },
+    },
+    targetScope: "selected_lot",
+    body: {
+      ...base.body,
+      target: {
+        kind: "lot",
+        lot: { id: "invented-lot", path: "/lots/3", headerPath: null },
+      },
+      fields: [
+        { scope: "project_context", rawPath: "/name", value: "Progetto" },
+        { scope: "selected_lot", rawPath: "/lots/3/lotNumber", value: 4 },
+      ],
+      classifications: base.body.classifications.map((c) => ({
+        ...c,
+        appliesTo: "shared_project_context",
+      })),
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[0],
+          id: "s5",
+          scope: "selected_lot",
+          rawPath: "/lots/3/description/it",
+        },
+      ],
+    },
+  };
+  const before = JSON.stringify(input);
+  const request = buildSourceInterpretationRequest(input);
+  const value = {
+    ...response(input),
+    targetRef: "s5",
+    details: [
+      ...response(input).details,
+      {
+        kind: "technical_specification",
+        explanation: "Dati del contesto originale del progetto inventato.",
+        sourceRefs: ["s1", "f0"],
+        scope: "project_context",
+      },
+      {
+        kind: "technical_specification",
+        explanation: "Dati del lotto inventato selezionato.",
+        sourceRefs: ["s5", "f1"],
+        scope: "selected_lot",
+      },
+    ],
+  };
+  const wire = wireResponse(value, request);
+  const accepts = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  assert.equal(accepts(wire), true);
+  assert.doesNotThrow(() =>
+    recordSourceInterpretation(wire, request, metadata),
+  );
+  const selectedIndex = wire.details.findIndex((d: any) =>
+    d.sourceRefs.includes("f1"),
+  );
+  assert(selectedIndex >= 0);
+  for (const changes of [
+    { sourceRefs: ["s5", "s1"] },
+    { sourceRefs: ["s5", "f0"] },
+    { sourceRefs: ["f1"], scope: "project_context" },
+    { kind: "shared_project_context" },
+  ]) {
+    const changed = structuredClone(wire);
+    Object.assign(changed.details[selectedIndex], changes);
+    const original = JSON.stringify(changed);
+    assert.equal(accepts(changed), false);
+    assert.throws(() => recordSourceInterpretation(changed, request, metadata));
+    assert.equal(JSON.stringify(changed), original);
+  }
+  const projectRequest = buildSourceInterpretationRequest(base);
+  const projectWire = wireResponse(response(base), projectRequest);
+  const acceptsProject = new Ajv2020({ strict: false }).compile(
+    projectRequest.responseFormat.json_schema.schema,
+  );
+  assert.equal(acceptsProject(projectWire), true);
+  projectWire.details.push({
+    kind: "technical_specification",
+    explanation: "Un riferimento di progetto non cambia ambito.",
+    sourceRefs: ["s1"],
+    scope: "selected_lot",
+  });
+  assert.equal(acceptsProject(projectWire), false);
+  assert.equal(JSON.stringify(input), before);
+});
+
 test("An opening selected-lot identifier uses its explicit number and its own field proof", () => {
   const base = context();
   const input: SourceInterpretationContext = {
@@ -3106,6 +3207,7 @@ test.each([
   "documentary-source-interpretation-v31",
   "documentary-source-interpretation-v32",
   "documentary-source-interpretation-v33",
+  "documentary-source-interpretation-v34",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
   assert.equal(request.version, SOURCE_INTERPRETATION_VERSION);

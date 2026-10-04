@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v34";
+  "documentary-source-interpretation-v35";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -484,7 +484,11 @@ export const sourceInterpretationResponseSchema = buildResponseSchema();
 // The provider selects passages and quotes the action and object. Their
 // precise supporting references are located locally within that selection.
 function buildProviderResponseSchema(
-  bounds?: Parameters<typeof buildResponseSchema>[0],
+  bounds?: Parameters<typeof buildResponseSchema>[0] & {
+    detailReferenceIdsByScope?: Partial<
+      Record<z.infer<typeof scope>, readonly string[]>
+    >;
+  },
   reference: z.ZodType<string> = z.string().regex(/^[sg]\d+$/),
   requiredClauses?: readonly { id: string; scope: z.infer<typeof scope> }[],
 ) {
@@ -533,6 +537,41 @@ function buildProviderResponseSchema(
   ]);
   const evidenceFormat = z.literal("component_quotations_v5");
   const detail = resolved.shape.details.element;
+  // The scope of every original reference is already known. Encode this
+  // structural relationship in the provider contract as well as retaining
+  // the existing local check; never relabel or repair a generated detail.
+  const scopedRefs = Object.entries(
+    bounds?.detailReferenceIdsByScope ?? {},
+  ).filter(([, ids]) => ids.length > 0);
+  const scopedDetails = scopedRefs.map(([value, ids]) =>
+    detail.extend({
+      scope: z.literal(value as z.infer<typeof scope>),
+      kind:
+        value === "selected_lot"
+          ? z.enum([
+              "missing_specification",
+              "technical_specification",
+              "execution_condition",
+            ])
+          : detail.shape.kind,
+      // Reuse the complete schema for a single scope to avoid duplicating
+      // the long enum already used by summarySourceRefs.
+      sourceRefs:
+        scopedRefs.length === 1
+          ? bounds!.detailRefs
+          : z.array(z.enum(ids)).min(1).max(32),
+    }),
+  );
+  const providerDetail =
+    scopedDetails.length === 2
+      ? z.union([scopedDetails[0], scopedDetails[1]])
+      : (scopedDetails[0] ?? detail);
+  const details = scopedDetails.length
+    ? z
+        .array(providerDetail)
+        .max(32)
+        .describe(resolved.shape.details.description!)
+    : resolved.shape.details;
   const contractClausesById = requiredClauses
     ? z.strictObject(
         Object.fromEntries(
@@ -558,6 +597,7 @@ function buildProviderResponseSchema(
   return z.discriminatedUnion("status", [
     resolved.extend({
       evidenceFormat,
+      details,
       ...(requiredClauses?.length === 0
         ? {}
         : {
@@ -573,8 +613,8 @@ function buildProviderResponseSchema(
         .max(64)
         .describe(componentsDescription),
     }),
-    uncertain.extend(unresolvedFields),
-    conflicting.extend(unresolvedFields),
+    uncertain.extend({ ...unresolvedFields, details }),
+    conflicting.extend({ ...unresolvedFields, details }),
   ]);
 }
 const providerResponseSchema = buildProviderResponseSchema();
@@ -1072,6 +1112,19 @@ export function buildSourceInterpretationRequest(
             classificationCount: classificationContext.length,
             targetRef: z.enum(targets),
             targetScope,
+            detailReferenceIdsByScope: Object.fromEntries(
+              scope.options.map((value) => [
+                value,
+                [
+                  ...body.passages
+                    .filter((passage) => passage.scope === value)
+                    .map((passage) => passage.id),
+                  ...fields
+                    .filter((field) => field.scope === value && field.id)
+                    .map((field) => field.id!),
+                ],
+              ]),
+            ),
           },
           evidenceGroups.length
             ? z.enum([
