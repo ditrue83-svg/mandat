@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v24";
+  "documentary-source-interpretation-v25";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -218,7 +218,7 @@ const meaningStatement = text(600).describe(
   "Significato concreto dell'oggetto nel suo dominio. Non basta ripetere o tradurre un termine ambiguo; non inventare dettagli o decodificare codici da memoria.",
 );
 const componentDescription = text(600).describe(
-  "Entro 600 caratteri: azioni, oggetto e ambito leggibili da soli, solo fatti attestati. Inventari/quantità nei details con prove e ambito, senza omissioni. Conserva tutte le azioni anche se role ne riassume una. Non descrivere campi/funzioni dei dati.",
+  "Entro 600 caratteri: tutte le azioni, oggetto e ambito, solo fatti attestati. Inventari/quantità nei details technical_specification con prove e ambito. Nessuna omissione o descrizione di campi dati.",
 );
 const componentRole = z
   .enum([
@@ -375,12 +375,20 @@ function buildResponseSchema(bounds?: {
   // Keep the stored contract broad; only the provider request narrows states
   // that are already forbidden for this target by relational validation.
   const detailKind: z.ZodType<
-    "missing_specification" | "execution_condition" | "shared_project_context"
+    | "missing_specification"
+    | "technical_specification"
+    | "execution_condition"
+    | "shared_project_context"
   > =
     bounds?.targetScope === "project_context"
-      ? z.enum(["missing_specification", "execution_condition"])
+      ? z.enum([
+          "missing_specification",
+          "technical_specification",
+          "execution_condition",
+        ])
       : z.enum([
           "missing_specification",
+          "technical_specification",
           "execution_condition",
           "shared_project_context",
         ]);
@@ -406,7 +414,7 @@ function buildResponseSchema(bounds?: {
       .array(detail)
       .max(32)
       .describe(
-        "Specifiche mancanti o condizioni, non prestazioni. shared_project_context è ammesso solo per un lotto con prove nel progetto, mai per un intero progetto.",
+        "technical_specification: specifiche note; missing_specification: lacune; execution_condition: condizioni. shared_project_context è ammesso solo per un lotto con prove nel progetto.",
       ),
   };
   const resolved = z.strictObject({

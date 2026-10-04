@@ -437,6 +437,36 @@ test("A resolved draft cannot omit a structured subcontracting prohibition", () 
   );
 });
 
+test("Known technical details retain evidence, scope and bounded explanations", () => {
+  const input = context();
+  const request = buildSourceInterpretationRequest(input);
+  const draft = {
+    ...response(input),
+    details: [
+      {
+        kind: "technical_specification",
+        explanation: "I prodotti indicati sono oggetto della fornitura.",
+        sourceRefs: ["s1"],
+        scope: "project_context",
+      },
+    ],
+  };
+  assert.equal(
+    validateSourceInterpretation(draft, request).details[0].kind,
+    "technical_specification",
+  );
+  for (const invalid of [
+    { ...draft.details[0], sourceRefs: ["s999"] },
+    { ...draft.details[0], scope: "selected_lot" },
+    { ...draft.details[0], explanation: "x".repeat(601) },
+  ]) {
+    assert.throws(() =>
+      validateSourceInterpretation({ ...draft, details: [invalid] }, request),
+    );
+  }
+  assert.deepEqual(request.body.passages, input.body.passages);
+});
+
 test("Standalone extension and delegation flags must be explained in details", () => {
   const base = context();
   const input: SourceInterpretationContext = {
@@ -810,7 +840,7 @@ test.each(["\n", "\r\n"])(
       prompt.rules.join(" "),
       /separa condizioni autonome nei details/,
     );
-    assert.equal(request.version, "documentary-source-interpretation-v24");
+    assert.equal(request.version, "documentary-source-interpretation-v25");
     const oldKey = createHash("sha256")
       .update(
         stableDocumentaryJson({

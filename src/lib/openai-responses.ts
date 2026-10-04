@@ -93,8 +93,10 @@ export function openaiErrorDiagnostic(value: unknown) {
 }
 
 // Restrict the wire schema to the documented Structured Outputs subset.
-// Length/uniqueness rules stay explicit descriptions and remain mandatory in
-// the original application validator; no answer is repaired or relaxed.
+// Bound free text with the supported pattern keyword as well as explicit
+// descriptions. Original local length/uniqueness checks still apply;
+// the provider pattern never replaces application validation.
+// No answer is repaired or relaxed.
 export function openaiJsonSchema(original: JsonObject): JsonObject {
   const simple = new Set([
     "type",
@@ -214,6 +216,26 @@ export function openaiJsonSchema(original: JsonObject): JsonObject {
       ]
         .filter(Boolean)
         .join(" ");
+    // Preserve existing patterns and literal domains. Do not replace their
+    // meaning with a length pattern or attempt an unsupported intersection.
+    if (
+      schema.type === "string" &&
+      schema.pattern === undefined &&
+      schema.enum === undefined &&
+      schema.const === undefined &&
+      (schema.minLength !== undefined || schema.maxLength !== undefined)
+    ) {
+      const minimum = schema.minLength ?? 0;
+      const maximum = schema.maxLength;
+      if (
+        !Number.isSafeInteger(minimum) ||
+        Number(minimum) < 0 ||
+        (maximum !== undefined &&
+          (!Number.isSafeInteger(maximum) || Number(maximum) < Number(minimum)))
+      )
+        throw new Error("Limite testo schema OpenAI non valido");
+      result.pattern = `^[\\s\\S]{${minimum},${maximum ?? ""}}$`;
+    }
     return result;
   };
   const wrapped =

@@ -266,6 +266,7 @@ it("keeps instructions and source separate with the original local constraints",
             text: {
               type: "string",
               description: "Required constraints: minLength=4; maxLength=40.",
+              pattern: "^[\\s\\S]{4,40}$",
             },
           },
         },
@@ -286,6 +287,51 @@ it("keeps instructions and source separate with the original local constraints",
     "include",
   ])
     expect(body).not.toHaveProperty(key);
+});
+
+it("constrains free text length, including lines and Unicode, without changing local validation", () => {
+  const validator = z.strictObject({ text: z.string().min(1).max(600) });
+  const original = z.toJSONSchema(validator);
+  const before = structuredClone(original);
+  const wire = openaiJsonSchema(original);
+  const accepts = new Ajv2020({ strict: false }).compile(wire);
+  for (const text of ["a".repeat(600), "é".repeat(600), "a\n".repeat(300)]) {
+    expect(accepts({ text })).toBe(true);
+    expect(validator.safeParse({ text }).success).toBe(true);
+  }
+  for (const text of ["", "a".repeat(601), "é".repeat(601)]) {
+    expect(accepts({ text })).toBe(false);
+    expect(validator.safeParse({ text }).success).toBe(false);
+  }
+  // Preserve the installed validator's Unicode-count behavior as well.
+  const supplementary = "🌳".repeat(400);
+  expect(accepts({ text: supplementary })).toBe(true);
+  expect(validator.safeParse({ text: supplementary }).success).toBe(true);
+  expect(accepts({ text: "🌳".repeat(601) })).toBe(false);
+  expect(validator.safeParse({ text: "🌳".repeat(601) }).success).toBe(false);
+  expect(original).toEqual(before);
+});
+
+it("preserves existing string patterns and rejects invalid length bounds", () => {
+  const schema = (text: object) => ({
+    type: "object",
+    properties: { text },
+    required: ["text"],
+    additionalProperties: false,
+  });
+  const wire = openaiJsonSchema(
+    schema({ type: "string", pattern: "^a+$", minLength: 1, maxLength: 4 }),
+  );
+  expect(wire.properties).toHaveProperty("text.pattern", "^a+$");
+  for (const bounds of [
+    { minLength: -1 },
+    { minLength: 4, maxLength: 3 },
+    { maxLength: 1.5 },
+  ]) {
+    expect(() =>
+      openaiJsonSchema(schema({ type: "string", ...bounds })),
+    ).toThrow("Limite testo");
+  }
 });
 
 it("preserves local validation and rejects unsupported schemas before spending", () => {
