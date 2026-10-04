@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v23";
+  "documentary-source-interpretation-v24";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -218,7 +218,7 @@ const meaningStatement = text(600).describe(
   "Significato concreto dell'oggetto nel suo dominio. Non basta ripetere o tradurre un termine ambiguo; non inventare dettagli o decodificare codici da memoria.",
 );
 const componentDescription = text(600).describe(
-  "Azioni e prodotto/servizio acquistato, comprensibili da soli, con sole caratteristiche attestate. Conserva le azioni contrattuali applicabili anche quando role ne riassume una sola. Non descrivere campi, intestazioni o funzioni dei dati.",
+  "Entro 600 caratteri: azioni, oggetto e ambito leggibili da soli, solo fatti attestati. Inventari/quantità nei details con prove e ambito, senza omissioni. Conserva tutte le azioni anche se role ne riassume una. Non descrivere campi/funzioni dei dati.",
 );
 const componentRole = z
   .enum([
