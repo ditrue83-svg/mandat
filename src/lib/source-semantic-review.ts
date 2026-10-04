@@ -22,7 +22,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v40";
+  "documentary-source-semantic-review-v41";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -218,6 +218,47 @@ const isOriginalFactClaim = (kind: Claim["kind"]) =>
   kind === "contract_clause_coverage" ||
   kind === "scope_coverage";
 const unique = (values: readonly string[]) => [...new Set(values)];
+const originalPathIndexes = new WeakMap<
+  ReadonlyMap<string, ComparisonPassage>,
+  Map<string, string[]>
+>();
+// A value and its separately stored Note are different assertions. Carry
+// their original siblings, including null, without changing draft citations
+// or assigning the sibling a second completeness owner. Match only the
+// exact JSON property convention and scope, never nearby text or other lots.
+function originalFactRefs(
+  claim: Claim,
+  originals: ReadonlyMap<string, ComparisonPassage>,
+) {
+  if (!isOriginalFactClaim(claim.kind)) return claim.sourceRefs;
+  const key = (scope: string, rawPath: string) =>
+    JSON.stringify([scope, rawPath]);
+  let index = originalPathIndexes.get(originals);
+  if (!index) {
+    index = new Map();
+    for (const original of originals.values()) {
+      const location = key(original.scope, original.rawPath);
+      index.set(location, [...(index.get(location) ?? []), original.id]);
+    }
+    originalPathIndexes.set(originals, index);
+  }
+  return unique([
+    ...claim.sourceRefs,
+    ...claim.sourceRefs.flatMap((ref) => {
+      const own = originals.get(ref);
+      if (!own) return [];
+      const note = /^(.*)Note(?:\/(?:de|en|fr|it|rm))?$/.exec(own.rawPath);
+      const paths = note
+        ? [note[1]]
+        : ["", "/de", "/en", "/fr", "/it", "/rm"].map(
+            (suffix) => `${own.rawPath}Note${suffix}`,
+          );
+      return paths.flatMap(
+        (rawPath) => index!.get(key(own.scope, rawPath)) ?? [],
+      );
+    }),
+  ]);
+}
 function areServiceLanguageVariants(
   originals: ReadonlyMap<string, ComparisonPassage>,
   leftId: string,
@@ -471,7 +512,7 @@ ${item.meaning.statement}`,
     const included = new Set([
       ...mandatory,
       ...group.passageIds,
-      ...group.claims.flatMap((claim) => claim.sourceRefs),
+      ...assignedClaims.flatMap((claim) => originalFactRefs(claim, byId)),
     ]);
     const passages = context.body.passages.filter((item) =>
       included.has(item.id),
@@ -522,6 +563,7 @@ ${item.meaning.statement}`,
         "Le observations della lettura indipendente selezionano e classificano passaggi originali senza riscriverli. Leggi direttamente evidence e passages per stabilire lavoro, soggetto che lo richiede, operatore che lo svolge, destinatario e carattere obbligatorio o facoltativo. kind e serviceRef aiutano a trovare le prove; non sono affermazioni del committente né sostituiscono il loro significato originale.",
         "Per ogni assignedClaim verifica il suo text e compila la sua chiave obbligatoria in checksByClaim, una sola volta. Non attribuirgli parole di altri claim o campi del draft. supported richiede sostegno reale; contradicted una controprova; not_verifiable sostegno insufficiente. Per ogni esito negativo, draftQuote deve essere un estratto esatto non vuoto del text assegnato che identifica l’affermazione problematica; supported può usare null. Spiega quel preciso difetto contro la fonte. Un problema nel summary va giudicato nel claim summary, anche se un detail distinto è corretto. Leggi insieme oggetto, classificazioni originali e relativo ambito.",
         "Una valutazione AI non è una nuova affermazione del committente. Per contradicted identifica l'affermazione precisa del draft e il fatto originale incompatibile: una diversa formulazione o precisione non basta. La mancanza di un sottotipo non cancella la famiglia esplicitamente dichiarata dalle etichette originali; queste non dimostrano da sole azioni accessorie o applicabilità a un lotto.",
+        "Un valore e la sua nota esplicativa sono campi distinti: yes/no/false non dimostra che una Note sia presente, e una Note null non cancella quel valore. originalFactBindings conserva separatamente i riferimenti dichiarati dal draft e gli eventuali campi Note collegati dal loro percorso JSON e ambito esatti. Sono prove originali da leggere, non approvazioni: verifica ciascuna affermazione sul proprio campo. Per contradicted serve un fatto incompatibile sullo stesso concetto; la presenza del valore non confuta l'assenza della nota. Se la prova necessaria manca, usa not_verifiable, senza inventare una controprova.",
         "Fedeltà e completezza sono controlli distinti. Una lista di lavori veri resta supported anche se sintetica. La completezza delle prestazioni ha un solo claim scope_coverage obbligatorio per ciascun gruppo di originali, indicato da assignedScopeCoverageIds. Nel suo text leggi la rappresentazione COMPLETA, comprese tutte le components, anche se i loro claim di fedeltà sono assegnati altrove. Non giudicare la completezza del solo summary: può usare un termine collettivo per beni o servizi presenti nelle componenti, senza ripeterne l'elenco. supported del claim scope_coverage richiede che ogni prestazione e limite materiale dei SOLI originali assegnati sia conservato nella rappresentazione completa. Se manca una prestazione usa not_verifiable su quel claim, cita la sua affermazione di completezza e identifica il lavoro assente; puoi inoltre registrare omitted_scope SOLO con riferimenti di assignedScopeCoverageIds. Il contesto condiviso aiuta a interpretare, ma ha il proprio controllo di completezza in un altro gruppo. Una frase che esclude o limita falsamente il lavoro resta invece contradicted nel proprio claim di fedeltà, anche se altri campi sono corretti.",
         "Per la completezza collega anche le clausole comuni del summary o dei details alle componenti del loro ambito esplicito. Un ciclo contrattuale dichiarato per tutti gli impianti o sistemi può valere per le componenti corrispondenti senza essere ripetuto parola per parola in ognuna; citarlo per un solo componente senza conservarne l'ambito generale non basta. Non estendere clausole a oggetti o lotti estranei. Ogni acquisto distinto deve restare rappresentato nelle components: menzionarlo soltanto come dettaglio non sostituisce una prestazione. Una descrizione sintetica non è una clausola di esclusione.",
         "Una categoria amministrativa e una descrizione specifica possono usare nomi diversi senza contraddirsi. La categoria non esclude di per sé un lavoro esplicito né aggiunge tutte le attività della sua etichetta. Verifica il lavoro contro la descrizione originale, mantenendo le classificazioni come dichiarate; non approvare correzioni del codice o nuovi servizi. Caratteristiche esplicite incompatibili e clausole opposte rimangono bloccanti. Un avviso sui metadati non sana ambiguità, omissioni o affermazioni false.",
@@ -798,7 +840,7 @@ export function buildGroundedSourceReviewRequests(
               isOriginalFactClaim(claim.kind) &&
               request.assignedClaimIds.includes(claim.id),
           )
-          .flatMap((claim) => claim.sourceRefs),
+          .flatMap((claim) => originalFactRefs(claim, originals)),
       ).map((sourceRef) => {
         const passage = sourceEvidencePassages(plan.context).find(
           (p) => p.id === sourceRef,
@@ -836,7 +878,7 @@ export function buildGroundedSourceReviewRequests(
           .filter(
             (fact) =>
               isOriginalFactClaim(claim.kind) &&
-              claim.sourceRefs.includes(fact.sourceRef),
+              originalFactRefs(claim, originals).includes(fact.sourceRef),
           )
           .map((fact) => fact.id);
         const supportedReadingIds =
@@ -906,6 +948,19 @@ export function buildGroundedSourceReviewRequests(
         },
         sourceEvidenceHash: independent.hash,
         originalFacts,
+        originalFactBindings: plan.claims
+          .filter(
+            (claim) =>
+              isOriginalFactClaim(claim.kind) &&
+              request.assignedClaimIds.includes(claim.id),
+          )
+          .map((claim) => ({
+            claimId: claim.id,
+            declaredSourceRefs: claim.sourceRefs,
+            relatedNoteContextRefs: originalFactRefs(claim, originals).filter(
+              (ref) => !claim.sourceRefs.includes(ref),
+            ),
+          })),
         detailEvidenceBindings: [...readingGroups.values()].flatMap((group) =>
           group.supportedReadingIds
             ? group.claimIds.map((claimId) => ({
@@ -1084,7 +1139,7 @@ function validateResponses(
         (!isOriginalFactClaim(claim.kind) ||
           directFacts.some(
             (fact) =>
-              !claim.sourceRefs.includes(fact.sourceRef) ||
+              !originalFactRefs(claim, originals).includes(fact.sourceRef) ||
               !check.sourceRefs.includes(fact.sourceRef),
           ))
       )
@@ -1114,7 +1169,7 @@ function validateResponses(
         component?.importance === "accessory" ||
         component?.importance === "excluded";
       const supportsClaimOrigin = (ref: string) =>
-        claim.sourceRefs.includes(ref) ||
+        originalFactRefs(claim, originals).includes(ref) ||
         claim.sourceRefs.some(
           (ownRef) =>
             check.sourceRefs.includes(ownRef) &&

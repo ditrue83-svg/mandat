@@ -2060,6 +2060,7 @@ test("Review records become stale for source draft configuration or version and 
     { version: "historical-review" },
     { version: "documentary-source-semantic-review-v20" },
     { version: "documentary-source-semantic-review-v22" },
+    { version: "documentary-source-semantic-review-v40" },
     { sourceKey: "b".repeat(64) },
     { draftHash: "c".repeat(64) },
     { inputHash: "d".repeat(64) },
@@ -2105,6 +2106,145 @@ test("Review records become stale for source draft configuration or version and 
       ),
     /Altered/,
   );
+});
+
+test("A value and its nullable Note remain separate original proofs across coverage groups and scopes", () => {
+  const base = context();
+  const flag = {
+    ...base.body.passages[3],
+    id: "s5",
+    rawPath: "/terms/optional",
+    text: "no",
+    endUtf16: 2,
+  };
+  const tail = Array.from({ length: 80 }, (_, i) => {
+    const text = `Contesto inventato ${i}: ${"x".repeat(1400)}`;
+    return {
+      ...flag,
+      id: `s${i + 6}`,
+      rawPath: `/unrelated/${i}`,
+      text,
+      endUtf16: text.length,
+    };
+  });
+  const fields: SourceInterpretationContext["body"]["fields"] = [
+    {
+      scope: "project_context",
+      rawPath: "/terms/optionalNote/it",
+      value: null,
+    },
+    {
+      scope: "project_context",
+      rawPath: "/terms/optionalNote/de",
+      value: null,
+    },
+    { scope: "selected_lot", rawPath: "/terms/optionalNote/it", value: false },
+    {
+      scope: "project_context",
+      rawPath: "/terms/optionalOtherNote/it",
+      value: null,
+    },
+  ];
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [...base.body.passages, flag, ...tail],
+      fields,
+    },
+  };
+  const before = JSON.stringify(input);
+  const original = recordSourceInterpretation(
+    {
+      ...draft(base).response,
+      details: [
+        {
+          kind: "execution_condition",
+          scope: "project_context",
+          sourceRefs: ["s5"],
+          explanation:
+            "L'opzione non è ammessa; la nota esplicativa non è indicata.",
+        },
+      ],
+    },
+    buildSourceInterpretationRequest(input),
+    { ...metadata, model: input.binding.model },
+  );
+  const draftBefore = JSON.stringify(original);
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  const requests = inventedGroundedReviewRequests(plan);
+  const claim = plan.claims.find((c) => c.kind === "detail")!;
+  const part = requests.find((r) => r.assignedClaimIds.includes(claim.id))!;
+  const body = JSON.parse(part.prompt);
+  assert(requests.length > 1);
+  assert(!part.coverage.fieldIndexes.includes(0));
+  assert.deepEqual(claim.sourceRefs, ["s5"]);
+  assert.deepEqual(
+    body.originalFactBindings.find((b: any) => b.claimId === claim.id),
+    {
+      claimId: claim.id,
+      declaredSourceRefs: ["s5"],
+      relatedNoteContextRefs: ["f1", "f0"],
+    },
+  );
+  for (const index of [0, 1]) {
+    const field = body.fields.find((f: any) => f.id === `f${index}`);
+    assert.deepEqual(field, { id: `f${index}`, index, ...fields[index] });
+    assert(
+      body.detailEvidenceBindings
+        .find((b: any) => b.claimId === claim.id)
+        .readingIds.includes(`o-f${index}`),
+    );
+  }
+  assert(
+    !body.detailEvidenceBindings
+      .find((b: any) => b.claimId === claim.id)
+      .readingIds.some((id: string) => id === "o-f2" || id === "o-f3"),
+  );
+  assert.deepEqual(
+    requests.flatMap((r) => r.coverage.fieldIndexes),
+    [0, 1, 2, 3],
+  );
+  assert.deepEqual(
+    requests.flatMap((r) => r.coverage.passageIds),
+    input.body.passages.map((p) => p.id),
+  );
+  const responses = answers(plan);
+  const check = responses
+    .flatMap((r) => r.checks)
+    .find((c) => c.claimId === claim.id)!;
+  check.sourceRefs = ["s5", "f0", "f1"];
+  check.readingRefs = ["o-s5", "o-f0", "o-f1"];
+  assert(
+    readSourceSemanticReview(
+      recordSourceSemanticReview(responses, plan, metadata),
+      plan,
+    )?.accepted,
+  );
+  // Structural context never overrides a negative judgment or supplies proof
+  // from another scope or merely similarly named field.
+  const negative = structuredClone(responses);
+  negative
+    .flatMap((r) => r.checks)
+    .find((c) => c.claimId === claim.id)!.verdict = "contradicted" as any;
+  assert.equal(
+    readSourceSemanticReview(
+      recordSourceSemanticReview(negative, plan, metadata),
+      plan,
+    )?.accepted,
+    false,
+  );
+  for (const other of ["f2", "f3"]) {
+    const wrong = structuredClone(responses);
+    const c = wrong
+      .flatMap((r) => r.checks)
+      .find((c) => c.claimId === claim.id)!;
+    c.sourceRefs = [other];
+    c.readingRefs = [`o-${other}`];
+    assert.throws(() => recordSourceSemanticReview(wrong, plan, metadata));
+  }
+  assert.equal(JSON.stringify(input), before);
+  assert.equal(JSON.stringify(original), draftBefore);
 });
 
 test("Long review covers every original passage and scalar including the unselected tail with one owner per claim", () => {
