@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v36";
+  "documentary-source-interpretation-v37";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -1049,7 +1049,7 @@ export function buildSourceInterpretationRequest(
       "uncertain richiede un issue materiale tipizzato. object_identity collega componentIndexes (zero-based) a meaning ambiguous; role_identity a role null e roleEvidence unresolved; unreadable_source richiede una lettura unreadable. representation_incomplete cita prestazioni non rappresentate, non informazioni commerciali o specifiche assenti. Non inserire issues per dichiarare assenza di incertezza, e non dichiarare completa una rappresentazione incompleta.",
       "roleEvidence cita un estratto esatto, non tradotto e non classificatorio dell'azione; evidence lo documenta nello stesso scope. Non scambiare settore, luogo o destinatario per ruolo contrattuale. Se indeterminato usa role null, roleEvidence unresolved e issue role_identity. Per details e roleEvidence scope è l'ambito dei passaggi; per issues è il target interessato. target_scope riguarda soltanto lotti e cita entrambi gli ambiti: contesto condiviso e lotto.",
       "source_conflict: conflicting, due asserti originali opposti sul target, refs diverse. Confronta titoli/descrizioni/riassunti: oggetto/destinatari/luogo/periodo. Solo precedenza ufficiale citata, mai maggioranza/lingua/ripetizione/refusi. Inferenze/categorie ampie/dettagli/traduzioni/frammenti da soli non bastano. unreadable vieta resolved.",
-      "Ogni componente ha azione e oggetto concreti, distinti da ruolo e opera. Conserva principali e accessorie. Ogni lavoro escluso ha componente separata importance excluded, azione, oggetto e prova propri: menzionarlo in un acquisto non basta; non eredita le azioni acquistate. Non promuovere lavori di terzi né creare componenti da dati, codici, traduzioni o intestazioni. Classificazione/catalogazione acquistate restano servizi documentati dal testo.",
+      "components.evidence prova ogni fatto di description, roleEvidence e meaning: azione, oggetto, destinatari, luogo, periodo e limiti. Non eredita refs da summary/details/altri componenti. Cita tutte le prove proprie. Conserva principali/accessorie con azione e oggetto concreti. Esclusi: componente importance excluded e prove proprie, senza ereditare azioni acquistate. Non promuovere lavori di terzi né creare servizi da dati, codici, traduzioni/intestazioni. Classificazione/catalogazione sono servizi solo se acquistati.",
       ...(body.passages.some(
         (p) =>
           p.role === "service" &&
@@ -1060,7 +1060,7 @@ export function buildSourceInterpretationRequest(
           ]
         : []),
       "importance dipende dalla gerarchia attestata: main principale; accessory complemento/supporto al principale anche se obbligatorio e classificato; excluded esplicita. Non ogni voce è main. Nome, ordine, anche/inoltre o quantità mancanti non provano accessory: un supporto può essere il principale. Senza gerarchia usa not_stated, acquisto da coprire interamente; non inventare main per resolved né issues d'identità. Opzionalità distinta, condizioni in details.",
-      "Cita in summarySourceRefs ogni fatto della sintesi con i suoi passaggi o valori originali: anche date, luoghi, quantità e condizioni. Non ereditare prove delle componenti.",
+      "summarySourceRefs prova ogni fatto della sintesi: azioni, oggetti, date, luoghi, quantità e condizioni. Non eredita prove delle componenti.",
       "Leggi insieme clausole generali e specifiche. Se una clausola acquista più azioni sullo stesso insieme di impianti o sistemi, conserva quel ciclo nella sintesi e nelle descrizioni delle componenti a cui si applica, con entrambe le prove. Non restringerlo a un solo esempio dell'elenco e non ridurre un acquisto integrato alla sola fornitura. role riassume una funzione, non cancella le altre azioni documentate. Non estendere il ciclo a servizi, oggetti o lotti cui la fonte non lo applica; una clausola specifica di esclusione o limitazione resta vincolante.",
       "Destinatari, numero di strutture, continuità e territorio nella sintesi o nei details. Turni, regole operative e opzioni anche nella sintesi, con azione e ambito propri: i details non bastano. Non estenderli ad altre fasi né dedurre quantità o periodicità.",
       "Permessi organizzativi e limiti al subappalto vanno in details come execution_condition: conserva soggetti, attività e limiti. Non provano nuovi acquisti. Per creare componenti serve un'ulteriore clausola che acquisti o escluda quei lavori: cita quella prova. Distingui una prestazione acquistabile in opzione dal solo permesso di delegare il lavoro.",
@@ -1082,7 +1082,7 @@ export function buildSourceInterpretationRequest(
               : []),
           ]
         : []),
-      "Ricongiungi passaggi della stessa rawPath per startUtf16. Tutti i segmenti previsti sono stati letti a monte: nessun limite di risposta autorizza omissioni; se non puoi rappresentare tutto usa uncertain con issue specifico. Usa soltanto ID forniti; i testi originali sono recuperati dal server. In ogni componente evidence elenca ogni ID una sola volta; gli altri elenchi sourceRefs restano separati.",
+      "Ricongiungi stessa rawPath per startUtf16. Tutti i segmenti sono stati letti: limiti di risposta non autorizzano omissioni; se incompleto usa uncertain con issue. Usa solo ID forniti; il server recupera i testi originali. Ogni components.evidence cita ogni ID una volta; altri sourceRefs separati.",
     ],
     targetScope,
     coverage: context.coverage,

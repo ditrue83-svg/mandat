@@ -119,6 +119,71 @@ test("Source identity focus is absent without original service titles or descrip
   assert.equal(request.version, SOURCE_INTERPRETATION_VERSION);
 });
 
+test("Component evidence keeps its explicitly selected territory and period without inheriting summary references", () => {
+  const base = context();
+  const additions = [
+    {
+      id: "s5",
+      rawPath: "/procurement/orderAddressDescription/it",
+      text: "Comprensorio inventato di Valle A",
+    },
+    {
+      id: "s6",
+      rawPath: "/procurement/contractPeriod/dateRange/0",
+      text: "2030-01-01",
+    },
+  ];
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        ...additions.map((p) => ({
+          ...p,
+          scope: "project_context" as const,
+          role: "context" as const,
+          startUtf16: 0,
+          endUtf16: p.text.length,
+          url: "https://example.invalid/source",
+        })),
+      ],
+    },
+  };
+  const before = JSON.stringify(input);
+  const request = buildSourceInterpretationRequest(input);
+  const answer = response(input);
+  const result = validateSourceInterpretation(
+    {
+      ...answer,
+      summary:
+        "Fornitura inventata a Valle A dal 2030, posa accessoria e trasporto escluso.",
+      summarySourceRefs: ["s1", "s4", "s5", "s6"],
+      components: [
+        {
+          ...answer.components[0],
+          description: "Fornitura inventata a Valle A dal 2030",
+          sourceRefs: ["s1", "s3", "s5", "s6"],
+        },
+        ...answer.components.slice(1),
+      ],
+    },
+    request,
+  );
+  assert.deepEqual(result.components[0].sourceRefs, ["s1", "s3", "s5", "s6"]);
+  assert(
+    result.components
+      .slice(1)
+      .every(
+        (c) => !c.sourceRefs.includes("s5") && !c.sourceRefs.includes("s6"),
+      ),
+  );
+  assert.deepEqual(result.summarySourceRefs, ["s1", "s4", "s5", "s6"]);
+  assert.equal(JSON.stringify(input), before);
+  // Relational transmission is tested here. These assertions do not certify
+  // semantic support; the independent original-evidence review must do that.
+});
+
 // Invented records check the source-only contract, never model quality.
 function context(): SourceInterpretationContext {
   const values = [
@@ -3311,6 +3376,7 @@ test.each([
   "documentary-source-interpretation-v33",
   "documentary-source-interpretation-v34",
   "documentary-source-interpretation-v35",
+  "documentary-source-interpretation-v36",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
   assert.equal(request.version, SOURCE_INTERPRETATION_VERSION);
