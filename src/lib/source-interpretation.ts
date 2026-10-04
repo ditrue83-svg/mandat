@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v28";
+  "documentary-source-interpretation-v29";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -478,7 +478,7 @@ export const sourceInterpretationResponseSchema = buildResponseSchema();
 // precise supporting references are located locally within that selection.
 function buildProviderResponseSchema(
   bounds?: Parameters<typeof buildResponseSchema>[0],
-  reference: z.ZodType<string> = sourceId,
+  reference: z.ZodType<string> = z.string().regex(/^[sg]\d+$/),
 ) {
   const [resolved, uncertain, conflicting] =
     buildResponseSchema(bounds).options;
@@ -504,7 +504,7 @@ function buildProviderResponseSchema(
       "Repeated component evidence",
     )
     .describe(
-      "Passaggi originali a sostegno della componente, ogni ID una volta. Devono contenere actionText e objectText esatti, anche su più frammenti contigui dello stesso campo. Il server localizza separatamente le due citazioni solo entro questi passaggi, senza aggiungerne altri. Ruolo e oggetto richiedono testo non classificatorio.",
+      "Seleziona passaggi sN o gruppi gN espliciti di frammenti contigui. Un gruppo seleziona tutti i suoi sourceRefs originali: usalo quando azione, oggetto o clausola generale attraversano frammenti. Devono contenere actionText e objectText esatti. Non selezionare anche un passaggio già incluso in un gruppo. Il server localizza le citazioni solo entro questa selezione. Ruolo e oggetto richiedono testo non classificatorio.",
     );
   const identifiedComponent = identified
     .omit({ sourceRefs: true, roleEvidence: true, meaning: true })
@@ -523,7 +523,7 @@ function buildProviderResponseSchema(
         meaning: anyMeaning,
       }),
   ]);
-  const evidenceFormat = z.literal("component_quotations_v3");
+  const evidenceFormat = z.literal("component_quotations_v4");
   const unresolvedFields = {
     evidenceFormat,
     components: z.array(anyComponent).max(64).describe(componentsDescription),
@@ -542,6 +542,57 @@ function buildProviderResponseSchema(
   ]);
 }
 const providerResponseSchema = buildProviderResponseSchema();
+
+// The model can select a complete contiguous run explicitly, rather than
+// having to reproduce each length-based fragment ID. This never searches or
+// adds neighbouring evidence outside the chosen run, or changes source text.
+function componentEvidenceGroups(
+  passages: SourceInterpretationContext["body"]["passages"],
+) {
+  type Passage = (typeof passages)[number];
+  const fields = new Map<string, Passage[]>();
+  for (const passage of passages) {
+    const key = JSON.stringify([
+      passage.url,
+      passage.scope,
+      passage.role,
+      passage.rawPath,
+    ]);
+    const field = fields.get(key) ?? [];
+    field.push(passage);
+    fields.set(key, field);
+  }
+  const groups: {
+    id: string;
+    scope: Passage["scope"];
+    rawPath: string;
+    sourceRefs: string[];
+  }[] = [];
+  for (const field of fields.values()) {
+    const runs: Passage[][] = [];
+    for (const passage of [...field].sort(
+      (a, b) => a.startUtf16 - b.startUtf16,
+    )) {
+      const last = runs.at(-1);
+      if (
+        last &&
+        last.length < 32 &&
+        last.at(-1)!.endUtf16 === passage.startUtf16
+      )
+        last.push(passage);
+      else runs.push([passage]);
+    }
+    for (const run of runs.filter((items) => items.length > 1))
+      groups.push({
+        id: `g${groups.length + 1}`,
+        scope: run[0].scope,
+        rawPath: run[0].rawPath,
+        sourceRefs: run.map((passage) => passage.id),
+      });
+  }
+  return groups;
+}
+
 function decodeProviderResponse(
   response: unknown,
   request: SourceInterpretationRequest,
@@ -563,11 +614,24 @@ function decodeProviderResponse(
       ...item.labels.flatMap((label) => label.sourceRefs),
     ]),
   );
+  const groups = new Map(
+    componentEvidenceGroups(request.body.passages).map((group) => [
+      group.id,
+      group.sourceRefs,
+    ]),
+  );
   return {
     ...value,
     components: components.map(
       ({ evidence, roleEvidence, meaning, ...component }) => {
-        const sourceRefs = evidence.map((item) => item.sourceRef);
+        const sourceRefs = evidence.flatMap(({ sourceRef }) => {
+          if (!sourceRef.startsWith("g")) return [sourceRef];
+          const refs = groups.get(sourceRef);
+          if (!refs) throw new Error("Unknown component evidence group");
+          return refs;
+        });
+        if (new Set(sourceRefs).size !== sourceRefs.length)
+          throw new Error("Overlapping component evidence selections");
         const passages = sourceRefs
           .map((id) => {
             const passage = request.body.passages.find((p) => p.id === id);
@@ -785,6 +849,7 @@ export function buildSourceInterpretationRequest(
       ),
   ];
   const clauseBlocks = contractClauseBlocks(body.passages);
+  const evidenceGroups = componentEvidenceGroups(body.passages);
   const targets = body.passages
     .filter(
       (passage) =>
@@ -811,6 +876,11 @@ export function buildSourceInterpretationRequest(
       "classificationContext è un registro immutabile separato dalle prestazioni: rendiconta ogni ID una volta, conservando codici, etichette, lingue e ambiti. clarifies_domain richiede un'etichetta originale; broad_context è una famiglia ampia, non prova una prestazione specifica; shared_project_only è contesto condiviso. Senza etichetta non decodificare codici da memoria. unresolved indica dubbio materiale; conflicting richiede asserzioni incompatibili.",
       "meaning identifica l'oggetto nel suo dominio: evidence cita prove non classificatorie; classificationContextIds riporta le classificazioni usate. Non basta ripetere o tradurre un termine ambiguo: disambigua con le etichette originali, senza scegliere settori esterni o dichiarare errata la classificazione per salvare un'ipotesi. explicit_text si fonda sul testo; text_with_classification_context richiede un'etichetta del target. Solo per un lotto senza classificazioni proprie può usare un'etichetta condivisa insieme a prove locali del significato. Famiglie classificatorie non provano equivalenza, capacità o ammissibilità.",
       "Copia meaning.objectText e actionText da evidence, con maiuscole/minuscole e punteggiatura originali: non adattare la citazione alla frase della descrizione. Il server localizza oggetto e azione separatamente nei soli passaggi scelti, senza correggere parole. Attraversa solo frammenti contigui della stessa fonte, campo e ambito, citandoli tutti. Nelle spiegazioni classificatorie nomina il prodotto/servizio, non posizioni di componenti già collegate da classificationContextIds.",
+      ...(evidenceGroups.length
+        ? [
+            "componentEvidenceGroups: gN seleziona esplicitamente tutti i sourceRefs elencati, appartenenti a un solo campo originale e ambito, senza salti. Nei components.evidence usa il gruppo completo se azione e oggetto si trovano in frammenti diversi, anche per il ciclo generale applicato agli oggetti successivi. Non duplicare un suo sN. gN è ammesso soltanto in evidence; summary, details, targetRef e classificazioni citano ancora gli ID sN/fN originali. Il gruppo non prova da solo che un'azione si applichi a ogni oggetto: conserva limitazioni, esclusioni e ambiti della fonte.",
+          ]
+        : []),
       "resolved richiede oggetto e ruolo identificabili, anche come famiglia di prodotti senza sottotipo o dettagli tecnici. Non inventare dettagli: quantità, certificazioni o specifiche assenti non rendono da sole incerto il mestiere. details separa specifiche mancanti, condizioni esecutive e contesto condiviso; conserva quantità e unità originali. Non sono prestazioni aggiuntive né issues bloccanti.",
       "uncertain richiede un issue materiale tipizzato. object_identity collega componentIndexes (zero-based) a meaning ambiguous; role_identity a role null e roleEvidence unresolved; unreadable_source richiede una lettura unreadable. representation_incomplete cita prestazioni non rappresentate, non informazioni commerciali o specifiche assenti. Non inserire issues per dichiarare assenza di incertezza, e non dichiarare completa una rappresentazione incompleta.",
       "roleEvidence cita un estratto esatto, non tradotto e non classificatorio dell'azione; evidence lo documenta nello stesso scope. Non scambiare settore, luogo o destinatario per ruolo contrattuale. Se indeterminato usa role null, roleEvidence unresolved e issue role_identity. Per details e roleEvidence scope è l'ambito dei passaggi; per issues è il target interessato. target_scope riguarda soltanto lotti e cita entrambi gli ambiti: contesto condiviso e lotto.",
@@ -836,6 +906,7 @@ export function buildSourceInterpretationRequest(
     readings,
     requiredContractClauses,
     ...(clauseBlocks.length ? { contractClauseBlocks: clauseBlocks } : {}),
+    ...(evidenceGroups.length ? { componentEvidenceGroups: evidenceGroups } : {}),
     ...promptBody,
     fields,
     classificationContext,
@@ -867,7 +938,12 @@ export function buildSourceInterpretationRequest(
             targetRef: z.enum(targets),
             targetScope,
           },
-          boundedReference,
+          evidenceGroups.length
+            ? z.enum([
+                ...body.passages.map((passage) => passage.id),
+                ...evidenceGroups.map((group) => group.id),
+              ])
+            : boundedReference,
         ),
         // Repeated reference enums share a JSON Schema definition. Preserve
         // their exact bounds without charging the long source multiple copies.

@@ -840,7 +840,7 @@ test.each(["\n", "\r\n"])(
       prompt.rules.join(" "),
       /separa condizioni autonome nei details/,
     );
-    assert.equal(request.version, "documentary-source-interpretation-v28");
+    assert.equal(request.version, "documentary-source-interpretation-v29");
     const oldKey = createHash("sha256")
       .update(
         stableDocumentaryJson({
@@ -861,7 +861,7 @@ test.each(["\n", "\r\n"])(
 function wireResponse(value: any) {
   return {
     ...value,
-    evidenceFormat: "component_quotations_v3",
+    evidenceFormat: "component_quotations_v4",
     components: value.components.map(
       ({ sourceRefs, roleEvidence, meaning, ...component }: any) => {
         const { sourceRefs: _roleRefs, ...role } = roleEvidence ?? {};
@@ -1109,6 +1109,124 @@ test("Selected evidence must contain both quotations without adding missing refe
     assert.equal(JSON.stringify(value), before);
   }
 });
+
+function splitServiceContext() {
+  const base = context();
+  const original =
+    "La fornitura, l’installazione e la manutenzione riguardano apparecchiature per il raffrescamento, il riscaldamento e la deumidificazione dei locali.";
+  const cut = original.indexOf("riscaldamento") + 4;
+  const first = base.body.passages[0];
+  return {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        { ...first, text: original.slice(0, cut), endUtf16: cut },
+        {
+          ...first,
+          id: "s5",
+          text: original.slice(cut),
+          startUtf16: cut,
+          endUtf16: original.length,
+        },
+        ...base.body.passages.slice(1),
+      ],
+    },
+  };
+}
+
+test("An explicit contiguous evidence group grounds an action in the first fragment and an object crossing the split", () => {
+  const input = splitServiceContext();
+  const before = JSON.stringify(input);
+  const request = buildSourceInterpretationRequest(input);
+  const group = JSON.parse(request.prompt).componentEvidenceGroups[0];
+  assert.deepEqual(group, {
+    id: "g1",
+    scope: "project_context",
+    rawPath: "/procurement/orderDescription/it",
+    sourceRefs: ["s1", "s5"],
+  });
+  const wire = wireResponse(response(input));
+  wire.components[0].evidence = [{ sourceRef: group.id }];
+  wire.components[0].roleEvidence.actionText =
+    "fornitura, l’installazione e la manutenzione";
+  wire.components[0].meaning.objectText =
+    "apparecchiature per il raffrescamento, il riscaldamento e la deumidificazione dei locali";
+  const wireBefore = JSON.stringify(wire);
+  const accepts = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  assert.equal(accepts(wire), true);
+  const record = recordSourceInterpretation(wire, request, metadata);
+  const component = readSourceInterpretation(record, request)!.components[0];
+  assert.deepEqual(component.sourceRefs, ["s1", "s5"]);
+  assert.deepEqual(component.roleEvidence.sourceRefs, ["s1"]);
+  assert.deepEqual(component.meaning.objectRefs, ["s1", "s5"]);
+  assert.equal(JSON.stringify(wire), wireBefore);
+  assert.equal(JSON.stringify(input), before);
+  for (const evidence of [
+    [{ sourceRef: "s5" }],
+    [{ sourceRef: "g999" }],
+    [{ sourceRef: "g1" }, { sourceRef: "s1" }],
+  ]) {
+    const changed = structuredClone(wire);
+    changed.components[0].evidence = evidence;
+    assert.throws(() => recordSourceInterpretation(changed, request, metadata));
+  }
+  for (const actionText of [
+    "fornitura, installazione e manutenzione",
+    "Fornitura, l’installazione e la manutenzione",
+    "azioni inventate",
+  ]) {
+    const changed = structuredClone(wire);
+    changed.components[0].roleEvidence.actionText = actionText;
+    assert.throws(
+      () => recordSourceInterpretation(changed, request, metadata),
+      /exact quotation/,
+    );
+  }
+});
+
+test.each(["gap", "field", "scope", "url", "role"] as const)(
+  "Component evidence groups never bridge different %s",
+  (boundary) => {
+    const base = splitServiceContext();
+    const changes = {
+      gap: {
+        startUtf16: base.body.passages[1].startUtf16 + 1,
+        endUtf16: base.body.passages[1].endUtf16 + 1,
+      },
+      field: { rawPath: "/other/field/it" },
+      scope: { scope: "selected_lot" as const },
+      url: { url: "https://example.invalid/another-source" },
+      role: { role: "context" as const },
+    };
+    const input = {
+      ...base,
+      body: {
+        ...base.body,
+        passages: base.body.passages.map((p) =>
+          p.id === "s5" ? { ...p, ...changes[boundary] } : p,
+        ),
+      },
+    };
+    // The selected-lot boundary also violates the original project context
+    // guard; no invented group can make that context valid.
+    if (boundary === "scope") {
+      assert.throws(() => buildSourceInterpretationRequest(input));
+      return;
+    }
+    const request = buildSourceInterpretationRequest(input);
+    assert.equal(JSON.parse(request.prompt).componentEvidenceGroups, undefined);
+    const wire = wireResponse(response(input));
+    wire.components[0].evidence = [{ sourceRef: "g1" }];
+    const accepts = new Ajv2020({ strict: false }).compile(
+      request.responseFormat.json_schema.schema,
+    );
+    assert(!accepts(wire));
+    assert.throws(() => recordSourceInterpretation(wire, request, metadata));
+  },
+);
 
 test("Provider schema requires the wire version, bounded IDs and a single unambiguous evidence format", () => {
   const request = buildSourceInterpretationRequest(context());
