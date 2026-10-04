@@ -17,6 +17,108 @@ import {
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 import { openaiResponseBody } from "../src/lib/openai-responses";
 
+test("Source identity focus preserves original titles, descriptions and split spans without resolving differences", () => {
+  const base = context();
+  const additions = [
+    {
+      id: "s5",
+      rawPath: "/base/title/de",
+      role: "service",
+      text: "Fiktive Lieferung 2028–2030 🌳",
+    },
+    {
+      id: "s6",
+      rawPath: "/base/title/fr",
+      role: "service",
+      text: "Livraison inventée 2028–2029",
+    },
+    {
+      id: "s7",
+      rawPath: "/project-info/title/it",
+      role: "service",
+      text: "Fornitura inventata 2028–2030",
+    },
+    {
+      id: "s8",
+      rawPath: "/procurement/orderDescription/fr",
+      role: "service",
+      text: "Livraison inventée pour ",
+    },
+    {
+      id: "s9",
+      rawPath: "/procurement/orderDescription/fr",
+      role: "service",
+      text: "le site A.",
+    },
+    {
+      id: "s10",
+      rawPath: "/metadata/title/it",
+      role: "context",
+      text: "Metadato non descrittivo",
+    },
+    {
+      id: "s11",
+      rawPath: "/terms/remediesNotice/it",
+      role: "context",
+      text: "Informazione procedurale",
+    },
+  ] as const;
+  const input = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        ...additions.map((p) => ({
+          ...p,
+          scope: "project_context" as const,
+          startUtf16: p.id === "s9" ? additions[3].text.length : 0,
+          endUtf16:
+            (p.id === "s9" ? additions[3].text.length : 0) + p.text.length,
+          url: "https://example.invalid/source",
+        })),
+      ],
+    },
+  };
+  const before = JSON.stringify(input);
+  const request = buildSourceInterpretationRequest(input);
+  const prompt = JSON.parse(request.prompt);
+  const originals = ["s1", "s5", "s6", "s7", "s8", "s9"];
+  assert.deepEqual(prompt.sourceIdentityAssertions, originals);
+  assert.deepEqual(
+    prompt.passages,
+    input.body.passages.map(({ url: _url, ...p }) => p),
+  );
+  assert.equal(JSON.stringify(input), before);
+  assert.deepEqual(request.body, input.body);
+  assert.deepEqual(request.binding, input.binding);
+  // This verifies original context transmission, not a model verdict or
+  // an automatic inference that a translated title is inconsistent.
+  assert.equal("detectedConflict" in prompt, false);
+  assert.equal("preferredLanguage" in prompt, false);
+});
+
+test("Source identity focus is absent without original service titles or descriptions", () => {
+  const base = context();
+  const input = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: base.body.passages.map((p, i) =>
+        i === 0 ? { ...p, rawPath: "/terms/serviceNote/it" } : p,
+      ),
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const prompt = JSON.parse(request.prompt);
+  assert.equal("sourceIdentityAssertions" in prompt, false);
+  assert.deepEqual(
+    prompt.passages,
+    input.body.passages.map(({ url: _url, ...p }) => p),
+  );
+  assert.equal(request.version, SOURCE_INTERPRETATION_VERSION);
+});
+
 // Invented records check the source-only contract, never model quality.
 function context(): SourceInterpretationContext {
   const values = [
@@ -849,7 +951,7 @@ test.each(["\n", "\r\n"])(
       prompt.rules.join(" "),
       /separa condizioni autonome nei details/,
     );
-    assert.equal(request.version, "documentary-source-interpretation-v35");
+    assert.equal(request.version, SOURCE_INTERPRETATION_VERSION);
     const oldKey = createHash("sha256")
       .update(
         stableDocumentaryJson({
@@ -3208,6 +3310,7 @@ test.each([
   "documentary-source-interpretation-v32",
   "documentary-source-interpretation-v33",
   "documentary-source-interpretation-v34",
+  "documentary-source-interpretation-v35",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
   assert.equal(request.version, SOURCE_INTERPRETATION_VERSION);

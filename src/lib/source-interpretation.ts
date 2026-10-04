@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v35";
+  "documentary-source-interpretation-v36";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -977,6 +977,16 @@ export function buildSourceInterpretationRequest(
   ];
   const clauseBlocks = contractClauseBlocks(body.passages);
   const evidenceGroups = componentEvidenceGroups(body.passages);
+  // Titles are original assertions too. Keep them beside descriptions so a
+  // repeated description cannot silently displace a conflicting translation.
+  // This selection asserts no conflict and never rewrites a source passage.
+  const sourceIdentityAssertions = body.passages
+    .filter(
+      (p) =>
+        p.role === "service" &&
+        /\/(?:title|orderDescription)\/(?:de|en|fr|it)$/.test(p.rawPath),
+    )
+    .map((p) => p.id);
   const targets = body.passages
     .filter(
       (passage) =>
@@ -997,6 +1007,7 @@ export function buildSourceInterpretationRequest(
     // Keep the required identifiers visible independently of long notes.
     // Coverage still needs an explanation of each condition, not filler refs.
     requiredContractClauseIds: requiredContractClauses.map((p) => p.id),
+    ...(sourceIdentityAssertions.length ? { sourceIdentityAssertions } : {}),
     rules: [
       "requiredContractClauseIds: ogni ID va nei details con la propria condizione completa. Non bastano summary/evidence e non aggiungere riferimenti estranei.",
       ...(requiredContractClauses.length
@@ -1037,7 +1048,7 @@ export function buildSourceInterpretationRequest(
       "resolved richiede oggetto e ruolo identificabili, anche come famiglia di prodotti senza sottotipo o dettagli tecnici. Non inventare dettagli: quantità, certificazioni o specifiche assenti non rendono da sole incerto il mestiere. details separa specifiche mancanti, condizioni esecutive e contesto condiviso; conserva quantità e unità originali. Non sono prestazioni aggiuntive né issues bloccanti.",
       "uncertain richiede un issue materiale tipizzato. object_identity collega componentIndexes (zero-based) a meaning ambiguous; role_identity a role null e roleEvidence unresolved; unreadable_source richiede una lettura unreadable. representation_incomplete cita prestazioni non rappresentate, non informazioni commerciali o specifiche assenti. Non inserire issues per dichiarare assenza di incertezza, e non dichiarare completa una rappresentazione incompleta.",
       "roleEvidence cita un estratto esatto, non tradotto e non classificatorio dell'azione; evidence lo documenta nello stesso scope. Non scambiare settore, luogo o destinatario per ruolo contrattuale. Se indeterminato usa role null, roleEvidence unresolved e issue role_identity. Per details e roleEvidence scope è l'ambito dei passaggi; per issues è il target interessato. target_scope riguarda soltanto lotti e cita entrambi gli ambiti: contesto condiviso e lotto.",
-      "source_conflict richiede status conflicting e due asserzioni materialmente incompatibili sullo stesso target, con riferimenti distinti nello stesso issue. Una tua interpretazione non è un'asserzione della fonte. Categoria ampia, descrizione specifica, traduzioni, ripetizioni o segmenti spezzati non costituiscono di per sé un conflitto. Una lettura unreadable vieta resolved.",
+      "source_conflict: conflicting, due asserti originali opposti sul target, refs diverse. Confronta titoli/descrizioni/riassunti: oggetto/destinatari/luogo/periodo. Solo precedenza ufficiale citata, mai maggioranza/lingua/ripetizione/refusi. Inferenze/categorie ampie/dettagli/traduzioni/frammenti da soli non bastano. unreadable vieta resolved.",
       "Ogni componente ha azione e oggetto concreti, distinti da ruolo e opera. Conserva principali e accessorie. Ogni lavoro escluso ha componente separata importance excluded, azione, oggetto e prova propri: menzionarlo in un acquisto non basta; non eredita le azioni acquistate. Non promuovere lavori di terzi né creare componenti da dati, codici, traduzioni o intestazioni. Classificazione/catalogazione acquistate restano servizi documentati dal testo.",
       ...(body.passages.some(
         (p) =>
