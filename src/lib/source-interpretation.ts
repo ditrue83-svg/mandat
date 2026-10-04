@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v25";
+  "documentary-source-interpretation-v26";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -242,7 +242,7 @@ const componentImportance = z
 const componentRefsDescription =
   "Cita il testo che identifica la prestazione, anche se si trova in una clausola o nel contesto del progetto. Codici ed etichette classificatorie possono chiarire questo stesso oggetto, ma non sono da soli una prestazione distinta.";
 const componentsDescription =
-  "Una componente per acquisto reale, accessorio o escluso. Descrizione e classificazione dello stesso acquisto non sono due prestazioni; dati, codici, traduzioni e intestazioni non aggiungono componenti.";
+  "Ogni acquisto o lavoro escluso ha componente propria, con azione, oggetto e prove. Non basta citare l'esclusione in un acquisto. Dati e classificazioni non creano acquisti.";
 
 // The same tagged shapes build the local contract and the provider schema.
 // Refinements below retain relational checks that JSON Schema does not encode.
@@ -404,7 +404,7 @@ function buildResponseSchema(bounds?: {
       : z.array(item).max(1024);
   const commonFields = {
     summary: text(1200).describe(
-      "Sintesi di oggetti, azioni contrattuali e ambito. Conserva tutte le azioni comuni: i soli beni non rappresentano anche installazione o gestione. Ogni fatto richiede summarySourceRefs.",
+      "Oggetti, tutte le azioni, ambito, esclusioni e condizioni esecutive per fase. I details non sostituiscono la sintesi. Ogni fatto ha summarySourceRefs.",
     ),
     // Share the exact reference schema with details; another described clone
     // would repeat the long source enum in the provider's JSON Schema.
@@ -815,11 +815,11 @@ export function buildSourceInterpretationRequest(
       "uncertain richiede un issue materiale tipizzato. object_identity collega componentIndexes (zero-based) a meaning ambiguous; role_identity a role null e roleEvidence unresolved; unreadable_source richiede una lettura unreadable. representation_incomplete cita prestazioni non rappresentate, non informazioni commerciali o specifiche assenti. Non inserire issues per dichiarare assenza di incertezza, e non dichiarare completa una rappresentazione incompleta.",
       "roleEvidence cita un estratto esatto, non tradotto e non classificatorio dell'azione; evidence lo documenta nello stesso scope. Non scambiare settore, luogo o destinatario per ruolo contrattuale. Se indeterminato usa role null, roleEvidence unresolved e issue role_identity. Per details e roleEvidence scope è l'ambito dei passaggi; per issues è il target interessato. target_scope riguarda soltanto lotti e cita entrambi gli ambiti: contesto condiviso e lotto.",
       "source_conflict richiede status conflicting e due asserzioni materialmente incompatibili sullo stesso target, con riferimenti distinti nello stesso issue. Una tua interpretazione non è un'asserzione della fonte. Categoria ampia, descrizione specifica, traduzioni, ripetizioni o segmenti spezzati non costituiscono di per sé un conflitto. Una lettura unreadable vieta resolved.",
-      "Descrivi ogni acquisto con azione e prodotto o servizio concreto, comprensibile da solo e coerente con la sintesi. Distingui oggetto, ruolo e opera a cui serve. Conserva tutte le prestazioni principali, accessorie ed escluse; non promuovere lavori di terzi. Non creare componenti da intestazioni, codici o traduzioni e non duplicare lo stesso acquisto per la classificazione. Servizi realmente acquistati di classificazione/catalogazione restano prestazioni, documentate dal testo.",
+      "Ogni componente ha azione e oggetto concreti, distinti da ruolo e opera. Conserva principali e accessorie. Ogni lavoro escluso ha componente separata importance excluded, azione, oggetto e prova propri: menzionarlo in un acquisto non basta; non eredita le azioni acquistate. Non promuovere lavori di terzi né creare componenti da dati, codici, traduzioni o intestazioni. Classificazione/catalogazione acquistate restano servizi documentati dal testo.",
       "importance dipende dalla gerarchia attestata: main principale; accessory complemento/supporto al principale anche se obbligatorio e classificato; excluded esplicita. Non ogni voce è main. Nome, ordine, anche/inoltre o quantità mancanti non provano accessory: un supporto può essere il principale. Senza gerarchia usa not_stated, acquisto da coprire interamente; non inventare main per resolved né issues d'identità. Opzionalità distinta, condizioni in details.",
       "Cita in summarySourceRefs ogni fatto della sintesi con i suoi passaggi o valori originali: anche date, luoghi, quantità e condizioni. Non ereditare prove delle componenti.",
       "Leggi insieme clausole generali e specifiche. Se una clausola acquista più azioni sullo stesso insieme di impianti o sistemi, conserva quel ciclo nella sintesi e nelle descrizioni delle componenti a cui si applica, con entrambe le prove. Non restringerlo a un solo esempio dell'elenco e non ridurre un acquisto integrato alla sola fornitura. role riassume una funzione, non cancella le altre azioni documentate. Non estendere il ciclo a servizi, oggetti o lotti cui la fonte non lo applica; una clausola specifica di esclusione o limitazione resta vincolante.",
-      "Conserva destinatari, numero di strutture, continuità e territorio nella sintesi o nei details. Mantieni azione e ambito delle condizioni anche nella sintesi, senza estenderle ad altre fasi del lavoro. Non dedurre quantità o periodicità assenti.",
+      "Destinatari, numero di strutture, continuità e territorio nella sintesi o nei details. Turni, regole operative e opzioni anche nella sintesi, con azione e ambito propri: i details non bastano. Non estenderli ad altre fasi né dedurre quantità o periodicità.",
       "Permessi organizzativi e limiti al subappalto vanno in details come execution_condition: conserva soggetti, attività e limiti. Non provano nuovi acquisti. Per creare componenti serve un'ulteriore clausola che acquisti o escluda quei lavori: cita quella prova. Distingui una prestazione acquistabile in opzione dal solo permesso di delegare il lavoro.",
       "requiredContractClauses: rendiconta nei details ogni proposizione autonoma, lingua e segmento con ID/scope. Subappalto: percentuali, documenti, prestazione caratteristica, candidature multiple in più offerte. Non risolvere opposizioni senza precedenza. fN conserva il JSON. Rinvii/valori ignoti: missing_specification. Clausole di progetto non diventano del lotto. Se incompleto: uncertain con issue, mai resolved.",
       ...(clauseBlocks.length
