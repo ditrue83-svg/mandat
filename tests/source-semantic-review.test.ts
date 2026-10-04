@@ -1495,6 +1495,198 @@ test("Contract completeness locates a detail even when its claim belongs to anot
   assert.equal(JSON.stringify(original), before);
 });
 
+for (const flag of ["no", "yes", false] as const) {
+  test(`Summary proof remains visible beside null notes in every review group (${String(flag)})`, () => {
+    const base = context();
+    const ref = typeof flag === "string" ? "s5" : "f2";
+    const input: SourceInterpretationContext = {
+      ...base,
+      body: {
+        ...base.body,
+        passages:
+          typeof flag === "string"
+            ? [
+                ...base.body.passages,
+                {
+                  ...base.body.passages[3],
+                  id: ref,
+                  rawPath: "/terms/subContractorAllowed",
+                  text: flag,
+                  endUtf16: flag.length,
+                },
+              ]
+            : base.body.passages,
+        fields: [
+          ...base.body.fields,
+          ...(typeof flag === "boolean"
+            ? [
+                {
+                  scope: "project_context" as const,
+                  rawPath: "/terms/subContractorAllowed",
+                  value: flag,
+                },
+              ]
+            : []),
+          ...["de", "en", "fr", "it"].map((language) => ({
+            scope: "project_context" as const,
+            rawPath: `/terms/subContractorNote/${language}`,
+            value: null,
+          })),
+        ],
+      },
+    };
+    const permitted = flag === "yes";
+    const explanation = permitted
+      ? "Il ricorso a subappaltatori è consentito."
+      : "Il ricorso a subappaltatori non è consentito.";
+    const response = draft().response;
+    const original = recordSourceInterpretation(
+      {
+        ...response,
+        summary: `Fornitura di articoli inventati. ${explanation}`,
+        summarySourceRefs: ["s1", ref],
+        components: Array.from({ length: 3 }, () => response.components[0]),
+        details: [
+          ...response.details,
+          {
+            kind: "execution_condition",
+            scope: "project_context",
+            sourceRefs: [ref],
+            explanation,
+          },
+        ],
+      },
+      buildSourceInterpretationRequest(input),
+      { ...metadata, model: input.binding.model },
+    );
+    const before = JSON.stringify({ input, original });
+    const plan = buildSourceSemanticReviewRequest(input, original, config);
+    const summary = plan.claims.find((claim) => claim.kind === "summary")!;
+    const evidence = recordSourceEvidenceReading(
+      plan.evidencePlan.requests.map((part) => {
+        const body = JSON.parse(part.prompt);
+        const answer = inventedSourceEvidenceAnswer(body);
+        // This fixture also reads the explicit false scalar. The usual
+        // passage-only helper cannot stand in for a required JSON field.
+        for (const field of body.requiredClauseFields) {
+          answer.observations.push({
+            kind: "condition",
+            serviceRef: "s1",
+            evidence: [{ sourceRef: field.sourceRef }],
+          });
+        }
+        return answer;
+      }),
+      plan.evidencePlan,
+      metadata,
+    );
+    const requests = buildGroundedSourceReviewRequests(plan, evidence);
+    assert(requests.length > 1);
+    assert(
+      requests.some((part) => {
+        const body = JSON.parse(part.prompt);
+        return (
+          !part.assignedClaimIds.includes(summary.id) &&
+          body.fields.some(
+            (field: { rawPath: string; value: unknown }) =>
+              field.rawPath.startsWith("/terms/subContractorNote/") &&
+              field.value === null,
+          )
+        );
+      }),
+    );
+    for (const part of requests) {
+      const body = JSON.parse(part.prompt);
+      assert(part.sourceIds.includes(ref));
+      if (typeof flag === "string") {
+        const proof = body.passages.find(
+          (item: { id: string }) => item.id === ref,
+        );
+        assert.equal(proof.text, flag);
+        assert.equal(proof.rawPath, "/terms/subContractorAllowed");
+      } else {
+        const proof = body.fields.find(
+          (item: { id: string }) => item.id === ref,
+        );
+        assert.equal(proof.value, false);
+        assert.equal(proof.rawPath, "/terms/subContractorAllowed");
+      }
+      assert.deepEqual(body.draft, JSON.parse(plan.requests[0].prompt).draft);
+      assert(
+        Buffer.byteLength(
+          part.system + part.prompt + JSON.stringify(part.responseFormat),
+        ) <= 160000,
+      );
+    }
+    assert.deepEqual(
+      requests.flatMap((part) => part.coverage.passageIds),
+      input.body.passages.map((item) => item.id),
+    );
+    assert.deepEqual(
+      requests.flatMap((part) => part.coverage.fieldIndexes),
+      input.body.fields.map((_item, index) => index),
+    );
+    assert.equal(
+      requests.filter((part) => part.assignedClaimIds.includes(summary.id))
+        .length,
+      1,
+    );
+    assert.equal(JSON.stringify({ input, original }), before);
+  });
+}
+
+test("Shared summary context does not approve a claim that contradicts an explicit permission", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[3],
+          id: "s5",
+          rawPath: "/terms/subContractorAllowed",
+          text: "yes",
+          endUtf16: 3,
+        },
+      ],
+    },
+  };
+  const original = recordSourceInterpretation(
+    {
+      ...draft().response,
+      summary: "Fornitura di articoli inventati; subappaltatori vietati.",
+      summarySourceRefs: ["s1", "s5"],
+      details: [
+        {
+          kind: "execution_condition",
+          scope: "project_context",
+          sourceRefs: ["s5"],
+          explanation: "Il ricorso a subappaltatori è consentito.",
+        },
+      ],
+    },
+    buildSourceInterpretationRequest(input),
+    { ...metadata, model: input.binding.model },
+  );
+  const before = JSON.stringify(original);
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  const claim = plan.claims.find((item) => item.kind === "summary")!;
+  const responses = answers(plan).map(wireResponse);
+  const owner = responses.find((part) => part.checksByClaim[claim.id])!;
+  owner.checksByClaim[claim.id] = {
+    verdict: "contradicted",
+    draftQuote: "subappaltatori vietati",
+    reason: "Il campo originale indica yes: il divieto dichiarato è falso.",
+    sourceRefs: ["s5"],
+    readingRefs: ["o-s5"],
+  };
+  const stored = recordSourceSemanticReview(responses, plan, metadata);
+  assert.equal(readSourceSemanticReview(stored, plan)!.accepted, false);
+  assert.equal(JSON.stringify(original), before);
+});
+
 test("Review records become stale for source draft configuration or version and reject tampering", () => {
   const input = context(),
     original = draft(input),
