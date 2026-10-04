@@ -437,6 +437,72 @@ test("A resolved draft cannot omit a structured subcontracting prohibition", () 
   );
 });
 
+test("Standalone extension and delegation flags must be explained in details", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        ...[
+          ["s5", "/procurement/canContractBeExtended"],
+          ["s6", "/terms/subContractorAllowed"],
+        ].map(([id, rawPath]) => ({
+          ...base.body.passages[0],
+          id,
+          rawPath,
+          role: "context" as const,
+          text: "yes",
+          startUtf16: 0,
+          endUtf16: 3,
+        })),
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const prompt = JSON.parse(request.prompt);
+  assert.deepEqual(prompt.requiredContractClauseIds, ["s5", "s6"]);
+  assert.match(prompt.rules.join(" "), /canContractBeExtended yes\/true/);
+  assert.match(prompt.rules.join(" "), /senza inventare durata/);
+  assert.equal(prompt.requiredContractClauses[0].text, "yes");
+  const omitted = response(input);
+  omitted.summarySourceRefs.push("s5", "s6");
+  assert.throws(
+    () => validateSourceInterpretation(omitted, request),
+    /Incomplete.*contract clauses/,
+  );
+  const complete = {
+    ...omitted,
+    details: [
+      {
+        kind: "execution_condition",
+        scope: "project_context",
+        sourceRefs: ["s5"],
+        explanation: "La proroga del contratto è consentita.",
+      },
+      {
+        kind: "execution_condition",
+        scope: "project_context",
+        sourceRefs: ["s6"],
+        explanation: "Il subappalto è consentito.",
+      },
+    ],
+  };
+  assert.equal(
+    validateSourceInterpretation(complete, request).status,
+    "resolved",
+  );
+  assert.throws(
+    () =>
+      validateSourceInterpretation(
+        { ...complete, details: complete.details.slice(1) },
+        request,
+      ),
+    /Incomplete.*contract clauses/,
+  );
+});
+
 test.each([false, true, 0, null])(
   "Structured contract value %s keeps its exact JSON identity",
   (value) => {
@@ -744,7 +810,7 @@ test.each(["\n", "\r\n"])(
       prompt.rules.join(" "),
       /separa condizioni autonome nei details/,
     );
-    assert.equal(request.version, "documentary-source-interpretation-v22");
+    assert.equal(request.version, "documentary-source-interpretation-v23");
     const oldKey = createHash("sha256")
       .update(
         stableDocumentaryJson({
