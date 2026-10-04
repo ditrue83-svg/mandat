@@ -849,7 +849,7 @@ test.each(["\n", "\r\n"])(
       prompt.rules.join(" "),
       /separa condizioni autonome nei details/,
     );
-    assert.equal(request.version, "documentary-source-interpretation-v32");
+    assert.equal(request.version, "documentary-source-interpretation-v33");
     const oldKey = createHash("sha256")
       .update(
         stableDocumentaryJson({
@@ -2239,6 +2239,110 @@ test("Unknown, duplicated or out-of-target evidence cannot support a source inte
   );
 });
 
+test("An opening selected-lot identifier uses its explicit number and its own field proof", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    binding: {
+      ...base.binding,
+      target: {
+        kind: "lot",
+        publicationId: "invented-publication",
+        sourceProjectId: "invented-project",
+        lotId: "invented-lot",
+      },
+    },
+    targetScope: "selected_lot",
+    body: {
+      ...base.body,
+      target: {
+        kind: "lot",
+        lot: {
+          id: "invented-lot",
+          path: "/lots/3",
+          headerPath: "/base/lots/3",
+        },
+      },
+      fields: [
+        { scope: "selected_lot", rawPath: "/lots/3/lotNumber", value: 4 },
+        { scope: "selected_lot", rawPath: "/base/lots/3/lotNumber", value: 4 },
+      ],
+      classifications: base.body.classifications.map((c) => ({
+        ...c,
+        appliesTo: "shared_project_context",
+      })),
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[0],
+          id: "s5",
+          scope: "selected_lot",
+          rawPath: "/lots/3/description/it",
+        },
+      ],
+    },
+  };
+  const before = JSON.stringify(input);
+  const request = buildSourceInterpretationRequest(input);
+  assert.deepEqual(JSON.parse(request.prompt).targetNumberEvidence, [
+    { sourceRef: "f0", value: 4 },
+    { sourceRef: "f1", value: 4 },
+  ]);
+  const valid = {
+    ...response(input),
+    targetRef: "s5",
+    summary:
+      "Il lotto 4 riguarda prodotti inventati, con posa accessoria e trasporto escluso.",
+    summarySourceRefs: [...response(input).summarySourceRefs, "f0"],
+  };
+  assert.equal(
+    recordSourceInterpretation(valid, request, metadata).response.summary,
+    valid.summary,
+  );
+  for (const number of [0, 1, 3, 5])
+    assert.throws(
+      () =>
+        recordSourceInterpretation(
+          {
+            ...valid,
+            summary: valid.summary.replace("lotto 4", `lotto ${number}`),
+          },
+          request,
+          metadata,
+        ),
+      /lot number contradicts original metadata/,
+    );
+  assert.throws(
+    () =>
+      recordSourceInterpretation(
+        { ...valid, summarySourceRefs: response(input).summarySourceRefs },
+        request,
+        metadata,
+      ),
+    /own original field evidence/,
+  );
+  const conflictingInput = {
+    ...input,
+    body: {
+      ...input.body,
+      fields: input.body.fields.map((f, i) => ({
+        ...f,
+        value: i === 1 ? 5 : f.value,
+      })),
+    },
+  };
+  assert.throws(
+    () =>
+      recordSourceInterpretation(
+        valid,
+        buildSourceInterpretationRequest(conflictingInput),
+        metadata,
+      ),
+    /lot number contradicts original metadata/,
+  );
+  assert.equal(JSON.stringify(input), before);
+});
+
 test("A selected lot keeps shared classification contextual and requires its own target evidence", () => {
   const input = context();
   const lot: SourceInterpretationContext = {
@@ -2992,6 +3096,7 @@ test.each([
   "documentary-source-interpretation-v20",
   "documentary-source-interpretation-v30",
   "documentary-source-interpretation-v31",
+  "documentary-source-interpretation-v32",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
   assert.equal(request.version, SOURCE_INTERPRETATION_VERSION);

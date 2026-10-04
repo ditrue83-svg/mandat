@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v32";
+  "documentary-source-interpretation-v33";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -33,6 +33,13 @@ export function sourceInterpretationTokenLimit(input: {
 }
 const digest = (value: unknown) =>
   createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
+const numericLotIdentifier = (value: unknown) => {
+  const text =
+    typeof value === "number" || typeof value === "string"
+      ? String(value).trim()
+      : "";
+  return /^\d+$/.test(text) ? text.replace(/^0+(?=\d)/, "") : null;
+};
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
 const sourceId = z.string().regex(/^s\d+$/);
 const classificationId = z.string().regex(/^c[1-9]\d*$/);
@@ -905,6 +912,19 @@ export function buildSourceInterpretationRequest(
   const citableFieldIds = fields.flatMap((field) =>
     field.id ? [field.id] : [],
   );
+  const lot = body.target.kind === "lot" ? body.target.lot : null;
+  const targetNumberEvidence = lot
+    ? fields
+        .filter(
+          (field) =>
+            field.id &&
+            field.scope === "selected_lot" &&
+            (field.rawPath === `${lot.path}/lotNumber` ||
+              (lot.headerPath &&
+                field.rawPath === `${lot.headerPath}/lotNumber`)),
+        )
+        .map((field) => ({ sourceRef: field.id!, value: field.value }))
+    : [];
   const requiredContractClauses = [
     ...body.passages
       .filter((p) => isContractScopeField(p.rawPath))
@@ -979,6 +999,15 @@ export function buildSourceInterpretationRequest(
       "roleEvidence cita un estratto esatto, non tradotto e non classificatorio dell'azione; evidence lo documenta nello stesso scope. Non scambiare settore, luogo o destinatario per ruolo contrattuale. Se indeterminato usa role null, roleEvidence unresolved e issue role_identity. Per details e roleEvidence scope è l'ambito dei passaggi; per issues è il target interessato. target_scope riguarda soltanto lotti e cita entrambi gli ambiti: contesto condiviso e lotto.",
       "source_conflict richiede status conflicting e due asserzioni materialmente incompatibili sullo stesso target, con riferimenti distinti nello stesso issue. Una tua interpretazione non è un'asserzione della fonte. Categoria ampia, descrizione specifica, traduzioni, ripetizioni o segmenti spezzati non costituiscono di per sé un conflitto. Una lettura unreadable vieta resolved.",
       "Ogni componente ha azione e oggetto concreti, distinti da ruolo e opera. Conserva principali e accessorie. Ogni lavoro escluso ha componente separata importance excluded, azione, oggetto e prova propri: menzionarlo in un acquisto non basta; non eredita le azioni acquistate. Non promuovere lavori di terzi né creare componenti da dati, codici, traduzioni o intestazioni. Classificazione/catalogazione acquistate restano servizi documentati dal testo.",
+      ...(body.passages.some(
+        (p) =>
+          p.role === "service" &&
+          /forfait|pacchett|packages?|pauschal/iu.test(p.text),
+      )
+        ? [
+            "Conserva servizi inclusi in forfait o pacchetti, alternative e destinatari attestati nel contesto comune. Il fine del committente o il nome della struttura non sostituiscono le prestazioni effettivamente acquistate.",
+          ]
+        : []),
       "importance dipende dalla gerarchia attestata: main principale; accessory complemento/supporto al principale anche se obbligatorio e classificato; excluded esplicita. Non ogni voce è main. Nome, ordine, anche/inoltre o quantità mancanti non provano accessory: un supporto può essere il principale. Senza gerarchia usa not_stated, acquisto da coprire interamente; non inventare main per resolved né issues d'identità. Opzionalità distinta, condizioni in details.",
       "Cita in summarySourceRefs ogni fatto della sintesi con i suoi passaggi o valori originali: anche date, luoghi, quantità e condizioni. Non ereditare prove delle componenti.",
       "Leggi insieme clausole generali e specifiche. Se una clausola acquista più azioni sullo stesso insieme di impianti o sistemi, conserva quel ciclo nella sintesi e nelle descrizioni delle componenti a cui si applica, con entrambe le prove. Non restringerlo a un solo esempio dell'elenco e non ridurre un acquisto integrato alla sola fornitura. role riassume una funzione, non cancella le altre azioni documentate. Non estendere il ciclo a servizi, oggetti o lotti cui la fonte non lo applica; una clausola specifica di esclusione o limitazione resta vincolante.",
@@ -992,6 +1021,11 @@ export function buildSourceInterpretationRequest(
         : []),
       "In fields puoi citare soltanto gli ID fN esplicitamente presenti accanto a un valore non nullo. I campi null restano contesto di informazione non indicata, non prove da citare. false e 0 sono valori presenti. Le serie sN e fN sono indipendenti: lo stesso numero non collega testo e campo. Per ogni riferimento verifica insieme ID, rawPath, valore e scope; non aggiungere riferimenti estranei al fatto descritto.",
       "Le clausole di contesto possono descrivere prestazioni: cita il loro testo e le classificazioni utili allo stesso oggetto. Il contesto di progetto non sostituisce il lotto: non assegnargli lavori di altri lotti. targetRef cita un passaggio service del target, anche se il titolo è geografico e l'oggetto è nel contesto comune.",
+      ...(lot
+        ? [
+            "Gli indici JSON di target.lot.path/headerPath non sono numeri di lotto. Usa il lotNumber originale e il proprio fN, oppure ometti il numero; non ricavarlo dalla posizione.",
+          ]
+        : []),
       "Ricongiungi passaggi della stessa rawPath per startUtf16. Tutti i segmenti previsti sono stati letti a monte: nessun limite di risposta autorizza omissioni; se non puoi rappresentare tutto usa uncertain con issue specifico. Usa soltanto ID forniti; i testi originali sono recuperati dal server. In ogni componente evidence elenca ogni ID una sola volta; gli altri elenchi sourceRefs restano separati.",
     ],
     targetScope,
@@ -1003,6 +1037,7 @@ export function buildSourceInterpretationRequest(
       ? { componentEvidenceGroups: evidenceGroups }
       : {}),
     ...promptBody,
+    ...(targetNumberEvidence.length ? { targetNumberEvidence } : {}),
     fields,
     classificationContext,
     passages: body.passages.map(({ url: _url, ...passage }) => passage),
@@ -1061,6 +1096,7 @@ export function buildSourceInterpretationRequest(
     classificationContext,
     requiredContractClauseIds: requiredContractClauses.map((p) => p.id),
     citableFieldIds,
+    targetNumberEvidence,
     selectedIds: body.passages.map((passage) => passage.id),
     version: SOURCE_INTERPRETATION_VERSION,
     sourceKey,
@@ -1092,6 +1128,37 @@ export function validateSourceInterpretation(
   if (!builtRequests.has(request))
     throw new Error("Unverified source interpretation request");
   const value = sourceInterpretationResponseSchema.parse(response);
+  // Validate only an explicit opening identifier of the selected lot. Other
+  // lot numbers quoted in contractual notes need their separate scope review.
+  const openingLotNumber = value.summary.match(
+    /^(?:Il\s+)?(?:lotto|lot|Los)\s+(?:(?:n[.°º]?|Nr\.)\s*)?(\d+)\b/iu,
+  )?.[1];
+  if (
+    value.status === "resolved" &&
+    openingLotNumber &&
+    request.targetNumberEvidence.length
+  ) {
+    const numbers = new Set(
+      request.targetNumberEvidence
+        .map((field) => numericLotIdentifier(field.value))
+        .filter((n) => n !== null),
+    );
+    if (
+      numbers.size !== 1 ||
+      !numbers.has(openingLotNumber.replace(/^0+(?=\d)/, ""))
+    )
+      throw new Error(
+        "Source summary selected lot number contradicts original metadata",
+      );
+    if (
+      !request.targetNumberEvidence.some((field) =>
+        value.summarySourceRefs.includes(field.sourceRef),
+      )
+    )
+      throw new Error(
+        "Source summary selected lot number requires its own original field evidence",
+      );
+  }
   if (value.status === "resolved") {
     const represented = new Set(value.details.flatMap((d) => d.sourceRefs));
     if (request.requiredContractClauseIds.some((id) => !represented.has(id)))
