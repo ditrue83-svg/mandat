@@ -95,9 +95,14 @@ export function inventedGroundedReviewRequests(plan: SourceSemanticReviewPlan) {
 }
 export function inventedReadingRefs(
   body: any,
-  claim: { sourceRefs: string[] },
+  claim: { sourceRefs: string[]; kind?: string },
 ) {
   return [
+    ...(claim.kind === "contract_clause_coverage"
+      ? body.originalFacts
+          .filter((f: any) => claim.sourceRefs.includes(f.sourceRef))
+          .map((f: any) => f.id)
+      : []),
     ...body.independentReading.observations
       .filter((o: any) =>
         o.evidence.some((q: any) => claim.sourceRefs.includes(q.sourceRef)),

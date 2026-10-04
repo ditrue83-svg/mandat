@@ -1414,7 +1414,9 @@ test("A cited compound contract note can still omit a separate bidding permissio
     ),
   );
   const responses = answers(plan);
-  const index = grounded.findIndex((part) => part.sourceIds.includes("s5"));
+  const index = grounded.findIndex((part) =>
+    part.ownedContractClauseIds.includes("s5"),
+  );
   responses[index].findings.push({
     kind: "omitted_contract_condition",
     reason: "Il draft omette il permesso di comparire in più offerte.",
@@ -1492,6 +1494,155 @@ test("Contract completeness locates a detail even when its claim belongs to anot
     ]);
     assert.deepEqual(body.draft.details, original.response.details);
   }
+  assert.equal(JSON.stringify(original), before);
+});
+
+test("Each original compound clause has one mandatory completeness owner; unrelated groups cannot report its omission", () => {
+  const base = context();
+  const note =
+    "Subappalto ammesso fino al 70%. Le candidature multiple in più offerte sono possibili.";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[3],
+          id: "s5",
+          rawPath: "/terms/subContractorNote/it",
+          text: note,
+          endUtf16: note.length,
+        },
+      ],
+    },
+  };
+  const response = draft().response;
+  const make = (complete: boolean) =>
+    recordSourceInterpretation(
+      {
+        ...response,
+        summary: "Fornitura di articoli inventati; subappalto ammesso.",
+        summarySourceRefs: ["s1", "s5"],
+        components: Array.from({ length: 3 }, () => response.components[0]),
+        details: [
+          ...response.details,
+          {
+            kind: "execution_condition",
+            scope: "project_context",
+            sourceRefs: ["s5"],
+            explanation: "Subappalto ammesso fino al 70%.",
+          },
+          ...(complete
+            ? [
+                {
+                  kind: "execution_condition",
+                  scope: "project_context",
+                  sourceRefs: ["s5"],
+                  explanation:
+                    "Sono possibili candidature multiple in più offerte.",
+                },
+              ]
+            : []),
+        ],
+      },
+      buildSourceInterpretationRequest(input),
+      { ...metadata, model: input.binding.model },
+    );
+  const original = make(true),
+    before = JSON.stringify(original);
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  const requests = inventedGroundedReviewRequests(plan);
+  const coverage = plan.claims.filter(
+    (c) => c.kind === "contract_clause_coverage",
+  );
+  assert.equal(coverage.length, 1);
+  assert.deepEqual(coverage[0].sourceRefs, ["s5"]);
+  assert(
+    coverage[0].text.includes(
+      "Sono possibili candidature multiple in più offerte.",
+    ),
+  );
+  const owners = requests.filter((r) =>
+    r.ownedContractClauseIds.includes("s5"),
+  );
+  assert.equal(owners.length, 1);
+  assert(owners[0].assignedClaimIds.includes(coverage[0].id));
+  assert.equal(
+    JSON.parse(owners[0].prompt).passages.find((p: any) => p.id === "s5").text,
+    note,
+  );
+  const nonOwner = requests.findIndex(
+    (r) => !r.ownedContractClauseIds.includes("s5"),
+  );
+  assert(nonOwner >= 0);
+  const valid = answers(plan);
+  assert.equal(
+    readSourceSemanticReview(
+      recordSourceSemanticReview(valid.map(wireResponse), plan, metadata),
+      plan,
+    )?.accepted,
+    true,
+  );
+  const falseFinding = structuredClone(valid);
+  falseFinding[nonOwner].findings.push({
+    kind: "omitted_contract_condition",
+    reason: "Il permesso presente viene erroneamente dichiarato assente.",
+    sourceRefs: ["s5"],
+  });
+  // Both the native strict wire and legacy ordered representation enforce
+  // responsibility. Neither silently filters or rescales an invalid finding.
+  assert.throws(() =>
+    recordSourceSemanticReview(falseFinding.map(wireResponse), plan, metadata),
+  );
+  assert.throws(
+    () => recordSourceSemanticReview(falseFinding, plan, metadata),
+    /mandatory clause coverage owner/,
+  );
+  const omittedCheck = structuredClone(valid);
+  const ownerIndex = requests.indexOf(owners[0]);
+  omittedCheck[ownerIndex].checks = omittedCheck[ownerIndex].checks.filter(
+    (c) => c.claimId !== coverage[0].id,
+  );
+  assert.throws(
+    () => recordSourceSemanticReview(omittedCheck, plan, metadata),
+    /exactly one check/,
+  );
+
+  const incomplete = make(false);
+  const missingPlan = buildSourceSemanticReviewRequest(
+    input,
+    incomplete,
+    config,
+  );
+  const missingCoverage = missingPlan.claims.find(
+    (c) => c.kind === "contract_clause_coverage",
+  )!;
+  assert(
+    !missingCoverage.text.includes(
+      "Sono possibili candidature multiple in più offerte.",
+    ),
+  );
+  const negative = answers(missingPlan);
+  const missingCheck = negative
+    .flatMap((r) => r.checks)
+    .find((c) => c.claimId === missingCoverage.id)!;
+  Object.assign(missingCheck, {
+    verdict: "not_verifiable",
+    draftQuote: "Tutte le proposizioni della clausola s5 sono rappresentate",
+    reason:
+      "Il dettaglio conserva il 70% ma omette il permesso originale di candidature multiple in più offerte.",
+  });
+  const rejected = readSourceSemanticReview(
+    recordSourceSemanticReview(
+      negative.map(wireResponse),
+      missingPlan,
+      metadata,
+    ),
+    missingPlan,
+  )!;
+  assert.equal(rejected.accepted, false);
+  assert.equal(rejected.findings[0].kind, "not_verifiable");
   assert.equal(JSON.stringify(original), before);
 });
 
