@@ -2365,6 +2365,218 @@ test("A value and its nullable Note remain separate original proofs across cover
   assert.equal(JSON.stringify(original), draftBefore);
 });
 
+test.each([
+  ["subContractor", "Allowed"],
+  ["subContractor", "MultiApplicationAllowed"],
+  ["consortium", "Allowed"],
+  ["consortium", "MultiApplicationAllowed"],
+])(
+  "The simap %s%s field carries its actual organizational Note without borrowing another scope or path",
+  (family, flagName) => {
+    const base = context();
+    const flag = {
+      ...base.body.passages[3],
+      id: "s5",
+      rawPath: `/terms/${family}${flagName}`,
+      text: "no",
+      endUtf16: 2,
+    };
+    const fields: SourceInterpretationContext["body"]["fields"] = [
+      {
+        scope: "project_context",
+        rawPath: `/terms/${family}Note/de`,
+        value: null,
+      },
+      {
+        scope: "project_context",
+        rawPath: `/terms/${family}Note/it`,
+        value: null,
+      },
+      {
+        scope: "selected_lot",
+        rawPath: `/terms/${family}Note/it`,
+        value: null,
+      },
+      {
+        scope: "project_context",
+        rawPath: `/lots/9/terms/${family}Note/it`,
+        value: null,
+      },
+      {
+        scope: "project_context",
+        rawPath: `/terms/${family}OtherNote/it`,
+        value: null,
+      },
+    ];
+    const input: SourceInterpretationContext = {
+      ...base,
+      body: { ...base.body, passages: [...base.body.passages, flag], fields },
+    };
+    const before = JSON.stringify(input);
+    const original = recordSourceInterpretation(
+      {
+        ...draft(base).response,
+        details: [
+          {
+            kind: "execution_condition",
+            scope: "project_context",
+            sourceRefs: ["s5"],
+            explanation: "Il valore è no; la nota non è indicata.",
+          },
+        ],
+      },
+      buildSourceInterpretationRequest(input),
+      { ...metadata, model: input.binding.model },
+    );
+    const draftBefore = JSON.stringify(original);
+    const plan = buildSourceSemanticReviewRequest(input, original, config);
+    const claim = plan.claims.find((c) => c.kind === "detail")!;
+    const request = inventedGroundedReviewRequests(plan).find((r) =>
+      r.assignedClaimIds.includes(claim.id),
+    )!;
+    const body = JSON.parse(request.prompt);
+    assert.deepEqual(
+      body.originalFactBindings.find((b: any) => b.claimId === claim.id),
+      {
+        claimId: claim.id,
+        declaredSourceRefs: ["s5"],
+        relatedNoteContextRefs: ["f0", "f1"],
+      },
+    );
+    assert.deepEqual(claim.sourceRefs, ["s5"]);
+    const allowed = body.detailEvidenceBindings.find(
+      (b: any) => b.claimId === claim.id,
+    ).readingIds;
+    for (const index of [0, 1]) {
+      assert(allowed.includes(`o-f${index}`));
+      assert.deepEqual(
+        body.fields.find((f: any) => f.id === `f${index}`),
+        { id: `f${index}`, index, ...fields[index] },
+      );
+    }
+    assert(
+      !allowed.some((id: string) => ["o-f2", "o-f3", "o-f4"].includes(id)),
+    );
+    assert.deepEqual(
+      plan.requests.flatMap((r) => r.coverage.fieldIndexes),
+      [0, 1, 2, 3, 4],
+    );
+    const responses = answers(plan);
+    const check = responses
+      .flatMap((r) => r.checks)
+      .find((c) => c.claimId === claim.id)!;
+    check.sourceRefs = ["s5", "f0", "f1"];
+    check.readingRefs = ["o-s5", "o-f0", "o-f1"];
+    assert(
+      readSourceSemanticReview(
+        recordSourceSemanticReview(responses, plan, metadata),
+        plan,
+      )?.accepted,
+    );
+    const negative = structuredClone(responses);
+    negative
+      .flatMap((r) => r.checks)
+      .find((c) => c.claimId === claim.id)!.verdict = "not_verifiable" as any;
+    assert.equal(
+      readSourceSemanticReview(
+        recordSourceSemanticReview(negative, plan, metadata),
+        plan,
+      )?.accepted,
+      false,
+    );
+    assert.equal(JSON.stringify(input), before);
+    assert.equal(JSON.stringify(original), draftBefore);
+  },
+);
+
+test.each(["subContractor", "consortium"])(
+  "The simap %sNote carries both original flags as separate context",
+  (family) => {
+    const base = context();
+    const note = {
+      ...base.body.passages[3],
+      id: "s5",
+      rawPath: `/terms/${family}Note/it`,
+      text: "Condizione organizzativa inventata.",
+      endUtf16: 33,
+    };
+    note.endUtf16 = note.text.length;
+    const allowed = {
+      ...note,
+      id: "s6",
+      rawPath: `/terms/${family}Allowed`,
+      text: "yes",
+      endUtf16: 3,
+    };
+    const multiple = {
+      ...note,
+      id: "s7",
+      rawPath: `/terms/${family}MultiApplicationAllowed`,
+      text: "no",
+      endUtf16: 2,
+    };
+    const unrelated = {
+      ...allowed,
+      id: "s8",
+      rawPath: `/terms/${family}OtherAllowed`,
+    };
+    const foreign = {
+      ...allowed,
+      id: "s9",
+      rawPath: `/lots/9/terms/${family}Allowed`,
+    };
+    const input = {
+      ...base,
+      body: {
+        ...base.body,
+        passages: [
+          ...base.body.passages,
+          note,
+          allowed,
+          multiple,
+          unrelated,
+          foreign,
+        ],
+      },
+    };
+    const before = JSON.stringify(input);
+    const original = recordSourceInterpretation(
+      {
+        ...draft(base).response,
+        details: [note, allowed, multiple, unrelated, foreign].map((p) => ({
+          kind: "execution_condition" as const,
+          scope: "project_context" as const,
+          sourceRefs: [p.id],
+          explanation: p.text,
+        })),
+      },
+      buildSourceInterpretationRequest(input),
+      { ...metadata, model: input.binding.model },
+    );
+    const plan = buildSourceSemanticReviewRequest(input, original, config);
+    const claim = plan.claims.find((c) => c.kind === "detail")!;
+    const request = inventedGroundedReviewRequests(plan).find((r) =>
+      r.assignedClaimIds.includes(claim.id),
+    )!;
+    const body = JSON.parse(request.prompt);
+    assert.deepEqual(
+      body.originalFactBindings.find((b: any) => b.claimId === claim.id),
+      {
+        claimId: claim.id,
+        declaredSourceRefs: ["s5"],
+        relatedNoteContextRefs: ["s6", "s7"],
+      },
+    );
+    assert.deepEqual(claim.sourceRefs, ["s5"]);
+    const own = body.detailEvidenceBindings.find(
+      (b: any) => b.claimId === claim.id,
+    ).readingIds;
+    assert(own.includes("o-s6") && own.includes("o-s7"));
+    assert(!own.includes("o-s8") && !own.includes("o-s9"));
+    assert.equal(JSON.stringify(input), before);
+  },
+);
+
 test("Long review covers every original passage and scalar including the unselected tail with one owner per claim", () => {
   const base = context();
   const passages = [

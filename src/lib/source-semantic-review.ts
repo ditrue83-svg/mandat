@@ -22,7 +22,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v45";
+  "documentary-source-semantic-review-v46";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -257,6 +257,9 @@ function relatedContractDurationRefs(
 // their original siblings, including null, without changing draft citations
 // or assigning the sibling a second completeness owner. Match only the
 // exact JSON property convention and scope, never nearby text or other lots.
+// PubBaseTerms stores organizational flags and their Note under distinct
+// names. The Note is shared context for the two flags, not a replacement for
+// either value or a semantic verdict about its relationship to them.
 function originalFactRefs(
   claim: Claim,
   originals: ReadonlyMap<string, ComparisonPassage>,
@@ -279,12 +282,30 @@ function originalFactRefs(
     ...claim.sourceRefs.flatMap((ref) => {
       const own = originals.get(ref);
       if (!own) return [];
+      const organizationalFlag =
+        /^(.*\/terms\/)(subContractor|consortium)(?:Allowed|MultiApplicationAllowed)$/.exec(
+          own.rawPath,
+        );
+      const organizationalNote =
+        /^(.*\/terms\/)(subContractor|consortium)Note(?:\/(?:de|en|fr|it|rm))?$/.exec(
+          own.rawPath,
+        );
       const note = /^(.*)Note(?:\/(?:de|en|fr|it|rm))?$/.exec(own.rawPath);
-      const paths = note
-        ? [note[1]]
-        : ["", "/de", "/en", "/fr", "/it", "/rm"].map(
-            (suffix) => `${own.rawPath}Note${suffix}`,
-          );
+      const paths = organizationalFlag
+        ? ["", "/de", "/en", "/fr", "/it", "/rm"].map(
+            (suffix) =>
+              `${organizationalFlag[1]}${organizationalFlag[2]}Note${suffix}`,
+          )
+        : organizationalNote
+          ? ["Allowed", "MultiApplicationAllowed"].map(
+              (suffix) =>
+                `${organizationalNote[1]}${organizationalNote[2]}${suffix}`,
+            )
+          : note
+            ? [note[1]]
+            : ["", "/de", "/en", "/fr", "/it", "/rm"].map(
+                (suffix) => `${own.rawPath}Note${suffix}`,
+              );
       return paths.flatMap(
         (rawPath) => index!.get(key(own.scope, rawPath)) ?? [],
       );
