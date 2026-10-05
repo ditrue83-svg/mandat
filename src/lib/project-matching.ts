@@ -8,9 +8,12 @@ import {
   projectClassificationInput,
 } from "./sector-classification";
 import { zoneForExactCity } from "./ticino-localities";
-import { explicitlyNoSiteVisit } from "./site-visit-notes";
+import {
+  explicitlyNoSiteVisit,
+  explicitlyUnscheduledIndividualVisit,
+} from "./site-visit-notes";
 
-export const PROJECT_PREFILTER_VERSION = "project-operational-prefilter-v3";
+export const PROJECT_PREFILTER_VERSION = "project-operational-prefilter-v4";
 export type ProjectOperationalEvidence = {
   scope: "publication" | "project_context";
   url: string;
@@ -369,7 +372,7 @@ export function preliminaryProjectMatch({
         publicationField(key, "editorial");
       if (
         (canton && publication.canton !== canton) ||
-        (zone && publication.zone !== zone) ||
+        (zone && publication.zone !== null && publication.zone !== zone) ||
         (cityVariants &&
           !cityVariants.map(plainText).includes(publication.location))
       ) {
@@ -397,8 +400,8 @@ export function preliminaryProjectMatch({
     } else review("Luogo di esecuzione del progetto da verificare.");
 
     // Keep every original note as evidence. Only complete, unqualified absence
-    // statements need no visit review. Do not infer attendance, optionality or
-    // a legal deadline/exclusion from other prose.
+    // statements or explicit, undated advice for an unorganized individual
+    // visit need no attendance review. Other prose remains for review.
     const visit = own(object(sections.terms), "walkThroughNotes");
     if (
       visit !== null &&
@@ -416,7 +419,10 @@ export function preliminaryProjectMatch({
         "/terms",
         "availability",
       );
-      if (!explicitlyNoSiteVisit(visit))
+      if (
+        !explicitlyNoSiteVisit(visit) &&
+        !explicitlyUnscheduledIndividualVisit(visit)
+      )
         review(
           "La fonte contiene indicazioni sul sopralluogo: verifica obbligatorietà, data ed eventuale partecipazione.",
         );

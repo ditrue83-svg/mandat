@@ -200,6 +200,64 @@ test("Collected Ticino localities share an exact district across normalization a
   }
 });
 
+test("A missing editorial district does not contradict the exact original city, while different districts still do", () => {
+  const raw = detail();
+  raw.procurement.orderAddress = {
+    countryId: "CH",
+    cantonId: "TI",
+    city: { it: "Ponte Tresa" },
+  };
+  const missing = filter(raw, { zones: ["Luganese"] }, { zone: null });
+  assert.equal(missing.eligible, true);
+  assert.equal(missing.requiresReview, false);
+  assert.equal(missing.operational.zone, "Luganese");
+  assert.equal(
+    missing.evidence.find(
+      (e) => e.scope === "publication" && e.rawPath === "/zone",
+    )?.value,
+    null,
+  );
+  assert.equal(
+    filter(raw, { zones: ["Bellinzonese"] }, { zone: null }).eligible,
+    false,
+  );
+  const different = filter(raw, {}, { zone: "Bellinzonese" });
+  assert.equal(different.requiresReview, true);
+  assert.equal(different.operational.zone, null);
+  assert.notEqual(different.operationalInputHash, missing.operationalInputHash);
+  assert.equal(
+    filter(raw, {}, { zone: null, location: "Bellinzona" }).requiresReview,
+    true,
+  );
+});
+
+test("An undated individual visit recommendation preserves evidence without an attendance hold", () => {
+  const raw = detail();
+  const notes = {
+    it: "Nessun sopralluogo organizzato. È tuttavia consigliato un sopralluogo individuale.",
+  };
+  Object.assign(raw.terms, { walkThroughNotes: notes });
+  const result = filter(raw);
+  assert.equal(result.eligible, true);
+  assert.equal(result.requiresReview, false);
+  assert.deepEqual(
+    result.evidence.find((e) => e.rawPath === "/terms/walkThroughNotes")?.value,
+    notes,
+  );
+  for (const extra of [
+    " Il 21 gennaio alle 09:00.",
+    " La partecipazione è obbligatoria.",
+    " Salvo successiva convocazione.",
+  ]) {
+    Object.assign(raw.terms, { walkThroughNotes: { it: notes.it + extra } });
+    assert.equal(filter(raw).requiresReview, true, extra);
+  }
+  Object.assign(raw.terms, {
+    walkThroughNotes: { ...notes, fr: "Visite obligatoire." },
+  });
+  assert.equal(filter(raw).requiresReview, true);
+});
+
 test("A source site-visit note is review evidence and invalidates a prior operational approval", () => {
   const raw = detail(),
     before = filter(raw);
@@ -274,7 +332,7 @@ test("An explicit absence of a visit retains evidence and clears only the visit 
 test("A real without project gets its own attributable CPV/place/deadline, with exact source evidence", () => {
   const raw = detail(),
     result = filter(raw);
-  assert.equal(PROJECT_PREFILTER_VERSION, "project-operational-prefilter-v3");
+  assert.equal(PROJECT_PREFILTER_VERSION, "project-operational-prefilter-v4");
   assert.equal(result.eligible, true);
   assert.equal(result.requiresReview, false);
   assert.equal(result.operational.deadline, "2030-12-01T11:00:00.000Z");
