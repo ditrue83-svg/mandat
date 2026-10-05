@@ -2108,6 +2108,126 @@ test("Review records become stale for source draft configuration or version and 
   );
 });
 
+test.each([null, { dateRange: ["2030-02-01", "2031-02-01"] }])(
+  "Duration claims retain their own original fields, separately from extension notes (%j)",
+  (period) => {
+    const base = context();
+    const flag = {
+      ...base.body.passages[3],
+      id: "s5",
+      rawPath: "/procurement/canContractBeExtended",
+      text: "no",
+      endUtf16: 2,
+    };
+    const fields: SourceInterpretationContext["body"]["fields"] = [
+      {
+        scope: "project_context",
+        rawPath: "/procurement/contractDays",
+        value: null,
+      },
+      {
+        scope: "project_context",
+        rawPath: "/procurement/contractPeriod",
+        value: period,
+      },
+      {
+        scope: "project_context",
+        rawPath: "/procurement/canContractBeExtendedNote/it",
+        value: null,
+      },
+      {
+        scope: "project_context",
+        rawPath: "/dates/offerValidityDeadlineDays",
+        value: 180,
+      },
+      {
+        scope: "selected_lot",
+        rawPath: "/procurement/contractPeriod",
+        value: { dateRange: ["2040-01-01", "2041-01-01"] },
+      },
+      {
+        scope: "project_context",
+        rawPath: "/lots/9/procurement/contractDays",
+        value: 365,
+      },
+      {
+        scope: "project_context",
+        rawPath: "/procurement/executionDays",
+        value: 90,
+      },
+    ];
+    const input: SourceInterpretationContext = {
+      ...base,
+      body: { ...base.body, passages: [...base.body.passages, flag], fields },
+    };
+    const before = JSON.stringify(input);
+    const original = recordSourceInterpretation(
+      {
+        ...draft(base).response,
+        details: [
+          {
+            kind: "execution_condition",
+            scope: "project_context",
+            sourceRefs: ["s5"],
+            explanation:
+              "Il contratto non è prorogabile; la durata non è indicata.",
+          },
+        ],
+      },
+      buildSourceInterpretationRequest(input),
+      { ...metadata, model: input.binding.model },
+    );
+    const originalBefore = JSON.stringify(original);
+    const plan = buildSourceSemanticReviewRequest(input, original, config);
+    const claim = plan.claims.find((c) => c.kind === "detail")!;
+    const requests = inventedGroundedReviewRequests(plan);
+    const part = requests.find((r) => r.assignedClaimIds.includes(claim.id))!;
+    const body = JSON.parse(part.prompt);
+    const binding = body.originalFactBindings.find(
+      (b: any) => b.claimId === claim.id,
+    );
+    assert.deepEqual(binding.declaredSourceRefs, ["s5"]);
+    assert.deepEqual(binding.relatedNoteContextRefs, ["f2"]);
+    assert.deepEqual(binding.relatedContractDurationContextRefs, ["f0", "f1"]);
+    const allowed = body.detailEvidenceBindings.find(
+      (b: any) => b.claimId === claim.id,
+    ).readingIds;
+    for (const index of [0, 1, 2]) {
+      assert.deepEqual(
+        body.fields.find((f: any) => f.id === `f${index}`),
+        { id: `f${index}`, index, ...fields[index] },
+      );
+      assert(allowed.includes(`o-f${index}`));
+    }
+    for (const index of [3, 4, 5, 6]) assert(!allowed.includes(`o-f${index}`));
+    assert.deepEqual(
+      requests.flatMap((r) => r.coverage.fieldIndexes),
+      fields.map((_, i) => i),
+    );
+    assert.equal(JSON.stringify(input), before);
+    assert.equal(JSON.stringify(original), originalBefore);
+    // Supplied context must not turn a negative model judgment into approval.
+    const responses = answers(plan);
+    const check = responses
+      .flatMap((r) => r.checks)
+      .find((c) => c.claimId === claim.id)! as {
+      verdict: "supported" | "contradicted" | "not_verifiable";
+      sourceRefs: string[];
+      readingRefs: string[];
+    };
+    check.verdict = period === null ? "not_verifiable" : "contradicted";
+    check.sourceRefs = ["s5", "f1"];
+    check.readingRefs = ["o-s5", "o-f1"];
+    assert.equal(
+      readSourceSemanticReview(
+        recordSourceSemanticReview(responses, plan, metadata),
+        plan,
+      )?.accepted,
+      false,
+    );
+  },
+);
+
 test("A value and its nullable Note remain separate original proofs across coverage groups and scopes", () => {
   const base = context();
   const flag = {

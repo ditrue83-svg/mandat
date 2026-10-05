@@ -22,7 +22,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v42";
+  "documentary-source-semantic-review-v43";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -222,6 +222,37 @@ const originalPathIndexes = new WeakMap<
   ReadonlyMap<string, ComparisonPassage>,
   Map<string, string[]>
 >();
+// Contract duration is a different concept from an extension's value/Note.
+// Carry only original temporal siblings of the same JSON object and scope;
+// this supplies review context, never a verdict or a missing-value inference.
+function relatedContractDurationRefs(
+  claim: Claim,
+  originals: ReadonlyMap<string, ComparisonPassage>,
+) {
+  if (!isOriginalFactClaim(claim.kind)) return [];
+  return unique(
+    claim.sourceRefs.flatMap((ref) => {
+      const own = originals.get(ref);
+      if (!own) return [];
+      const path = own.rawPath.replace(/Note(?:\/(?:de|en|fr|it|rm))?$/, "");
+      const parent =
+        /^(.*)\/(?:canContractBeExtended|contractDays|contractPeriod|contractDeadlineType)(?:\/.*)?$/.exec(
+          path,
+        )?.[1];
+      if (!parent) return [];
+      return [...originals.values()]
+        .filter(
+          (candidate) =>
+            candidate.scope === own.scope &&
+            (candidate.rawPath === `${parent}/contractDays` ||
+              candidate.rawPath === `${parent}/contractDeadlineType` ||
+              candidate.rawPath === `${parent}/contractPeriod` ||
+              candidate.rawPath.startsWith(`${parent}/contractPeriod/`)),
+        )
+        .map((candidate) => candidate.id);
+    }),
+  );
+}
 // A value and its separately stored Note are different assertions. Carry
 // their original siblings, including null, without changing draft citations
 // or assigning the sibling a second completeness owner. Match only the
@@ -244,6 +275,7 @@ function originalFactRefs(
   }
   return unique([
     ...claim.sourceRefs,
+    ...relatedContractDurationRefs(claim, originals),
     ...claim.sourceRefs.flatMap((ref) => {
       const own = originals.get(ref);
       if (!own) return [];
@@ -560,6 +592,8 @@ ${item.meaning.statement}`,
     const prompt = JSON.stringify({
       task: "Verifica assignedClaims contro le prove originali: passages, fields e classificationContext. independentReading è una lettura AI separata, registrata prima di vedere il draft: serve a individuare prove e prestazioni, non sostituisce la fonte. Verifica la fedeltà delle affermazioni e la completezza delle prestazioni rappresentate. Non riscrivere la lettura indipendente per conformarla al draft. La mancanza di una prestazione in un altro frammento non la confuta.",
       rules: [
+        "originalCoverage descrive il contenuto esaminato, non una dichiarazione del committente sulla disponibilità esterna. linkedDocumentsRead false sostiene documenti collegati non esaminati in questa lettura; non prova indisponibilità sul portale. Giudica la formulazione precisa del claim senza attribuirgli una diversa affermazione di disponibilità o di consegna da parte dell'utente.",
+        "originalFactBindings separa le Note dai relatedContractDurationContextRefs dello stesso oggetto JSON e scope. Per durata leggi contractDays/contractPeriod/contractDeadlineType, non il solo valore o Note della proroga. null indica dato non determinato in quel campo, non no, zero o assenza universale; confronta anche le eventuali date e i testi originali. I campi aggiunti sono contesto da verificare, mai approvazioni né prove trasferite da altri lotti.",
         "Le observations della lettura indipendente selezionano e classificano passaggi originali senza riscriverli. Leggi direttamente evidence e passages per stabilire lavoro, soggetto che lo richiede, operatore che lo svolge, destinatario e carattere obbligatorio o facoltativo. kind e serviceRef aiutano a trovare le prove; non sono affermazioni del committente né sostituiscono il loro significato originale.",
         "Per ogni assignedClaim verifica il suo text e compila la sua chiave obbligatoria in checksByClaim, una sola volta. Non attribuirgli parole di altri claim o campi del draft. supported richiede sostegno reale; contradicted una controprova; not_verifiable sostegno insufficiente. Per ogni esito negativo, draftQuote deve essere un estratto esatto non vuoto del text assegnato che identifica l’affermazione problematica; supported può usare null. Spiega quel preciso difetto contro la fonte. Un problema nel summary va giudicato nel claim summary, anche se un detail distinto è corretto. Leggi insieme oggetto, classificazioni originali e relativo ambito.",
         "Una valutazione AI non è una nuova affermazione del committente. Per contradicted identifica l'affermazione precisa del draft e il fatto originale incompatibile: una diversa formulazione o precisione non basta. La mancanza di un sottotipo non cancella la famiglia esplicitamente dichiarata dalle etichette originali; queste non dimostrano da sole azioni accessorie o applicabilità a un lotto.",
@@ -580,7 +614,7 @@ ${item.meaning.statement}`,
         "independentReading.missingDetails contiene note AI non verificate: description non è una nuova affermazione del committente. Rileggi le loro evidence originali prima di usare dN-M per motivare not_verifiable; una supposizione nella nota non prova una diversa attribuzione del lavoro o delle quantità. Un elenco di quantità dell'appalto può essere riportato senza una ripartizione per edificio, sottoarea o lotto: non attribuire al draft una ripartizione che non afferma. Una ripartizione o applicabilità puntuale effettivamente affermata deve invece essere provata, e quantità inventate o non determinate dalla fonte restano non verificabili. I riferimenti fN indicano il valore JSON originale in fields al relativo rawPath; non inventarne il significato e distingui 0, false e null.",
         "Ogni claim è affidato a una sola richiesta con tutte le sue citazioni; i passaggi aggiunti sono contesto, non una selezione che sostituisce coverage. Esamina tutti i passaggi e campi di coverage nel loro claim scope_coverage obbligatorio; nessuna prestazione può essere ignorata perché non era selezionata dal draft. Non richiedere che tutti gli acquisti siano ripetuti in ogni frammento. La fedeltà di un'affermazione del draft va giudicata soltanto nel suo assignedClaim: non creare findings unverifiable per un summary o detail affidato ad altro gruppo. Non giudicare omissioni di prestazioni fuori da assignedScopeCoverageIds. La completezza amministrativa di ciascuna requiredContractClause ha il proprio claim contract_clause_coverage obbligatorio, indicato in assignedContractClauseIds. Il summary conserva in ogni gruppo le proprie prove originali: una nota null non cancella un valore yes, no o false in un campo distinto. Nessuna autocorrezione.",
         "omitted_scope richiede una prestazione principale, accessoria o esclusa mancante, oppure un limite che cambi concretamente oggetto, azione, ruolo o applicabilità al target. In reason identifica quale lavoro risulterebbe omesso o diverso. Una condition nella lettura indipendente è una prova di contesto, non un obbligo di copiarla nel draft. Periodi contrattuali, proroghe temporali, scadenze e contatti non devono essere ripetuti quando non cambiano le prestazioni. La loro sola assenza non produce findings né not_verifiable.",
-        "Una sigla o codice di progetto non sciolto non prova un lavoro aggiuntivo: per scope_coverage negativo identifica una prestazione o limite materiale concreto non conservato. Non basta ignorare una sigla; se è l'unica indicazione del servizio e il mestiere non è identificabile, il dubbio resta.",
+        "Una sigla o codice di progetto non sciolto non prova un lavoro aggiuntivo, anche in un titolo con più sigle. Per scope_coverage negativo identifica la citazione originale dell'azione e oggetto mancanti, oppure un limite materiale concreto non conservato. Una sigla da sola non è tale prova; se è l'unica indicazione del servizio e il mestiere non è identificabile, il dubbio resta.",
         "Eccezione esplicita: requiredContractClauses contiene condizioni che il draft deve riportare nei details, anche quando non cambiano le prestazioni. Nel claim contract_clause_coverage assegnato, confronta ogni proposizione originale con i testi dei dettagli candidati indicati nel claim. supported richiede che siano TUTTE rappresentate, non la sola presenza di sourceRefs o di un dettaglio sullo stesso argomento. Se una proposizione manca usa not_verifiable sul claim di completezza con un estratto della sua affermazione e nomina la proposizione assente. Non verificare omissioni amministrative fuori da assignedContractClauseIds: ogni altra clausola ha il proprio giudizio obbligatorio in un altro gruppo. Per ciascuna nota composta assegnata controlla separatamente ogni obbligo, limite, eccezione e permesso originale: una stessa citazione sN non prova che tutte le sue proposizioni siano state rappresentate. Se manca un fatto puoi inoltre registrare omitted_contract_condition SOLO per gli ID in assignedContractClauseIds con la clausola originale in sourceRefs e nomina in reason la proposizione assente; non chiamarlo omitted_scope se riguarda solo modalità amministrative. Per esempio, il limite percentuale al subappalto non sostituisce il permesso di comparire in più offerte. Cerca prima nell'intero draft e non pretendere una copia letterale, ma non considerare una citazione sufficiente senza il fatto. Le condizioni amministrative fuori da requiredContractClauses restano facoltative salvo che il draft le affermi falsamente.",
         "contractClauseDraftBindings localizza i dettagli candidati nell'intero draft, anche se il loro claim è assegnato a un altro gruppo. Prima di dichiarare un'omissione leggi quei testi e confronta ogni proposizione con la clausola originale. Sono rinvii, non approvazioni: un riferimento corrispondente non prova completezza o correttezza. Non confondere l'assenza dai tuoi assignedClaims con l'assenza dal draft; controlla comunque tutti i details.",
         "Distinzione obbligatoria: omettere la data di inizio di una fornitura non omette una prestazione; omettere un servizio di installazione opzionale omette un lavoro acquistabile. Una data o condizione che il draft afferma in modo falso resta contradicted: l'assenza di un dettaglio e un'affermazione falsa sono casi diversi. Esclusioni di lavoro, obblighi accessori e limiti territoriali che cambiano l'ambito restano da controllare.",
@@ -959,8 +993,16 @@ export function buildGroundedSourceReviewRequests(
             claimId: claim.id,
             declaredSourceRefs: claim.sourceRefs,
             relatedNoteContextRefs: originalFactRefs(claim, originals).filter(
-              (ref) => !claim.sourceRefs.includes(ref),
+              (ref) =>
+                !claim.sourceRefs.includes(ref) &&
+                !relatedContractDurationRefs(claim, originals).includes(ref),
             ),
+            ...(relatedContractDurationRefs(claim, originals).length
+              ? {
+                  relatedContractDurationContextRefs:
+                    relatedContractDurationRefs(claim, originals),
+                }
+              : {}),
           })),
         detailEvidenceBindings: [...readingGroups.values()].flatMap((group) =>
           group.supportedReadingIds
