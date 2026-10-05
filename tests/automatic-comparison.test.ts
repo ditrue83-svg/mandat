@@ -2138,7 +2138,7 @@ test("Long-source maps retain partial offers, language authority and independent
     request.readingRequests.map((chunk) => ({
       chunkId: chunk.id,
       status: "complete",
-      sourceRefs: [],
+      sourceRefs: chunk.requiredPassageIds ?? [],
     })),
   );
   const body = JSON.parse(reduced.prompt);
@@ -2619,6 +2619,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v70",
     sourceVersion: "documentary-source-interpretation-v35",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v74",
+    sourceVersion: "documentary-source-interpretation-v41",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2652,7 +2656,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v74");
+    assert.equal(request.version, "documentary-service-comparison-v75");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(
@@ -2682,6 +2686,42 @@ test.each([
     assert.equal(JSON.stringify(historical), before);
   },
 );
+
+test("Long-source maps cannot discard partial-offer notes or substitute their flag", () => {
+  const detail = raw();
+  detail.procurement.orderDescription.it = "Servizio inventato. ".repeat(1800);
+  Object.assign(detail.procurement, {
+    partialOffers: "yes",
+    partialOffersNote: {
+      it: "Offerte per lotti interi; vietate frazioni interne.",
+      de: "Nur ganze Lose, keine Teile innerhalb eines Loses.",
+    },
+  });
+  const original = JSON.stringify(detail);
+  const request = buildAutomaticComparisonRequest(fixture(detail));
+  const required = request.readingRequests.flatMap(
+    (r) => r.requiredPassageIds ?? [],
+  );
+  assert.equal(required.length, 3);
+  const readings = request.readingRequests.map((r) => ({
+    chunkId: r.id,
+    status: "complete",
+    sourceRefs: [...r.passageIds],
+  }));
+  const accepted = buildAutomaticSourceRequest(request, readings);
+  for (const id of required) {
+    const omitted = readings.map((r) => ({
+      ...r,
+      sourceRefs: r.sourceRefs.filter((ref) => ref !== id),
+    }));
+    assert.throws(
+      () => buildAutomaticSourceRequest(request, omitted),
+      /Incomplete original partial-offer flag and notes/,
+    );
+  }
+  assert(accepted.requiredContractClauseIds.length > 0);
+  assert.equal(JSON.stringify(detail), original);
+});
 
 test("A long-source reduction preserves all service text even when the map only selects an administrative limitation", () => {
   const detail = raw();

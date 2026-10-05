@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v41";
+  "documentary-source-interpretation-v42";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -1045,7 +1045,7 @@ export function buildSourceInterpretationRequest(
             "componentEvidenceGroups: gN seleziona tutti i sourceRefs di un solo campo/ambito senza salti. Usa il gruppo completo per azione/oggetto in frammenti diversi o ciclo generale con oggetti successivi; non duplicarne sN. gN solo in components.evidence; altrove sN/fN originali. Conserva limiti/esclusioni/ambiti: il gruppo non prova applicabilità a ogni oggetto.",
           ]
         : []),
-      "resolved: oggetto e ruolo identificabili, anche senza sottotipi. Specifiche, quantità o certificazioni ignote non sono issues né nuovi lavori. details: lacune precise, condizioni e contesto; quantità/unità originali. Non negare altri dettagli presenti. Proroga no non prova durata assente: ometti lacune senza prove proprie.",
+      "resolved: oggetto/ruolo noti anche senza sottotipi. details: minimi tecnici, tempi massimi, vincoli del prodotto da descrizioni/criteri; separa referenze passate. Rinvii/lacune non negano minimi presenti. Specifiche ignote non sono issues o lavori. Quantità/unità originali; proroga no non prova durata assente.",
       "linkedDocumentsRead o hasProjectDocuments false: documenti non letti o non archiviati qui, non indisponibili. Conserva richieste via email/portale e relativi limiti; non inventare mancata consegna.",
       "uncertain richiede un issue materiale tipizzato. object_identity collega componentIndexes (zero-based) a meaning ambiguous; role_identity a role null e roleEvidence unresolved; unreadable_source richiede una lettura unreadable. representation_incomplete cita prestazioni non rappresentate, non informazioni commerciali o specifiche assenti. Non inserire issues per dichiarare assenza di incertezza, e non dichiarare completa una rappresentazione incompleta.",
       "roleEvidence cita l'azione professionale acquistata nello stesso scope, anche nominale: progettazione/assicurazione sono azioni; mestiere/luogo/destinatario e presentare un'offerta non lo sono. Cita l'azione effettiva quando presente. other solo altra azione identificata, non un nome generico o ripiego. Conserva funzioni composite. Se ignoto: role null, unresolved, role_identity. Scope di details/roleEvidence è dei passaggi, di issues del target; target_scope solo lotti con prove nei due ambiti.",
@@ -1064,7 +1064,7 @@ export function buildSourceInterpretationRequest(
       "summarySourceRefs: prove proprie per ogni fatto, senza ereditare refs dalle componenti.",
       "Leggi insieme clausole generali e specifiche. Se una clausola acquista più azioni sullo stesso insieme di impianti o sistemi, conserva quel ciclo nella sintesi e nelle descrizioni delle componenti a cui si applica, con entrambe le prove. Non restringerlo a un solo esempio dell'elenco e non ridurre un acquisto integrato alla sola fornitura. role riassume una funzione, non cancella le altre azioni documentate. Non estendere il ciclo a servizi, oggetti o lotti cui la fonte non lo applica; una clausola specifica di esclusione o limitazione resta vincolante.",
       "Esamina anche criteri e tempi di esecuzione: montaggio e collaudo della commessa attuale sono azioni del suo ciclo, con prove proprie. Distinguili da referenze passate, qualifiche aziendali, prezzi e permessi, che non acquistano nuovi lavori. Un criterio senza un'azione della commessa non basta.",
-      "Destinatari, numero di strutture, continuità e territorio nella sintesi o nei details. Turni, regole operative e opzioni anche nella sintesi, con azione e ambito propri: i details non bastano. Non estenderli ad altre fasi né dedurre quantità o periodicità.",
+      "Destinatari/strutture/continuità/territorio in sintesi o details. Indirizzo prova luogo, non consegna lì senza prova propria. Turni/regole/opzioni anche in sintesi, con azione/ambito propri: details non bastano. Mai estendere ad altre fasi o dedurre quantità/periodicità.",
       "Permessi organizzativi e limiti al subappalto vanno in details come execution_condition: conserva soggetti, attività e limiti. Non provano nuovi acquisti. Per creare componenti serve un'ulteriore clausola che acquisti o escluda quei lavori: cita quella prova. Distingui una prestazione acquistabile in opzione dal solo permesso di delegare il lavoro.",
       "requiredContractClauses: rendiconta nei details ogni proposizione autonoma, lingua e segmento con ID/scope. Subappalto: percentuali, documenti, prestazione caratteristica, candidature multiple in più offerte. Non risolvere opposizioni senza precedenza. fN conserva il JSON. Rinvii/valori ignoti: missing_specification. Clausole di progetto non diventano del lotto. Se incompleto: uncertain con issue, mai resolved.",
       ...(clauseBlocks.length
