@@ -1131,6 +1131,42 @@ test("The company comparison keeps explicit maintenance separate from source exe
   assert.equal(JSON.stringify(source), before);
 });
 
+test("Company exclusions stay verbatim and cannot change the independently fixed source", () => {
+  const input = fixture(raw(), {
+    activities:
+      "Pulizia di vetri esterni; non puliamo uffici. Riparazione di serramenti.",
+  });
+  const request = buildAutomaticComparisonRequest(input);
+  const source = sourceRecord(request);
+  const before = JSON.stringify(source);
+  const body = JSON.parse(
+    buildInterpretedComparisonRequest(request, source).prompt,
+  );
+  assert.deepEqual(body.company.activities, request.companyPassages);
+  assert.equal(body.company.activities[0].text, input.profile.activities);
+  const withoutExclusion = buildAutomaticComparisonRequest({
+    ...input,
+    profile: { ...input.profile, activities: "Pulizie di uffici e condomini." },
+  });
+  assert.equal(request.sourceKey, withoutExclusion.sourceKey);
+  assert.notEqual(request.inputHash, withoutExclusion.inputHash);
+  const otherBody = JSON.parse(
+    buildInterpretedComparisonRequest(withoutExclusion, source).prompt,
+  );
+  assert.deepEqual(body.sourceInterpretation, otherBody.sourceInterpretation);
+  assert.equal(JSON.stringify(source), before);
+  // These invented facts test routing; the live model still needs review.
+  for (const relatedActivity of ["incidental_context", "none"] as const) {
+    const answer = response(request, source, "different");
+    answer.facts.relatedActivity = relatedActivity;
+    answer.facts.sameContractualRole = true;
+    const value = validateAutomaticComparison(answer, request, source);
+    assert.equal(value.relation, "different");
+    assert.equal(value.response!.facts.sameContractualRole, true);
+    assert.equal(JSON.stringify(source), before);
+  }
+});
+
 test("Evaluation context preserves only the selected lot's original non-price descriptions", () => {
   const detail = raw(true);
   const criterion = "Funzione professionale inventata. ".repeat(45);
@@ -2616,7 +2652,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v71");
+    assert.equal(request.version, "documentary-service-comparison-v72");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(
