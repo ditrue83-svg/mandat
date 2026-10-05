@@ -29,6 +29,8 @@ import {
   openaiResponseProjection,
   openaiErrorDiagnostic,
   readOpenaiResponseStream,
+  readOpenaiStreamFailure,
+  type OpenaiStreamFailure,
   OPENAI_INPUT_COST_MULTIPLIER,
 } from "@/lib/openai-responses";
 const summarySchema = z.object({
@@ -157,6 +159,7 @@ export type AiResponseDiagnostic = Readonly<{
   refusalState: RefusalState;
   usage: Readonly<TokenUsage> | null;
   providerError?: NonNullable<ReturnType<typeof openaiErrorDiagnostic>>;
+  streamFailure?: OpenaiStreamFailure;
 }>;
 
 // This projection never retains the provider body, content, reasoning, refusal
@@ -585,20 +588,24 @@ export const configuredTransport: AiTransport = {
         provider === "openai" && body.stream && response.ok
           ? await readOpenaiResponseStream(response)
           : await response.json();
-    } catch {
+    } catch (error) {
+      const streamFailure = readOpenaiStreamFailure(error);
       throw new AiResponseRejected(
         response.ok
           ? "Risposta AI non leggibile"
           : `Servizio AI: HTTP ${response.status}`,
         null,
-        responseDiagnostic(
-          undefined,
-          expectedModel,
-          maxTokens,
-          response.status,
-          null,
-          response.ok ? "response_unreadable" : "http_error",
-        ),
+        {
+          ...responseDiagnostic(
+            undefined,
+            expectedModel,
+            maxTokens,
+            response.status,
+            null,
+            response.ok ? "response_unreadable" : "http_error",
+          ),
+          ...(streamFailure ? { streamFailure } : {}),
+        },
       );
     }
     const providerError =

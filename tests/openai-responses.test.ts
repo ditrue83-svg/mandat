@@ -5,6 +5,7 @@ import {
   openaiJsonSchema,
   openaiErrorDiagnostic,
   readOpenaiResponseStream,
+  readOpenaiStreamFailure,
 } from "../src/lib/openai-responses";
 import { z } from "zod";
 import Ajv2020 from "ajv/dist/2020.js";
@@ -228,6 +229,68 @@ it("rejects a truncated stream, mismatched terminal and provider error without u
     ),
   ).rejects.toThrow("OpenAI stream error");
 });
+
+it.each([
+  [
+    "malformed JSON",
+    new TextEncoder().encode("data: private-invalid-json\n\n"),
+    "event_unreadable",
+  ],
+  ["invalid UTF8", new Uint8Array([0xff]), "invalid_utf8"],
+  ["unfinished UTF8", new Uint8Array([0xe2, 0x82]), "invalid_utf8"],
+  [
+    "invalid event",
+    new TextEncoder().encode("data: null\n\n"),
+    "event_invalid",
+  ],
+  [
+    "missing terminal",
+    new TextEncoder().encode(
+      'data: {"type":"response.output_text.delta","delta":"private-answer"}\n\n',
+    ),
+    "terminal_missing",
+  ],
+])(
+  "reports a safe category for %s without accepting partial content",
+  async (_name, bytes, category) => {
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes as Uint8Array);
+          controller.close();
+        },
+      }),
+    );
+    const error = await readOpenaiResponseStream(response).catch((e) => e);
+    expect(readOpenaiStreamFailure(error)).toBe(category);
+    expect(String(error)).not.toContain("private");
+    expect(error).not.toHaveProperty("cause");
+  },
+);
+
+it.each(["AbortError", "TimeoutError", "Error"])(
+  "categorizes %s while discarding its private message",
+  async (name) => {
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          const error = new Error("private-key-and-source");
+          error.name = name;
+          controller.error(error);
+        },
+      }),
+    );
+    const error = await readOpenaiResponseStream(response).catch((e) => e);
+    expect(readOpenaiStreamFailure(error)).toBe(
+      name === "Error" ? "read_failed" : "aborted",
+    );
+    expect(JSON.stringify(error)).not.toContain("private");
+    expect(String(error)).not.toContain("private");
+    expect(
+      readOpenaiStreamFailure(new Error("OpenAI stream read failed")),
+    ).toBeNull();
+  },
+);
 
 it("keeps instructions and source separate with the original local constraints", () => {
   const schema = {

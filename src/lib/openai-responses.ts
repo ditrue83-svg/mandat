@@ -399,8 +399,43 @@ export function openaiResponseBody(
 // Accept only a complete terminal Response object, never accumulated deltas.
 // If the connection breaks, the caller retains an uncertain usage reservation
 // rather than using partial text or issuing another generation automatically.
+export type OpenaiStreamFailure =
+  | "body_missing"
+  | "size_limit"
+  | "frame_limit"
+  | "invalid_utf8"
+  | "event_unreadable"
+  | "event_invalid"
+  | "provider_error"
+  | "response_identity_invalid"
+  | "terminal_identity_mismatch"
+  | "terminal_missing"
+  | "read_failed"
+  | "aborted";
+
+class OpenaiStreamRejected extends Error {
+  constructor(
+    readonly category: OpenaiStreamFailure,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+// Only a closed category is retained. Native errors and provider prose may
+// contain private data and are never attached as causes or logged.
+export function readOpenaiStreamFailure(
+  error: unknown,
+): OpenaiStreamFailure | null {
+  return error instanceof OpenaiStreamRejected ? error.category : null;
+}
+
 export async function readOpenaiResponseStream(response: Response) {
-  if (!response.body) throw new Error("OpenAI stream body missing");
+  if (!response.body)
+    throw new OpenaiStreamRejected(
+      "body_missing",
+      "OpenAI stream body missing",
+    );
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let buffer = "";
@@ -408,13 +443,38 @@ export async function readOpenaiResponseStream(response: Response) {
   let responseId: string | null = null;
   try {
     while (true) {
-      const chunk = await reader.read();
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch (error) {
+        const aborted =
+          error instanceof Error &&
+          (error.name === "AbortError" || error.name === "TimeoutError");
+        throw new OpenaiStreamRejected(
+          aborted ? "aborted" : "read_failed",
+          "OpenAI stream read failed",
+        );
+      }
       if (chunk.done) break;
       totalBytes += chunk.value.byteLength;
-      if (totalBytes > 8_000_000) throw new Error("OpenAI stream size limit");
-      buffer += decoder.decode(chunk.value, { stream: true });
+      if (totalBytes > 8_000_000)
+        throw new OpenaiStreamRejected(
+          "size_limit",
+          "OpenAI stream size limit",
+        );
+      try {
+        buffer += decoder.decode(chunk.value, { stream: true });
+      } catch {
+        throw new OpenaiStreamRejected(
+          "invalid_utf8",
+          "OpenAI stream UTF8 invalid",
+        );
+      }
       if (buffer.length > 2_000_000)
-        throw new Error("OpenAI stream frame limit");
+        throw new OpenaiStreamRejected(
+          "frame_limit",
+          "OpenAI stream frame limit",
+        );
       let boundary: RegExpExecArray | null;
       while ((boundary = /\r?\n\r?\n/.exec(buffer))) {
         const frame = buffer.slice(0, boundary.index);
@@ -429,18 +489,31 @@ export async function readOpenaiResponseStream(response: Response) {
         try {
           event = JSON.parse(data);
         } catch {
-          throw new Error("OpenAI stream event unreadable");
+          throw new OpenaiStreamRejected(
+            "event_unreadable",
+            "OpenAI stream event unreadable",
+          );
         }
         if (!event || typeof event !== "object" || Array.isArray(event))
-          throw new Error("OpenAI stream event invalid");
-        if (event.type === "error") throw new Error("OpenAI stream error");
+          throw new OpenaiStreamRejected(
+            "event_invalid",
+            "OpenAI stream event invalid",
+          );
+        if (event.type === "error")
+          throw new OpenaiStreamRejected(
+            "provider_error",
+            "OpenAI stream error",
+          );
         if (event.type === "response.created") {
           if (
             responseId !== null ||
             typeof event.response?.id !== "string" ||
             !/^resp_[A-Za-z0-9_-]{1,200}$/.test(event.response.id)
           )
-            throw new Error("OpenAI stream response identity invalid");
+            throw new OpenaiStreamRejected(
+              "response_identity_invalid",
+              "OpenAI stream response identity invalid",
+            );
           responseId = event.response.id;
         }
         if (
@@ -451,13 +524,28 @@ export async function readOpenaiResponseStream(response: Response) {
           ].includes(event.type)
         ) {
           if (!responseId || event.response?.id !== responseId)
-            throw new Error("OpenAI stream terminal identity mismatch");
+            throw new OpenaiStreamRejected(
+              "terminal_identity_mismatch",
+              "OpenAI stream terminal identity mismatch",
+            );
           // Existing projection validates status, output, model and usage.
           return event.response as unknown;
         }
       }
     }
-    throw new Error("OpenAI stream ended without terminal response");
+    // Flush validates a trailing, incomplete UTF8 sequence as well.
+    try {
+      decoder.decode();
+    } catch {
+      throw new OpenaiStreamRejected(
+        "invalid_utf8",
+        "OpenAI stream UTF8 invalid",
+      );
+    }
+    throw new OpenaiStreamRejected(
+      "terminal_missing",
+      "OpenAI stream ended without terminal response",
+    );
   } finally {
     await reader.cancel().catch(() => {});
     reader.releaseLock();

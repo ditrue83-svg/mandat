@@ -1469,16 +1469,14 @@ test("Mandatory work completeness uses every component even when the summary use
   );
   assert.equal(new Set(coverageClaims.flatMap((c) => c.sourceRefs)).size, 6);
   for (const claim of coverageClaims) {
-    const representation = JSON.parse(
-      claim.text.slice(claim.text.indexOf("\n") + 1),
-    );
+    const owner = requests.filter((r) => r.assignedClaimIds.includes(claim.id));
+    assert.equal(owner.length, 1);
+    const representation = JSON.parse(owner[0].prompt).draft;
     assert.deepEqual(
       representation.components.map((c: any) => c.description),
       descriptions,
     );
     assert.equal(representation.summary, original.response.summary);
-    const owner = requests.filter((r) => r.assignedClaimIds.includes(claim.id));
-    assert.equal(owner.length, 1);
     assert.deepEqual(owner[0].ownedScopeCoverageIds, claim.sourceRefs);
     assert(owner[0].assignedClaimIds.length <= 8);
   }
@@ -2487,13 +2485,30 @@ test("Long review covers every original passage and scalar including the unselec
 
 test("A rich draft with many small original facts still fits grounded review without losing work or scalar coverage", () => {
   const base = context();
+  const labels = Array.from({ length: 12 }, (_, i) => ({
+    ...base.body.passages[2],
+    id: `s${i + 5}`,
+    rawPath: `/invented/classifications/${i}/label/it`,
+    text: `Famiglia inventata ${i}. `.padEnd(100, "x"),
+    endUtf16: 100,
+  }));
+  const classifications = [
+    ...base.body.classifications,
+    ...labels.map((p, i) => ({
+      ...base.body.classifications[0],
+      rawPath: `/invented/classifications/${i}`,
+      code: null,
+      labels: [{ text: p.text, sourceRefs: [p.id], language: "it" }],
+    })),
+  ];
   const passages = [
     ...base.body.passages,
+    ...labels,
     ...Array.from({ length: 180 }, (_, i) => {
       const text = `Condizione inventata ${i}. `.padEnd(300, "x");
       return {
         ...base.body.passages[3],
-        id: `s${i + 5}`,
+        id: `s${i + 17}`,
         rawPath: `/conditions/${i}/it`,
         text,
         endUtf16: text.length,
@@ -2510,6 +2525,11 @@ test("A rich draft with many small original facts still fits grounded review wit
   ];
   const reduced = {
     ...base,
+    body: {
+      ...base.body,
+      passages: [...base.body.passages, ...labels],
+      classifications,
+    },
     coverage: {
       ...base.coverage,
       sourceUtf16: passages.reduce((n, p) => n + p.text.length, 0),
@@ -2521,23 +2541,29 @@ test("A rich draft with many small original facts still fits grounded review wit
       { chunkId: "chunk2", status: "complete" as const, sourceRefs: [] },
     ],
   };
-  const seed = draft(reduced).response;
+  const seed = draft(base).response;
   const original = recordSourceInterpretation(
     {
       ...seed,
-      components: Array.from({ length: 12 }, (_, i) => ({
-        ...seed.components[0],
-        description: `Prestazione inventata ${i}. `.padEnd(500, "x"),
+      classificationReadings: classifications.map((c, i) => ({
+        classificationId: `c${i + 1}`,
+        use: "broad_context" as const,
+        explanation: "Famiglia inventata di contesto, senza nuove prestazioni.",
+        sourceRefs: c.labels[0].sourceRefs,
       })),
-      details: Array.from({ length: 17 }, (_, i) => ({
+      components: Array.from({ length: 3 }, (_, i) => ({
+        ...seed.components[0],
+        description: `Prestazione inventata ${i}. `.padEnd(590, "x"),
+      })),
+      details: Array.from({ length: 29 }, (_, i) => ({
         ...seed.details[0],
-        explanation: `Dettaglio inventato ${i}. `.padEnd(500, "x"),
+        explanation: `Dettaglio inventato ${i}. `.padEnd(590, "x"),
       })),
     },
     buildSourceInterpretationRequest(reduced),
     { ...metadata, model: reduced.binding.model },
   );
-  const full = { ...reduced, body: { ...base.body, passages, fields } },
+  const full = { ...reduced, body: { ...reduced.body, passages, fields } },
     before = JSON.stringify(full),
     draftBefore = JSON.stringify(original);
   const plan = buildSourceSemanticReviewRequest(full, original, config);

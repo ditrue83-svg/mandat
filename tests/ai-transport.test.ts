@@ -351,6 +351,12 @@ describe("OpenAI native Responses", () => {
         expect(readAiResponseDiagnostic(result)?.code).toBe(
           "response_unreadable",
         );
+        expect(readAiResponseDiagnostic(result)?.streamFailure).toBe(
+          "terminal_missing",
+        );
+        expect(JSON.stringify(readAiResponseDiagnostic(result))).not.toContain(
+          privateResponseText,
+        );
         expect(row).toMatchObject({ status: "uncertain", costChf: null });
         expect(Number(row.reservedChf)).toBeGreaterThan(0);
       }
