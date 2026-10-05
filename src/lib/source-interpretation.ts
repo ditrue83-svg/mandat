@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v39";
+  "documentary-source-interpretation-v40";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -1012,7 +1012,7 @@ export function buildSourceInterpretationRequest(
       "requiredContractClauseIds: ogni ID va nei details con la propria condizione completa. Non bastano summary/evidence e non aggiungere riferimenti estranei.",
       ...(requiredContractClauses.length
         ? [
-            "Con status resolved, contractClausesById rendiconta ogni requiredContractClauseId con tutte le sue proposizioni autonome, una o più spiegazioni, solo il suo ID/scope. Anche yes/no è una clausola propria, distinta dalle note. La mappa confluisce nei details memorizzati; details esterni contiene altri fatti. Totale massimo 32 dettagli. Riferimenti o spiegazioni vuote non bastano: i giudizi verificano significato e completezza.",
+            "contractClausesById: ogni ID con TUTTE le proposizioni, in una o più frasi complete, ciascuna entro 600 caratteri e con lo stesso ID/scope. Clausola lunga: più voci, mai parole tronche o condizioni tagliate. yes/no è distinto dalle note. La mappa confluisce nei details: quelli esterni contengono solo altri fatti, senza duplicarla. Massimo 32 dettagli totali. Citazioni o frasi vuote non provano completezza.",
           ]
         : []),
       "canContractBeExtended yes/true consente la proroga, no/false la vieta, senza inventare durata. subContractorAllowed riguarda il ricorso a subappaltatori, non la subfornitura: yes/true consente, no/false vieta, con valore e note. null non indicato; altro valore da verificare.",
@@ -1048,7 +1048,7 @@ export function buildSourceInterpretationRequest(
       "resolved: oggetto e ruolo identificabili, anche senza sottotipi. Specifiche, quantità o certificazioni ignote non sono issues né nuovi lavori. details: lacune precise, condizioni e contesto; quantità/unità originali. Non negare altri dettagli presenti. Proroga no non prova durata assente: ometti lacune senza prove proprie.",
       "linkedDocumentsRead false: documenti collegati non esaminati qui; non prova indisponibilità o mancata consegna dell'utente.",
       "uncertain richiede un issue materiale tipizzato. object_identity collega componentIndexes (zero-based) a meaning ambiguous; role_identity a role null e roleEvidence unresolved; unreadable_source richiede una lettura unreadable. representation_incomplete cita prestazioni non rappresentate, non informazioni commerciali o specifiche assenti. Non inserire issues per dichiarare assenza di incertezza, e non dichiarare completa una rappresentazione incompleta.",
-      "roleEvidence cita un estratto esatto, non tradotto e non classificatorio dell'azione; evidence lo documenta nello stesso scope. Non scambiare settore, luogo o destinatario per ruolo contrattuale. Se indeterminato usa role null, roleEvidence unresolved e issue role_identity. Per details e roleEvidence scope è l'ambito dei passaggi; per issues è il target interessato. target_scope riguarda soltanto lotti e cita entrambi gli ambiti: contesto condiviso e lotto.",
+      "roleEvidence: citazione originale esatta dell'azione nello stesso scope, non classificatoria. Ruolo non è mestiere/luogo/destinatario. other solo altra azione attestata, non un ruolo già identificabile. Conserva le funzioni composite. Se ignoto: role null, unresolved, role_identity. Scope di details/roleEvidence è dei passaggi, di issues del target; target_scope solo lotti con prove nei due ambiti.",
       "source_conflict: conflicting, due asserti originali opposti sul target, refs diverse. Confronta titoli/descrizioni/riassunti: oggetto/destinatari/luogo/periodo. Solo precedenza ufficiale citata, mai maggioranza/lingua/ripetizione/refusi. Inferenze/categorie ampie/dettagli/traduzioni/frammenti da soli non bastano. unreadable vieta resolved.",
       "components.evidence prova ogni fatto di description, roleEvidence e meaning: azione, oggetto, destinatari, luogo, periodo e limiti. Non eredita refs da summary/details/altri componenti. Cita tutte le prove proprie. Conserva principali/accessorie con azione e oggetto concreti. Esclusi: componente importance excluded e prove proprie, senza ereditare azioni acquistate. Non promuovere lavori di terzi né creare servizi da dati, codici, traduzioni/intestazioni. Classificazione/catalogazione sono servizi solo se acquistati.",
       ...(body.passages.some(
@@ -1060,7 +1060,7 @@ export function buildSourceInterpretationRequest(
             "Conserva servizi inclusi in forfait o pacchetti, alternative e destinatari attestati nel contesto comune. Il fine del committente o il nome della struttura non sostituiscono le prestazioni effettivamente acquistate.",
           ]
         : []),
-      "importance dipende dalla gerarchia attestata: main principale; accessory complemento/supporto al principale anche se obbligatorio e classificato; excluded esplicita. Non ogni voce è main. Nome, ordine, anche/inoltre o quantità mancanti non provano accessory: un supporto può essere il principale. Senza gerarchia usa not_stated, acquisto da coprire interamente; non inventare main per resolved né issues d'identità. Opzionalità distinta, condizioni in details.",
+      "importance: main per prestazioni esplicitamente principali, con prova propria, non not_stated. accessory complemento/supporto attestato anche se obbligatorio; excluded esclusione esplicita. Elenco, quantità principali, ordine e anche/inoltre non provano gerarchia: un supporto può essere principale. Senza gerarchia not_stated conserva l'acquisto completo. Non inventare main per resolved né issues d'identità. Opzioni distinte, condizioni in details.",
       "summarySourceRefs: prove proprie di azioni/oggetti/date/luoghi/quantità/condizioni; non ereditarle dalle componenti.",
       "Leggi insieme clausole generali e specifiche. Se una clausola acquista più azioni sullo stesso insieme di impianti o sistemi, conserva quel ciclo nella sintesi e nelle descrizioni delle componenti a cui si applica, con entrambe le prove. Non restringerlo a un solo esempio dell'elenco e non ridurre un acquisto integrato alla sola fornitura. role riassume una funzione, non cancella le altre azioni documentate. Non estendere il ciclo a servizi, oggetti o lotti cui la fonte non lo applica; una clausola specifica di esclusione o limitazione resta vincolante.",
       "Destinatari, numero di strutture, continuità e territorio nella sintesi o nei details. Turni, regole operative e opzioni anche nella sintesi, con azione e ambito propri: i details non bastano. Non estenderli ad altre fasi né dedurre quantità o periodicità.",
