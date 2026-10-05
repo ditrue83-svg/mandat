@@ -344,7 +344,7 @@ function wireResponse({ checks, ...header }: any, request?: any) {
   if (request?.claimReadingGroups) {
     return {
       ...header,
-      checksFormat: "claim_keyed_refs_v2",
+      checksFormat: "claim_keyed_refs_v3",
       checksByClaim: Object.fromEntries(
         checks.map(({ claimId, readingRefs, ...check }: any) => {
           assert.equal(new Set(readingRefs).size, readingRefs.length);
@@ -3728,7 +3728,7 @@ test("Keyed reading selections preserve evidence and reject malformed or empty s
   assert.deepEqual(record.responses, stored);
   assert(readSourceSemanticReview(record, plan)?.accepted);
   assert.equal(JSON.stringify(wire), before);
-  assert.equal(wire[0].checksFormat, "claim_keyed_refs_v2");
+  assert.equal(wire[0].checksFormat, "claim_keyed_refs_v3");
   const claimId = requests[0].assignedClaimIds[0];
   const selected = wire[0].checksByClaim[claimId].readingRefsById;
   assert(Object.values(selected).some((value) => value === true));
@@ -3779,6 +3779,166 @@ test("Keyed reading selections preserve evidence and reject malformed or empty s
     }),
   );
   assert.equal(JSON.stringify(legacy), legacyBefore);
+});
+
+test("V3 projects only explicitly selected own original facts; legacy omissions remain invalid", () => {
+  const base = context();
+  const flag = {
+    ...base.body.passages[3],
+    id: "s5",
+    rawPath: "/terms/optional",
+    text: "no",
+    endUtf16: 2,
+  };
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [...base.body.passages, flag],
+      fields: [
+        {
+          scope: "project_context",
+          rawPath: "/terms/optionalNote/it",
+          value: null,
+        },
+        {
+          scope: "project_context",
+          rawPath: "/terms/optionalNote/de",
+          value: null,
+        },
+        {
+          scope: "selected_lot",
+          rawPath: "/terms/optionalNote/it",
+          value: false,
+        },
+        {
+          scope: "project_context",
+          rawPath: "/terms/otherNote/it",
+          value: null,
+        },
+      ],
+    },
+  };
+  const original = recordSourceInterpretation(
+    {
+      ...draft(base).response,
+      details: [
+        {
+          kind: "execution_condition",
+          scope: "project_context",
+          sourceRefs: ["s5"],
+          explanation:
+            "L'opzione non è ammessa; la nota italiana non è indicata.",
+        },
+      ],
+    },
+    buildSourceInterpretationRequest(input),
+    { ...metadata, model: input.binding.model },
+  );
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  const evidence = inventedSourceEvidence(plan);
+  const requests = buildGroundedSourceReviewRequests(plan, evidence);
+  const claim = plan.claims.find((c) => c.kind === "detail")!;
+  const partIndex = requests.findIndex((r) =>
+    r.assignedClaimIds.includes(claim.id),
+  );
+  const wire = answers(plan).map((response, index) =>
+    wireResponse(response, requests[index]),
+  );
+  const check = wire[partIndex].checksByClaim[claim.id];
+  check.sourceRefs = [];
+  for (const id of Object.keys(check.readingRefsById))
+    check.readingRefsById[id] = ["o-s5", "o-f0"].includes(id);
+  const before = JSON.stringify({ input, original, evidence, wire });
+  const store = (responses: unknown[]) =>
+    productionRecordSourceSemanticReview(responses, plan, {
+      ...metadata,
+      sourceEvidence: evidence,
+    });
+  const record = store(wire);
+  const normalized = record.responses[partIndex].checks.find(
+    (c) => c.claimId === claim.id,
+  )!;
+  assert.deepEqual([...normalized.sourceRefs].sort(), ["f0", "s5"]);
+  assert.deepEqual([...normalized.readingRefs].sort(), ["o-f0", "o-s5"]);
+  assert.equal(normalized.verdict, "supported");
+  assert(readSourceSemanticReview(record, plan)?.accepted);
+  assert.equal(JSON.stringify({ input, original, evidence, wire }), before);
+  assert(!normalized.sourceRefs.includes("f1"));
+  assert(!normalized.sourceRefs.includes("f2"));
+  const validators = requests.map((request) =>
+    new Ajv2020({ strict: false }).compile(
+      openaiJsonSchema(request.responseFormat.json_schema.schema),
+    ),
+  );
+  wire.forEach((response, index) => assert(validators[index](response)));
+  // V2 still demands the duplicate pointer; do not reparse a closed V2
+  // response as V3, or add the missing pointer to its canonical record.
+  const legacy = structuredClone(wire);
+  for (const response of legacy) response.checksFormat = "claim_keyed_refs_v2";
+  legacy[partIndex].checksByClaim[claim.id].sourceRefs = ["s5"];
+  assert.throws(() => store(legacy), /own summary or detail claim/);
+  const missingStored = structuredClone(record.responses);
+  missingStored[partIndex].checks.find(
+    (c) => c.claimId === claim.id,
+  )!.sourceRefs = ["s5"];
+  assert.throws(() => store(missingStored), /own summary or detail claim/);
+  const negative = structuredClone(wire);
+  negative[partIndex].checksByClaim[claim.id].verdict = "not_verifiable";
+  const readingGroup = requests[partIndex].claimReadingGroups.find((group) =>
+    group.claimIds.includes(claim.id),
+  )!;
+  for (const id of readingGroup.readingIds)
+    negative[partIndex].checksByClaim[claim.id].readingRefsById[id] ??= false;
+  assert.equal(
+    readSourceSemanticReview(store(negative), plan)?.accepted,
+    false,
+  );
+  for (const invalidId of ["o-f2", "o-f3", "o-f999"]) {
+    const foreign = structuredClone(wire);
+    foreign[partIndex].checksByClaim[claim.id].readingRefsById[invalidId] =
+      true;
+    assert(!validators[partIndex](foreign[partIndex]));
+    assert.throws(() => store(foreign));
+  }
+  const duplicate = structuredClone(wire);
+  duplicate[partIndex].checksByClaim[claim.id].sourceRefs = ["s5", "s5"];
+  assert.throws(() => store(duplicate), /repeats source evidence/);
+  const empty = structuredClone(wire);
+  for (const id of Object.keys(
+    empty[partIndex].checksByClaim[claim.id].readingRefsById,
+  ))
+    empty[partIndex].checksByClaim[claim.id].readingRefsById[id] = false;
+  assert.throws(() => store(empty));
+});
+
+test("V3 fact projection does not replace an independent performance or the assigned criticism quote", () => {
+  const plan = buildSourceSemanticReviewRequest(context(), draft(), config);
+  const evidence = inventedSourceEvidence(plan);
+  const requests = buildGroundedSourceReviewRequests(plan, evidence);
+  const wire = answers(plan).map((response, index) =>
+    wireResponse(response, requests[index]),
+  );
+  const summary = plan.claims.find((c) => c.kind === "summary")!;
+  const index = requests.findIndex((r) =>
+    r.assignedClaimIds.includes(summary.id),
+  );
+  const check = wire[index].checksByClaim[summary.id];
+  check.sourceRefs = [];
+  for (const id of Object.keys(check.readingRefsById))
+    check.readingRefsById[id] = id === "o-s1";
+  const store = (responses: unknown[]) =>
+    productionRecordSourceSemanticReview(responses, plan, {
+      ...metadata,
+      sourceEvidence: evidence,
+    });
+  assert.throws(() => store(wire), /independent performance/);
+  check.verdict = "contradicted";
+  check.draftQuote = "Un'affermazione estranea al summary.";
+  assert.throws(
+    () => store(wire),
+    /criticism must quote its own assigned claim/,
+  );
 });
 
 test("Review criticisms quote their assigned text without confusing summary and detail", () => {

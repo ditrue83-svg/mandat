@@ -22,7 +22,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v46";
+  "documentary-source-semantic-review-v47";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -104,15 +104,28 @@ const responseShape = z.strictObject({
   checks: z.array(checkShape).max(MAX_CHECKS),
   findings: z.array(findingShape).max(32),
 });
-function providerResponseSchema(bounds: ResponseBounds, keyedReadings = false) {
+function providerResponseSchema(
+  bounds: ResponseBounds,
+  format:
+    | "claim_keyed_v1"
+    | "claim_keyed_refs_v2"
+    | "claim_keyed_refs_v3" = "claim_keyed_v1",
+) {
+  const keyedReadings = format !== "claim_keyed_v1";
   // References identify a set. Its cardinality bounds the wire response while
   // keeping every available piece of evidence and the strict uniqueness gate.
-  const boundedRefs = (ids: string[]) =>
+  const boundedRefs = (ids: string[], minimum = 1) =>
     z
       .array(z.enum(ids))
-      .min(1)
+      .min(minimum)
       .max(Math.min(1024, new Set(ids).size));
+  // V3 selects an original fact once. Its bound source pointer is projected
+  // below; the canonical response still requires nonempty, unique evidence.
   const references = boundedRefs(bounds.sourceIds);
+  const checkReferences =
+    format === "claim_keyed_refs_v3"
+      ? boundedRefs(bounds.sourceIds, 0)
+      : references;
   // A keyed selection represents each available reference exactly once.
   // False preserves available but unused evidence; only true selects a citation.
   const readingSelection = (ids?: string[]) =>
@@ -128,7 +141,7 @@ function providerResponseSchema(bounds: ResponseBounds, keyedReadings = false) {
   const common = responseShape.shape.checks.element
     .omit({ claimId: true, readingRefs: true })
     .extend({
-      sourceRefs: references,
+      sourceRefs: checkReferences,
       ...readingSelection(bounds.readingIds),
     });
   // Reuse each ownership group's schema, but require every claim as a
@@ -183,9 +196,7 @@ function providerResponseSchema(bounds: ResponseBounds, keyedReadings = false) {
       ? z.literal(bounds.evidenceHash)
       : hash,
     findings: z.array(z.union(materialFindings)).max(32),
-    checksFormat: z.literal(
-      keyedReadings ? "claim_keyed_refs_v2" : "claim_keyed_v1",
-    ),
+    checksFormat: z.literal(format),
     checksByClaim: z.strictObject(
       Object.fromEntries(
         bounds.claimIds.map((id) => [
@@ -980,7 +991,7 @@ export function buildGroundedSourceReviewRequests(
                 readingIds,
                 claimReadingGroups: [...readingGroups.values()],
               },
-              true,
+              "claim_keyed_refs_v3",
             ),
             { reused: "ref" },
           ),
@@ -988,9 +999,15 @@ export function buildGroundedSourceReviewRequests(
       };
       const prompt = JSON.stringify({
         ...JSON.parse(request.prompt),
+        rules: JSON.parse(request.prompt).rules.map((rule: string) =>
+          rule.replace(
+            "e cita lo stesso sN o fN in sourceRefs.",
+            "e seleziona il relativo o-sN/o-fN: il formato v3 collega il suo sourceRef originale.",
+          ),
+        ),
         referenceSelectionFormat: {
-          checksFormat: "claim_keyed_refs_v2",
-          rule: "Ogni check contiene readingRefsById, con una chiave booleana obbligatoria per ciascun identificativo previsto dal suo schema. Usa true soltanto per le prove necessarie al giudizio e false per le altre. Almeno una prova deve essere true. Non aggiungere readingRefs, nuove chiavi o riferimenti ripetuti; le regole sul sostegno proprio di ogni claim restano invariate.",
+          checksFormat: "claim_keyed_refs_v3",
+          rule: "readingRefsById richiede una chiave booleana per ogni ID previsto: true seleziona una prova, false la lascia inutilizzata. Seleziona almeno una prova. Per o-sN/o-fN il codice collega il sourceRef originale del fatto scelto: non serve ripeterlo in sourceRefs. Cita in sourceRefs le altre prove necessarie. Nessuna nuova chiave o readingRefs. Ambito, significato e sostegno proprio del claim restano da verificare; il collegamento non assegna verdetti.",
         },
         sourceEvidenceHash: independent.hash,
         originalFacts,
@@ -1096,7 +1113,11 @@ function validateResponses(
           readingIds: request.readingIds,
           claimReadingGroups: request.claimReadingGroups,
         },
-        "checksFormat" in value && value.checksFormat === "claim_keyed_refs_v2",
+        "checksFormat" in value &&
+          (value.checksFormat === "claim_keyed_refs_v2" ||
+            value.checksFormat === "claim_keyed_refs_v3")
+          ? value.checksFormat
+          : "claim_keyed_v1",
       ).parse(value);
       return responseShape.parse({
         ...header,
@@ -1104,12 +1125,28 @@ function validateResponses(
           const check = checksByClaim[claimId];
           if ("readingRefsById" in check) {
             const { readingRefsById, ...rest } = check;
+            if (new Set(rest.sourceRefs).size !== rest.sourceRefs.length)
+              throw new Error("Source review repeats source evidence");
+            const readingRefs = Object.entries(
+              readingRefsById as Record<string, boolean>,
+            ).flatMap(([id, selected]) => (selected ? [id] : []));
             return {
               claimId,
               ...rest,
-              readingRefs: Object.entries(
-                readingRefsById as Record<string, boolean>,
-              ).flatMap(([id, selected]) => (selected ? [id] : [])),
+              // Only the declared V3 wire contract projects explicitly chosen
+              // original facts. Legacy wires and stored responses stay strict.
+              // Ownership, scope and semantic guards still run below.
+              ...(_format === "claim_keyed_refs_v3"
+                ? {
+                    sourceRefs: unique([
+                      ...rest.sourceRefs,
+                      ...request.originalFacts
+                        .filter((fact) => readingRefs.includes(fact.id))
+                        .map((fact) => fact.sourceRef),
+                    ]),
+                  }
+                : {}),
+              readingRefs,
             };
           }
           return { claimId, ...check };
