@@ -1378,6 +1378,42 @@ test("Object quotations are required and cannot be translated or paraphrased", (
   }
 });
 
+test("Object quotations retain contracted articles or omit them without grammatical rewriting", () => {
+  const base = context();
+  const original =
+    "Fornitura del materiale inventato, posa accessoria; trasporto escluso.";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: base.body.passages.map((passage, index) =>
+        index === 0
+          ? { ...passage, text: original, endUtf16: original.length }
+          : passage,
+      ),
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const wire = wireResponse(response(input));
+  wire.components[0].roleEvidence.actionText = "Fornitura";
+  for (const objectText of ["del materiale inventato", "materiale inventato"]) {
+    const value = structuredClone(wire);
+    value.components[0].meaning.objectText = objectText;
+    const before = JSON.stringify(value);
+    const record = recordSourceInterpretation(value, request, metadata);
+    assert.equal(record.response.components[0].meaning.objectText, objectText);
+    assert.equal(JSON.stringify(value), before);
+  }
+  const changed = structuredClone(wire);
+  changed.components[0].meaning.objectText = "il materiale inventato";
+  const before = JSON.stringify(changed);
+  assert.throws(
+    () => recordSourceInterpretation(changed, request, metadata),
+    /Meaning object must be an exact quotation/,
+  );
+  assert.equal(JSON.stringify(changed), before);
+});
+
 test("Provider quotations preserve original initials instead of adapting them to a description", () => {
   const base = context();
   const original =

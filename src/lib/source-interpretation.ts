@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v37";
+  "documentary-source-interpretation-v38";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -266,7 +266,7 @@ function buildResponseSchema(bounds?: {
   const meaningFields = {
     statement: meaningStatement,
     objectText: text(600).describe(
-      "Copia l'oggetto dai passaggi in evidence, preservando maiuscole, minuscole e punteggiatura. Ammessi solo tag HTML omessi, spazi uniformati e apostrofi tipografici interni. Non tradurre, parafrasare o cambiare iniziali; non basta un verbo o una classificazione.",
+      "Citazione dell'oggetto in evidence, non riscrittura. Conserva articoli, preposizioni, iniziali e punteggiatura. Puoi accorciare l'estratto, non correggerne la grammatica. Ammessi solo HTML omesso, spazi uniformati e apostrofi interni. Non basta un verbo o una classificazione.",
     ),
     objectRefs: refs.describe(
       "Passaggi non classificatori che nominano l'oggetto o la prestazione; devono essere anche nelle sourceRefs della componente. Sono ammesse clausole di contesto.",
@@ -1037,9 +1037,9 @@ export function buildSourceInterpretationRequest(
             "otherRequirements: conserva separatamente ogni riserva o diritto sul servizio acquistato, inclusi crediti annuali, ulteriori destinatari e acquisto intero, parziale o nullo delle opzioni quando attestati. Dire soltanto che un'opzione è facoltativa non rappresenta le altre proposizioni. Non trasformare destinatari o condizioni del committente in ulteriori prestazioni acquistate.",
           ]
         : []),
-      "classificationContext è un registro immutabile separato dalle prestazioni: rendiconta ogni ID una volta, conservando codici, etichette, lingue e ambiti. clarifies_domain richiede un'etichetta originale; broad_context è una famiglia ampia, non prova una prestazione specifica; shared_project_only è contesto condiviso. Senza etichetta non decodificare codici da memoria. unresolved indica dubbio materiale; conflicting richiede asserzioni incompatibili.",
+      "classificationContext è immutabile e separato dalle prestazioni: ogni reading cita soltanto le proprie etichette, senza attribuirgli parole di altre classificazioni. Rendiconta ogni ID una volta con codici, lingue e ambiti originali. clarifies_domain richiede un'etichetta; broad_context è una famiglia ampia, non una prestazione; shared_project_only è contesto condiviso. Senza etichetta non decodificare da memoria. unresolved indica dubbio materiale; conflicting richiede asserti incompatibili.",
       "meaning identifica l'oggetto nel suo dominio: evidence cita prove non classificatorie; classificationContextIds riporta le classificazioni usate. Non basta ripetere o tradurre un termine ambiguo: disambigua con le etichette originali, senza scegliere settori esterni o dichiarare errata la classificazione per salvare un'ipotesi. explicit_text si fonda sul testo; text_with_classification_context richiede un'etichetta del target. Solo per un lotto senza classificazioni proprie può usare un'etichetta condivisa insieme a prove locali del significato. Famiglie classificatorie non provano equivalenza, capacità o ammissibilità.",
-      "Copia meaning.objectText e actionText da evidence, con maiuscole/minuscole e punteggiatura originali: non adattare la citazione alla frase della descrizione. Il server localizza oggetto e azione separatamente nei soli passaggi scelti, senza correggere parole. Attraversa solo frammenti contigui della stessa fonte, campo e ambito, citandoli tutti. Nelle spiegazioni classificatorie nomina il prodotto/servizio, non posizioni di componenti già collegate da classificationContextIds.",
+      "meaning.objectText e actionText sono citazioni, non frasi grammaticali: copia parole, articoli, preposizioni, iniziali e punteggiatura. Se una contrazione non serve, scegli un estratto più breve senza riscriverla. Il server localizza oggetto e azione nei soli evidence scelti, senza correggere parole. Attraversa solo frammenti contigui della stessa fonte, campo e ambito, citandoli tutti. Ogni spiegazione classificatoria usa le proprie etichette citate.",
       ...(evidenceGroups.length
         ? [
             "componentEvidenceGroups: gN seleziona esplicitamente tutti i sourceRefs elencati, appartenenti a un solo campo originale e ambito, senza salti. Nei components.evidence usa il gruppo completo se azione e oggetto si trovano in frammenti diversi, anche per il ciclo generale applicato agli oggetti successivi. Non duplicare un suo sN. gN è ammesso soltanto in evidence; summary, details, targetRef e classificazioni citano ancora gli ID sN/fN originali. Il gruppo non prova da solo che un'azione si applichi a ogni oggetto: conserva limitazioni, esclusioni e ambiti della fonte.",
