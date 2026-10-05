@@ -332,7 +332,7 @@ it("Durably schedules once, completes a referenced comparison, and never creates
   expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
     status: "skipped",
   });
-  expect(infer).toHaveBeenCalledTimes(4);
+  expect(infer).toHaveBeenCalledTimes(5);
   for (const call of vi.mocked(infer).mock.calls)
     expect(call[7]?.timeoutMs).toBe(300_000);
   const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
@@ -359,6 +359,7 @@ it("Reuses only the public interpretation for another company and creates a fres
   expect(firstCalls.map((call) => call[1])).toEqual([
     "documentary-source-interpretation",
     "documentary-source-evidence",
+    "documentary-source-semantic-review",
     "documentary-source-semantic-review",
     "documentary-service-comparison",
   ]);
@@ -474,6 +475,7 @@ it("A rejected semantic review beyond twenty older source-only rows is reused ac
     "documentary-source-interpretation",
     "documentary-source-evidence",
     "documentary-source-semantic-review",
+    "documentary-source-semantic-review",
   ]);
   const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
   expect(loaded.project.targets[0].automatic?.serviceRelation).toBe("review");
@@ -562,6 +564,7 @@ for (const changed of ["missing", "version", "reasoning"] as const)
     expect(second.sourceReview).not.toEqual(first.sourceReview);
     expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
       "documentary-source-evidence",
+      "documentary-source-semantic-review",
       "documentary-source-semantic-review",
       "documentary-service-comparison",
     ]);
@@ -849,6 +852,7 @@ for (const changed of ["source", "source_reasoning"] as const)
       "documentary-source-interpretation",
       "documentary-source-evidence",
       "documentary-source-semantic-review",
+      "documentary-source-semantic-review",
       "documentary-service-comparison",
     ]);
     if (changed === "source_reasoning") {
@@ -1091,7 +1095,7 @@ it("An expired lease can be recovered once, while a live lease prevents a duplic
   expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
     status: "completed",
   });
-  expect(infer).toHaveBeenCalledTimes(4);
+  expect(infer).toHaveBeenCalledTimes(5);
 });
 
 it("An abandoned third attempt is closed once without another provider call", async () => {
@@ -1326,7 +1330,7 @@ it("Returning to a superseded profile requeues its input once and preserves the 
     .from(schema.automaticMatchRuns)
     .where(eq(schema.automaticMatchRuns.id, job.runId));
   expect(exhausted).toMatchObject({ status: "superseded", attempts: 3 });
-  expect(infer).toHaveBeenCalledTimes(4);
+  expect(infer).toHaveBeenCalledTimes(5);
 });
 
 it("A job for another company cannot read, run or update the owner's comparison", async () => {

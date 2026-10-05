@@ -17,6 +17,215 @@ import {
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 import { openaiResponseBody } from "../src/lib/openai-responses";
 
+test("Present options, organisational limits, territory and document access cannot disappear behind null notes", () => {
+  const base = context();
+  const originals = [
+    ["s5", "/procurement/options", "no"],
+    ["s6", "/terms/consortiumAllowed", "yes"],
+    [
+      "s7",
+      "/terms/consortiumNote/it",
+      "Al massimo tre membri; ciascuno partecipa a un solo consorzio. Responsabilità solidale e illimitata.",
+    ],
+    ["s8", "/terms/subContractorMultiApplicationAllowed", "no"],
+    ["s9", "/procurement/orderAddress/city/it", "Comune inventato"],
+    [
+      "s10",
+      "/project-info/documentsSourceNote/it",
+      "Richiedere la documentazione via email all'ufficio del committente.",
+    ],
+    [
+      "s11",
+      "/terms/walkThroughNotes/it",
+      "Visita facoltativa su appuntamento.",
+    ],
+  ] as const;
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      fields: [
+        {
+          scope: "project_context",
+          rawPath: "/procurement/optionsNote/it",
+          value: null,
+        },
+        {
+          scope: "project_context",
+          rawPath: "/terms/consortiumMultiApplicationAllowed",
+          value: false,
+        },
+        {
+          scope: "project_context",
+          rawPath: "/procurement/variants",
+          value: false,
+        },
+      ],
+      passages: [
+        ...base.body.passages,
+        ...originals.map(([id, rawPath, text]) => ({
+          id,
+          rawPath,
+          text,
+          scope: "project_context" as const,
+          role: "context" as const,
+          startUtf16: 0,
+          endUtf16: text.length,
+          url: "https://example.invalid/source",
+        })),
+      ],
+    },
+  };
+  const before = JSON.stringify(input);
+  const request = buildSourceInterpretationRequest(input);
+  assert.deepEqual(request.requiredContractClauseIds, [
+    ...originals.map(([id]) => id),
+    "f1",
+    "f2",
+  ]);
+  assert.equal(request.citableFieldIds.includes("f0"), false);
+  const supplied = {
+    ...response(input),
+    details: [
+      ...originals.map(([id, , text]) => ({
+        kind: "execution_condition" as const,
+        explanation: text,
+        sourceRefs: [id],
+        scope: "project_context" as const,
+      })),
+      {
+        kind: "execution_condition" as const,
+        explanation: "Partecipazione a più consorzi non consentita.",
+        sourceRefs: ["f1"],
+        scope: "project_context" as const,
+      },
+      {
+        kind: "execution_condition" as const,
+        explanation: "Varianti non consentite.",
+        sourceRefs: ["f2"],
+        scope: "project_context" as const,
+      },
+    ],
+  };
+  const wire = wireResponse(supplied, request);
+  const record = recordSourceInterpretation(wire, request, metadata);
+  assert.equal(record.response.details.length, 9);
+  for (const id of request.requiredContractClauseIds) {
+    const missing = structuredClone(wire);
+    delete missing.contractClausesById[id];
+    assert.throws(
+      () => recordSourceInterpretation(missing, request, metadata),
+      /Incomplete|Required|Invalid/,
+    );
+  }
+  const wrongScope = structuredClone(wire);
+  wrongScope.contractClausesById.s5[0].scope = "selected_lot";
+  assert.throws(
+    () => recordSourceInterpretation(wrongScope, request, metadata),
+    /scope|Invalid/,
+  );
+  assert.equal(JSON.stringify(input), before);
+  // Coverage is mechanical; it does not decide the meaning of the supplied
+  // explanations, create extra purchased services or qualify a company.
+  assert.equal(record.response.components.length, supplied.components.length);
+});
+
+test("A shared translated note keeps every own reference and is stored once without merging flags or scopes", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        ...[
+          ["s5", "/terms/consortiumNote/it", "Al massimo tre membri."],
+          ["s6", "/terms/consortiumNote/fr", "Au maximum trois membres."],
+          ["s7", "/terms/consortiumAllowed", "yes"],
+        ].map(([id, rawPath, text]) => ({
+          id,
+          rawPath,
+          text,
+          role: "context" as const,
+          scope: "project_context" as const,
+          startUtf16: 0,
+          endUtf16: text.length,
+          url: "https://example.invalid/source",
+        })),
+      ],
+    },
+  };
+  const original = JSON.stringify(input);
+  const request = buildSourceInterpretationRequest(input);
+  const value = {
+    ...response(input),
+    details: [
+      {
+        kind: "execution_condition",
+        explanation: "Le due note limitano il consorzio a tre membri.",
+        sourceRefs: ["s5", "s6"],
+        scope: "project_context",
+      },
+      {
+        kind: "execution_condition",
+        explanation: "I consorzi sono ammessi.",
+        sourceRefs: ["s7"],
+        scope: "project_context",
+      },
+    ],
+  };
+  const wire = wireResponse(value, request);
+  const before = JSON.stringify(wire);
+  const record = recordSourceInterpretation(wire, request, metadata);
+  assert.deepEqual(record.response.details, value.details);
+  assert.deepEqual(record.response.details[0].sourceRefs, ["s5", "s6"]);
+  assert.equal(JSON.stringify(wire), before);
+  assert.equal(JSON.stringify(input), original);
+  const ajv = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  assert(ajv(wire));
+  for (const edit of [
+    (v: any) => {
+      v.contractClausesById.s5[0].sourceRefs = ["s6"];
+    },
+    (v: any) => {
+      v.contractClausesById.s5[0].sourceRefs.push("s7");
+    },
+    (v: any) => {
+      v.contractClausesById.s5[0].sourceRefs.push("s1");
+    },
+    (v: any) => {
+      v.contractClausesById.s5[0].scope = "selected_lot";
+    },
+  ]) {
+    const invalid = structuredClone(wire);
+    edit(invalid);
+    assert.throws(
+      () => recordSourceInterpretation(invalid, request, metadata),
+      /Contract clause|scope|Invalid/,
+    );
+  }
+});
+
+test("A project-only provider contract cannot invent a selected-lot role scope", () => {
+  const input = context();
+  const request = buildSourceInterpretationRequest(input);
+  const wire: any = wireResponse(response(input), request);
+  const validate = new Ajv2020({ strict: false }).compile<any>(
+    request.responseFormat.json_schema.schema,
+  );
+  assert(validate(wire));
+  const invalid = structuredClone(wire);
+  invalid.components[0].roleEvidence.scope = "selected_lot";
+  assert.equal(validate(invalid), false);
+  assert.throws(
+    () => recordSourceInterpretation(invalid, request, metadata),
+    /Role action|scope/,
+  );
+  assert.equal(wire.components[0].roleEvidence.scope, "project_context");
+});
+
 test("Source identity focus preserves original titles, descriptions and split spans without resolving differences", () => {
   const base = context();
   const additions = [
@@ -153,6 +362,14 @@ test("Component evidence keeps its explicitly selected territory and period with
   const before = JSON.stringify(input);
   const request = buildSourceInterpretationRequest(input);
   const answer = response(input);
+  answer.details = [
+    {
+      kind: "execution_condition",
+      explanation: additions[0].text,
+      sourceRefs: ["s5"],
+      scope: "project_context",
+    },
+  ] as any;
   const result = validateSourceInterpretation(
     {
       ...answer,
@@ -3413,6 +3630,7 @@ test.each([
   "documentary-source-interpretation-v34",
   "documentary-source-interpretation-v35",
   "documentary-source-interpretation-v36",
+  "documentary-source-interpretation-v42",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
   assert.equal(request.version, SOURCE_INTERPRETATION_VERSION);

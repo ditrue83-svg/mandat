@@ -5,9 +5,15 @@
 // live under /procurement. Preserve both original shapes.
 // Partial-offer limits delimit the package that must be covered. The official
 // language note may establish precedence; language availability alone does not.
-// Other requirements may independently reserve quantities, funding or the
-// recipients of purchased services. Keep every original proposition available.
+// Flags and notes are independent original facts. A null note cannot cancel a
+// present prohibition, and an optional service is not the same as options=yes.
+// Preserve organisational limits, territory and document access too; none of
+// these fields establishes an additional service or bidder eligibility.
+const contractScopePaths = [
+  /^(?:\/lots\/\d+)?\/terms\/(?:subContractor(?:Note|Allowed|MultiApplicationAllowed)|consortium(?:Note|Allowed|MultiApplicationAllowed)|otherRequirements|walkThroughNotes)(?:\/|$)/,
+  /^(?:\/procurement|\/lots\/\d+)\/(?:options(?:Note)?|variants(?:Note)?|executionNote|canContractBeExtended(?:Note)?|partialOffers(?:Note)?|orderAddressDescription|orderAddress\/(?:cantonId|city))(?:\/|$)/,
+  /^\/project-info\/(?:documentsLanguagesNote|documentsSource(?:Type|Email|Url|Note))(?:\/|$)/,
+];
+
 export const isContractScopeField = (rawPath: string) =>
-  /^(?:(?:\/lots\/\d+)?\/(?:terms\/(?:subContractor(?:Note|Allowed)|otherRequirements)|procurement\/(?:optionsNote|executionNote|canContractBeExtended(?:Note)?|partialOffers(?:Note)?))|\/lots\/\d+\/(?:optionsNote|executionNote|canContractBeExtended(?:Note)?|partialOffers(?:Note)?)|\/project-info\/documentsLanguagesNote)(?:\/|$)/.test(
-    rawPath,
-  );
+  contractScopePaths.some((pattern) => pattern.test(rawPath));

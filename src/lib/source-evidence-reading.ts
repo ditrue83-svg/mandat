@@ -10,7 +10,7 @@ import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v19";
+export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v20";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;

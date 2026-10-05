@@ -214,7 +214,16 @@ function sourceResponse(
   )!.id;
   return {
     status,
-    details: [],
+    details: sourceRequest.body.passages
+      .filter((p) =>
+        /\/orderAddress\/(?:cantonId|city)(?:\/|$)/.test(p.rawPath),
+      )
+      .map((p) => ({
+        kind: "execution_condition" as const,
+        explanation: `Territorio originale del test: ${p.text}.`,
+        sourceRefs: [p.id],
+        scope: p.scope,
+      })),
     summary:
       "Servizi inventati, interpretazione simulata per verificare il contratto.",
     summarySourceRefs: [targetRef],
@@ -636,6 +645,7 @@ test("A structured subcontract prohibition survives review and stored comparison
     {
       ...sourceResponse(request),
       details: [
+        ...sourceResponse(request).details,
         {
           kind: "execution_condition",
           scope: "project_context",
@@ -692,7 +702,7 @@ test("A structured subcontract prohibition survives review and stored comparison
               "Risposta inventata per verificare la conservazione delle prove.",
             sourceRefs: claim.sourceRefs,
             readingRefs:
-              claim.kind === "detail"
+              claim.kind === "detail" && claim.sourceRefs.includes(fieldId)
                 ? [`o-${fieldId}`]
                 : inventedReadingRefs(body, claim),
           };
@@ -1004,6 +1014,7 @@ test("Missing specifications remain visible through comparison without becoming 
   )!;
   const answer = sourceResponse(request);
   const details = [
+    ...answer.details,
     {
       kind: "missing_specification",
       explanation: "Quantità definitiva non disponibile nel testo fornito.",
@@ -1284,7 +1295,7 @@ test("Project evaluation context excludes qualification, metadata and explicit p
     assert.equal(item.endUtf16, original.endUtf16);
   }
   assert.equal(JSON.stringify(source), before);
-  assert.deepEqual(body.sourceInterpretation.details, []);
+  assert.deepEqual(body.sourceInterpretation.details, source.response.details);
   const without = buildAutomaticComparisonRequest(fixture());
   const withoutBody = JSON.parse(
     buildInterpretedComparisonRequest(without, sourceRecord(without)).prompt,
@@ -2623,6 +2634,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v74",
     sourceVersion: "documentary-source-interpretation-v41",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v75",
+    sourceVersion: "documentary-source-interpretation-v42",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2656,7 +2671,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v75");
+    assert.equal(request.version, "documentary-service-comparison-v76");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(

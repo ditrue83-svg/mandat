@@ -172,6 +172,14 @@ function draft(input = context()) {
           sourceRefs: ["s4"],
           scope: "project_context",
         },
+        ...input.body.passages
+          .filter((p) => p.rawPath === "/procurement/options/it")
+          .map((p) => ({
+            kind: "execution_condition" as const,
+            explanation: p.text,
+            sourceRefs: [p.id],
+            scope: p.scope,
+          })),
       ],
       issues: [],
     },

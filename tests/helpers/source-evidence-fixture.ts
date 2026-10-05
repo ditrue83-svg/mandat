@@ -10,9 +10,13 @@ import {
 } from "../../src/lib/source-semantic-review";
 
 export function inventedSourceEvidenceAnswer(data: any) {
+  const required = new Set<string>(
+    (data.requiredClausePassages ?? []).map((p: any) => p.sourceRef),
+  );
   const quote = (id: string) => {
     const passage = data.passages.find((p: any) => p.id === id);
-    if (!passage) throw new Error("Invented fixture lacks source passage");
+    if (!passage && !data.fields.some((f: any) => f.id === id))
+      throw new Error("Invented fixture lacks source passage or field");
     return { sourceRef: id };
   };
   const target =
@@ -30,10 +34,30 @@ export function inventedSourceEvidenceAnswer(data: any) {
     chunkId: data.chunkId,
     coverage: "complete",
     observations: [
-      target,
-      ...data.passages.filter((p: any) => p.id !== target.id),
-    ]
-      .flatMap((p: any) => {
+      ...(data.requiredClauseFields ?? []).flatMap((field: any) => {
+        const original = data.fields.find((f: any) => f.id === field.sourceRef);
+        const anchor = data.passages.find(
+          (p: any) => p.scope === original.scope && p.role === "service",
+        );
+        return anchor
+          ? [
+              {
+                kind: "condition",
+                serviceRef: anchor.id,
+                evidence: [quote(field.sourceRef)],
+              },
+            ]
+          : [];
+      }),
+      ...[
+        target,
+        ...data.passages
+          .filter((p: any) => p.id !== target.id)
+          .sort(
+            (a: any, b: any) =>
+              Number(required.has(b.id)) - Number(required.has(a.id)),
+          ),
+      ].flatMap((p: any) => {
         const anchor = data.passages.find(
           (candidate: any) =>
             candidate.scope === p.scope && candidate.role === "service",
@@ -49,8 +73,12 @@ export function inventedSourceEvidenceAnswer(data: any) {
             evidence: [quote(p.id)],
           },
         ];
-      })
-      .slice(0, 32),
+      }),
+    ].slice(0, 32) as {
+      kind: "performance" | "condition" | "target_partition";
+      serviceRef: string;
+      evidence: { sourceRef: string }[];
+    }[],
     classifications: data.assignedClassificationIds.map((id: string) => {
       const c = data.classifications.find((item: any) => item.id === id);
       const refs: string[] = [
