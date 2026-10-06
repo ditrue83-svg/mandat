@@ -332,7 +332,7 @@ test("An explicit absence of a visit retains evidence and clears only the visit 
 test("A real without project gets its own attributable CPV/place/deadline, with exact source evidence", () => {
   const raw = detail(),
     result = filter(raw);
-  assert.equal(PROJECT_PREFILTER_VERSION, "project-operational-prefilter-v4");
+  assert.equal(PROJECT_PREFILTER_VERSION, "project-operational-prefilter-v5");
   assert.equal(result.eligible, true);
   assert.equal(result.requiresReview, false);
   assert.equal(result.operational.deadline, "2030-12-01T11:00:00.000Z");
@@ -432,6 +432,82 @@ test("Only unambiguous execution places veto; multilingual contradictions and bu
     it: "Luogo da concordare.",
   };
   assert.equal(filter(descriptionOnly).eligible, true);
+});
+
+test("An explicit whole-Ticino order description resolves the canton without borrowing a buyer city", () => {
+  const raw = detail();
+  raw.procurement.orderAddressOnlyDescription = "yes";
+  raw.procurement.orderAddress = {
+    countryId: "CH",
+    cantonId: null,
+    city: null,
+  };
+  raw.procurement.orderAddressDescription = {
+    it: "Tutto il territorio cantonale (Ticino)",
+  };
+  const before = JSON.stringify(raw);
+  const result = filter(raw);
+  assert.equal(result.eligible, true);
+  assert.equal(result.requiresReview, false);
+  assert.deepEqual(
+    [
+      result.operational.country,
+      result.operational.canton,
+      result.operational.zone,
+    ],
+    ["CH", "TI", null],
+  );
+  assert.deepEqual(
+    result.evidence.find(
+      (e) => e.rawPath === "/procurement/orderAddressDescription",
+    )?.value,
+    raw.procurement.orderAddressDescription,
+  );
+  assert.equal(JSON.stringify(raw), before);
+  const restricted = filter(raw, { zones: ["Luganese"] });
+  assert.equal(restricted.eligible, true);
+  assert.equal(restricted.requiresReview, true);
+});
+
+test("Canton-wide description recognition keeps qualifications, mixed languages and real conflicts for review", () => {
+  const raw = detail();
+  raw.procurement.orderAddressOnlyDescription = "yes";
+  raw.procurement.orderAddress = {
+    countryId: "CH",
+    cantonId: null,
+    city: null,
+  };
+  for (const description of [
+    { it: "Tutto il Ticino, salvo le sedi da definire." },
+    { it: "Tutto il Ticino", fr: "Lieu à convenir." },
+    { it: "Fornitore con sede in Ticino." },
+    { it: "Luogo da concordare." },
+  ]) {
+    raw.procurement.orderAddressDescription = description;
+    assert.equal(filter(raw).requiresReview, true);
+  }
+  raw.procurement.orderAddressDescription = { it: "Tutto il Ticino" };
+  raw.procurement.orderAddress = {
+    countryId: "CH",
+    cantonId: "ZH",
+    city: null,
+  };
+  const conflict = filter(raw);
+  assert.equal(conflict.eligible, true);
+  assert.equal(conflict.requiresReview, true);
+  assert.equal(conflict.operational.canton, null);
+  raw.procurement.orderAddress = {
+    countryId: "CH",
+    cantonId: null,
+    city: null,
+  };
+  assert.equal(filter(raw, {}, { canton: "ZH" }).requiresReview, true);
+  raw.procurement.orderAddress = {
+    countryId: null,
+    cantonId: null,
+    city: null,
+  };
+  assert.equal(filter(raw).requiresReview, true);
 });
 
 test("Complete source texts retain multilingual activity and explicit exclusions, while metadata/conditions do not manufacture services", () => {

@@ -13,7 +13,7 @@ import {
   explicitlyUnscheduledIndividualVisit,
 } from "./site-visit-notes";
 
-export const PROJECT_PREFILTER_VERSION = "project-operational-prefilter-v4";
+export const PROJECT_PREFILTER_VERSION = "project-operational-prefilter-v5";
 export type ProjectOperationalEvidence = {
   scope: "publication" | "project_context";
   url: string;
@@ -338,11 +338,44 @@ export function preliminaryProjectMatch({
       "/procurement",
       "location",
     );
-    field(procurement, "orderAddressDescription", "/procurement", "location");
+    const rawDescription = field(
+      procurement,
+      "orderAddressDescription",
+      "/procurement",
+      "location",
+    );
     const address = object(rawAddress),
       rawCity = own(address, "city");
+    // A complete, explicit canton-wide location in this original field is
+    // location evidence. Do not infer it from the buyer or from prose that
+    // merely mentions Ticino, or discard qualifications after that phrase.
+    const descriptions = strings(rawDescription);
+    const wholeTicino =
+      descriptions !== null &&
+      descriptions.every((text) =>
+        /^tutto (?:il ticino|il territorio cantonale \(ticino\))\.?$/i.test(
+          plainText(text).trim(),
+        ),
+      );
     let locationConflict = false;
-    if (
+    if (descriptionOnly === "yes" && wholeTicino) {
+      const originalCountry = code(own(address, "countryId"), countries);
+      const originalCanton = code(own(address, "cantonId"), cantons);
+      const editorialCanton = code(publication.canton, cantons);
+      publicationField("canton", "editorial");
+      if (
+        (originalCountry !== null && originalCountry !== "CH") ||
+        (originalCanton !== null && originalCanton !== "TI") ||
+        (editorialCanton !== null && editorialCanton !== "TI")
+      ) {
+        review("Città, paese o cantone del progetto sono discordanti.");
+      } else if (originalCountry === "CH") {
+        country = originalCountry;
+        canton = "TI";
+        if (!profile.zones.includes("Tutto il Ticino"))
+          review("Il progetto interessa tutto il Ticino: zone da verificare.");
+      } else review("Luogo di esecuzione del progetto da verificare.");
+    } else if (
       Object.keys(address).length &&
       (descriptionOnly === null || descriptionOnly === "no")
     ) {
