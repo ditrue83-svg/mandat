@@ -195,6 +195,142 @@ test("A numeric offer validity field keeps its own day unit and cannot borrow a 
   assert.equal(JSON.stringify(input), before);
 });
 
+test("Validity type and day count reject cross-field claims before storage without repairing the response", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      fields: [
+        {
+          scope: "project_context",
+          rawPath: "/dates/offerValidityDeadlineDays",
+          value: 180,
+        },
+      ],
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[0],
+          id: "s5",
+          role: "context",
+          rawPath: "/dates/offerValidityDeadlineType",
+          text: "days_after",
+          endUtf16: 10,
+        },
+      ],
+    },
+  };
+  const original = JSON.stringify(input);
+  const request = buildSourceInterpretationRequest(input);
+  const value = {
+    ...response(input),
+    details: [
+      {
+        kind: "execution_condition" as const,
+        scope: "project_context" as const,
+        explanation: "Tipo di validità dell’offerta: days_after.",
+        sourceRefs: ["s5"],
+      },
+      {
+        kind: "execution_condition" as const,
+        scope: "project_context" as const,
+        explanation: "Validità dell’offerta: 180 giorni.",
+        sourceRefs: ["f0"],
+      },
+    ],
+  };
+  const wire = wireResponse(value, request);
+  const native = openaiResponseBody(
+    "gpt-6-luna",
+    request.system,
+    request.prompt,
+    request.maxTokens,
+    request.responseFormat,
+    "medium",
+  );
+  const accepts = new Ajv2020({ strict: false }).compile(
+    native.text!.format.schema,
+  );
+  assert(accepts({ result: wire }));
+  const record = recordSourceInterpretation(wire, request, metadata);
+  assert(readSourceInterpretation(record, request));
+  for (const [ref, explanation] of [
+    ["s5", "Il termine è days_after; il valore separato in f0 è 180 giorni."],
+    ["s5", "Validità dell’offerta: 180 giorni dalla scadenza."],
+    ["f0", "Validità dell’offerta: 180 giorni dalla scadenza."],
+    ["f0", "Validità dell’offerta: 180 giorni, estendibili per sei mesi."],
+  ]) {
+    const invalid = structuredClone(wire);
+    detailFor(invalid, ref).explanation = explanation;
+    const before = JSON.stringify(invalid);
+    assert(!accepts({ result: invalid }), explanation);
+    assert.throws(
+      () => recordSourceInterpretation(invalid, request, metadata),
+      /Contract scalar detail/,
+    );
+    assert.equal(JSON.stringify(invalid), before);
+    // Canonical storage is validated too; omitting the provider envelope
+    // cannot bypass the same invariant.
+    const canonical = structuredClone(value);
+    canonical.details.find((row) => row.sourceRefs.includes(ref))!.explanation =
+      explanation;
+    assert.throws(
+      () => validateSourceInterpretation(canonical, request),
+      /Contract scalar detail/,
+    );
+  }
+  assert.equal(JSON.stringify(input), original);
+});
+
+test("Scalar validity constraints preserve unfamiliar original enums and never infer a value from fragments or notes", () => {
+  for (const [rawPath, texts, constrained] of [
+    ["/dates/offerValidityDeadlineType", ["unspecified_future_type"], true],
+    ["/dates/offerValidityDeadlineType", ["days_", "after"], false],
+    ["/dates/offerValidityNotes/it", ["days_after"], false],
+    ["/dates/offerValidityDeadlineType", ["days_after; 180 giorni"], false],
+  ] as const) {
+    const base = context();
+    let offset = 0;
+    const input: SourceInterpretationContext = {
+      ...base,
+      body: {
+        ...base.body,
+        passages: [
+          ...base.body.passages,
+          ...texts.map((text, i) => {
+            const startUtf16 = offset;
+            offset += text.length;
+            return {
+              ...base.body.passages[0],
+              id: `s${i + 5}`,
+              role: "context" as const,
+              rawPath,
+              text,
+              startUtf16,
+              endUtf16: offset,
+            };
+          }),
+        ],
+      },
+    };
+    const request = buildSourceInterpretationRequest(input);
+    const family = request.contractDetailFamilies.find(
+      (row) => row.id === "s5",
+    )!;
+    assert.equal(Boolean(family.originalScalarExplanation), constrained);
+    assert.deepEqual(
+      family.sourceRefs,
+      texts.map((_, i) => `s${i + 5}`),
+    );
+    if (constrained)
+      assert.equal(
+        family.originalScalarExplanation,
+        "Tipo di validità dell’offerta: unspecified_future_type.",
+      );
+  }
+});
+
 test("Required clause blocks cannot declare coverage while citing another numeric original", () => {
   const base = context();
   const input: SourceInterpretationContext = {
@@ -470,7 +606,8 @@ test("Provider contract rejects grouping independent validity values, flags and 
           .map(([id, , text]) => ({
             kind: "execution_condition" as const,
             scope: "project_context" as const,
-            explanation: text,
+            explanation:
+              id === "s5" ? "Tipo di validità dell’offerta: days_after." : text,
             sourceRefs: id === "s9" ? ["s9", "s10"] : [id],
           })),
         {

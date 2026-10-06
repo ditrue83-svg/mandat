@@ -2540,7 +2540,7 @@ test.each([null, { dateRange: ["2030-02-01", "2031-02-01"] }])(
             kind: "execution_condition",
             scope: "project_context",
             sourceRefs: ["f3"],
-            explanation: "L'offerta ha validità di 180 giorni.",
+            explanation: "Validità dell’offerta: 180 giorni.",
           },
         ],
       },

@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v52";
+  "documentary-source-interpretation-v53";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -239,7 +239,7 @@ const componentRole = z
     "other",
   ])
   .describe(
-    "Azione contrattuale, non settore/luogo/destinatario. supply: beni; execute: svolgere/organizzare; design: progettare; install: mettere in opera; maintain: conservare/ripristinare funzionalità; operate: gestione continuativa; advise: consulenza; other: altra azione identificata.",
+    "Ruolo contrattuale: supply fornitura; design progettare/rivedere progetti; install posa/messa in opera; maintain manutenzione; operate gestione continuativa; advise consulenza; execute altre prestazioni esecutive; other altra azione nota. Usa la funzione specifica attestata, non il mestiere.",
   );
 const componentImportance = z
   .enum(["main", "accessory", "excluded", "not_stated"])
@@ -501,7 +501,15 @@ function originalDayDurationPattern(rawPath: string, value: unknown) {
   return `(^|[^0-9.+−-])${number}\\s+giorn[oi]\\b`;
 }
 
-function originalDayDurationExplanation(rawPath: string, value: unknown) {
+function originalScalarExplanation(rawPath: string, value: unknown) {
+  // The type is an original enum, not evidence for a neighbouring number,
+  // date or starting event. Preserve it without adding any such assertion.
+  if (
+    /^(?:\/lots\/\d+)?\/dates\/offerValidityDeadlineType$/.test(rawPath) &&
+    typeof value === "string" &&
+    /^[a-z][a-z_]{0,63}$/.test(value)
+  )
+    return `Tipo di validità dell’offerta: ${value}.`;
   if (!originalDayDurationPattern(rawPath, value)) return undefined;
   const label = rawPath.endsWith("/offerValidityDeadlineDays")
     ? "Validità dell’offerta"
@@ -523,7 +531,7 @@ function buildProviderResponseSchema(
       scope: z.infer<typeof scope>;
       rawPath: string;
       sourceRefs: readonly string[];
-      originalDayDurationExplanation?: string;
+      originalScalarExplanation?: string;
     }[];
   },
   reference: z.ZodType<string> = z.string().regex(/^[sg]\d+$/),
@@ -634,14 +642,10 @@ function buildProviderResponseSchema(
       scope: value as z.infer<typeof scope>,
       rawPath: "",
       sourceRefs: ids.filter((id) => !clauseFamilyRefs.has(id)),
-      originalDayDurationExplanation: undefined,
     }))
     .filter((family) => family.sourceRefs.length > 0);
   const ownedDetails = ownedDetailGroups.map((family) =>
     detail.extend({
-      explanation: family.originalDayDurationExplanation
-        ? z.literal(family.originalDayDurationExplanation)
-        : detail.shape.explanation,
       scope: z.literal(family.scope),
       kind:
         family.scope === "selected_lot"
@@ -696,8 +700,8 @@ function buildProviderResponseSchema(
                     .array(z.enum(family.sourceRefs))
                     .min(family.sourceRefs.length)
                     .max(family.sourceRefs.length),
-                  explanation: family.originalDayDurationExplanation
-                    ? z.literal(family.originalDayDurationExplanation)
+                  explanation: family.originalScalarExplanation
+                    ? z.literal(family.originalScalarExplanation)
                     : detail.shape.explanation,
                 }),
               )
@@ -1157,6 +1161,11 @@ export function buildSourceInterpretationRequest(
     ...new Map(
       requiredContractClauses.map((clause) => {
         const rawPath = contractFieldFamily(clause.rawPath);
+        const originals = detailOriginals.filter(
+          (original) =>
+            original.scope === clause.scope &&
+            contractFieldFamily(original.rawPath) === rawPath,
+        );
         return [
           JSON.stringify([clause.scope, rawPath]),
           {
@@ -1167,17 +1176,14 @@ export function buildSourceInterpretationRequest(
             )!.id,
             scope: clause.scope,
             rawPath,
-            sourceRefs: detailOriginals
-              .filter(
-                (original) =>
-                  original.scope === clause.scope &&
-                  contractFieldFamily(original.rawPath) === rawPath,
-              )
-              .map((original) => original.id),
-            originalDayDurationExplanation: originalDayDurationExplanation(
-              clause.rawPath,
-              "value" in clause ? clause.value : undefined,
-            ),
+            sourceRefs: originals.map((original) => original.id),
+            originalScalarExplanation:
+              originals.length === 1
+                ? originalScalarExplanation(
+                    clause.rawPath,
+                    "value" in clause ? clause.value : clause.text,
+                  )
+                : undefined,
           },
         ] as const;
       }),
@@ -1286,7 +1292,7 @@ export function buildSourceInterpretationRequest(
       "resolved: oggetto/ruolo noti anche senza sottotipi. details: minimi tecnici, tempi massimi, vincoli del prodotto da descrizioni/criteri; separa referenze passate. Rinvii/lacune non negano minimi presenti. Specifiche ignote non sono issues o lavori. Quantità/unità originali; proroga no non prova durata assente.",
       "linkedDocumentsRead: metadato di pipeline, ometti nei details. hasProjectDocuments false non prova indisponibilità. Email, tipo documentale e note distinti: l’indirizzo non prova il tipo. Ogni ripetizione richiede refs propri.",
       "uncertain richiede un issue materiale tipizzato. object_identity collega componentIndexes (zero-based) a meaning ambiguous; role_identity a role null e roleEvidence unresolved; unreadable_source richiede una lettura unreadable. representation_incomplete cita prestazioni non rappresentate, non informazioni commerciali o specifiche assenti. Non inserire issues per dichiarare assenza di incertezza, e non dichiarare completa una rappresentazione incompleta.",
-      "roleEvidence: azione acquistata, stesso scope, anche nominale (progettazione/assicurazione); non mestiere/luogo/destinatario/presentazione d'offerta. Cita l'azione effettiva; other solo altra azione identificata, mai ripiego. Conserva funzioni composite. Se ignoto: role null/unresolved/role_identity. details/roleEvidence: scope dei passaggi; issues: target. target_scope solo lotti con prove nei due ambiti.",
+      "roleEvidence: azione acquistata, anche nominale, nello stesso scope; non mestiere/luogo/destinatario/offerta. Cita la funzione specifica: progettazione/posa/manutenzione non diventano execute negli appalti di lavori. Conserva azioni composite; other solo altra azione nota. Se ignoto: role null/unresolved/role_identity. details/roleEvidence: scope originali; issues: target. target_scope solo lotti con prove nei due ambiti.",
       "source_conflict: conflicting con due asserti originali opposti/ref diverse sul target. Confronta tutti i titoli/descrizioni/riassunti: oggetto/destinatari/luogo/periodo. Precedenza solo ufficiale citata, mai maggioranza/lingua/ripetizione/refusi; inferenze/categorie/dettagli/traduzioni/frammenti isolati non bastano. unreadable vieta resolved.",
       "components.evidence: prove PROPRIE di OGNI azione/oggetto/destinatario/luogo/periodo/limite in description/roleEvidence/meaning; mai ereditate da summary/details/altre componenti. Territorio non identifica istituto: cita titolo o ometti luogo attribuito. Conserva principali/accessorie; excluded con prove proprie, niente azioni acquistate ereditate. Non creare servizi da lavori di terzi/dati/codici/traduzioni/intestazioni; classificazione/catalogazione solo se acquistate.",
       ...(body.passages.some(
@@ -1480,6 +1486,21 @@ export function validateSourceInterpretation(
     const represented = new Set(value.details.flatMap((d) => d.sourceRefs));
     if (request.requiredContractClauseIds.some((id) => !represented.has(id)))
       throw new Error("Incomplete source interpretation contract clauses");
+    // Apply the provider's factual scalar contract again to stored results.
+    // Never repair an explanation by copying facts or references from a
+    // neighbouring row, even when that other row is correct.
+    for (const family of request.contractDetailFamilies) {
+      if (!family.originalScalarExplanation) continue;
+      const rows = value.details.filter((row) =>
+        row.sourceRefs.some((ref) => family.sourceRefs.includes(ref)),
+      );
+      if (
+        rows.some((row) => row.explanation !== family.originalScalarExplanation)
+      )
+        throw new Error(
+          "Contract scalar detail must preserve only its original value",
+        );
+    }
   }
   if (
     value.status === "resolved" &&
