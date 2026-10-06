@@ -96,14 +96,93 @@ test("A numeric offer validity field keeps its own day unit and cannot borrow a 
     "Valore originale: 180; nota di sei mesi.",
   ]) {
     const invalid: any = structuredClone(wire);
-    invalid.details[1].explanation = explanation;
+    detailFor(invalid, "f0").explanation = explanation;
     assert(!accepts(invalid), explanation);
     assert(!acceptsProviderWire({ result: invalid }), explanation);
     assert.throws(
       () => recordSourceInterpretation(invalid, request, metadata),
       /Original duration/,
     );
-    assert.equal(invalid.details[1].explanation, explanation);
+    assert.equal(detailFor(invalid, "f0").explanation, explanation);
+  }
+  assert.equal(JSON.stringify(input), before);
+});
+
+test("Required clause blocks cannot declare coverage while citing another numeric original", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      fields: [
+        {
+          scope: "project_context",
+          rawPath: "/metadata/unrelated",
+          value: false,
+        },
+        {
+          scope: "project_context",
+          rawPath: "/metadata/otherNumber",
+          value: 180,
+        },
+        {
+          scope: "project_context",
+          rawPath: "/dates/offerValidityDeadlineDays",
+          value: 180,
+        },
+      ],
+    },
+  };
+  const before = JSON.stringify(input);
+  const request = buildSourceInterpretationRequest(input);
+  const wire = wireResponse(
+    {
+      ...response(input),
+      details: [
+        {
+          kind: "execution_condition",
+          scope: "project_context",
+          sourceRefs: ["f2"],
+          explanation: "Validità dell’offerta: 180 giorni.",
+        },
+      ],
+    },
+    request,
+  );
+  const native = openaiResponseBody(
+    "gpt-6-luna",
+    request.system,
+    request.prompt,
+    request.maxTokens,
+    request.responseFormat,
+    "medium",
+  );
+  const accepts = new Ajv2020({ strict: false }).compile(
+    native.text!.format.schema,
+  );
+  assert(accepts({ result: wire }));
+  const record = recordSourceInterpretation(wire, request, metadata);
+  assert.deepEqual(record.response.details[0].sourceRefs, ["f2"]);
+  for (const mutate of [
+    (v: any) => {
+      delete v.contractClauseDetails.f2;
+    },
+    (v: any) => {
+      v.contractClauseDetails.f2 = [];
+    },
+    (v: any) => {
+      v.contractClauseDetails.f2[0].sourceRefs = ["f1"];
+    },
+    (v: any) => {
+      v.contractClauseRefs = { f2: "f2" };
+    },
+  ]) {
+    const invalid = structuredClone(wire);
+    mutate(invalid);
+    const untouched = JSON.stringify(invalid);
+    assert(!accepts({ result: invalid }));
+    assert.throws(() => recordSourceInterpretation(invalid, request, metadata));
+    assert.equal(JSON.stringify(invalid), untouched);
   }
   assert.equal(JSON.stringify(input), before);
 });
@@ -225,7 +304,7 @@ test("Submission, validity and document collection remain mandatory with their o
   );
   for (const id of request.requiredContractClauseIds) {
     const missing = structuredClone(wire);
-    delete missing.contractClauseRefs[id];
+    delete missing.contractClauseDetails[clauseKey(request, id)];
     assert(!accepts(missing));
     assert.throws(
       () => recordSourceInterpretation(missing, request, metadata),
@@ -234,7 +313,7 @@ test("Submission, validity and document collection remain mandatory with their o
   }
   for (const ref of ["s13", "s5"]) {
     const unrelated = structuredClone(wire);
-    unrelated.details[detailIndex(unrelated, "s9")].sourceRefs.push(ref);
+    detailFor(unrelated, "s9").sourceRefs.push(ref);
     assert(!accepts(unrelated));
     assert.throws(
       () => recordSourceInterpretation(unrelated, request, metadata),
@@ -242,9 +321,7 @@ test("Submission, validity and document collection remain mandatory with their o
     );
   }
   const withoutOwnValue = structuredClone(wire);
-  withoutOwnValue.details[detailIndex(withoutOwnValue, "f0")].sourceRefs = [
-    "s5",
-  ];
+  detailFor(withoutOwnValue, "f0").sourceRefs = ["s5"];
   assert.throws(
     () => recordSourceInterpretation(withoutOwnValue, request, metadata),
     /own scoped source/,
@@ -331,7 +408,7 @@ test("Provider contract rejects grouping independent validity values, flags and 
     ["s9", "s11"],
   ]) {
     const mixed: any = structuredClone(wire);
-    mixed.details[detailIndex(mixed, own)].sourceRefs.push(foreign);
+    detailFor(mixed, own).sourceRefs.push(foreign);
     assert(!accepts(mixed));
     assert.throws(
       () => recordSourceInterpretation(mixed, request, metadata),
@@ -384,16 +461,13 @@ test("A singleton contract field cannot request duplicate references and byte-id
     request.responseFormat.json_schema.schema,
   );
   const duplicatedRefs = structuredClone(wire);
-  duplicatedRefs.details[detailIndex(duplicatedRefs, "s5")].sourceRefs = [
-    "s5",
-    "s5",
-  ];
+  detailFor(duplicatedRefs, "s5").sourceRefs = ["s5", "s5"];
   assert(!accepts(duplicatedRefs));
   assert.throws(
     () => recordSourceInterpretation(duplicatedRefs, request, metadata),
     /Repeated/,
   );
-  wire.details.push(structuredClone(wire.details[detailIndex(wire, "s5")]));
+  wire.contractClauseDetails!.s5.push(structuredClone(detailFor(wire, "s5")));
   const before = JSON.stringify(wire);
   const recorded = recordSourceInterpretation(wire, request, metadata);
   assert.equal(recorded.response.details.length, 1);
@@ -401,7 +475,8 @@ test("A singleton contract field cannot request duplicate references and byte-id
   assert.equal(JSON.stringify(wire), before);
   // Different wording is not merged or judged equivalent automatically.
   const different = structuredClone(wire);
-  different.details[0].explanation = "Il campo originale options contiene no.";
+  detailFor(different, "s5").explanation =
+    "Il campo originale options contiene no.";
   assert.equal(
     recordSourceInterpretation(different, request, metadata).response.details
       .length,
@@ -447,7 +522,7 @@ test("Direct clause references reject old index tables and preserve the unchange
     request.responseFormat.json_schema.schema,
   );
   assert(accepts(wire));
-  assert.deepEqual(wire.contractClauseRefs, { s5: "s5" });
+  assert.deepEqual(Object.keys(wire.contractClauseDetails!), ["s5"]);
   const before = JSON.stringify(wire);
   for (const indexes of [[31], [0, 0]]) {
     const invalid = structuredClone(wire);
@@ -462,7 +537,7 @@ test("Direct clause references reject old index tables and preserve the unchange
   assert(!accepts(outOfBounds));
   const overflow = structuredClone(wire);
   overflow.details = Array.from({ length: 33 }, (_, i) => ({
-    ...wire.details[0],
+    ...detailFor(wire, "s5"),
     explanation: `Condizione inventata ${i}.`,
   }));
   assert(!accepts(overflow));
@@ -573,14 +648,14 @@ test("Present options, organisational limits, territory and document access cann
   assert.equal(record.response.details.length, 9);
   for (const id of request.requiredContractClauseIds) {
     const missing = structuredClone(wire);
-    delete missing.contractClauseRefs[id];
+    delete missing.contractClauseDetails[clauseKey(request, id)];
     assert.throws(
       () => recordSourceInterpretation(missing, request, metadata),
       /Incomplete|Required|Invalid/,
     );
   }
   const wrongScope = structuredClone(wire);
-  wrongScope.details[detailIndex(wrongScope, "s5")].scope = "selected_lot";
+  detailFor(wrongScope, "s5").scope = "selected_lot";
   assert.throws(
     () => recordSourceInterpretation(wrongScope, request, metadata),
     /scope|Invalid/,
@@ -648,16 +723,16 @@ test("A shared translated note keeps every own reference and is stored once with
   assert(ajv(wire));
   for (const edit of [
     (v: any) => {
-      v.details[detailIndex(v, "s5")].sourceRefs = ["s6"];
+      detailFor(v, "s5").sourceRefs = ["s6"];
     },
     (v: any) => {
-      v.details[detailIndex(v, "s5")].sourceRefs.push("s7");
+      detailFor(v, "s5").sourceRefs.push("s7");
     },
     (v: any) => {
-      v.details[detailIndex(v, "s5")].sourceRefs.push("s1");
+      detailFor(v, "s5").sourceRefs.push("s1");
     },
     (v: any) => {
-      v.details[detailIndex(v, "s5")].scope = "selected_lot";
+      detailFor(v, "s5").scope = "selected_lot";
     },
   ]) {
     const invalid = structuredClone(wire);
@@ -1719,11 +1794,26 @@ function wireResponse(
   const required = request?.requiredContractClauseIds ?? [];
   return {
     ...value,
-    evidenceFormat: "component_quotations_v7",
+    evidenceFormat: "component_quotations_v8",
     ...(value.status === "resolved" && required.length
       ? {
-          contractClauseRefs: Object.fromEntries(
-            required.map((id) => [id, id]),
+          contractClauseDetails: Object.fromEntries(
+            request!.contractDetailFamilies.map((family) => [
+              family.id,
+              value.details.filter((row: any) =>
+                row.sourceRefs.some((id: string) =>
+                  family.sourceRefs.includes(id),
+                ),
+              ),
+            ]),
+          ),
+          details: value.details.filter(
+            (row: any) =>
+              !row.sourceRefs.some((id: string) =>
+                request!.contractDetailFamilies.some((family) =>
+                  family.sourceRefs.includes(id),
+                ),
+              ),
           ),
         }
       : {}),
@@ -1744,12 +1834,24 @@ function wireResponse(
   };
 }
 
-function detailIndex(value: any, id: string) {
-  const index = value.details.findIndex((detail: any) =>
-    detail.sourceRefs.includes(id),
+function detailFor(value: any, id: string): any {
+  const rows = [
+    ...value.details,
+    ...Object.values(value.contractClauseDetails ?? {}).flat(),
+  ];
+  const row = rows.find((detail: any) => detail.sourceRefs.includes(id));
+  assert(row, `Missing fixture detail for ${id}`);
+  return row;
+}
+function clauseKey(
+  request: ReturnType<typeof buildSourceInterpretationRequest>,
+  id: string,
+) {
+  const family = request.contractDetailFamilies.find((family) =>
+    family.sourceRefs.includes(id),
   );
-  assert(index >= 0, `Missing fixture detail for ${id}`);
-  return index;
+  assert(family);
+  return family.id;
 }
 
 test("Partial offers, language authority and purchase reservations require separate original evidence", () => {
@@ -1834,7 +1936,7 @@ test("Partial offers, language authority and purchase reservations require separ
   assert.deepEqual(record.response.details, value.details);
   for (const id of ["s5", "s6", "s7", "f0"]) {
     const missing = structuredClone(wire);
-    delete missing.contractClauseRefs[id];
+    delete missing.contractClauseDetails[clauseKey(request, id)];
     assert.throws(() => recordSourceInterpretation(missing, request, metadata));
   }
   assert.equal(JSON.stringify(input), before);
@@ -1906,7 +2008,7 @@ test("Resolved wire requires every contractual clause separately with its own sc
   assert.equal(accepts(wire), true);
   const record = recordSourceInterpretation(wire, request, metadata);
   assert.deepEqual(record.response.details, value.details);
-  assert.equal("contractClauseRefs" in record.response, false);
+  assert.equal("contractClauseDetails" in record.response, false);
   assert.equal(
     readSourceInterpretation(record, request)!.evidence.find(
       (p) => p.id === "f0",
@@ -1916,27 +2018,27 @@ test("Resolved wire requires every contractual clause separately with its own sc
   assert.equal(JSON.stringify(wire), originalWire);
   for (const [index, mutate] of [
     (v: any) => {
-      delete v.contractClauseRefs.s5;
+      delete v.contractClauseDetails.s5;
       v.details = value.details;
     },
     (v: any) => {
-      v.contractClauseRefs.s5 = "s6";
+      v.contractClauseDetails.s5 = "s6";
     },
     (v: any) => {
-      v.details[detailIndex(v, "s5")].sourceRefs = ["s6"];
+      detailFor(v, "s5").sourceRefs = ["s6"];
     },
     (v: any) => {
-      v.details[detailIndex(v, "s5")].scope = "selected_lot";
+      detailFor(v, "s5").scope = "selected_lot";
     },
     (v: any) => {
-      v.contractClauseRefs.s999 = "s999";
+      v.contractClauseDetails.s999 = "s999";
     },
   ].entries()) {
     const changed = structuredClone(wire);
     mutate(changed);
     const before = JSON.stringify(changed);
     // Cross-row own evidence is checked locally; missing keys, incorrect references and wrong scopes also fail the wire schema.
-    assert.equal(accepts(changed), index === 2);
+    assert.equal(accepts(changed), false);
     assert.throws(() => recordSourceInterpretation(changed, request, metadata));
     assert.equal(JSON.stringify(changed), before);
   }
@@ -3189,10 +3291,7 @@ test("Provider details keep original project and selected-lot references in sepa
   assert.doesNotThrow(() =>
     recordSourceInterpretation(wire, request, metadata),
   );
-  const selectedIndex = wire.details.findIndex((d: any) =>
-    d.sourceRefs.includes("f1"),
-  );
-  assert(selectedIndex >= 0);
+  assert(detailFor(wire, "f1"));
   for (const changes of [
     { sourceRefs: ["s5", "s1"] },
     { sourceRefs: ["s5", "f0"] },
@@ -3200,7 +3299,7 @@ test("Provider details keep original project and selected-lot references in sepa
     { kind: "shared_project_context" },
   ]) {
     const changed = structuredClone(wire);
-    Object.assign(changed.details[selectedIndex], changes);
+    Object.assign(detailFor(changed, "f1"), changes);
     const original = JSON.stringify(changed);
     assert.equal(accepts(changed), false);
     assert.throws(() => recordSourceInterpretation(changed, request, metadata));

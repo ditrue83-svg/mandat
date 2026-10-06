@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v49";
+  "documentary-source-interpretation-v50";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -519,6 +519,7 @@ function buildProviderResponseSchema(
       Record<z.infer<typeof scope>, readonly string[]>
     >;
     contractDetailFamilies?: readonly {
+      id: string;
       scope: z.infer<typeof scope>;
       rawPath: string;
       sourceRefs: readonly string[];
@@ -582,7 +583,7 @@ function buildProviderResponseSchema(
         meaning: anyMeaning,
       }),
   ]);
-  const evidenceFormat = z.literal("component_quotations_v7");
+  const evidenceFormat = z.literal("component_quotations_v8");
   const detail = resolved.shape.details.element;
   // The scope of every original reference is already known. Encode this
   // structural relationship in the provider contract as well as retaining
@@ -628,15 +629,14 @@ function buildProviderResponseSchema(
   const clauseFamilyRefs = new Set(
     clauseFamilies.flatMap((family) => family.sourceRefs),
   );
-  const ownedDetailGroups = [
-    ...clauseFamilies,
-    ...scopedRefs.map(([value, ids]) => ({
+  const ownedDetailGroups = scopedRefs
+    .map(([value, ids]) => ({
       scope: value as z.infer<typeof scope>,
       rawPath: "",
       sourceRefs: ids.filter((id) => !clauseFamilyRefs.has(id)),
       originalDayDurationExplanation: undefined,
-    })),
-  ].filter((family) => family.sourceRefs.length > 0);
+    }))
+    .filter((family) => family.sourceRefs.length > 0);
   const ownedDetails = ownedDetailGroups.map((family) =>
     detail.extend({
       explanation: family.originalDayDurationExplanation
@@ -667,17 +667,44 @@ function buildProviderResponseSchema(
           .array(ownedDetail)
           .max(32)
           .describe(resolved.shape.details.description!)
-      : details;
-  // Required coverage is checked against each row's declared original IDs.
-  // There is no second, model-generated index table that can point to a
-  // different row. The original 32-row, 600-character bounds still apply.
-  const contractClauseRefs = requiredClauses
+      : clauseFamilies.length
+        ? z.array(detail).max(0)
+        : details;
+  // An explanation belongs to a required original field, rather than to an
+  // independently generated coverage declaration. Scope and possible IDs
+  // are bound to that field in the provider contract and checked again here.
+  const contractClauseDetails = requiredClauses
     ? z.strictObject(
         Object.fromEntries(
-          requiredClauses.map(({ id }) => [id, z.literal(id)]),
+          clauseFamilies.map((family) => [
+            family.id,
+            z
+              .array(
+                detail.extend({
+                  scope: z.literal(family.scope),
+                  kind:
+                    family.scope === "selected_lot"
+                      ? z.enum([
+                          "missing_specification",
+                          "technical_specification",
+                          "execution_condition",
+                        ])
+                      : detail.shape.kind,
+                  sourceRefs: z
+                    .array(z.enum(family.sourceRefs))
+                    .min(family.sourceRefs.length)
+                    .max(family.sourceRefs.length),
+                  explanation: family.originalDayDurationExplanation
+                    ? z.literal(family.originalDayDurationExplanation)
+                    : detail.shape.explanation,
+                }),
+              )
+              .min(1)
+              .max(32),
+          ]),
         ),
       )
-    : z.record(z.string().regex(/^[sf]\d+$/), z.string().regex(/^[sf]\d+$/));
+    : z.record(z.string().regex(/^[sf]\d+$/), z.array(detail).min(1).max(32));
   const unresolvedFields = {
     evidenceFormat,
     components: z.array(anyComponent).max(64).describe(componentsDescription),
@@ -689,9 +716,9 @@ function buildProviderResponseSchema(
       ...(requiredClauses?.length === 0
         ? {}
         : {
-            contractClauseRefs: requiredClauses
-              ? contractClauseRefs
-              : contractClauseRefs.optional(),
+            contractClauseDetails: requiredClauses
+              ? contractClauseDetails
+              : contractClauseDetails.optional(),
           }),
       components: z
         .array(identifiedComponent)
@@ -769,16 +796,35 @@ function decodeProviderResponse(
   const { evidenceFormat: _format, components, ...value } = parsed;
   let details = value.details;
   if (parsed.status === "resolved") {
-    const declared = parsed.contractClauseRefs as
-      Record<string, string> | undefined;
+    const declared = parsed.contractClauseDetails as
+      Record<string, typeof details> | undefined;
     if (
       JSON.stringify(Object.keys(declared ?? {}).sort()) !==
-        JSON.stringify([...request.requiredContractClauseIds].sort()) ||
-      Object.entries(declared ?? {}).some(([id, ref]) => id !== ref)
+      JSON.stringify(
+        request.contractDetailFamilies.map((family) => family.id).sort(),
+      )
     )
       throw new Error(
-        "Incomplete source interpretation contract clause references",
+        "Incomplete source interpretation contract clause details",
       );
+    for (const family of request.contractDetailFamilies) {
+      if (
+        declared![family.id].some(
+          (row) =>
+            row.scope !== family.scope ||
+            JSON.stringify([...row.sourceRefs].sort()) !==
+              JSON.stringify([...family.sourceRefs].sort()),
+        )
+      )
+        throw new Error(
+          "Contract clause detail must cite its own scoped source",
+        );
+    }
+    // Moving already supplied rows out of their required field containers is
+    // only serialization. No missing ID, explanation or meaning is repaired.
+    details = [...details, ...Object.values(declared ?? {}).flat()];
+    if (details.length > 32)
+      throw new Error("Source interpretation details exceed aggregate limit");
     const originals = sourceEvidencePassages(request);
     for (const id of request.requiredContractClauseIds) {
       const original = originals.find((passage) => passage.id === id);
@@ -845,7 +891,7 @@ function decodeProviderResponse(
   );
   return {
     ...Object.fromEntries(
-      Object.entries(value).filter(([key]) => key !== "contractClauseRefs"),
+      Object.entries(value).filter(([key]) => key !== "contractClauseDetails"),
     ),
     details,
     components: components.map(
@@ -1100,6 +1146,11 @@ export function buildSourceInterpretationRequest(
         return [
           JSON.stringify([clause.scope, rawPath]),
           {
+            id: requiredContractClauses.find(
+              (p) =>
+                p.scope === clause.scope &&
+                contractFieldFamily(p.rawPath) === rawPath,
+            )!.id,
             scope: clause.scope,
             rawPath,
             sourceRefs: detailOriginals
@@ -1118,6 +1169,13 @@ export function buildSourceInterpretationRequest(
       }),
     ).values(),
   ];
+  if (
+    contractDetailFamilies.length > 32 ||
+    contractDetailFamilies.some((family) => family.sourceRefs.length > 32)
+  )
+    throw new Error(
+      "Source interpretation clause families exceed original detail limits",
+    );
   const clauseBlocks = contractClauseBlocks(body.passages);
   const evidenceGroups = componentEvidenceGroups(body.passages);
   // Titles are original assertions too. Keep them beside descriptions so a
@@ -1164,7 +1222,7 @@ export function buildSourceInterpretationRequest(
         : []),
       ...(requiredContractClauses.length
         ? [
-            "details: UNA VOLTA, massimo 32 righe di 600 caratteri. contractClauseRefs: ID obbligatori, non indici; ognuno richiede proprie prove e TUTTE le proposizioni. Una riga: UNA contractDetailFamilies/scope; mai unire flag, note, valori, scadenze o campi distinti. Frammenti/traduzioni dello stesso campo condividono righe complete con TUTTI i refs, senza presumere equivalenza. Dividi la clausola se necessario, senza omissioni. I soli refs non provano completezza.",
+            "contractClauseDetails: ogni famiglia obbligatoria contiene le proprie righe complete con TUTTI i refs e lo scope di quella famiglia. details: solo altre informazioni. Massimo 32 righe complessive di 600 caratteri. Mai unire flag, note, valori, scadenze o campi distinti né presumere equivalenza delle traduzioni. Dividi la clausola se necessario, senza omissioni. I soli refs non provano completezza.",
             ...(requiredContractClauses.length > 32
               ? [
                   "Segmenti/traduzioni dello stesso campo/scope possono selezionare la stessa riga completa con TUTTI i refs. Non copiarla per ciascuna chiave. Mai presumere traduzioni uguali o unire famiglie, flag/note o ambiti diversi. Il limite è 32 righe totali, non 32 citazioni.",
@@ -1334,6 +1392,7 @@ export function buildSourceInterpretationRequest(
     ...context,
     classificationContext,
     requiredContractClauseIds: requiredContractClauses.map((p) => p.id),
+    contractDetailFamilies,
     citableFieldIds,
     targetNumberEvidence,
     selectedIds: body.passages.map((passage) => passage.id),
