@@ -300,6 +300,7 @@ test("A singleton contract field cannot request duplicate references and byte-id
   duplicatedRefs.details[
     duplicatedRefs.contractClauseDetailIndexes.s5[0]
   ].sourceRefs = ["s5", "s5"];
+  assert(!accepts(duplicatedRefs));
   assert.throws(
     () => recordSourceInterpretation(duplicatedRefs, request, metadata),
     /Repeated/,

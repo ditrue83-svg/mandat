@@ -310,6 +310,118 @@ function draft(input = context()) {
   );
 }
 
+test("Document record metadata stays scoped and unaltered without approving claims about external document availability", () => {
+  const base = context();
+  const documentType = {
+    ...base.body.passages[3],
+    id: "s5",
+    rawPath: "/project-info/documentsSourceType",
+    text: "documents_source_simap",
+    endUtf16: 22,
+  };
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [...base.body.passages, documentType],
+      fields: [
+        {
+          scope: "project_context",
+          rawPath: "/hasProjectDocuments",
+          value: true,
+        },
+        {
+          scope: "project_context",
+          rawPath: "/project-info/documentsSourceAddress",
+          value: null,
+        },
+        {
+          scope: "project_context",
+          rawPath: "/project-info/documentsSourceNote/it",
+          value: null,
+        },
+        {
+          scope: "selected_lot",
+          rawPath: "/hasProjectDocuments",
+          value: false,
+        },
+        {
+          scope: "project_context",
+          rawPath: "/project-info/offerAddress",
+          value: null,
+        },
+      ],
+    },
+  };
+  const before = JSON.stringify(input);
+  const source = recordSourceInterpretation(
+    {
+      ...draft(base).response,
+      summary:
+        "Fornitura di articoli inventati. I documenti sono indicati su SIMAP; questa lettura non li ha esaminati.",
+      summarySourceRefs: ["s1", "s5"],
+      details: [
+        ...draft(base).response.details,
+        {
+          kind: "execution_condition",
+          scope: "project_context",
+          sourceRefs: ["s5"],
+          explanation: "Fonte documentale indicata: SIMAP.",
+        },
+      ],
+    },
+    buildSourceInterpretationRequest(input),
+    { ...metadata, model: input.binding.model },
+  );
+  const sourceBefore = JSON.stringify(source);
+  const plan = buildSourceSemanticReviewRequest(input, source, config);
+  const requests = inventedGroundedReviewRequests(plan);
+  const summary = plan.claims.find((c) => c.kind === "summary")!;
+  const body = JSON.parse(
+    requests.find((r) => r.assignedClaimIds.includes(summary.id))!.prompt,
+  );
+  assert.deepEqual(body.processingContext, {
+    authority: "recorded_processing_metadata",
+    linkedDocumentsRead: false,
+    externalDocumentAvailabilityAssessed: false,
+  });
+  const binding = body.originalFactBindings.find(
+    (b: any) => b.claimId === summary.id,
+  );
+  assert.deepEqual(binding.declaredSourceRefs, ["s1", "s5"]);
+  assert.deepEqual(binding.relatedDocumentRecordContextRefs, [
+    "f0",
+    "f1",
+    "f2",
+  ]);
+  assert.deepEqual(binding.relatedNoteContextRefs, []);
+  for (const index of [0, 1, 2]) {
+    assert.deepEqual(
+      body.fields.find((f: any) => f.id === `f${index}`),
+      { id: `f${index}`, index, ...input.body.fields[index] },
+    );
+    assert(body.originalFacts.some((f: any) => f.id === `o-f${index}`));
+  }
+  assert.deepEqual(summary.sourceRefs, ["s1", "s5"]);
+  const responses: any[] = answers(plan);
+  const check = responses
+    .flatMap((r) => r.checks)
+    .find((c) => c.claimId === summary.id)!;
+  check.verdict = "not_verifiable";
+  check.draftQuote = "questa lettura non li ha esaminati";
+  check.reason =
+    "Esito negativo inventato: il metadato non deve assegnare o sostituire un verdetto.";
+  assert.equal(
+    readSourceSemanticReview(
+      recordSourceSemanticReview(responses, plan, metadata),
+      plan,
+    )?.accepted,
+    false,
+  );
+  assert.equal(JSON.stringify(input), before);
+  assert.equal(JSON.stringify(source), sourceBefore);
+});
+
 test("Summary dates absent from the independent work selection keep their own original proof and still require independent work evidence", () => {
   const base = context();
   const date = "2030-01-01";

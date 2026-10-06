@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v47";
+  "documentary-source-interpretation-v48";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -625,7 +625,10 @@ function buildProviderResponseSchema(
               "execution_condition",
             ])
           : detail.shape.kind,
-      sourceRefs: z.array(z.enum(family.sourceRefs)).min(1).max(32),
+      sourceRefs: z
+        .array(z.enum(family.sourceRefs))
+        .min(1)
+        .max(Math.min(32, family.sourceRefs.length)),
     }),
   );
   const ownedDetail =
@@ -1177,9 +1180,9 @@ export function buildSourceInterpretationRequest(
       "resolved: oggetto/ruolo noti anche senza sottotipi. details: minimi tecnici, tempi massimi, vincoli del prodotto da descrizioni/criteri; separa referenze passate. Rinvii/lacune non negano minimi presenti. Specifiche ignote non sono issues o lavori. Quantità/unità originali; proroga no non prova durata assente.",
       "linkedDocumentsRead o hasProjectDocuments false: documenti non letti o non archiviati qui, non indisponibili. Conserva richieste via email/portale e relativi limiti; non inventare mancata consegna.",
       "uncertain richiede un issue materiale tipizzato. object_identity collega componentIndexes (zero-based) a meaning ambiguous; role_identity a role null e roleEvidence unresolved; unreadable_source richiede una lettura unreadable. representation_incomplete cita prestazioni non rappresentate, non informazioni commerciali o specifiche assenti. Non inserire issues per dichiarare assenza di incertezza, e non dichiarare completa una rappresentazione incompleta.",
-      "roleEvidence cita l'azione professionale acquistata nello stesso scope, anche nominale: progettazione/assicurazione sono azioni; mestiere/luogo/destinatario e presentare un'offerta non lo sono. Cita l'azione effettiva quando presente. other solo altra azione identificata, non un nome generico o ripiego. Conserva funzioni composite. Se ignoto: role null, unresolved, role_identity. Scope di details/roleEvidence è dei passaggi, di issues del target; target_scope solo lotti con prove nei due ambiti.",
+      "roleEvidence: azione acquistata, stesso scope, anche nominale (progettazione/assicurazione); non mestiere/luogo/destinatario/presentazione d'offerta. Cita l'azione effettiva; other solo altra azione identificata, mai ripiego. Conserva funzioni composite. Se ignoto: role null/unresolved/role_identity. details/roleEvidence: scope dei passaggi; issues: target. target_scope solo lotti con prove nei due ambiti.",
       "source_conflict: conflicting, due asserti originali opposti sul target, refs diverse. Confronta titoli/descrizioni/riassunti: oggetto/destinatari/luogo/periodo. Solo precedenza ufficiale citata, mai maggioranza/lingua/ripetizione/refusi. Inferenze/categorie ampie/dettagli/traduzioni/frammenti da soli non bastano. unreadable vieta resolved.",
-      "components.evidence prova ogni fatto di description, roleEvidence e meaning: azione, oggetto, destinatari, luogo, periodo e limiti. Non eredita refs da summary/details/altri componenti. Cita tutte le prove proprie. Conserva principali/accessorie con azione e oggetto concreti. Esclusi: componente importance excluded e prove proprie, senza ereditare azioni acquistate. Non promuovere lavori di terzi né creare servizi da dati, codici, traduzioni/intestazioni. Classificazione/catalogazione sono servizi solo se acquistati.",
+      "components.evidence: prove proprie di OGNI azione/oggetto/destinatario/luogo/periodo/limite in description, roleEvidence e meaning, mai refs ereditati da summary/details/altri componenti. Conserva principali/accessorie concrete; esclusi: importance excluded, prove proprie, niente azioni acquistate ereditate. Non promuovere lavori di terzi o creare servizi da dati/codici/traduzioni/intestazioni. Classificazione/catalogazione solo se acquistate.",
       ...(body.passages.some(
         (p) =>
           p.role === "service" &&
@@ -1190,7 +1193,7 @@ export function buildSourceInterpretationRequest(
           ]
         : []),
       "importance: main richiede gerarchia esplicita e prova propria; 'bene e accessori', quantità, ordine, anche/inoltre non bastano. accessory complemento/supporto anche obbligatorio, excluded esclusione esplicita. Senza gerarchia not_stated conserva tutto l'acquisto, senza inventare main o issues. Opzioni distinte, condizioni nei details.",
-      "summarySourceRefs: prove proprie per ogni fatto, senza ereditare refs dalle componenti.",
+      "Prove proprie di OGNI fatto in summary e ciascun detail, mai ereditate. Numero non prova days_after; paese/CAP non provano città/cantone. Righe obbligatorie: solo fatti della famiglia citata; generiche: solo fatti dei refs consentiti, non duplicare. Summary cita ogni ref necessario, anche dei details. ID unici per array.",
       "Leggi insieme clausole generali e specifiche. Se una clausola acquista più azioni sullo stesso insieme di impianti o sistemi, conserva quel ciclo nella sintesi e nelle descrizioni delle componenti a cui si applica, con entrambe le prove. Non restringerlo a un solo esempio dell'elenco e non ridurre un acquisto integrato alla sola fornitura. role riassume una funzione, non cancella le altre azioni documentate. Non estendere il ciclo a servizi, oggetti o lotti cui la fonte non lo applica; una clausola specifica di esclusione o limitazione resta vincolante.",
       "Esamina anche criteri e tempi di esecuzione: montaggio e collaudo della commessa attuale sono azioni del suo ciclo, con prove proprie. Distinguili da referenze passate, qualifiche aziendali, prezzi e permessi, che non acquistano nuovi lavori. Un criterio senza un'azione della commessa non basta.",
       "Destinatari/strutture/continuità/territorio in sintesi o details. Indirizzo prova luogo, non consegna lì senza prova propria. Turni/regole/opzioni anche in sintesi, con azione/ambito propri: details non bastano. Mai estendere ad altre fasi o dedurre quantità/periodicità.",

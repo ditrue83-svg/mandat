@@ -22,7 +22,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v51";
+  "documentary-source-semantic-review-v52";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -233,6 +233,27 @@ const originalPathIndexes = new WeakMap<
   ReadonlyMap<string, ComparisonPassage>,
   Map<string, string[]>
 >();
+// Related document metadata supplies the original record's values and nulls,
+// not a conclusion about documents hosted elsewhere. Keep it in the cited
+// scope and distinguish it from notes and the draft's own references.
+function relatedDocumentRecordRefs(
+  claim: Claim,
+  originals: ReadonlyMap<string, ComparisonPassage>,
+) {
+  if (!isOriginalFactClaim(claim.kind)) return [];
+  const documentPath = (path: string) =>
+    path === "/hasProjectDocuments" ||
+    /^\/project-info\/documents(?:[A-Z]|\/|$)/.test(path);
+  const scopes = new Set(
+    claim.sourceRefs.flatMap((ref) => {
+      const own = originals.get(ref);
+      return own && documentPath(own.rawPath) ? [own.scope] : [];
+    }),
+  );
+  return [...originals.values()]
+    .filter((item) => scopes.has(item.scope) && documentPath(item.rawPath))
+    .map((item) => item.id);
+}
 // Contract duration is a different concept from an extension's value/Note.
 // Carry only original temporal siblings of the same JSON object and scope;
 // this supplies review context, never a verdict or a missing-value inference.
@@ -289,6 +310,7 @@ function originalFactRefs(
   }
   return unique([
     ...claim.sourceRefs,
+    ...relatedDocumentRecordRefs(claim, originals),
     ...relatedContractDurationRefs(claim, originals),
     ...claim.sourceRefs.flatMap((ref) => {
       const own = originals.get(ref);
@@ -646,7 +668,7 @@ ${item.meaning.statement}`,
               "geographyCodeMeanings scioglie soltanto codici geografici standard nei loro campi originali: TI=Ticino, CH=Svizzera. Nome e codice sono equivalenti per quel campo, non luoghi aggiunti. Cita sempre il riferimento proprio e controlla scope/path; non geocodificare città, indirizzi del committente o codici sconosciuti né trasferire il luogo ad altri lotti. Non è un verdetto di applicabilità.",
             ]
           : []),
-        "originalCoverage descrive il contenuto esaminato, non una dichiarazione del committente sulla disponibilità esterna. linkedDocumentsRead false sostiene documenti collegati non esaminati in questa lettura; non prova indisponibilità sul portale. Giudica la formulazione precisa del claim senza attribuirgli una diversa affermazione di disponibilità o di consegna da parte dell'utente.",
+        "processingContext è un fatto del processo, non un giudizio AI né una dichiarazione del committente. originalCoverage descrive il contenuto esaminato. linkedDocumentsRead false attesta che questa lettura non ha esaminato documenti collegati; non nega che esistano o siano disponibili. Distingui 'il record fornito non contiene il loro testo' da 'i documenti non contengono testo' o 'non sono disponibili sul portale'. La prima riguarda il pacchetto effettivamente fornito: leggi anche relatedDocumentRecordContextRefs e i loro valori/null originali. Le altre richiedono una prova esterna che qui non va inventata. Nessun verdetto automatico: verifica la frase precisa, senza trasformare un limite di elaborazione in una pretesa di indisponibilità o consegna.",
         "originalFactBindings separa le Note dai relatedContractDurationContextRefs dello stesso oggetto JSON e scope. Per durata leggi contractDays/contractPeriod/contractDeadlineType, non il solo valore o Note della proroga. null indica dato non determinato in quel campo, non no, zero o assenza universale; confronta anche le eventuali date e i testi originali. I campi aggiunti sono contesto da verificare, mai approvazioni né prove trasferite da altri lotti.",
         "Le observations della lettura indipendente selezionano e classificano passaggi originali senza riscriverli. Leggi direttamente evidence e passages per stabilire lavoro, soggetto che lo richiede, operatore che lo svolge, destinatario e carattere obbligatorio o facoltativo. kind e serviceRef aiutano a trovare le prove; non sono affermazioni del committente né sostituiscono il loro significato originale.",
         "Per ogni assignedClaim verifica il suo text e compila la sua chiave obbligatoria in checksByClaim, una sola volta. Non attribuirgli parole di altri claim o campi del draft. supported richiede sostegno reale; contradicted una controprova; not_verifiable sostegno insufficiente. Per ogni esito negativo, draftQuote deve essere un estratto esatto non vuoto del text assegnato che identifica l’affermazione problematica; supported può usare null. Spiega quel preciso difetto contro la fonte. Un problema nel summary va giudicato nel claim summary, anche se un detail distinto è corretto. Leggi insieme oggetto, classificazioni originali e relativo ambito.",
@@ -678,6 +700,11 @@ ${item.meaning.statement}`,
       target: context.body.target,
       targetScope: context.targetScope,
       originalCoverage: context.coverage,
+      processingContext: {
+        authority: "recorded_processing_metadata",
+        linkedDocumentsRead: context.coverage.linkedDocumentsRead,
+        externalDocumentAvailabilityAssessed: false,
+      },
       ...(geographyCodeMeanings.length ? { geographyCodeMeanings } : {}),
       classificationContext,
       requiredContractClauses: contractClauses,
@@ -1056,8 +1083,17 @@ export function buildGroundedSourceReviewRequests(
             relatedNoteContextRefs: originalFactRefs(claim, originals).filter(
               (ref) =>
                 !claim.sourceRefs.includes(ref) &&
+                !relatedDocumentRecordRefs(claim, originals).includes(ref) &&
                 !relatedContractDurationRefs(claim, originals).includes(ref),
             ),
+            ...(relatedDocumentRecordRefs(claim, originals).length
+              ? {
+                  relatedDocumentRecordContextRefs: relatedDocumentRecordRefs(
+                    claim,
+                    originals,
+                  ).filter((ref) => !claim.sourceRefs.includes(ref)),
+                }
+              : {}),
             ...(relatedContractDurationRefs(claim, originals).length
               ? {
                   relatedContractDurationContextRefs:
