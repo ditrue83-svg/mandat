@@ -146,6 +146,7 @@ test("Submission, validity and document collection remain mandatory with their o
     unrelated.details[
       unrelated.contractClauseDetailIndexes.s9[0]
     ].sourceRefs.push(ref);
+    assert(!accepts(unrelated));
     assert.throws(
       () => recordSourceInterpretation(unrelated, request, metadata),
       /own scoped source/,
@@ -158,6 +159,104 @@ test("Submission, validity and document collection remain mandatory with their o
   assert.throws(
     () => recordSourceInterpretation(withoutOwnValue, request, metadata),
     /own scoped source/,
+  );
+  assert.equal(JSON.stringify(input), before);
+});
+
+test("Provider contract rejects grouping independent validity values, flags and formal fields while accepting same-field translations", () => {
+  const base = context();
+  const originalClauses = [
+    ["s5", "/dates/offerValidityDeadlineType", "days_after"],
+    ["s6", "/dates/offerValidityNotes/it", "Offerte vincolanti per sei mesi."],
+    ["s7", "/procurement/options", "no"],
+    ["s8", "/procurement/variants", "no"],
+    [
+      "s9",
+      "/dates/specificDeadlinesAndFormalRequirements/it",
+      "Busta chiusa, dicitura CONCORSO INVENTATO.",
+    ],
+    [
+      "s10",
+      "/dates/specificDeadlinesAndFormalRequirements/fr",
+      "Enveloppe fermée, mention CONCORSO INVENTATO.",
+    ],
+    ["s11", "/project-info/offerSpecificNote/it", "Due copie firmate."],
+  ] as const;
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      fields: [
+        {
+          scope: "project_context",
+          rawPath: "/dates/offerValidityDeadlineDays",
+          value: 180,
+        },
+      ],
+      passages: [
+        ...base.body.passages,
+        ...originalClauses.map(([id, rawPath, text]) => ({
+          ...base.body.passages[0],
+          id,
+          rawPath,
+          text,
+          endUtf16: text.length,
+          role: "context" as const,
+        })),
+      ],
+    },
+  };
+  const before = JSON.stringify(input);
+  const request = buildSourceInterpretationRequest(input);
+  const wire = wireResponse(
+    {
+      ...response(input),
+      details: [
+        ...originalClauses
+          .filter(([id]) => id !== "s10")
+          .map(([id, , text]) => ({
+            kind: "execution_condition" as const,
+            scope: "project_context" as const,
+            explanation: text,
+            sourceRefs: id === "s9" ? ["s9", "s10"] : [id],
+          })),
+        {
+          kind: "execution_condition",
+          scope: "project_context",
+          explanation: "Valore originale: 180 giorni.",
+          sourceRefs: ["f0"],
+        },
+      ],
+    },
+    request,
+  );
+  const accepts = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  assert(accepts(wire));
+  recordSourceInterpretation(wire, request, metadata);
+  for (const [own, foreign] of [
+    ["s5", "f0"],
+    ["s5", "s6"],
+    ["s7", "s8"],
+    ["s9", "s11"],
+  ]) {
+    const mixed: any = structuredClone(wire);
+    mixed.details[mixed.contractClauseDetailIndexes[own][0]].sourceRefs.push(
+      foreign,
+    );
+    assert(!accepts(mixed));
+    assert.throws(
+      () => recordSourceInterpretation(mixed, request, metadata),
+      /own scoped source/,
+    );
+  }
+  assert.deepEqual(
+    JSON.parse(request.prompt).contractDetailFamilies.find(
+      (family: any) =>
+        family.rawPath === "/dates/specificDeadlinesAndFormalRequirements",
+    ).sourceRefs,
+    ["s9", "s10"],
   );
   assert.equal(JSON.stringify(input), before);
 });
