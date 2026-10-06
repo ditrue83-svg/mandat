@@ -17,6 +17,71 @@ import {
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 import { openaiResponseBody } from "../src/lib/openai-responses";
 
+test("The provider protocol and consumer keep mandatory clauses out of generic details", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[0],
+          id: "s5",
+          role: "context",
+          rawPath: "/procurement/options",
+          text: "no",
+          endUtf16: 2,
+        },
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const instruction = JSON.parse(request.prompt).rules.find((rule: string) =>
+    rule.startsWith("requiredContractClauseIds:"),
+  );
+  assert(instruction.includes("contractClauseDetails"));
+  assert(!instruction.includes("nei details"));
+  const wire = wireResponse(
+    {
+      ...response(input),
+      details: [
+        {
+          kind: "execution_condition",
+          explanation: "Non sono previste opzioni.",
+          scope: "project_context",
+          sourceRefs: ["s5"],
+        },
+      ],
+    },
+    request,
+  );
+  const native = openaiResponseBody(
+    "gpt-6-luna",
+    request.system,
+    request.prompt,
+    request.maxTokens,
+    request.responseFormat,
+    "medium",
+  );
+  const accepts = new Ajv2020({ strict: false }).compile(
+    native.text!.format.schema,
+  );
+  assert(accepts({ result: wire }));
+  assert.doesNotThrow(() =>
+    recordSourceInterpretation(wire, request, metadata),
+  );
+  const invalid = structuredClone(wire);
+  invalid.details.push(structuredClone(invalid.contractClauseDetails!.s5[0]));
+  const before = JSON.stringify(invalid);
+  assert(!accepts({ result: invalid }));
+  assert.throws(
+    () => recordSourceInterpretation(invalid, request, metadata),
+    /only in its bound field block/,
+  );
+  assert.equal(JSON.stringify(invalid), before);
+});
+
 test("A numeric offer validity field keeps its own day unit and cannot borrow a month note", () => {
   const base = context();
   const note =

@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v50";
+  "documentary-source-interpretation-v51";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -666,7 +666,9 @@ function buildProviderResponseSchema(
       ? z
           .array(ownedDetail)
           .max(32)
-          .describe(resolved.shape.details.description!)
+          .describe(
+            "Solo informazioni aggiuntive non presenti in contractClauseDetails; nessuna copia o rinumerazione. Se assenti, []. Usa gli ID originali e le loro prove.",
+          )
       : clauseFamilies.length
         ? z.array(detail).max(0)
         : details;
@@ -820,6 +822,18 @@ function decodeProviderResponse(
           "Contract clause detail must cite its own scoped source",
         );
     }
+    if (
+      details.some((row) =>
+        row.sourceRefs.some((ref) =>
+          request.contractDetailFamilies.some((family) =>
+            family.sourceRefs.includes(ref),
+          ),
+        ),
+      )
+    )
+      throw new Error(
+        "Mandatory contract clause belongs only in its bound field block",
+      );
     // Moving already supplied rows out of their required field containers is
     // only serialization. No missing ID, explanation or meaning is repaired.
     details = [...details, ...Object.values(declared ?? {}).flat()];
@@ -1210,7 +1224,7 @@ export function buildSourceInterpretationRequest(
     requiredContractClauseIds: requiredContractClauses.map((p) => p.id),
     ...(sourceIdentityAssertions.length ? { sourceIdentityAssertions } : {}),
     rules: [
-      "requiredContractClauseIds: ogni ID va nei details con la propria condizione completa. Non bastano summary/evidence e non aggiungere riferimenti estranei.",
+      "requiredContractClauseIds: prove e condizioni complete nei propri contractClauseDetails. Non duplicare in details né rinumerare gli ID.",
       ...(requiredContractClauses.some((p) =>
         /^(?:(?:\/lots\/\d+)?\/dates\/|\/project-info\/(?:offerSpecificNote|documentsSourceAddress)\/)/.test(
           p.rawPath,
