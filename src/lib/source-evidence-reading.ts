@@ -10,7 +10,7 @@ import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v21";
+export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v22";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -102,6 +102,10 @@ const selectedClassification = classification
   .extend({
     evidence: references,
   });
+const clauseSelection = z.strictObject({
+  collection: z.enum(["observations", "missingDetails", "issues"]),
+  index: z.number().int().min(0).max(31),
+});
 const selectionSchema = responseSchema
   .omit({
     observations: true,
@@ -116,6 +120,9 @@ const selectionSchema = responseSchema
       .array(issue.omit({ evidence: true }).extend({ evidence: references }))
       .max(32),
     missingDetails: z.array(selectedDetail).max(32),
+    requiredClauseSelections: z
+      .record(z.string().regex(/^[sf]\d+$/), z.array(clauseSelection).max(32))
+      .optional(),
   });
 const unique = (values: string[]) => [...new Set(values)];
 function freeze<T>(value: T): T {
@@ -245,33 +252,61 @@ export function buildSourceEvidenceReadingRequest(
     const boundedDetails = z
       .array(selectedDetail.safeExtend(boundedAnchor))
       .max(serviceIds.length ? 32 : 0);
-    const bounded = selectionSchema.safeExtend({
-      chunkId: z.literal(id),
-      observations: boundedObservations,
-      issues: z
-        .array(
-          issue
-            .omit({ evidence: true })
-            .extend({ evidence: boundedReferences }),
-        )
-        .max(32),
-      missingDetails: boundedDetails,
-      classifications: group.classificationIds.length
-        ? z
-            .array(
-              boundedClassification.safeExtend({
-                classificationId: z.enum(group.classificationIds),
-              }),
-            )
-            .length(group.classificationIds.length)
-        : z.array(boundedClassification).length(0),
-    });
+    const bounded = selectionSchema
+      .omit({ requiredClauseSelections: true })
+      .safeExtend({
+        chunkId: z.literal(id),
+        observations: boundedObservations,
+        issues: z
+          .array(
+            issue
+              .omit({ evidence: true })
+              .extend({ evidence: boundedReferences }),
+          )
+          .max(32),
+        missingDetails: boundedDetails,
+        classifications: group.classificationIds.length
+          ? z
+              .array(
+                boundedClassification.safeExtend({
+                  classificationId: z.enum(group.classificationIds),
+                }),
+              )
+              .length(group.classificationIds.length)
+          : z.array(boundedClassification).length(0),
+      });
+    const coverageSchema = (complete: boolean) =>
+      z.strictObject(
+        Object.fromEntries(
+          requiredClauses.map(({ id }) => [
+            id,
+            complete
+              ? z.array(clauseSelection).min(1).max(32)
+              : z.array(clauseSelection).max(32),
+          ]),
+        ),
+      );
+    // Mandatory originals select bounded rows instead of relying on the
+    // model to remember an unstructured coverage list. Meaning remains a
+    // separate judgment; selecting an index never establishes support.
+    const providerSchema = requiredClauses.length
+      ? z.discriminatedUnion("coverage", [
+          bounded.extend({
+            coverage: z.literal("complete"),
+            requiredClauseSelections: coverageSchema(true),
+          }),
+          bounded.extend({
+            coverage: z.literal("unreadable"),
+            requiredClauseSelections: coverageSchema(false),
+          }),
+        ])
+      : bounded;
     const responseFormat: AutomaticResponseFormat = {
       type: "json_schema",
       json_schema: {
         name: "source_evidence_reading",
         strict: true,
-        schema: z.toJSONSchema(bounded, { reused: "ref" }),
+        schema: z.toJSONSchema(providerSchema, { reused: "ref" }),
       },
     };
     const prompt = JSON.stringify({
@@ -318,6 +353,11 @@ export function buildSourceEvidenceReadingRequest(
         ],
       },
       rules: [
+        ...(requiredClauses.length
+          ? [
+              "requiredClauseSelections: OGNI ID obbligatorio seleziona una o più righe di observations, missingDetails o issues tramite collection e index zero-based (prima riga=0). Le righe devono citare quel medesimo originale e conservarne significato e ambito; un indice non sostituisce la prova. Non omettere tipi, date o valori perché amministrativi. Nessun testo duplicato nella mappa. Per complete ogni ID ha una selezione; per unreadable gli ID non leggibili possono avere liste vuote.",
+            ]
+          : []),
         "originalCoverage descrive soltanto il materiale fornito qui. linkedDocumentsRead false o hasProjectDocuments false non provano indisponibilità esterna: conserva email/portali e condizioni di richiesta presenti. Non negare un documento perché non è archiviato o non è stato letto.",
         "Le observations sono selezioni di prove originali, non un riassunto. Scegli kind, serviceRef ed evidence per individuare tutte le prestazioni e condizioni rilevanti; non produrre parafrasi, traduzioni o un campo statement. Il codice conserva i passaggi integrali. Oggetto, azione, soggetto contrattuale, destinatario, permessi e obblighi rimangono nel testo originale selezionato, che il revisore dovrà leggere direttamente. La sola selezione di un riferimento non dimostra un significato né l'applicabilità al target.",
         "requiredClausePassages e requiredClauseFields elencano note e valori originali su subappalto, opzioni o esecuzione assegnati a questa parte. Per coverage complete conserva ogni riferimento, incluse tutte le lingue e i segmenti, in observations, missingDetails o issues secondo il suo significato. Leggi i valori strutturati insieme al percorso originale: il divieto di subappalto espresso da subContractorAllowed no o false delimita il lavoro delegabile anche senza una nota testuale. null significa non indicato, non divieto; non inventare il significato di valori sconosciuti. Una clausola che delimita ruoli, parti delegabili, obblighi od opzioni va in condition con una descrizione del lavoro dello stesso ambito. Un rinvio privo dei dettagli necessari va in missingDetails; un impedimento materiale in issues. Se non riesci a coprirle usa unreadable. Il nome del campo da solo non prova prestazioni, restrizioni, capacità o idoneità non dichiarate dal valore o testo originale.",
@@ -471,6 +511,39 @@ function materialize(values: unknown[], plan: SourceEvidenceReadingPlan) {
   return values.map((value, index) => {
     const selected = selectionSchema.parse(value);
     const request = plan.requests[index];
+    const { requiredClauseSelections: selections, ...selectionBody } = selected;
+    if (
+      JSON.stringify(Object.keys(selections ?? {}).sort()) !==
+      JSON.stringify([...request.requiredClauseIds].sort())
+    )
+      throw new Error(
+        "Incomplete independent source contractual clause selections",
+      );
+    for (const id of request.requiredClauseIds) {
+      const pointers = selections![id];
+      if (selected.coverage === "complete" && !pointers.length)
+        throw new Error(
+          "Incomplete independent source contractual clause evidence coverage",
+        );
+      const seen = new Set<string>();
+      for (const pointer of pointers) {
+        const key = `${pointer.collection}:${pointer.index}`;
+        if (seen.has(key))
+          throw new Error("Repeated independent source clause selection");
+        seen.add(key);
+        const row = selected[pointer.collection][pointer.index];
+        if (
+          !row ||
+          !(
+            row.evidence.some((q) => q.sourceRef === id) ||
+            ("serviceRef" in row && row.serviceRef === id)
+          )
+        )
+          throw new Error(
+            "Incomplete independent source contractual clause evidence coverage: selection lacks its own original",
+          );
+      }
+    }
     const resolve = (refs: z.infer<typeof references>) => {
       if (new Set(refs.map((q) => q.sourceRef)).size !== refs.length)
         throw new Error("Repeated source evidence references");
@@ -519,7 +592,7 @@ function materialize(values: unknown[], plan: SourceEvidenceReadingPlan) {
       };
     };
     return {
-      ...selected,
+      ...selectionBody,
       observations: selected.observations.map(resolveAnchored),
       classifications: selected.classifications.map((c) => {
         const original = plan.classifications.find(

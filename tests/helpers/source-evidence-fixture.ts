@@ -9,6 +9,27 @@ import {
   type SourceSemanticReviewPlan,
 } from "../../src/lib/source-semantic-review";
 
+// Encode only references already selected in an invented fixture. This never
+// adds original evidence, decides meaning, or operates on a provider response.
+export function inventedClauseSelections(
+  required: readonly string[],
+  answer: any,
+) {
+  return Object.fromEntries(
+    required.map((id) => [
+      id,
+      ["observations", "missingDetails", "issues"].flatMap((collection) =>
+        (answer[collection] ?? []).flatMap((row: any, index: number) =>
+          row.serviceRef === id ||
+          row.evidence.some((e: any) => e.sourceRef === id)
+            ? [{ collection, index }]
+            : [],
+        ),
+      ),
+    ]),
+  );
+}
+
 export function inventedSourceEvidenceAnswer(data: any) {
   const required = new Set<string>(
     (data.requiredClausePassages ?? []).map((p: any) => p.sourceRef),
@@ -30,7 +51,7 @@ export function inventedSourceEvidenceAnswer(data: any) {
       (p: any) => p.scope === data.targetScope && p.role === "service",
     ) ??
     data.passages[0];
-  return {
+  const answer = {
     chunkId: data.chunkId,
     coverage: "complete",
     observations: [
@@ -94,6 +115,21 @@ export function inventedSourceEvidenceAnswer(data: any) {
     }),
     issues: [],
     missingDetails: [],
+  };
+  const requiredIds = [
+    ...(data.requiredClausePassages ?? []),
+    ...(data.requiredClauseFields ?? []),
+  ].map((p: any) => p.sourceRef);
+  return {
+    ...answer,
+    ...(requiredIds.length
+      ? {
+          requiredClauseSelections: inventedClauseSelections(
+            requiredIds,
+            answer,
+          ),
+        }
+      : {}),
   };
 }
 const evidence = new WeakMap<

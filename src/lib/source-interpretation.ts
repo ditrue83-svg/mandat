@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v45";
+  "documentary-source-interpretation-v46";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -555,7 +555,7 @@ function buildProviderResponseSchema(
         meaning: anyMeaning,
       }),
   ]);
-  const evidenceFormat = z.literal("component_quotations_v5");
+  const evidenceFormat = z.literal("component_quotations_v6");
   const detail = resolved.shape.details.element;
   // The scope of every original reference is already known. Encode this
   // structural relationship in the provider contract as well as retaining
@@ -592,37 +592,17 @@ function buildProviderResponseSchema(
         .max(32)
         .describe(resolved.shape.details.description!)
     : resolved.shape.details;
-  const contractClausesById = requiredClauses
+  // All text lives in the single bounded details array. Required originals
+  // select rows by index, so a clause map cannot expand 32 wire rows into a
+  // larger stored array or charge repeated copies of the same explanation.
+  const indexes = z.array(z.number().int().min(0).max(31)).min(1).max(32);
+  const contractClauseDetailIndexes = requiredClauses
     ? z.strictObject(
         Object.fromEntries(
-          requiredClauses.map((clause) => {
-            const familyRefs = requiredClauses
-              .filter(
-                (other) =>
-                  other.scope === clause.scope &&
-                  contractFieldFamily(other.rawPath) ===
-                    contractFieldFamily(clause.rawPath),
-              )
-              .map((other) => other.id);
-            return [
-              clause.id,
-              z
-                .array(
-                  detail.extend({
-                    sourceRefs: z
-                      .array(z.enum(familyRefs))
-                      .min(1)
-                      .max(Math.min(32, familyRefs.length)),
-                    scope: z.literal(clause.scope),
-                  }),
-                )
-                .min(1)
-                .max(32),
-            ];
-          }),
+          requiredClauses.map((clause) => [clause.id, indexes]),
         ),
       )
-    : z.record(z.string().regex(/^[sf]\d+$/), z.array(detail).min(1).max(32));
+    : z.record(z.string().regex(/^[sf]\d+$/), indexes);
   const unresolvedFields = {
     evidenceFormat,
     components: z.array(anyComponent).max(64).describe(componentsDescription),
@@ -634,11 +614,11 @@ function buildProviderResponseSchema(
       ...(requiredClauses?.length === 0
         ? {}
         : {
-            contractClausesById: requiredClauses
-              ? contractClausesById.describe(
-                  "Una voce per ogni clausola, con tutte le condizioni e solo il suo ID/scope originali. I details esterni contengono altri fatti. Totale massimo 32 dettagli.",
+            contractClauseDetailIndexes: requiredClauses
+              ? contractClauseDetailIndexes.describe(
+                  "Ogni clausola seleziona indici zero-based dei details che ne conservano tutte le proposizioni, con proprie prove e scope. Non copiare testi nella mappa. Massimo 32 details in tutto.",
                 )
-              : contractClausesById.optional(),
+              : contractClauseDetailIndexes.optional(),
           }),
       components: z
         .array(identifiedComponent)
@@ -718,12 +698,8 @@ function decodeProviderResponse(
   if (parsed.status === "resolved") {
     // Zod validates the dynamic object; Object.fromEntries cannot express its
     // source-dependent keys in TypeScript's inferred object type.
-    const clauses = parsed.contractClausesById as
-      | Record<
-          string,
-          z.infer<typeof sourceInterpretationResponseSchema>["details"]
-        >
-      | undefined;
+    const clauses = parsed.contractClauseDetailIndexes as
+      Record<string, number[]> | undefined;
     if (!request.requiredContractClauseIds.length && clauses !== undefined)
       throw new Error("Unexpected source interpretation contract clause map");
     if (
@@ -732,12 +708,17 @@ function decodeProviderResponse(
     )
       throw new Error("Incomplete source interpretation contract clause map");
     const originals = sourceEvidencePassages(request);
-    const clauseDetails = request.requiredContractClauseIds.flatMap((id) => {
+    for (const id of request.requiredContractClauseIds) {
       const original = originals.find((passage) => passage.id === id);
+      const indexes = clauses![id];
+      if (new Set(indexes).size !== indexes.length)
+        throw new Error("Repeated contract clause detail index");
       if (
         !original ||
-        clauses![id].some(
-          (detail) =>
+        indexes.some((index) => {
+          const detail = details[index];
+          return (
+            !detail ||
             !detail.sourceRefs.includes(id) ||
             detail.scope !== original.scope ||
             detail.sourceRefs.some((ref) => {
@@ -748,31 +729,29 @@ function decodeProviderResponse(
                 contractFieldFamily(cited.rawPath) !==
                   contractFieldFamily(original.rawPath)
               );
-            }),
-        )
+            })
+          );
+        })
       )
         throw new Error(
           "Contract clause detail must cite its own scoped source",
         );
-      return clauses![id];
-    });
-    // One scoped note may be split into several spans or provided in several
-    // languages. The provider must place the same fully referenced detail in
-    // each covered key; store that exact detail once. This only removes byte
-    // identical entries, never interprets translations or merges assertions.
+    }
+    // A fully referenced row may serve several scoped fragments. Validate
+    // every selected row before removing only byte-identical duplicates;
+    // never merge meanings or rewrite an index to repair a missing proof.
     const uniqueDetails = [
       ...new Map(
-        [...details, ...clauseDetails].map((detail) => [
-          stableDocumentaryJson(detail),
-          detail,
-        ]),
+        details.map((detail) => [stableDocumentaryJson(detail), detail]),
       ).values(),
     ];
     details = uniqueDetails;
   }
   // The map is a provider contract, not part of the stored interpretation.
   const storedValue = Object.fromEntries(
-    Object.entries(value).filter(([key]) => key !== "contractClausesById"),
+    Object.entries(value).filter(
+      ([key]) => key !== "contractClauseDetailIndexes",
+    ),
   );
   const classificationRefs = new Set(
     request.classificationContext.flatMap((item) => [
@@ -1074,10 +1053,10 @@ export function buildSourceInterpretationRequest(
         : []),
       ...(requiredContractClauses.length
         ? [
-            "contractClausesById: pianifica prima tutte le voci entro 32 dettagli TOTALI, compresi quelli esterni. Ogni ID conserva TUTTE le proposizioni in frasi complete entro 600 caratteri, stesso ID/scope. Riunisci proposizioni dello stesso ID, senza una voce per ciascuna; dividi solo quando necessario. Mai tagliare parole o condizioni. yes/no distinto dalle note. La mappa confluisce nei details: quelli esterni solo altri fatti, senza duplicarla. Riferimenti o frasi vuote non provano completezza.",
+            "Scrivi tutte le spiegazioni UNA VOLTA in details: massimo 32 righe, ciascuna entro 600 caratteri. contractClauseDetailIndexes collega OGNI ID agli indici zero-based (prima riga=0) che ne conservano TUTTE le proposizioni con propri refs e scope. La mappa contiene solo numeri, mai copie dei dettagli. Riunisci proposizioni dello stesso ID; dividi solo se necessario, senza tagliare parole o condizioni. Flag e note sono distinti. Citazioni vuote o soli indici non provano completezza.",
             ...(requiredContractClauses.length > 32
               ? [
-                  "Segmenti/traduzioni dello stesso campo/scope possono condividere un dettaglio identico con TUTTI i refs, ripetuto in ogni chiave coperta: si conserva una volta. Mai presumere traduzioni uguali o unire campi, flag/note o ambiti diversi. Il limite è 32 dettagli distinti, non 32 citazioni.",
+                  "Segmenti/traduzioni dello stesso campo/scope possono selezionare la stessa riga completa con TUTTI i refs. Non copiarla per ciascuna chiave. Mai presumere traduzioni uguali o unire famiglie, flag/note o ambiti diversi. Il limite è 32 righe totali, non 32 citazioni.",
                 ]
               : []),
           ]

@@ -16,7 +16,10 @@ import {
   buildSourceSemanticReviewRequest,
   buildGroundedSourceReviewRequests,
 } from "../src/lib/source-semantic-review";
-import { inventedSourceEvidenceAnswer } from "./helpers/source-evidence-fixture";
+import {
+  inventedSourceEvidenceAnswer,
+  inventedClauseSelections,
+} from "./helpers/source-evidence-fixture";
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 
 const config = {
@@ -217,6 +220,99 @@ test("Independent reading cannot skip submission obligations, validity, document
     );
   }
   assert.equal(JSON.stringify(input), before);
+});
+
+test("Complete independent wire requires every original selection, and indexes cannot replace own evidence", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[0],
+          id: "s5",
+          rawPath: "/dates/offerValidityDeadlineType",
+          role: "context",
+          text: "days_after",
+          endUtf16: 10,
+        },
+      ],
+      fields: [
+        ...base.body.fields,
+        {
+          scope: "project_context",
+          rawPath: "/dates/offerValidityDeadlineDays",
+          value: 180,
+        },
+      ],
+    },
+  };
+  const plan = buildSourceEvidenceReadingRequest(input, config);
+  const complete: any = responses(plan);
+  const accepts = new Ajv2020({ strict: false }).compile<any>(
+    plan.requests[0].responseFormat.json_schema.schema,
+  );
+  assert(accepts(complete[0]));
+  const before = JSON.stringify(complete);
+  for (const id of ["s5", "f2"]) {
+    const missing = structuredClone(complete);
+    delete missing[0].requiredClauseSelections[id];
+    assert(!accepts(missing[0]));
+    assert.throws(
+      () => recordSourceEvidenceReading(missing, plan, metadata),
+      /clause selections/,
+    );
+    const empty = structuredClone(complete);
+    empty[0].requiredClauseSelections[id] = [];
+    assert(!accepts(empty[0]));
+    assert.throws(
+      () => recordSourceEvidenceReading(empty, plan, metadata),
+      /clause evidence coverage/,
+    );
+  }
+  const borrowed = structuredClone(complete);
+  borrowed[0].requiredClauseSelections.s5 = [
+    {
+      collection: "observations",
+      index: borrowed[0].observations.findIndex(
+        (o: any) => o.kind === "performance",
+      ),
+    },
+  ];
+  assert.throws(
+    () => recordSourceEvidenceReading(borrowed, plan, metadata),
+    /own original/,
+  );
+  const absentRow = structuredClone(complete);
+  absentRow[0].requiredClauseSelections.s5 = [
+    { collection: "observations", index: 31 },
+  ];
+  assert.throws(
+    () => recordSourceEvidenceReading(absentRow, plan, metadata),
+    /own original/,
+  );
+  const duplicated = structuredClone(complete);
+  duplicated[0].requiredClauseSelections.s5.push({
+    ...duplicated[0].requiredClauseSelections.s5[0],
+  });
+  assert.throws(
+    () => recordSourceEvidenceReading(duplicated, plan, metadata),
+    /Repeated.*selection/,
+  );
+  const unreadable = structuredClone(complete);
+  unreadable[0].coverage = "unreadable";
+  unreadable[0].requiredClauseSelections.s5 = [];
+  assert(accepts(unreadable[0]));
+  assert.equal(
+    readSourceEvidenceReading(
+      recordSourceEvidenceReading(unreadable, plan, metadata),
+      plan,
+    )?.accepted,
+    false,
+  );
+  assert.equal(JSON.stringify(complete), before);
 });
 
 test("A complete reading must preserve every original work clause, including language variants", () => {
@@ -474,6 +570,10 @@ for (const scope of ["project_context", "selected_lot"] as const) {
         serviceRef: anchor.id,
         evidence: [{ sourceRef: ref }],
       });
+      answers[index].requiredClauseSelections = inventedClauseSelections(
+        plan.requests[index].requiredClauseIds,
+        answers[index],
+      );
       const record = recordSourceEvidenceReading(answers, plan, metadata);
       assert(readSourceEvidenceReading(record, plan)?.accepted);
       const condition = record.responses[index].observations.find((o) =>
@@ -523,6 +623,10 @@ test("Unreadable work clauses stay blocked and missing-detail quotations cannot 
     (o: any) => !o.evidence.some((q: any) => q.sourceRef === "s5"),
   );
   answer[0].coverage = "unreadable";
+  answer[0].requiredClauseSelections = inventedClauseSelections(
+    plan.requests[0].requiredClauseIds,
+    answer[0],
+  );
   const result = readSourceEvidenceReading(
     recordSourceEvidenceReading(answer, plan, metadata),
     plan,
@@ -553,6 +657,10 @@ test("Unreadable work clauses stay blocked and missing-detail quotations cannot 
       evidence: [{ sourceRef: "s6" }],
     },
   ];
+  moved[0].requiredClauseSelections = inventedClauseSelections(
+    mixed.requests[0].requiredClauseIds,
+    moved[0],
+  );
   assert.throws(
     () => recordSourceEvidenceReading(moved, mixed, metadata),
     /scope mismatch/,
@@ -1136,6 +1244,7 @@ test("Stored evidence cannot replace the original passage with a reconstructed o
     "source-evidence-reading-v9",
     "source-evidence-reading-v10",
     "source-evidence-reading-v20",
+    "source-evidence-reading-v21",
   ])
     assert.equal(readSourceEvidenceReading({ ...record, version }, plan), null);
 });

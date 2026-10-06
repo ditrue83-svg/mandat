@@ -2277,6 +2277,7 @@ test("Review records become stale for source draft configuration or version and 
     { version: "documentary-source-semantic-review-v22" },
     { version: "documentary-source-semantic-review-v40" },
     { version: "documentary-source-semantic-review-v49" },
+    { version: "documentary-source-semantic-review-v50" },
     { sourceKey: "b".repeat(64) },
     { draftHash: "c".repeat(64) },
     { inputHash: "d".repeat(64) },
