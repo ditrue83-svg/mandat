@@ -52,6 +52,41 @@ const metadata = {
 const digest = (value: unknown) =>
   createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
 
+test("Completeness lookup locates the full draft and does not replace its semantic judgment", () => {
+  const input = context();
+  const original = draft(input);
+  const before = JSON.stringify(original);
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  const parts = inventedGroundedReviewRequests(plan);
+  for (const part of parts) {
+    const body = JSON.parse(part.prompt);
+    assert.deepEqual(
+      body.scopeCoverageDraftBindings.map((b: any) => b.sourceRef),
+      part.ownedScopeCoverageIds,
+    );
+    for (const binding of body.scopeCoverageDraftBindings) {
+      assert.equal(
+        binding.summary,
+        original.response.summarySourceRefs.includes(binding.sourceRef),
+      );
+      assert.deepEqual(
+        binding.componentIndexes,
+        original.response.components.flatMap((item, index) =>
+          item.sourceRefs.includes(binding.sourceRef) ? [index] : [],
+        ),
+      );
+      assert.deepEqual(
+        binding.detailIndexes,
+        original.response.details.flatMap((item, index) =>
+          item.sourceRefs.includes(binding.sourceRef) ? [index] : [],
+        ),
+      );
+    }
+    assert.deepEqual(body.draft.details, original.response.details);
+  }
+  assert.equal(JSON.stringify(original), before);
+});
+
 test("A bilingual meaning statement stays with all owned component evidence while its literal object keeps its narrow proof", () => {
   const base = context();
   const french = "Fourniture de tenues professionnelles inventées.";

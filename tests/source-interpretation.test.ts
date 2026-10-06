@@ -17,6 +17,28 @@ import {
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 import { openaiResponseBody } from "../src/lib/openai-responses";
 
+test("Classification evidence ownership preserves exact label and code references without borrowing service passages", () => {
+  const input = context();
+  const before = JSON.stringify(input);
+  const request = buildSourceInterpretationRequest(input);
+  const body = JSON.parse(request.prompt);
+  assert.deepEqual(
+    body.classificationEvidenceOwnership,
+    input.body.classifications.map((item, index) => ({
+      classificationId: `c${index + 1}`,
+      codeRefs: item.code?.sourceRefs ?? [],
+      labelRefs: item.labels.flatMap((label) => label.sourceRefs),
+    })),
+  );
+  const bad = response(input);
+  bad.classificationReadings[0].sourceRefs = ["s1"];
+  assert.throws(
+    () => recordSourceInterpretation(bad, request, metadata),
+    /Classification reading requires its own source evidence/,
+  );
+  assert.equal(JSON.stringify(input), before);
+});
+
 test("The provider protocol and consumer keep mandatory clauses out of generic details", () => {
   const base = context();
   const input: SourceInterpretationContext = {

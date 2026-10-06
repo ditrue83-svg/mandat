@@ -31,6 +31,58 @@ const metadata = {
   at: "2030-01-01T12:00:00.000Z",
   model: config.model,
 };
+test("Known form obligations cannot be covered only by unknown product specifications", () => {
+  const base = contractContext();
+  const note =
+    "Scaricare il formulario, compilare ogni parte e consegnare tutte le pagine. Specifiche degli articoli nel capitolato.";
+  const input = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: base.body.passages.map((p) =>
+        p.id === "s5"
+          ? {
+              ...p,
+              rawPath: "/project-info/documentsSourceNote/it",
+              text: note,
+              endUtf16: note.length,
+            }
+          : p,
+      ),
+    },
+  };
+  const before = JSON.stringify(input);
+  const plan = buildSourceEvidenceReadingRequest(input, config);
+  const complete: any[] = responses(plan);
+  const index = plan.requests.findIndex((part) =>
+    part.requiredClauseIds.includes("s5"),
+  );
+  complete[index].missingDetails.push({
+    serviceRef: "s1",
+    description: "Specifiche degli articoli non fornite.",
+    evidence: [{ sourceRef: "s5" }],
+  });
+  const onlyUnknown = structuredClone(complete);
+  onlyUnknown[index].requiredClauseSelections.s5 = [
+    {
+      collection: "missingDetails",
+      index: complete[index].missingDetails.length - 1,
+    },
+  ];
+  assert.throws(
+    () => recordSourceEvidenceReading(onlyUnknown, plan, metadata),
+    /only as an unknown specification/,
+  );
+  const record = recordSourceEvidenceReading(complete, plan, metadata);
+  assert(readSourceEvidenceReading(record, plan)?.accepted);
+  assert.equal(
+    record.responses[index].missingDetails
+      .at(-1)
+      ?.evidence.find((q) => q.sourceRef === "s5")?.text,
+    note,
+  );
+  assert.equal(JSON.stringify(input), before);
+});
 function context(): SourceInterpretationContext {
   const passages = [
     {
@@ -657,6 +709,11 @@ test("Unreadable work clauses stay blocked and missing-detail quotations cannot 
       evidence: [{ sourceRef: "s6" }],
     },
   ];
+  moved[0].observations.push({
+    serviceRef: "s5",
+    kind: "condition",
+    evidence: [{ sourceRef: "s6" }],
+  });
   moved[0].requiredClauseSelections = inventedClauseSelections(
     mixed.requests[0].requiredClauseIds,
     moved[0],

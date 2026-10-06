@@ -22,7 +22,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v52";
+  "documentary-source-semantic-review-v53";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -640,6 +640,20 @@ ${item.meaning.statement}`,
       scope: clause.scope,
       candidateDetails: clauseCandidates(clause),
     }));
+    // Locate candidates across the full representation without repeating it.
+    // These pointers assert citation ownership only, never semantic coverage.
+    const scopeCoverageDraftBindings = ownedScopeCoverageIds.map(
+      (sourceRef) => ({
+        sourceRef,
+        summary: draft.response.summarySourceRefs.includes(sourceRef),
+        componentIndexes: draft.response.components.flatMap((item, index) =>
+          item.sourceRefs.includes(sourceRef) ? [index] : [],
+        ),
+        detailIndexes: draft.response.details.flatMap((item, index) =>
+          item.sourceRefs.includes(sourceRef) ? [index] : [],
+        ),
+      }),
+    );
     const ownedContractClauseIds = group.claims
       .filter((claim) => claim.kind === "contract_clause_coverage")
       .flatMap((claim) => claim.sourceRefs);
@@ -692,7 +706,7 @@ ${item.meaning.statement}`,
         "omitted_scope richiede una prestazione principale, accessoria o esclusa mancante, oppure un limite che cambi concretamente oggetto, azione, ruolo o applicabilità al target. In reason identifica quale lavoro risulterebbe omesso o diverso. Una condition nella lettura indipendente è una prova di contesto, non un obbligo di copiarla nel draft. Periodi contrattuali, proroghe temporali, scadenze e contatti non devono essere ripetuti quando non cambiano le prestazioni. La loro sola assenza non produce findings né not_verifiable.",
         "Una sigla o codice di progetto non sciolto non prova un lavoro aggiuntivo, anche in un titolo con più sigle. Per scope_coverage negativo identifica la citazione originale dell'azione e oggetto mancanti, oppure un limite materiale concreto non conservato. Una sigla da sola non è tale prova; se è l'unica indicazione del servizio e il mestiere non è identificabile, il dubbio resta.",
         "Eccezione esplicita: requiredContractClauses contiene condizioni che il draft deve riportare nei details, anche quando non cambiano le prestazioni. Nel claim contract_clause_coverage assegnato, confronta ogni proposizione originale con i testi dei dettagli candidati indicati nel claim. supported richiede che siano TUTTE rappresentate, non la sola presenza di sourceRefs o di un dettaglio sullo stesso argomento. Se una proposizione manca usa not_verifiable sul claim di completezza con un estratto della sua affermazione e nomina la proposizione assente. Non verificare omissioni amministrative fuori da assignedContractClauseIds: ogni altra clausola ha il proprio giudizio obbligatorio in un altro gruppo. Per ciascuna nota composta assegnata controlla separatamente ogni obbligo, limite, eccezione e permesso originale: una stessa citazione sN non prova che tutte le sue proposizioni siano state rappresentate. Se manca un fatto puoi inoltre registrare omitted_contract_condition SOLO per gli ID in assignedContractClauseIds con la clausola originale in sourceRefs e nomina in reason la proposizione assente; non chiamarlo omitted_scope se riguarda solo modalità amministrative. Per esempio, il limite percentuale al subappalto non sostituisce il permesso di comparire in più offerte. Cerca prima nell'intero draft e non pretendere una copia letterale, ma non considerare una citazione sufficiente senza il fatto. Le condizioni amministrative fuori da requiredContractClauses restano facoltative salvo che il draft le affermi falsamente.",
-        "contractClauseDraftBindings localizza i dettagli candidati nell'intero draft, anche se il loro claim è assegnato a un altro gruppo. Prima di dichiarare un'omissione leggi quei testi e confronta ogni proposizione con la clausola originale. Sono rinvii, non approvazioni: un riferimento corrispondente non prova completezza o correttezza. Non confondere l'assenza dai tuoi assignedClaims con l'assenza dal draft; controlla comunque tutti i details.",
+        "contractClauseDraftBindings e scopeCoverageDraftBindings localizzano candidati nell'intero draft, anche fuori dagli assignedClaims. Prima di dichiarare assente un fatto leggi i candidati E tutto il draft: quantità, punto di ritrovo o modalità documentali già scritti non sono omissioni. Gli indici sono zero-based; summary e rif. corrispondenti non approvano il significato. L'assenza di un indice non prova assenza del fatto. Non confondere l'assenza dagli assignedClaims con l'assenza dal draft.",
         "Distinzione obbligatoria: omettere la data di inizio di una fornitura non omette una prestazione; omettere un servizio di installazione opzionale omette un lavoro acquistabile. Una data o condizione che il draft afferma in modo falso resta contradicted: l'assenza di un dettaglio e un'affermazione falsa sono casi diversi. Esclusioni di lavoro, obblighi accessori e limiti territoriali che cambiano l'ambito restano da controllare.",
         "coverage complete significa che hai esaminato tutto il gruppo, non che il draft debba ripeterne ogni dato o che sia approvato. Se non puoi esaminarlo usa unreadable; non dare supported a ciò che non puoi verificare. Cita soltanto gli ID originali visibili. Nessun giudizio aziendale, di idoneità o di partecipazione.",
       ],
@@ -709,6 +723,7 @@ ${item.meaning.statement}`,
       classificationContext,
       requiredContractClauses: contractClauses,
       contractClauseDraftBindings,
+      scopeCoverageDraftBindings,
       draft: draftView,
       assignedClaims,
       assignedContractClauseIds: ownedContractClauseIds,

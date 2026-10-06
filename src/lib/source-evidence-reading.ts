@@ -10,7 +10,7 @@ import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v23";
+export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v24";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -355,7 +355,7 @@ export function buildSourceEvidenceReadingRequest(
       rules: [
         ...(requiredClauses.length
           ? [
-              "requiredClauseSelections: OGNI ID obbligatorio seleziona una o più righe di observations, missingDetails o issues tramite collection e index zero-based (prima riga=0). Le righe devono citare quel medesimo originale e conservarne significato e ambito; un indice non sostituisce la prova. Non omettere tipi, date o valori perché amministrativi. Nessun testo duplicato nella mappa. Per complete ogni ID ha una selezione; per unreadable gli ID non leggibili possono avere liste vuote.",
+              "requiredClauseSelections: OGNI ID obbligatorio seleziona righe proprie tramite collection/index zero-based. Per complete almeno una observations o issues conserva il fatto noto; missingDetails da sola non basta. Anche istruzioni amministrative note vanno in condition: scaricare, compilare tutte le parti, consegnare tutte le pagine. Un rinvio può lasciare ignoti articoli o quantità, ma non rende ignoti gli obblighi scritti. missingDetails aggiunge solo le specifiche davvero assenti. Non omettere tipi/date/valori. Nessun testo duplicato nella mappa; unreadable può avere selezioni vuote.",
             ]
           : []),
         "originalCoverage descrive soltanto il materiale fornito qui. linkedDocumentsRead false o hasProjectDocuments false non provano indisponibilità esterna: conserva email/portali e condizioni di richiesta presenti. Non negare un documento perché non è archiviato o non è stato letto.",
@@ -367,7 +367,7 @@ export function buildSourceEvidenceReadingRequest(
         "Conserva il ciclo della commessa attuale anche quando precisato in criteri o tempi: montaggio e collaudo attuali sono azioni, con prove originali e ambito propri. Referenze passate, qualifiche, prezzi e permessi non sono nuovi acquisti. Un titolo che chiede un'offerta non identifica da solo l'azione professionale.",
         "Una sola osservazione per ciascuna prestazione distinta, con oggetto e azione insieme. Non creare una seconda performance per ripetere orderType, supplyType o un altro campo amministrativo. Ogni performance e target_partition deve citare almeno una descrizione originale role service dello stesso ambito. Non aggiungere una citazione irrilevante solo per rispettare lo schema.",
         "missingDetails elenca specifiche non determinate nella fonte fornita: sottotipo, composizione, quantità, modelli o condizioni rinviate ai documenti. Non proporre possibili sottotipi. Queste lacune non diventano issues se famiglia dell'oggetto e azione contrattuale sono identificabili. Per esempio: fornitura di arredi senza dimensioni -> prestazione identificata, dimensioni in missingDetails; solo 'incarico Delta' senza descrizione né famiglia -> object_uncertain. Non trasferire azioni generali o di altri lotti al target.",
-        "Limita missingDetails alle lacune rilevanti per comprendere l'oggetto descritto, citandone anche una descrizione role service. Non generare una lista generica di possibili certificazioni, imballaggi o modalità non menzionati. Non ricavare modalità di esecuzione o consegna da campi relativi alla presentazione delle offerte. Riporta condition solo se delimita il lavoro: esclusioni, prestazioni opzionali, attività complementari o luogo che ne modifica l'ambito. Ometti cronologie, contatti e riepiloghi della procedura che non cambiano ciò che viene acquistato.",
+        "Limita missingDetails alle lacune sull'oggetto, con una descrizione role service. Non inventare possibili requisiti o modalità né ricavare esecuzione/consegna dalla presentazione delle offerte. condition conserva limiti, opzioni e attività complementari. ECCEZIONE: per requiredClausePassages/Fields conserva anche ogni obbligo amministrativo noto come condition, distinto dalle specifiche mancanti. Altre cronologie/contatti non pertinenti al lavoro possono essere omessi.",
         "Una clausola che limita quali parti del lavoro possono svolgere altri operatori delimita i ruoli contrattuali e va conservata come condition: per esempio subappalto ammesso solo per determinate attività o parti riservate all'aggiudicatario. Mantieni l'elenco delle attività e il carattere permesso, obbligatorio o escluso come dichiarati, con la citazione originale della clausola e una descrizione del lavoro. Non trasformare le attività subappaltabili in gare autonome o obblighi principali, né dedurre idoneità delle ditte. Questa condizione è diversa dai soli moduli o adempimenti per presentare l'offerta.",
         "issues contiene solo impedimenti materiali: object_uncertain quando non si può identificare neppure la famiglia o l'azione; target_uncertain quando non si può stabilire l'ambito; source_conflict per affermazioni incompatibili sul medesimo oggetto, senza precedenza o rettifica. Due clausole che includono ed escludono reciprocamente la stessa prestazione restano un conflitto, mai un semplice dettaglio da controllare. Non trasformare dati compatibili o traduzioni in conflitti.",
         "In ogni observations e missingDetails scegli serviceRef: una descrizione principale role service. Il codice ne ricava scope e conserva la citazione; non restituire scope. Gli eventuali riferimenti aggiuntivi in evidence devono appartenere allo stesso ambito originale di serviceRef, non a un’applicabilità dedotta. Conserva le informazioni del progetto in project_context e quelle del lotto in selected_lot, in osservazioni distinte. Il revisore successivo potrà esaminare insieme le due serie; non perderne una e non combinarle in un fatto locale.",
@@ -524,6 +524,13 @@ function materialize(values: unknown[], plan: SourceEvidenceReadingPlan) {
       if (selected.coverage === "complete" && !pointers.length)
         throw new Error(
           "Incomplete independent source contractual clause evidence coverage",
+        );
+      if (
+        selected.coverage === "complete" &&
+        !pointers.some((pointer) => pointer.collection !== "missingDetails")
+      )
+        throw new Error(
+          "A required original clause cannot be represented only as an unknown specification",
         );
       const seen = new Set<string>();
       for (const pointer of pointers) {
