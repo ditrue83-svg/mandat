@@ -22,7 +22,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v48";
+  "documentary-source-semantic-review-v49";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -394,6 +394,31 @@ export function buildSourceSemanticReviewRequest(
     throw new Error("Review classification context changed");
   const originalPassages = sourceEvidencePassages(context);
   const byId = new Map(originalPassages.map((item) => [item.id, item]));
+  // Decode only these standard geographic identifiers at their original
+  // address paths. This supplies vocabulary, never a location inferred from
+  // a buyer, a city name, a classification or another scope.
+  const geographyCodeMeanings = originalPassages.flatMap((item) => {
+    const field = item.rawPath.match(
+      /^(?:\/procurement|\/lots\/\d+)\/orderAddress\/(cantonId|countryId)$/,
+    )?.[1];
+    const name =
+      field === "cantonId" && item.text === "TI"
+        ? "Ticino"
+        : field === "countryId" && item.text === "CH"
+          ? "Svizzera"
+          : null;
+    return name
+      ? [
+          {
+            sourceRef: item.id,
+            rawPath: item.rawPath,
+            scope: item.scope,
+            originalCode: item.text,
+            name,
+          },
+        ]
+      : [];
+  });
   const classificationRefs = (item: (typeof classificationContext)[number]) =>
     unique([
       ...(item.code?.sourceRefs ?? []),
@@ -441,7 +466,9 @@ export function buildSourceSemanticReviewRequest(
       ...domainRefs,
       ...item.roleEvidence.sourceRefs,
     ]);
-    // Each dimension has one owner, with all original evidence retained there.
+    // The literal object keeps its narrow quotation proof. The full meaning
+    // statement can also assert facts from another selected language: review
+    // it once with component_scope and all the component's own evidence.
     for (const kind of [
       "component_domain",
       "component_role",
@@ -458,7 +485,7 @@ ${item.roleEvidence.actionText ?? ""}`
             ? `${item.importance}
 ${item.description}`
             : kind === "component_domain"
-              ? `${item.meaning.objectText}\n${item.meaning.statement}`
+              ? item.meaning.objectText
               : `${item.description}
 ${item.meaning.statement}`,
         kind === "component_domain"
@@ -614,6 +641,11 @@ ${item.meaning.statement}`,
     const prompt = JSON.stringify({
       task: "Verifica assignedClaims contro le prove originali: passages, fields e classificationContext. independentReading è una lettura AI separata, registrata prima di vedere il draft: serve a individuare prove e prestazioni, non sostituisce la fonte. Verifica la fedeltà delle affermazioni e la completezza delle prestazioni rappresentate. Non riscrivere la lettura indipendente per conformarla al draft. La mancanza di una prestazione in un altro frammento non la confuta.",
       rules: [
+        ...(geographyCodeMeanings.length
+          ? [
+              "geographyCodeMeanings scioglie soltanto codici geografici standard nei loro campi originali: TI=Ticino, CH=Svizzera. Nome e codice sono equivalenti per quel campo, non luoghi aggiunti. Cita sempre il riferimento proprio e controlla scope/path; non geocodificare città, indirizzi del committente o codici sconosciuti né trasferire il luogo ad altri lotti. Non è un verdetto di applicabilità.",
+            ]
+          : []),
         "originalCoverage descrive il contenuto esaminato, non una dichiarazione del committente sulla disponibilità esterna. linkedDocumentsRead false sostiene documenti collegati non esaminati in questa lettura; non prova indisponibilità sul portale. Giudica la formulazione precisa del claim senza attribuirgli una diversa affermazione di disponibilità o di consegna da parte dell'utente.",
         "originalFactBindings separa le Note dai relatedContractDurationContextRefs dello stesso oggetto JSON e scope. Per durata leggi contractDays/contractPeriod/contractDeadlineType, non il solo valore o Note della proroga. null indica dato non determinato in quel campo, non no, zero o assenza universale; confronta anche le eventuali date e i testi originali. I campi aggiunti sono contesto da verificare, mai approvazioni né prove trasferite da altri lotti.",
         "Le observations della lettura indipendente selezionano e classificano passaggi originali senza riscriverli. Leggi direttamente evidence e passages per stabilire lavoro, soggetto che lo richiede, operatore che lo svolge, destinatario e carattere obbligatorio o facoltativo. kind e serviceRef aiutano a trovare le prove; non sono affermazioni del committente né sostituiscono il loro significato originale.",
@@ -631,7 +663,7 @@ ${item.meaning.statement}`,
         "Controlla dominio dell'oggetto, azione contrattuale, applicabilità al target e importanza separatamente. main e accessory richiedono una gerarchia attestata; not_stated conserva un acquisto senza gerarchia indicata, non lo esclude né lo rende accessorio. Nomi e ordine dell'elenco non ne provano l'importanza. Non scambiare settore, luogo o destinatario per ruolo. Contesto generale, classificazioni ampie e opere di altri lotti non provano una prestazione locale.",
         "Per un lotto territoriale verifica insieme le performance comuni in project_context e la target_partition in selected_lot. Se le descrizioni originali del progetto e del lotto mostrano che il lotto ripartisce geograficamente quello stesso lavoro, il loro collegamento può sostenere summary, component_scope e component_importance: non occorre che il titolo geografico ripeta le azioni comuni. Cita entrambe le prove mantenendone gli ambiti originali. Un rinvio al dossier lascia ignote le specifiche, non cancella di per sé questo collegamento documentato.",
         "target_partition è una proposta della lettura AI, non una prova automatica di applicabilità: controlla i testi originali. Non usare questa composizione per lotti con beni o prestazioni differenti, per estendere lavori di altri lotti, per assegnare servizi accessori o ubicazioni puntuali non attestati. Una classificazione comune o una coincidenza geografica non basta. Se manca la prova del lavoro comune o della sua ripartizione nel lotto, oppure una clausola locale la contraddice, l'applicabilità resta da verificare.",
-        "Per component_domain verifica il significato dichiarato, non la sola presenza di classificationContextIds. Ripetere o tradurre un nome ambiguo senza conservarne il dominio attestato non basta a identificarlo. Non ignorare una spiegazione classificatoria incompatibile con quel significato.",
+        "component_domain verifica il nome dell'oggetto contro le sue prove e classificazioni, non solo classificationContextIds. component_scope contiene ANCHE l'intero meaning.statement: verifica ogni interpretazione, lingua e fatto con tutte le prove proprie della componente; il controllo del nome non li approva. Nomi ambigui non bastano e classificazioni incompatibili restano bloccanti.",
         "Una famiglia di prodotti identificata può non specificare sottotipi, quantità o requisiti: non inventarli e non usare la loro assenza come ambiguità del mestiere. Il nome del bene non è una specifica di composizione, materiale, modello o sottotipo: descriverlo come generico può essere compatibile con il conservarne il nome. Se invece una caratteristica è esplicita nella fonte, negarne la presenza resta contradicted. Verifica che details riporti soltanto condizioni o dettagli, non prestazioni espulse dalle componenti.",
         "independentReading.missingDetails contiene note AI non verificate: description non è una nuova affermazione del committente. Rileggi le loro evidence originali prima di usare dN-M per motivare not_verifiable; una supposizione nella nota non prova una diversa attribuzione del lavoro o delle quantità. Un elenco di quantità dell'appalto può essere riportato senza una ripartizione per edificio, sottoarea o lotto: non attribuire al draft una ripartizione che non afferma. Una ripartizione o applicabilità puntuale effettivamente affermata deve invece essere provata, e quantità inventate o non determinate dalla fonte restano non verificabili. I riferimenti fN indicano il valore JSON originale in fields al relativo rawPath; non inventarne il significato e distingui 0, false e null.",
         "Ogni claim è affidato a una sola richiesta con tutte le sue citazioni; i passaggi aggiunti sono contesto, non una selezione che sostituisce coverage. Esamina tutti i passaggi e campi di coverage nel loro claim scope_coverage obbligatorio; nessuna prestazione può essere ignorata perché non era selezionata dal draft. Non richiedere che tutti gli acquisti siano ripetuti in ogni frammento. La fedeltà di un'affermazione del draft va giudicata soltanto nel suo assignedClaim: non creare findings unverifiable per un summary o detail affidato ad altro gruppo. Non giudicare omissioni di prestazioni fuori da assignedScopeCoverageIds. La completezza amministrativa di ciascuna requiredContractClause ha il proprio claim contract_clause_coverage obbligatorio, indicato in assignedContractClauseIds. Il summary conserva in ogni gruppo le proprie prove originali: una nota null non cancella un valore yes, no o false in un campo distinto. Nessuna autocorrezione.",
@@ -646,6 +678,7 @@ ${item.meaning.statement}`,
       target: context.body.target,
       targetScope: context.targetScope,
       originalCoverage: context.coverage,
+      ...(geographyCodeMeanings.length ? { geographyCodeMeanings } : {}),
       classificationContext,
       requiredContractClauses: contractClauses,
       contractClauseDraftBindings,

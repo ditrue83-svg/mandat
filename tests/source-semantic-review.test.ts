@@ -51,6 +51,128 @@ const metadata = {
 };
 const digest = (value: unknown) =>
   createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
+
+test("A bilingual meaning statement stays with all owned component evidence while its literal object keeps its narrow proof", () => {
+  const base = context();
+  const french = "Fourniture de tenues professionnelles inventées.";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[0],
+          id: "s5",
+          rawPath: "/procurement/orderDescription/fr",
+          text: french,
+          endUtf16: french.length,
+        },
+      ],
+    },
+  };
+  const baseline = draft(input);
+  const original = recordSourceInterpretation(
+    {
+      ...baseline.response,
+      components: [
+        {
+          ...baseline.response.components[0],
+          sourceRefs: ["s1", "s5"],
+          meaning: {
+            ...baseline.response.components[0].meaning,
+            objectText: "articoli inventati",
+            objectRefs: ["s1"],
+            classificationContextIds: [],
+            statement:
+              "Articoli inventati; la descrizione francese indica tenute professionali inventate.",
+          },
+        },
+      ],
+    },
+    buildSourceInterpretationRequest(input),
+    { ...metadata, model: input.binding.model },
+  );
+  const before = JSON.stringify(original);
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  const object = plan.claims.find((c) => c.kind === "component_domain")!;
+  const statement = plan.claims.find((c) => c.kind === "component_scope")!;
+  assert.equal(object.text, "articoli inventati");
+  assert.deepEqual(object.sourceRefs, ["s1"]);
+  assert(statement.text.includes("descrizione francese"));
+  assert(
+    statement.sourceRefs.includes("s1") && statement.sourceRefs.includes("s5"),
+  );
+  assert.equal(JSON.stringify(original), before);
+});
+
+test.each([
+  ["/procurement/orderAddress/cantonId", "TI", "Ticino"],
+  ["/procurement/orderAddress/countryId", "CH", "Svizzera"],
+  ["/procurement/orderAddress/cantonId", "ZZ", null],
+  ["/procurement/orderAddress/countryId", "TI", null],
+  ["/customer/orderAddress/cantonId", "TI", null],
+  ["/procurement/orderAddress/city/it", "TI", null],
+])(
+  "Geographic code vocabulary preserves exact own path and scope without geocoding %s = %s",
+  (rawPath, code, name) => {
+    const base = context();
+    const input: SourceInterpretationContext = {
+      ...base,
+      body: {
+        ...base.body,
+        passages: [
+          ...base.body.passages,
+          {
+            ...base.body.passages[3],
+            id: "s5",
+            rawPath: rawPath!,
+            text: code!,
+            endUtf16: code!.length,
+          },
+        ],
+      },
+    };
+    const baseline = draft();
+    const original = recordSourceInterpretation(
+      {
+        ...baseline.response,
+        details: [
+          ...baseline.response.details,
+          {
+            kind: "execution_condition",
+            explanation: `Valore originale: ${code}.`,
+            scope: "project_context",
+            sourceRefs: ["s5"],
+          },
+        ],
+      },
+      buildSourceInterpretationRequest(input),
+      { ...metadata, model: input.binding.model },
+    );
+    const before = JSON.stringify(input);
+    const plan = buildSourceSemanticReviewRequest(input, original, config);
+    for (const request of plan.requests) {
+      const means = JSON.parse(request.prompt).geographyCodeMeanings ?? [];
+      assert.deepEqual(
+        means,
+        name
+          ? [
+              {
+                sourceRef: "s5",
+                rawPath,
+                scope: "project_context",
+                originalCode: code,
+                name,
+              },
+            ]
+          : [],
+      );
+    }
+    assert.equal(JSON.stringify(input), before);
+  },
+);
+
 function context(): SourceInterpretationContext {
   const values = [
     [

@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v43";
+  "documentary-source-interpretation-v44";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -607,7 +607,10 @@ function buildProviderResponseSchema(
               z
                 .array(
                   detail.extend({
-                    sourceRefs: z.array(z.enum(familyRefs)).min(1).max(32),
+                    sourceRefs: z
+                      .array(z.enum(familyRefs))
+                      .min(1)
+                      .max(Math.min(32, familyRefs.length)),
                     scope: z.literal(clause.scope),
                   }),
                 )
@@ -755,12 +758,15 @@ function decodeProviderResponse(
     // languages. The provider must place the same fully referenced detail in
     // each covered key; store that exact detail once. This only removes byte
     // identical entries, never interprets translations or merges assertions.
-    const uniqueClauses = [
+    const uniqueDetails = [
       ...new Map(
-        clauseDetails.map((detail) => [stableDocumentaryJson(detail), detail]),
+        [...details, ...clauseDetails].map((detail) => [
+          stableDocumentaryJson(detail),
+          detail,
+        ]),
       ).values(),
     ];
-    details = [...details, ...uniqueClauses];
+    details = uniqueDetails;
   }
   // The map is a provider contract, not part of the stored interpretation.
   const storedValue = Object.fromEntries(
@@ -1096,7 +1102,7 @@ export function buildSourceInterpretationRequest(
             "otherRequirements: conserva separatamente ogni riserva o diritto sul servizio acquistato, inclusi crediti annuali, ulteriori destinatari e acquisto intero, parziale o nullo delle opzioni quando attestati. Dire soltanto che un'opzione è facoltativa non rappresenta le altre proposizioni. Non trasformare destinatari o condizioni del committente in ulteriori prestazioni acquistate.",
           ]
         : []),
-      "classificationContext immutabile: rendiconta ogni ID una volta con codici/lingue/ambiti originali, citando solo le proprie etichette. clarifies_domain richiede etichetta; broad_context famiglia ampia, non prestazione; shared_project_only contesto condiviso. Senza etichetta niente decodifica da memoria. unresolved dubbio materiale; conflicting asserti incompatibili.",
+      "classificationContext immutabile: ogni ID una volta, proprie etichette/codici/ambiti. clarifies_domain SOLO se quel medesimo ID è usato in meaning.classificationContextIds di una componente; altrimenti broad_context (compatibilità, non prestazione) o shared_project_only. Senza etichetta niente decodifica da memoria; conflicting solo asserti incompatibili.",
       "meaning identifica l'oggetto nel suo dominio: evidence cita prove non classificatorie; classificationContextIds riporta le classificazioni usate. Non basta ripetere o tradurre un termine ambiguo: disambigua con le etichette originali, senza scegliere settori esterni o dichiarare errata la classificazione per salvare un'ipotesi. explicit_text si fonda sul testo; text_with_classification_context richiede un'etichetta del target. Solo per un lotto senza classificazioni proprie può usare un'etichetta condivisa insieme a prove locali del significato. Famiglie classificatorie non provano equivalenza, capacità o ammissibilità.",
       "meaning.objectText/actionText: citazioni letterali, inclusi articoli/preposizioni/iniziali/punteggiatura, mai riscrittura grammaticale. Scegli estratti più brevi se necessario. Localizzazione nei soli evidence, attraverso frammenti contigui della stessa fonte/campo/ambito, tutti citati. Spiegazioni classificatorie: solo proprie etichette citate.",
       ...(evidenceGroups.length
@@ -1131,7 +1137,7 @@ export function buildSourceInterpretationRequest(
             "contractClauseBlocks: paragrafi originali, non ambiti dedotti. Leggi ogni titolo con il suo testo e la nota intera; non ereditare ambiti dal blocco precedente. Una condizione generale resta generale; separa condizioni autonome nei details. Collegamenti come 'per tali lavori' richiedono prova, non vicinanza. Conserva qualificatori e cita sourceRefs originali.",
           ]
         : []),
-      "In fields puoi citare soltanto gli ID fN esplicitamente presenti accanto a un valore non nullo. I campi null restano contesto di informazione non indicata, non prove da citare. false e 0 sono valori presenti. Le serie sN e fN sono indipendenti: lo stesso numero non collega testo e campo. Per ogni riferimento verifica insieme ID, rawPath, valore e scope; non aggiungere riferimenti estranei al fatto descritto.",
+      "fields: cita solo fN espliciti non null; false/0 presenti, null non indicato. sN/fN indipendenti: verifica ID/path/valore/scope propri. Numeri JSON in fields richiedono il proprio fN anche nei details; una nota in mesi non prova giorni. Non convertire unità né geocodificare: conserva codici territoriali originali quando il nome esteso non è nel testo.",
       "Le clausole di contesto possono descrivere prestazioni: cita il loro testo e le classificazioni utili allo stesso oggetto. Il contesto di progetto non sostituisce il lotto: non assegnargli lavori di altri lotti. targetRef cita un passaggio service del target, anche se il titolo è geografico e l'oggetto è nel contesto comune.",
       ...(lot
         ? [

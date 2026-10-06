@@ -17,6 +17,60 @@ import {
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 import { openaiResponseBody } from "../src/lib/openai-responses";
 
+test("A singleton contract field cannot request duplicate references and byte-identical mapped details are stored once", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[0],
+          id: "s5",
+          role: "context",
+          rawPath: "/procurement/options",
+          text: "no",
+          endUtf16: 2,
+        },
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const value = {
+    ...response(input),
+    details: [
+      {
+        kind: "execution_condition",
+        explanation: "Non sono previste opzioni.",
+        sourceRefs: ["s5"],
+        scope: "project_context",
+      },
+    ],
+  };
+  const wire = wireResponse(value, request);
+  const accepts = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  const duplicatedRefs = structuredClone(wire);
+  duplicatedRefs.contractClausesById.s5[0].sourceRefs = ["s5", "s5"];
+  assert.equal(accepts(duplicatedRefs), false);
+  wire.details.push(structuredClone(wire.contractClausesById.s5[0]));
+  const before = JSON.stringify(wire);
+  const recorded = recordSourceInterpretation(wire, request, metadata);
+  assert.equal(recorded.response.details.length, 1);
+  assert.deepEqual(recorded.response.details[0].sourceRefs, ["s5"]);
+  assert.equal(JSON.stringify(wire), before);
+  // Different wording is not merged or judged equivalent automatically.
+  const different = structuredClone(wire);
+  different.details[0].explanation = "Il campo originale options contiene no.";
+  assert.equal(
+    recordSourceInterpretation(different, request, metadata).response.details
+      .length,
+    2,
+  );
+});
+
 test("Present options, organisational limits, territory and document access cannot disappear behind null notes", () => {
   const base = context();
   const originals = [
@@ -1480,9 +1534,9 @@ test("Resolved wire requires every contractual clause separately with its own sc
   }
   // The provider map cannot exceed the unchanged aggregate stored limit.
   const overflow = structuredClone(wire);
-  overflow.details = Array.from({ length: 30 }, () => ({
+  overflow.details = Array.from({ length: 30 }, (_, index) => ({
     kind: "technical_specification",
-    explanation: "Specifiche inventate per il test del limite.",
+    explanation: `Specifica inventata ${index} per il test del limite.`,
     scope: "project_context",
     sourceRefs: ["s1"],
   }));
