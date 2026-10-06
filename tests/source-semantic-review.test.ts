@@ -1827,6 +1827,93 @@ test("Contract completeness locates a detail even when its claim belongs to anot
   assert.equal(JSON.stringify(original), before);
 });
 
+test("A cited submission clause with its envelope label omitted has a mandatory independent completeness judgment", () => {
+  const base = context();
+  const note =
+    "Offerta completa, in busta chiusa con dicitura CONCORSO INVENTATO.";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[3],
+          id: "s5",
+          rawPath: "/dates/specificDeadlinesAndFormalRequirements/it",
+          text: note,
+          endUtf16: note.length,
+        },
+      ],
+    },
+  };
+  const candidate = recordSourceInterpretation(
+    {
+      ...draft().response,
+      details: [
+        ...draft().response.details,
+        {
+          kind: "execution_condition",
+          scope: "project_context",
+          sourceRefs: ["s5"],
+          explanation: "Offerta completa in busta chiusa.",
+        },
+      ],
+    },
+    buildSourceInterpretationRequest(input),
+    { ...metadata, model: input.binding.model },
+  );
+  const before = JSON.stringify(candidate);
+  const plan = buildSourceSemanticReviewRequest(input, candidate, config);
+  const claim = plan.claims.find(
+    (c) => c.kind === "contract_clause_coverage" && c.sourceRefs.includes("s5"),
+  )!;
+  assert(claim);
+  const requests = inventedGroundedReviewRequests(plan);
+  const owner = requests.findIndex((r) =>
+    r.ownedContractClauseIds.includes("s5"),
+  );
+  assert(owner >= 0);
+  assert.equal(
+    requests.filter((r) => r.ownedContractClauseIds.includes("s5")).length,
+    1,
+  );
+  const body = JSON.parse(requests[owner].prompt);
+  assert.equal(
+    body.requiredContractClauses.find((c: any) => c.id === "s5").text,
+    note,
+  );
+  assert.deepEqual(
+    body.contractClauseDraftBindings.find((c: any) => c.sourceRef === "s5")
+      .candidateDetails,
+    [{ index: 1, explanation: "Offerta completa in busta chiusa." }],
+  );
+  const negative = answers(plan);
+  const check = negative[owner].checks.find((c) => c.claimId === claim.id)!;
+  Object.assign(check, {
+    verdict: "not_verifiable",
+    draftQuote: "Tutte le proposizioni della clausola s5 sono rappresentate",
+    reason:
+      "La dicitura obbligatoria CONCORSO INVENTATO è assente; citare la nota non conserva tale obbligo.",
+  });
+  assert.equal(
+    readSourceSemanticReview(
+      recordSourceSemanticReview(negative.map(wireResponse), plan, metadata),
+      plan,
+    )?.accepted,
+    false,
+  );
+  const missingCheck = structuredClone(negative);
+  missingCheck[owner].checks = missingCheck[owner].checks.filter(
+    (c) => c.claimId !== claim.id,
+  );
+  assert.throws(
+    () => recordSourceSemanticReview(missingCheck, plan, metadata),
+    /exactly one check/,
+  );
+  assert.equal(JSON.stringify(candidate), before);
+});
+
 test("Each original compound clause has one mandatory completeness owner; unrelated groups cannot report its omission", () => {
   const base = context();
   const note =
@@ -2189,6 +2276,7 @@ test("Review records become stale for source draft configuration or version and 
     { version: "documentary-source-semantic-review-v20" },
     { version: "documentary-source-semantic-review-v22" },
     { version: "documentary-source-semantic-review-v40" },
+    { version: "documentary-source-semantic-review-v49" },
     { sourceKey: "b".repeat(64) },
     { draftHash: "c".repeat(64) },
     { inputHash: "d".repeat(64) },
@@ -2299,6 +2387,12 @@ test.each([null, { dateRange: ["2030-02-01", "2031-02-01"] }])(
             sourceRefs: ["s5"],
             explanation:
               "Il contratto non è prorogabile; la durata non è indicata.",
+          },
+          {
+            kind: "execution_condition",
+            scope: "project_context",
+            sourceRefs: ["f3"],
+            explanation: "L'offerta ha validità di 180 giorni.",
           },
         ],
       },

@@ -17,6 +17,147 @@ import {
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 import { openaiResponseBody } from "../src/lib/openai-responses";
 
+test("Submission, validity and document collection remain mandatory with their own values and complete scoped address", () => {
+  const base = context();
+  const originals = [
+    [
+      "s5",
+      "/dates/offerValidityNotes/it",
+      "Offerta vincolante per sei mesi; eventuale prolungamento da concordare.",
+    ],
+    [
+      "s6",
+      "/dates/specificDeadlinesAndFormalRequirements/it",
+      "Offerta completa e tempestiva, in busta chiusa con dicitura CONCORSO INVENTATO.",
+    ],
+    ["s7", "/dates/documentsAvailable/start", "2030-01-02"],
+    ["s8", "/dates/documentsAvailable/end", "2030-01-31"],
+    ["s9", "/project-info/documentsSourceAddress/name", "Ufficio inventato"],
+    ["s10", "/project-info/documentsSourceAddress/street", "Via inventata 1"],
+    ["s11", "/project-info/documentsSourceAddress/city", "Comune inventato"],
+    ["s12", "/project-info/documentsSourceAddress/countryId", "CH"],
+    ["s13", "/project-info/offerAddress/street", "Recapito offerte distinto"],
+    [
+      "s14",
+      "/project-info/offerSpecificNote/it",
+      "Inviare due esemplari firmati.",
+    ],
+  ] as const;
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        ...originals.map(([id, rawPath, text]) => ({
+          ...base.body.passages[0],
+          id,
+          rawPath,
+          text,
+          role: "context" as const,
+          endUtf16: text.length,
+        })),
+      ],
+      fields: [
+        {
+          scope: "project_context",
+          rawPath: "/dates/offerValidityDeadlineDays",
+          value: 180,
+        },
+        {
+          scope: "project_context",
+          rawPath: "/dates/offerValidityDeadlineDate",
+          value: null,
+        },
+        {
+          scope: "project_context",
+          rawPath: "/project-info/documentsSourceAddress/postalCode",
+          value: 9999,
+        },
+      ],
+    },
+  };
+  const before = JSON.stringify(input);
+  const request = buildSourceInterpretationRequest(input);
+  assert.deepEqual(request.requiredContractClauseIds, [
+    "s5",
+    "s6",
+    "s7",
+    "s8",
+    "s9",
+    "s10",
+    "s11",
+    "s12",
+    "s14",
+    "f0",
+    "f2",
+  ]);
+  assert(!request.citableFieldIds.includes("f1"));
+  const addressRefs = ["s9", "s10", "s11", "s12", "f2"];
+  const supplied = {
+    ...response(input),
+    details: [
+      ...originals
+        .filter(([id]) => !addressRefs.includes(id) && id !== "s13")
+        .map(([id, , text]) => ({
+          kind: "execution_condition" as const,
+          scope: "project_context" as const,
+          sourceRefs: [id],
+          explanation: text,
+        })),
+      {
+        kind: "execution_condition",
+        scope: "project_context",
+        sourceRefs: ["f0"],
+        explanation: "Il campo numerico dichiara 180 giorni di validità.",
+      },
+      {
+        kind: "execution_condition",
+        scope: "project_context",
+        sourceRefs: addressRefs,
+        explanation:
+          "Documenti presso Ufficio inventato, Via inventata 1, 9999 Comune inventato, CH.",
+      },
+    ],
+  };
+  const wire: any = wireResponse(supplied, request);
+  const accepts = new Ajv2020({ strict: false }).compile<any>(
+    request.responseFormat.json_schema.schema,
+  );
+  assert(accepts(wire));
+  const stored = recordSourceInterpretation(wire, request, metadata);
+  assert.equal(stored.response.details.length, 7);
+  assert.deepEqual(
+    stored.response.details.find((d) => d.sourceRefs.includes("s9"))
+      ?.sourceRefs,
+    addressRefs,
+  );
+  for (const id of request.requiredContractClauseIds) {
+    const missing = structuredClone(wire);
+    delete missing.contractClausesById[id];
+    assert(!accepts(missing));
+    assert.throws(
+      () => recordSourceInterpretation(missing, request, metadata),
+      /Incomplete|Invalid/,
+    );
+  }
+  for (const ref of ["s13", "s5"]) {
+    const unrelated = structuredClone(wire);
+    unrelated.contractClausesById.s9[0].sourceRefs.push(ref);
+    assert.throws(
+      () => recordSourceInterpretation(unrelated, request, metadata),
+      /own scoped source/,
+    );
+  }
+  const withoutOwnValue = structuredClone(wire);
+  withoutOwnValue.contractClausesById.f0[0].sourceRefs = ["s5"];
+  assert.throws(
+    () => recordSourceInterpretation(withoutOwnValue, request, metadata),
+    /own scoped source/,
+  );
+  assert.equal(JSON.stringify(input), before);
+});
+
 test("A singleton contract field cannot request duplicate references and byte-identical mapped details are stored once", () => {
   const base = context();
   const input: SourceInterpretationContext = {
@@ -3685,6 +3826,7 @@ test.each([
   "documentary-source-interpretation-v35",
   "documentary-source-interpretation-v36",
   "documentary-source-interpretation-v42",
+  "documentary-source-interpretation-v44",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
   assert.equal(request.version, SOURCE_INTERPRETATION_VERSION);

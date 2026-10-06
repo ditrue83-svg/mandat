@@ -146,6 +146,79 @@ function contractContext(): SourceInterpretationContext {
   };
 }
 
+test("Independent reading cannot skip submission obligations, validity, document dates or collection address", () => {
+  const base = context();
+  const originals = [
+    [
+      "s5",
+      "/dates/specificDeadlinesAndFormalRequirements/it",
+      "Busta chiusa con dicitura CONCORSO INVENTATO.",
+    ],
+    [
+      "s6",
+      "/dates/offerValidityNotes/it",
+      "Sei mesi vincolanti; prolungamento da concordare.",
+    ],
+    ["s7", "/dates/documentsAvailable/start", "2030-01-02"],
+    ["s8", "/project-info/documentsSourceAddress/street", "Via inventata 1"],
+  ];
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        ...originals.map(([id, rawPath, text]) => ({
+          ...base.body.passages[0],
+          id,
+          rawPath,
+          text,
+          role: "context" as const,
+          endUtf16: text.length,
+        })),
+      ],
+      fields: [
+        ...base.body.fields,
+        {
+          scope: "project_context",
+          rawPath: "/dates/offerValidityDeadlineDays",
+          value: 180,
+        },
+        {
+          scope: "project_context",
+          rawPath: "/dates/offerValidityDeadlineDate",
+          value: null,
+        },
+      ],
+    },
+  };
+  const before = JSON.stringify(input);
+  const plan = buildSourceEvidenceReadingRequest(input, config);
+  assert.deepEqual(
+    plan.requests.flatMap((r) => r.requiredClauseIds),
+    ["s5", "s6", "s7", "s8", "f2"],
+  );
+  const complete = responses(plan);
+  assert(
+    readSourceEvidenceReading(
+      recordSourceEvidenceReading(complete, plan, metadata),
+      plan,
+    )?.accepted,
+  );
+  for (const ref of ["s5", "s6", "s7", "s8", "f2"]) {
+    const missing = structuredClone(complete);
+    for (const answer of missing)
+      answer.observations = answer.observations.filter(
+        (o: any) => !o.evidence.some((e: any) => e.sourceRef === ref),
+      );
+    assert.throws(
+      () => recordSourceEvidenceReading(missing, plan, metadata),
+      /contractual clause evidence coverage/,
+    );
+  }
+  assert.equal(JSON.stringify(input), before);
+});
+
 test("A complete reading must preserve every original work clause, including language variants", () => {
   const plan = buildSourceEvidenceReadingRequest(contractContext(), config);
   const answer = responses(plan);
@@ -1062,6 +1135,7 @@ test("Stored evidence cannot replace the original passage with a reconstructed o
     "source-evidence-reading-v1",
     "source-evidence-reading-v9",
     "source-evidence-reading-v10",
+    "source-evidence-reading-v20",
   ])
     assert.equal(readSourceEvidenceReading({ ...record, version }, plan), null);
 });

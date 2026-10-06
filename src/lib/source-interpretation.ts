@@ -14,7 +14,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v44";
+  "documentary-source-interpretation-v45";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -482,7 +482,9 @@ function buildResponseSchema(bounds?: {
 export const sourceInterpretationResponseSchema = buildResponseSchema();
 
 const contractFieldFamily = (rawPath: string) =>
-  rawPath.replace(/\/(?:de|en|fr|it|rm)$/, "");
+  /^\/project-info\/documentsSourceAddress\//.test(rawPath)
+    ? "/project-info/documentsSourceAddress"
+    : rawPath.replace(/\/(?:de|en|fr|it|rm)$/, "");
 
 // The provider selects passages and quotes the action and object. Their
 // precise supporting references are located locally within that selection.
@@ -1061,6 +1063,15 @@ export function buildSourceInterpretationRequest(
     ...(sourceIdentityAssertions.length ? { sourceIdentityAssertions } : {}),
     rules: [
       "requiredContractClauseIds: ogni ID va nei details con la propria condizione completa. Non bastano summary/evidence e non aggiungere riferimenti estranei.",
+      ...(requiredContractClauses.some((p) =>
+        /^(?:(?:\/lots\/\d+)?\/dates\/|\/project-info\/(?:offerSpecificNote|documentsSourceAddress)\/)/.test(
+          p.rawPath,
+        ),
+      )
+        ? [
+            "Conserva validità dell'offerta, condizioni formali di presentazione, finestra di disponibilità e indirizzo di acquisizione dei documenti. La dicitura prescritta per la busta è un obbligo concreto, non una sigla da espandere. Numeri e note sulla validità conservano separatamente valori e unità originali; l'estensione della validità dell'offerta non è proroga del contratto. L'indirizzo documentale può essere descritto in una sola voce completa con tutte le prove proprie, stesso scope e tutti gli ID della stessa famiglia, senza importare indirizzi di offerta o committente.",
+          ]
+        : []),
       ...(requiredContractClauses.length
         ? [
             "contractClausesById: pianifica prima tutte le voci entro 32 dettagli TOTALI, compresi quelli esterni. Ogni ID conserva TUTTE le proposizioni in frasi complete entro 600 caratteri, stesso ID/scope. Riunisci proposizioni dello stesso ID, senza una voce per ciascuna; dividi solo quando necessario. Mai tagliare parole o condizioni. yes/no distinto dalle note. La mappa confluisce nei details: quelli esterni solo altri fatti, senza duplicarla. Riferimenti o frasi vuote non provano completezza.",

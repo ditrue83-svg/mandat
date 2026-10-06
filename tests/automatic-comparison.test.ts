@@ -2064,6 +2064,64 @@ test("CPV blocks keep shared project context separate from the selected lot and 
   );
 });
 
+test("A lossy long-source map cannot discard submission conditions or document collection details", () => {
+  const base = raw();
+  const detail = {
+    ...base,
+    dates: {
+      ...base.dates,
+      offerValidityDeadlineDays: 180,
+      offerValidityNotes: {
+        it: "Sei mesi vincolanti; prolungamento da concordare.",
+      },
+      specificDeadlinesAndFormalRequirements: {
+        it: "Busta chiusa con dicitura CONCORSO INVENTATO.",
+      },
+      documentsAvailable: { start: "2030-01-02", end: "2030-01-31" },
+    },
+    "project-info": {
+      ...base["project-info"],
+      documentsSourceAddress: {
+        street: "Via inventata 1",
+        city: "Comune inventato",
+      },
+    },
+    terms: {
+      qualificationCriteriaNote: {
+        it: "Condizioni amministrative inventate. ".repeat(900),
+      },
+    },
+  };
+  const before = JSON.stringify(detail);
+  const request = buildAutomaticComparisonRequest(fixture(detail));
+  assert(request.readingRequests.length > 1);
+  const reduction = buildAutomaticReductionRequest(
+    request.readingRequests.map((chunk) => ({
+      chunkId: chunk.id,
+      status: "complete",
+      sourceRefs: [],
+    })),
+    request,
+  );
+  const originals = request.passages.filter((p) =>
+    /^\/(?:dates\/(?:offerValidity|specificDeadlinesAndFormalRequirements|documentsAvailable)|project-info\/documentsSourceAddress)/.test(
+      p.rawPath,
+    ),
+  );
+  assert.equal(originals.length, 6);
+  for (const original of originals) {
+    assert(reduction.selectedIds.includes(original.id));
+    assert(reduction.requiredContractClauseIds.includes(original.id));
+  }
+  const prompt = JSON.parse(reduction.prompt);
+  const days = prompt.fields.find(
+    (f: any) => f.rawPath === "/dates/offerValidityDeadlineDays",
+  );
+  assert.equal(days.value, 180);
+  assert(reduction.requiredContractClauseIds.includes(days.id));
+  assert.equal(JSON.stringify(detail), before);
+});
+
 test("Long-source reduction preserves complete CPV labels even when the map selects no context", () => {
   const base = raw();
   const label = "CLASSIFICAZIONE_LUNGA_INVENTATA ".repeat(85);
@@ -2642,6 +2700,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v76",
     sourceVersion: "documentary-source-interpretation-v43",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v77",
+    sourceVersion: "documentary-source-interpretation-v44",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2675,7 +2737,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v77");
+    assert.equal(request.version, "documentary-service-comparison-v78");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(
