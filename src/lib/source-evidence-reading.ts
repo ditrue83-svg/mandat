@@ -10,7 +10,7 @@ import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v22";
+export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v23";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -362,7 +362,7 @@ export function buildSourceEvidenceReadingRequest(
         "Le observations sono selezioni di prove originali, non un riassunto. Scegli kind, serviceRef ed evidence per individuare tutte le prestazioni e condizioni rilevanti; non produrre parafrasi, traduzioni o un campo statement. Il codice conserva i passaggi integrali. Oggetto, azione, soggetto contrattuale, destinatario, permessi e obblighi rimangono nel testo originale selezionato, che il revisore dovrà leggere direttamente. La sola selezione di un riferimento non dimostra un significato né l'applicabilità al target.",
         "requiredClausePassages e requiredClauseFields elencano note e valori originali su subappalto, opzioni o esecuzione assegnati a questa parte. Per coverage complete conserva ogni riferimento, incluse tutte le lingue e i segmenti, in observations, missingDetails o issues secondo il suo significato. Leggi i valori strutturati insieme al percorso originale: il divieto di subappalto espresso da subContractorAllowed no o false delimita il lavoro delegabile anche senza una nota testuale. null significa non indicato, non divieto; non inventare il significato di valori sconosciuti. Una clausola che delimita ruoli, parti delegabili, obblighi od opzioni va in condition con una descrizione del lavoro dello stesso ambito. Un rinvio privo dei dettagli necessari va in missingDetails; un impedimento materiale in issues. Se non riesci a coprirle usa unreadable. Il nome del campo da solo non prova prestazioni, restrizioni, capacità o idoneità non dichiarate dal valore o testo originale.",
         "Le etichette classificatorie dichiarano il contesto originale. Una denominazione generica o polisemica non dimostra che la classificazione sia sbagliata: non inventare una discrepanza né un sottotipo. Una classificazione ampia non aggiunge tutte le attività della sua etichetta.",
-        "Per ciascuna assignedClassificationIds restituisci una relazione con la descrizione. Non restituire label: il codice conserva codice ed etichette originali. In evidence scegli le prove della relazione; i riferimenti della classificazione sono aggiunti dal codice. consistent o broad_context conserva la famiglia compatibile; not_decisive non determina da sola la prestazione locale. metadata_discrepancy segnala una differenza di etichetta senza incompatibilità materiale: richiede in evidence il serviceRef di una performance esplicita dello stesso ambito e una spiegazione della differenza, senza correggere il codice. Non risolve oggetti ambigui, fonti incomplete o clausole opposte. conflicting richiede caratteristiche o affermazioni realmente incompatibili, con controprova originale esterna alla classificazione.",
+        "Per ciascuna assignedClassificationIds restituisci una relazione con la descrizione. Non restituire label: il codice conserva codice ed etichette originali. In evidence scegli le prove della relazione; i riferimenti della classificazione sono aggiunti dal codice. consistent o broad_context conserva la famiglia compatibile; not_decisive non determina da sola la prestazione locale. metadata_discrepancy segnala una differenza di etichetta senza incompatibilità materiale: richiede in evidence una descrizione originale role service dello stesso ambito, selezionata come serviceRef o prova propria di una performance esplicita, e una spiegazione della differenza, senza correggere il codice. Non risolve oggetti ambigui, fonti incomplete o clausole opposte. conflicting richiede caratteristiche o affermazioni realmente incompatibili, con controprova originale esterna alla classificazione.",
         "Le osservazioni performance descrivono acquisti e azioni: fornitura di beni, esecuzione, gestione, installazione, manutenzione, progettazione o consulenza. Manutenzione conserva o ripristina un bene: luogo, destinatario o settore non la dimostrano. Metadati e classificazioni non sono prestazioni autonome.",
         "Conserva il ciclo della commessa attuale anche quando precisato in criteri o tempi: montaggio e collaudo attuali sono azioni, con prove originali e ambito propri. Referenze passate, qualifiche, prezzi e permessi non sono nuovi acquisti. Un titolo che chiede un'offerta non identifica da solo l'azione professionale.",
         "Una sola osservazione per ciascuna prestazione distinta, con oggetto e azione insieme. Non creare una seconda performance per ripetere orderType, supplyType o un altro campo amministrativo. Ogni performance e target_partition deve citare almeno una descrizione originale role service dello stesso ambito. Non aggiungere una citazione irrilevante solo per rispettare lo schema.",
@@ -763,8 +763,12 @@ function validate(values: unknown[], plan: SourceEvidenceReadingPlan) {
           (q) =>
             !classificationRefs.has(q.sourceRef) &&
             byId.get(q.sourceRef)?.scope === original.scope &&
+            byId.get(q.sourceRef)?.role === "service" &&
             value.observations.some(
-              (o) => o.kind === "performance" && o.serviceRef === q.sourceRef,
+              (o) =>
+                o.kind === "performance" &&
+                (o.serviceRef === q.sourceRef ||
+                  o.evidence.some((e) => e.sourceRef === q.sourceRef)),
             ),
         )
       )

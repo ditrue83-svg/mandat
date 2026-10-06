@@ -1111,6 +1111,106 @@ test("Metadata advisories require a selected original performance, not a code or
   );
 });
 
+test("A metadata advisory can cite an owned service passage without changing the performance anchor", () => {
+  const base = context();
+  const french = "Fourniture du produit Alfa inventé.";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[0],
+          id: "s5",
+          rawPath: "/description/fr",
+          text: french,
+          endUtf16: french.length,
+        },
+      ],
+    },
+  };
+  const plan = buildSourceEvidenceReadingRequest(input, config);
+  const answers = responses(plan);
+  answers[0].observations = [
+    {
+      kind: "performance",
+      serviceRef: "s1",
+      evidence: [{ sourceRef: "s5" }],
+    },
+  ];
+  answers[0].classifications[0].relationship = "metadata_discrepancy";
+  answers[0].classifications[0].evidence = [{ sourceRef: "s5" }];
+  const before = structuredClone({ input, answers });
+  const result = readSourceEvidenceReading(
+    recordSourceEvidenceReading(answers, plan, metadata),
+    plan,
+  )!;
+  assert.equal(result.accepted, true);
+  assert.equal(result.findings.length, 0);
+  assert.equal(result.warnings[0].kind, "classification_metadata_discrepancy");
+  assert.equal(result.responses[0].observations[0].serviceRef, "s1");
+  assert.deepEqual(
+    result.responses[0].observations[0].evidence.map((e) => e.sourceRef),
+    ["s1", "s5"],
+  );
+  assert.equal(
+    result.responses[0].classifications[0].evidence.find(
+      (e) => e.sourceRef === "s5",
+    )!.text,
+    french,
+  );
+  assert.deepEqual({ input, answers }, before);
+});
+
+test("Attached metadata proof must be an owned service passage in the classification scope", () => {
+  const base = context();
+  const planWith = (scope: "project_context" | "selected_lot") =>
+    buildSourceEvidenceReadingRequest(
+      scope === "selected_lot"
+        ? lotContext()
+        : {
+            ...base,
+            body: {
+              ...base.body,
+              passages: [
+                ...base.body.passages,
+                {
+                  ...base.body.passages[0],
+                  id: "s5",
+                  rawPath: "/description/fr",
+                  scope,
+                },
+              ],
+            },
+          },
+      config,
+    );
+  for (const scenario of ["unowned", "context", "condition", "other_scope"]) {
+    const plan = planWith(
+      scenario === "other_scope" ? "selected_lot" : "project_context",
+    );
+    const answers = responses(plan);
+    const proof = scenario === "context" ? "s4" : "s5";
+    answers[0].observations = [
+      {
+        kind: scenario === "condition" ? "condition" : "performance",
+        serviceRef: scenario === "other_scope" ? "s5" : "s1",
+        evidence: scenario === "unowned" ? [] : [{ sourceRef: proof }],
+      },
+    ];
+    answers[0].classifications[0].relationship = "metadata_discrepancy";
+    answers[0].classifications[0].evidence = [{ sourceRef: proof }];
+    const before = structuredClone(answers);
+    assert.throws(
+      () => recordSourceEvidenceReading(answers, plan, metadata),
+      /original performance in the same scope/,
+      scenario,
+    );
+    assert.deepEqual(answers, before);
+  }
+});
+
 test("Long original readings cover the entire tail and never use extraction-selected passages", () => {
   const base = context();
   const input: SourceInterpretationContext = {
