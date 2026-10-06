@@ -11,12 +11,19 @@ import {
 import {
   SOURCE_SEMANTIC_REVIEW_VERSION,
   buildGroundedSourceReviewRequests,
-  buildSourceSemanticReviewRequest,
+  buildSourceSemanticReviewRequest as buildCurrentSourceSemanticReviewRequest,
   recordSourceSemanticReview as productionRecordSourceSemanticReview,
   readSourceSemanticReview,
   sourceSemanticReviewRecordSchema,
   type SourceSemanticReviewPlan,
 } from "../src/lib/source-semantic-review";
+const buildSourceSemanticReviewRequest = (
+  ...args: Parameters<typeof buildCurrentSourceSemanticReviewRequest>
+) =>
+  buildCurrentSourceSemanticReviewRequest(args[0], args[1], {
+    ...args[2],
+    legacyProviderFormatForRegression: true,
+  });
 
 import {
   inventedSourceEvidence,

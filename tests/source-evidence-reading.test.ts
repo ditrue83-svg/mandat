@@ -13,9 +13,17 @@ import {
   type SourceInterpretationContext,
 } from "../src/lib/source-interpretation";
 import {
-  buildSourceSemanticReviewRequest,
+  buildSourceSemanticReviewRequest as buildCurrentSourceSemanticReviewRequest,
   buildGroundedSourceReviewRequests,
 } from "../src/lib/source-semantic-review";
+const buildSourceSemanticReviewRequest = (
+  ...args: Parameters<typeof buildCurrentSourceSemanticReviewRequest>
+) =>
+  buildCurrentSourceSemanticReviewRequest(args[0], args[1], {
+    ...args[2],
+    legacyProviderFormatForRegression: true,
+  });
+
 import {
   inventedSourceEvidenceAnswer,
   inventedClauseSelections,

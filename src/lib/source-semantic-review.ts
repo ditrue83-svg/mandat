@@ -1,3 +1,8 @@
+import { RADAR_ACCEPTANCE_POLICY } from "./radar-acceptance-policy";
+import {
+  coverageProofSchema,
+  validateCoverageProof,
+} from "./source-coverage-proof";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { stableDocumentaryJson } from "./documentary-observation";
@@ -22,7 +27,9 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v53";
+  "documentary-source-semantic-review-v54";
+export const SOURCE_REVIEW_SUPPORTED_REASON =
+  "Le prove indicate sostengono il claim; coverageProof distingue fatti rappresentati e dati facoltativi.";
 const MAX_BYTES = 160_000;
 // Leave room for the separately recorded evidence before constructing the
 // final comparison request; that request is still checked at its actual size.
@@ -50,6 +57,7 @@ const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const reasoning = z.enum(["none", "low", "medium", "high"]);
 const configurationSchema = z.strictObject({
   model: text(200),
+  legacyProviderFormatForRegression: z.boolean().optional(),
   reasoningEffort: reasoning.optional(),
   maxTokens: z.number().int().min(1).max(16_384).optional(),
 });
@@ -87,6 +95,7 @@ const checkShape = z.strictObject({
   draftQuote: text(1200).nullable(),
   reason: text(600),
   sourceRefs: refs,
+  coverageProof: coverageProofSchema.optional(),
   readingRefs: z
     .array(z.string().regex(/^([ed][1-9]\d*-[1-9]\d*|c[1-9]\d*|o-[sf]\d+)$/))
     .min(1)
@@ -109,7 +118,8 @@ function providerResponseSchema(
   format:
     | "claim_keyed_v1"
     | "claim_keyed_refs_v2"
-    | "claim_keyed_refs_v3" = "claim_keyed_v1",
+    | "claim_keyed_refs_v3"
+    | "claim_keyed_refs_v4" = "claim_keyed_v1",
 ) {
   const keyedReadings = format !== "claim_keyed_v1";
   // References identify a set. Its cardinality bounds the wire response while
@@ -123,7 +133,7 @@ function providerResponseSchema(
   // below; the canonical response still requires nonempty, unique evidence.
   const references = boundedRefs(bounds.sourceIds);
   const checkReferences =
-    format === "claim_keyed_refs_v3"
+    format === "claim_keyed_refs_v3" || format === "claim_keyed_refs_v4"
       ? boundedRefs(bounds.sourceIds, 0)
       : references;
   // A keyed selection represents each available reference exactly once.
@@ -139,8 +149,11 @@ function providerResponseSchema(
           readingRefs: ids ? boundedRefs(ids) : checkShape.shape.readingRefs,
         };
   const common = responseShape.shape.checks.element
-    .omit({ claimId: true, readingRefs: true })
+    .omit({ claimId: true, readingRefs: true, coverageProof: true })
     .extend({
+      ...(format === "claim_keyed_refs_v4"
+        ? { coverageProof: coverageProofSchema }
+        : {}),
       sourceRefs: checkReferences,
       ...readingSelection(bounds.readingIds),
     });
@@ -155,17 +168,25 @@ function providerResponseSchema(
       // A true detail must cite its own original fact or an independently
       // selected passage for that detail. Keep all independent evidence
       // available for criticism, including counterevidence elsewhere.
-      schema: group.supportedReadingIds
-        ? z.union([
-            schema.extend({
-              verdict: z.literal("supported"),
-              ...readingSelection(group.supportedReadingIds),
-            }),
-            schema.extend({
-              verdict: z.enum(["contradicted", "not_verifiable"]),
-            }),
-          ])
-        : schema,
+      schema:
+        group.supportedReadingIds || format === "claim_keyed_refs_v4"
+          ? z.union([
+              schema.extend({
+                verdict: z.literal("supported"),
+                ...(format === "claim_keyed_refs_v4"
+                  ? {
+                      reason: z.literal(SOURCE_REVIEW_SUPPORTED_REASON),
+                    }
+                  : {}),
+                ...readingSelection(
+                  group.supportedReadingIds ?? group.readingIds,
+                ),
+              }),
+              schema.extend({
+                verdict: z.enum(["contradicted", "not_verifiable"]),
+              }),
+            ])
+          : schema,
     };
   });
   const materialFindings = [
@@ -383,11 +404,17 @@ export function buildSourceSemanticReviewRequest(
     model: string;
     reasoningEffort?: "none" | "low" | "medium" | "high";
     maxTokens?: number;
+    legacyProviderFormatForRegression?: boolean;
   },
 ) {
   const context = validateSourceInterpretationContext(input);
   const config = configurationSchema.parse(configuration);
-  const evidencePlan = buildSourceEvidenceReadingRequest(context, config);
+  const { legacyProviderFormatForRegression: _legacy, ...evidenceConfig } =
+    config;
+  const evidencePlan = buildSourceEvidenceReadingRequest(
+    context,
+    evidenceConfig,
+  );
   const draft = sourceInterpretationRecordSchema.parse(
     structuredClone(draftValue),
   );
@@ -675,6 +702,9 @@ ${item.meaning.statement}`,
       },
     };
     const prompt = JSON.stringify({
+      ...(config.legacyProviderFormatForRegression
+        ? {}
+        : { acceptancePolicy: RADAR_ACCEPTANCE_POLICY }),
       task: "Verifica assignedClaims contro le prove originali: passages, fields e classificationContext. independentReading è una lettura AI separata, registrata prima di vedere il draft: serve a individuare prove e prestazioni, non sostituisce la fonte. Verifica la fedeltà delle affermazioni e la completezza delle prestazioni rappresentate. Non riscrivere la lettura indipendente per conformarla al draft. La mancanza di una prestazione in un altro frammento non la confuta.",
       rules: [
         ...(geographyCodeMeanings.length
@@ -854,6 +884,8 @@ ${item.meaning.statement}`,
     evidenceInputHash: evidencePlan.inputHash,
   });
   const plan = freeze({
+    legacyProviderFormatForRegression:
+      config.legacyProviderFormatForRegression === true,
     version: SOURCE_SEMANTIC_REVIEW_VERSION,
     sourceKey,
     draftHash,
@@ -1066,7 +1098,9 @@ export function buildGroundedSourceReviewRequests(
                 readingIds,
                 claimReadingGroups: [...readingGroups.values()],
               },
-              "claim_keyed_refs_v3",
+              plan.legacyProviderFormatForRegression
+                ? "claim_keyed_refs_v3"
+                : "claim_keyed_refs_v4",
             ),
             { reused: "ref" },
           ),
@@ -1080,8 +1114,16 @@ export function buildGroundedSourceReviewRequests(
             "e seleziona il relativo o-sN/o-fN: il formato v3 collega il suo sourceRef originale.",
           ),
         ),
+        ...(plan.legacyProviderFormatForRegression
+          ? {}
+          : {
+              coverageProofRule:
+                "Per ogni claim scope_coverage/contract_clause_coverage, coverageProof contiene ESATTAMENTE una riga per ciascun sourceRef assegnato. represented richiede witnesses con draftPath e quote letterale del campo del draft che cita quel sourceRef; le clausole obbligatorie devono citare details. Non copiare la fonte come prova di presenza nel draft. not_required indica solo un dato amministrativo facoltativo o un originale senza nuova prestazione/limite, mai una clausola obbligatoria; missing indica una prestazione/condizione richiesta assente e vieta supported. Per gli altri claim coverageProof=[]. I witness provano presenza e provenienza, non equivalenza o completezza: verifica ogni proposizione. Le ragioni devono concordare con queste disposizioni; mai dichiarare conservata una data precisa mostrando soltanto una durata stimata.",
+            }),
         referenceSelectionFormat: {
-          checksFormat: "claim_keyed_refs_v3",
+          checksFormat: plan.legacyProviderFormatForRegression
+            ? "claim_keyed_refs_v3"
+            : "claim_keyed_refs_v4",
           rule: "readingRefsById richiede una chiave booleana per ogni ID previsto: true seleziona una prova, false la lascia inutilizzata. Seleziona almeno una prova. Per o-sN/o-fN il codice collega il sourceRef originale del fatto scelto: non serve ripeterlo in sourceRefs. Cita in sourceRefs le altre prove necessarie. Nessuna nuova chiave o readingRefs. Ambito, significato e sostegno proprio del claim restano da verificare; il collegamento non assegna verdetti.",
         },
         sourceEvidenceHash: independent.hash,
@@ -1182,6 +1224,14 @@ function validateResponses(
       ("checksFormat" in value || "checksByClaim" in value)
     ) {
       const request = grounded[index];
+      if (
+        !plan.legacyProviderFormatForRegression &&
+        (!("checksFormat" in value) ||
+          value.checksFormat !== "claim_keyed_refs_v4")
+      )
+        throw new Error(
+          "Source review provider protocol does not match its request",
+        );
       const {
         checksFormat: _format,
         checksByClaim,
@@ -1199,7 +1249,8 @@ function validateResponses(
         },
         "checksFormat" in value &&
           (value.checksFormat === "claim_keyed_refs_v2" ||
-            value.checksFormat === "claim_keyed_refs_v3")
+            value.checksFormat === "claim_keyed_refs_v3" ||
+            value.checksFormat === "claim_keyed_refs_v4")
           ? value.checksFormat
           : "claim_keyed_v1",
       ).parse(value);
@@ -1220,7 +1271,8 @@ function validateResponses(
               // Only the declared V3 wire contract projects explicitly chosen
               // original facts. Legacy wires and stored responses stay strict.
               // Ownership, scope and semantic guards still run below.
-              ...(_format === "claim_keyed_refs_v3"
+              ...(_format === "claim_keyed_refs_v3" ||
+              _format === "claim_keyed_refs_v4"
                 ? {
                     sourceRefs: unique([
                       ...rest.sourceRefs,
@@ -1304,6 +1356,36 @@ function validateResponses(
       )
         throw new Error("Source review cites unknown independent reading");
       const claim = claims.get(check.claimId)!;
+      if (
+        !plan.legacyProviderFormatForRegression &&
+        check.coverageProof === undefined
+      )
+        throw new Error(
+          "Current source review requires explicit coverage proof",
+        );
+      if (
+        !plan.legacyProviderFormatForRegression &&
+        check.verdict === "supported" &&
+        check.reason !== SOURCE_REVIEW_SUPPORTED_REASON
+      )
+        throw new Error(
+          "Supported source review reason must agree with its structured proof",
+        );
+      if (check.coverageProof !== undefined) {
+        if (
+          claim.kind === "scope_coverage" ||
+          claim.kind === "contract_clause_coverage"
+        )
+          validateCoverageProof({
+            proof: check.coverageProof,
+            ownedSourceRefs: claim.sourceRefs,
+            kind: claim.kind,
+            verdict: check.verdict,
+            draft: JSON.parse(request.prompt).draft,
+          });
+        else if (check.coverageProof.length)
+          throw new Error("Coverage proof belongs only to a coverage claim");
+      }
       if (
         (check.verdict !== "supported" && check.draftQuote === null) ||
         (check.draftQuote !== null && !claim.text.includes(check.draftQuote))

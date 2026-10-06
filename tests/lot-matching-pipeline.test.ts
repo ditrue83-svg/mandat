@@ -1,7 +1,9 @@
 import {
   inventedSourceEvidenceAnswer,
+  inventedCoverageProof,
   inventedReadingRefs,
 } from "./helpers/source-evidence-fixture";
+import { SOURCE_REVIEW_SUPPORTED_REASON } from "../src/lib/source-semantic-review";
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
@@ -172,8 +174,8 @@ function inventedAnswer(prompt: string) {
           draftQuote: claim.text.slice(0, 1200),
           readingRefs: inventedReadingRefs(data, claim),
           verdict: "supported",
-          reason:
-            "Riscontro inventato per verificare il flusso, non il modello.",
+          reason: SOURCE_REVIEW_SUPPORTED_REASON,
+          coverageProof: inventedCoverageProof(data.draft, claim, "supported"),
           sourceRefs: claim.sourceRefs,
         }),
       ),
@@ -459,7 +461,9 @@ it("A rejected semantic review beyond twenty older source-only rows is reused ac
           ...check,
           verdict: index === 0 ? "contradicted" : "supported",
           reason:
-            "Contraddizione inventata per verificare l'arresto del confronto.",
+            index === 0
+              ? "Contraddizione inventata per verificare l'arresto del confronto."
+              : SOURCE_REVIEW_SUPPORTED_REASON,
         }),
       ),
     };

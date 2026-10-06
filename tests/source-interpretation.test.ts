@@ -6,7 +6,7 @@ import {
   SOURCE_INTERPRETATION_VERSION,
   SOURCE_INTERPRETATION_MAX_TOKENS,
   sourceInterpretationTokenLimit,
-  buildSourceInterpretationRequest,
+  buildSourceInterpretationRequest as buildCurrentSourceInterpretationRequest,
   sourceInterpretationKey,
   validateSourceInterpretation,
   recordSourceInterpretation,
@@ -16,6 +16,13 @@ import {
 } from "../src/lib/source-interpretation";
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 import { openaiResponseBody } from "../src/lib/openai-responses";
+
+// Preserve the old wire-contract regression suite explicitly. New generation
+// uses selections v9 and is exercised separately in source-selection.test.ts.
+const buildSourceInterpretationRequest = (input: SourceInterpretationContext) =>
+  buildCurrentSourceInterpretationRequest(input, {
+    legacyProviderFormatForRegression: true,
+  });
 
 test("Classification evidence ownership preserves exact label and code references without borrowing service passages", () => {
   const input = context();

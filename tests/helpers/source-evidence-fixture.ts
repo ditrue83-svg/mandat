@@ -180,3 +180,32 @@ export function inventedReadingRefs(
       .map((c: any) => c.id),
   ];
 }
+
+// Mechanical witnesses for invented fixtures only, never provider repairs.
+export function inventedCoverageProof(draft: any, claim: any, verdict: string) {
+  if (!claim.kind?.endsWith("coverage")) return [];
+  return claim.sourceRefs.map((sourceRef: string) => {
+    const index = draft.details.findIndex((d: any) =>
+      d.sourceRefs.includes(sourceRef),
+    );
+    const witness =
+      index >= 0
+        ? {
+            draftPath: `/details/${index}/explanation`,
+            quote: draft.details[index].explanation,
+          }
+        : draft.summarySourceRefs.includes(sourceRef)
+          ? { draftPath: "/summary", quote: draft.summary }
+          : null;
+    if (witness)
+      return { sourceRef, disposition: "represented", witnesses: [witness] };
+    if (claim.kind === "contract_clause_coverage" && verdict === "supported")
+      throw new Error("Invented mandatory fixture needs a real draft witness");
+    return {
+      sourceRef,
+      disposition:
+        claim.kind === "contract_clause_coverage" ? "missing" : "not_required",
+      witnesses: [],
+    };
+  });
+}

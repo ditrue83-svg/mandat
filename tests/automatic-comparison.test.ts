@@ -1,9 +1,11 @@
 import {
   inventedSourceEvidence,
+  inventedCoverageProof,
   inventedGroundedReviewRequests,
   inventedReadingRefs,
   inventedSourceEvidenceAnswer,
 } from "./helpers/source-evidence-fixture";
+import { sourceEvidencePassages } from "../src/lib/source-evidence-context";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test, vi } from "vitest";
@@ -28,6 +30,7 @@ import {
 } from "../src/lib/source-interpretation";
 import {
   recordSourceSemanticReview,
+  SOURCE_REVIEW_SUPPORTED_REASON,
   type SourceSemanticReviewRecord,
   buildGroundedSourceReviewRequests,
 } from "../src/lib/source-semantic-review";
@@ -214,10 +217,8 @@ function sourceResponse(
   )!.id;
   return {
     status,
-    details: sourceRequest.body.passages
-      .filter((p) =>
-        /\/orderAddress\/(?:cantonId|city)(?:\/|$)/.test(p.rawPath),
-      )
+    details: sourceEvidencePassages(sourceRequest)
+      .filter((p) => sourceRequest.requiredContractClauseIds.includes(p.id))
       .map((p) => ({
         kind: "execution_condition" as const,
         explanation: `Territorio originale del test: ${p.text}.`,
@@ -325,7 +326,10 @@ function sourceReview(
             readingRefs: inventedReadingRefs(body, claim),
             verdict,
             reason:
-              "Giudizio inventato per verificare il flusso, non la qualità AI.",
+              verdict === "supported"
+                ? SOURCE_REVIEW_SUPPORTED_REASON
+                : "Giudizio negativo inventato per verificare il flusso.",
+            coverageProof: inventedCoverageProof(body.draft, claim, verdict),
             sourceRefs: claim.sourceRefs.length
               ? claim.sourceRefs
               : [body.passages[0].id],
@@ -698,8 +702,12 @@ test("A structured subcontract prohibition survives review and stored comparison
             claimId: id,
             verdict: "supported",
             draftQuote: null,
-            reason:
-              "Risposta inventata per verificare la conservazione delle prove.",
+            reason: SOURCE_REVIEW_SUPPORTED_REASON,
+            coverageProof: inventedCoverageProof(
+              body.draft,
+              claim,
+              "supported",
+            ),
             sourceRefs: claim.sourceRefs,
             readingRefs:
               claim.kind === "detail" && claim.sourceRefs.includes(fieldId)
