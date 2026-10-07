@@ -827,7 +827,11 @@ export async function infer(
         .onConflictDoUpdate({ target: settings.key, set: { value: month } });
     throw error;
   }
-  await getDb().delete(settings).where(eq(settings.key, "ai_budget_blocked"));
+  await getDb()
+    .delete(settings)
+    .where(
+      and(eq(settings.key, "ai_budget_blocked"), eq(settings.value, month)),
+    );
   let knownUsage: TokenUsage | null = null;
   try {
     // Preserve the original three-argument contract for legacy transports.

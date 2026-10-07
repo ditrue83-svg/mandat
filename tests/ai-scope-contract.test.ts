@@ -8,6 +8,7 @@ import {
   vi,
 } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
+import { DateTime } from "luxon";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import * as schema from "../src/db/schema";
@@ -18,6 +19,7 @@ vi.mock("@/db", () => ({ getDb: () => context.db }));
 import {
   buildScopeRequest,
   classify,
+  infer,
   parseAiJson,
   validateScope,
 } from "../src/worker/ai";
@@ -540,3 +542,41 @@ it("applica il limite esistente anche fra controllo fonte e scoring", async () =
   expect(settings).toHaveLength(1);
   expect(settings[0].key).toBe("ai_budget_blocked");
 });
+
+it.each(["historical", "current"] as const)(
+  "clears only the current monthly block before a failed AI request (%s marker)",
+  async (period) => {
+    const month = DateTime.now().setZone("Europe/Zurich").toFormat("yyyy-MM");
+    const value = period === "historical" ? "2000-01" : month;
+    await db
+      .insert(schema.settings)
+      .values({ key: "ai_budget_blocked", value });
+    const expected =
+      period === "historical" ? [{ key: "ai_budget_blocked", value }] : [];
+    const complete = vi.fn(async () => {
+      expect(
+        await db
+          .select({ key: schema.settings.key, value: schema.settings.value })
+          .from(schema.settings),
+      ).toEqual(expected);
+      throw new Error("transport interrupted");
+    });
+
+    await expect(
+      infer(publication, "marker-preservation", "public test", 100, {
+        complete,
+      }),
+    ).rejects.toThrow("transport interrupted");
+
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(
+      await db
+        .select({ key: schema.settings.key, value: schema.settings.value })
+        .from(schema.settings),
+    ).toEqual(expected);
+    const usage = await db.select().from(schema.aiUsage);
+    expect(usage).toHaveLength(1);
+    expect(usage[0].costChf).toBeNull();
+    expect(Number(usage[0].reservedChf)).toBeGreaterThan(0);
+  },
+);
