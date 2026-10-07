@@ -1545,6 +1545,7 @@ test("Stored evidence cannot replace the original passage with a reconstructed o
     "source-evidence-reading-v10",
     "source-evidence-reading-v20",
     "source-evidence-reading-v21",
+    "source-evidence-reading-v29",
   ])
     assert.equal(readSourceEvidenceReading({ ...record, version }, plan), null);
 });
