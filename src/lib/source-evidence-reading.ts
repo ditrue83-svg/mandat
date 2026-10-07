@@ -10,7 +10,7 @@ import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v27";
+export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v28";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -307,7 +307,14 @@ export function buildSourceEvidenceReadingRequest(
           requiredClauses.map(({ id }) => [
             id,
             complete
-              ? z.array(clauseSelection).min(1).max(32)
+              ? z
+                  .array(
+                    clauseSelection.extend({
+                      collection: z.enum(["observations", "issues"]),
+                    }),
+                  )
+                  .min(1)
+                  .max(32)
               : z.array(clauseSelection).max(32),
           ]),
         ),
@@ -553,10 +560,10 @@ function materialize(values: unknown[], plan: SourceEvidenceReadingPlan) {
         );
       if (
         selected.coverage === "complete" &&
-        !pointers.some((pointer) => pointer.collection !== "missingDetails")
+        pointers.some((pointer) => pointer.collection === "missingDetails")
       )
         throw new Error(
-          "A required original clause cannot be represented only as an unknown specification",
+          "A required original clause cannot be selected as an unknown specification",
         );
       const seen = new Set<string>();
       for (const pointer of pointers) {

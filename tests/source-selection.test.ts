@@ -316,7 +316,7 @@ test("Parallel short clauses cannot collapse different original wording", () => 
   value.contractClauseDetails.s4[0] = {
     kind: "execution_condition",
     scope: "project_context",
-    explanation: literal,
+    originalText: true,
     sourceRefs: ["s4", "s5"],
   };
   const native = openaiResponseBody(
@@ -333,12 +333,19 @@ test("Parallel short clauses cannot collapse different original wording", () => 
   assert(accepts({ result: value }), JSON.stringify(accepts.errors));
   const record = recordSourceInterpretation(value, request, metadata);
   assert(record.response.details.some((d) => d.explanation === literal));
+  const beforeSource = JSON.stringify(input);
+  const beforeWire = JSON.stringify(value);
+  assert.equal(
+    JSON.stringify(record.response.details).includes("originalText"),
+    false,
+  );
   for (const explanation of [
     de,
     it,
     "Restano riservate la maturità del progetto e la disponibilità dei finanziamenti.",
   ]) {
     const bad = structuredClone(value);
+    delete bad.contractClauseDetails.s4[0].originalText;
     bad.contractClauseDetails.s4[0].explanation = explanation;
     const before = JSON.stringify(bad);
     assert.equal(accepts({ result: bad }), false);
@@ -348,6 +355,22 @@ test("Parallel short clauses cannot collapse different original wording", () => 
     );
     assert.equal(JSON.stringify(bad), before);
   }
+  for (const sourceRefs of [["s4"], ["s4", "s4"], ["s4", "s1"]]) {
+    const bad = structuredClone(value);
+    bad.contractClauseDetails.s4[0].sourceRefs = sourceRefs;
+    assert.throws(
+      () => recordSourceInterpretation(bad, request, metadata),
+      /complete scoped family|Repeated source references/,
+    );
+  }
+  const changed = structuredClone(record.response);
+  changed.details.find((d) => d.sourceRefs.includes("s4"))!.explanation = de;
+  assert.throws(
+    () => validateSourceInterpretation(changed, request),
+    /multilingual detail/,
+  );
+  assert.equal(JSON.stringify(input), beforeSource);
+  assert.equal(JSON.stringify(value), beforeWire);
 });
 
 test("Long parallel clauses retain the reviewed multi-row path without truncation", () => {

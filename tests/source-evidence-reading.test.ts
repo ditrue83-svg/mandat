@@ -79,8 +79,13 @@ test("Known form obligations cannot be covered only by unknown product specifica
   ];
   assert.throws(
     () => recordSourceEvidenceReading(onlyUnknown, plan, metadata),
-    /only as an unknown specification/,
+    /as an unknown specification/,
   );
+  const accepts = new Ajv2020({ strict: false }).compile(
+    plan.requests[index].responseFormat.json_schema.schema,
+  );
+  assert.equal(accepts(onlyUnknown[index]), false);
+  assert(accepts(complete[index]), JSON.stringify(accepts.errors));
   const record = recordSourceEvidenceReading(complete, plan, metadata);
   assert(readSourceEvidenceReading(record, plan)?.accepted);
   assert.equal(

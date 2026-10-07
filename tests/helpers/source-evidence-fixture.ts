@@ -18,7 +18,7 @@ export function inventedClauseSelections(
   return Object.fromEntries(
     required.map((id) => [
       id,
-      ["observations", "missingDetails", "issues"].flatMap((collection) =>
+      ["observations", "issues"].flatMap((collection) =>
         (answer[collection] ?? []).flatMap((row: any, index: number) =>
           row.serviceRef === id ||
           row.evidence.some((e: any) => e.sourceRef === id)

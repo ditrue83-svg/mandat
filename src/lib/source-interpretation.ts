@@ -20,7 +20,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v60";
+  "documentary-source-interpretation-v61";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -790,10 +790,18 @@ const completeProviderResponseSchema = buildProviderResponseSchema(
 // V9 has one owner for each mechanical relationship. The provider selects
 // source spans and classification -> component links; the stored model is
 // populated by exact projection, never by correcting a proposed quotation.
+const selectedContractDetail = z.union([
+  sourceInterpretationResponseSchema.options[0].shape.details.element,
+  sourceInterpretationResponseSchema.options[0].shape.details.element
+    .omit({ explanation: true })
+    .extend({ originalText: z.literal(true) }),
+]);
 function buildSelectionResponseSchema(
   classifications: SourceClassificationContext,
   ...args: Parameters<typeof buildProviderResponseSchema>
 ) {
+  const detail =
+    sourceInterpretationResponseSchema.options[0].shape.details.element;
   const [resolved, uncertain, conflicting] = buildProviderResponseSchema(
     args[0],
     args[1],
@@ -907,6 +915,54 @@ function buildSelectionResponseSchema(
   const common = {
     evidenceFormat: z.literal("source_selections_v14"),
     details,
+    // Short parallel originals are selected, never regenerated. The marker
+    // does not assert their meaning or consistency; review still does that.
+    ...(args[2]?.length === 0
+      ? {}
+      : {
+          contractClauseDetails: args[0]?.contractDetailFamilies
+            ? z.strictObject(
+                Object.fromEntries(
+                  args[0].contractDetailFamilies.map((family) => {
+                    const row = detail.extend({
+                      scope: z.literal(family.scope),
+                      kind:
+                        family.scope === "selected_lot"
+                          ? z.enum([
+                              "missing_specification",
+                              "technical_specification",
+                              "execution_condition",
+                            ])
+                          : detail.shape.kind,
+                      sourceRefs: z
+                        .array(z.enum(family.sourceRefs))
+                        .length(family.sourceRefs.length),
+                      explanation: family.originalScalarExplanation
+                        ? z.literal(family.originalScalarExplanation)
+                        : detail.shape.explanation,
+                    });
+                    return [
+                      family.id,
+                      family.originalMultilingualExplanation
+                        ? z
+                            .array(
+                              row.omit({ explanation: true }).extend({
+                                originalText: z.literal(true),
+                              }),
+                            )
+                            .length(1)
+                        : z.array(row).min(1).max(32),
+                    ];
+                  }),
+                ),
+              )
+            : z
+                .record(
+                  z.string().regex(/^[sf]\d+$/),
+                  z.array(selectedContractDetail).min(1).max(32),
+                )
+                .optional(),
+        }),
   };
   const readings = (settled: boolean) =>
     z.strictObject(
@@ -943,8 +999,40 @@ function decodeSelectionResponse(
     request.classificationContext,
   ).parse(response);
   const { classificationReadingsById, ...rest } = parsed;
+  const contractClauseDetails = Object.fromEntries(
+    Object.entries(rest.contractClauseDetails ?? {}).map(([id, value]) => {
+      const rows = z.array(selectedContractDetail).parse(value);
+      const family = request.contractDetailFamilies.find(
+        (item) => item.id === id,
+      );
+      const literal = family?.originalMultilingualExplanation;
+      if (literal && (rows.length !== 1 || !("originalText" in rows[0])))
+        throw new Error(
+          "Contract multilingual detail requires explicit original text selection",
+        );
+      return [
+        id,
+        rows.map((row) => {
+          if (!("originalText" in row)) return row;
+          if (
+            !literal ||
+            !family ||
+            row.scope !== family.scope ||
+            JSON.stringify([...row.sourceRefs].sort()) !==
+              JSON.stringify([...family.sourceRefs].sort())
+          )
+            throw new Error(
+              "Original contract text selection requires its own complete scoped family",
+            );
+          const { originalText: _selection, ...owned } = row;
+          return { ...owned, explanation: literal };
+        }),
+      ];
+    }),
+  );
   const value = {
     ...rest,
+    contractClauseDetails,
     classificationReadings: request.classificationContext.map((item) => {
       const { ownSourceRef, ...reading } = classificationReadingsById[item.id];
       if (new Set(reading.sourceRefs).size !== reading.sourceRefs.length)
@@ -1643,7 +1731,15 @@ export function buildSourceInterpretationRequest(
             "otherRequirements: conserva separatamente ogni riserva o diritto sul servizio acquistato, inclusi crediti annuali, ulteriori destinatari e acquisto intero, parziale o nullo delle opzioni quando attestati. Dire soltanto che un'opzione è facoltativa non rappresenta le altre proposizioni. Non trasformare destinatari o condizioni del committente in ulteriori prestazioni acquistate.",
           ]
         : []),
-      "classificationContext immutabile: ogni ID una volta, proprie etichette/codici/ambiti. classificationEvidenceOwnership elenca i refs propri: ogni reading ne cita almeno uno; clarifies_domain cita la propria etichetta e compare in meaning.classificationContextIds. Altrimenti broad_context o shared_project_only. Non citare intestazioni CPC sotto CPV o classificazioni diverse. Senza etichetta niente decodifica da memoria; conflicting solo asserti incompatibili.",
+      ...(options.legacyProviderFormatForRegression
+        ? [
+            "classificationContext immutabile: ogni ID una volta, proprie etichette/codici/ambiti. classificationEvidenceOwnership elenca i refs propri: ogni reading ne cita almeno uno; clarifies_domain cita la propria etichetta e compare in meaning.classificationContextIds. Altrimenti broad_context o shared_project_only. Non citare intestazioni CPC sotto CPV o classificazioni diverse. Senza etichetta niente decodifica da memoria; conflicting solo asserti incompatibili.",
+          ]
+        : [
+            "classificationContext immutabile: ogni ID una volta, proprie etichette/codici/ambiti. Ogni reading cita un ref proprio; clarifies_domain cita la propria etichetta e collega una componente. Altrimenti broad_context o shared_project_only. Non citare CPC sotto CPV o classificazioni diverse. Senza etichetta niente decodifica da memoria. Nomi diversi non provano conflitto: una categoria di servizio complessivo non esclude un lavoro specifico. Per source_conflict cita due caratteristiche o obblighi incompatibili sullo stesso oggetto; la sola differenza tra etichetta ampia e prestazione esplicita resta contesto, non impedimento.",
+            "Sintesi: lavoro acquistato e ambito, con prove proprie. Le date, durate, scadenze e istruzioni amministrative restano nei campi originali o nei dettagli richiesti, non nella sintesi. Le date di contratto e di esecuzione sono fatti distinti anche quando coincidono.",
+            "Clausole con originalMultilingualExplanation: seleziona originalText true con tutti i riferimenti propri e lo scope richiesto. Il codice conserva ogni formulazione originale integrale; non restituire explanation, traduzioni o conclusioni sulla compatibilità. Le clausole lunghe conservano il percorso a più righe e la revisione del significato.",
+          ]),
       "meaning identifica l'oggetto nel suo dominio: evidence cita prove non classificatorie; classificationContextIds riporta le classificazioni usate. Non basta ripetere o tradurre un termine ambiguo: disambigua con le etichette originali, senza scegliere settori esterni o dichiarare errata la classificazione per salvare un'ipotesi. explicit_text si fonda sul testo; text_with_classification_context richiede un'etichetta del target. Solo per un lotto senza classificazioni proprie può usare un'etichetta condivisa insieme a prove locali del significato. Famiglie classificatorie non provano equivalenza, capacità o ammissibilità.",
       "meaning.objectText/actionText: citazioni letterali, inclusi articoli/preposizioni/iniziali/punteggiatura, mai riscrittura grammaticale. Scegli estratti più brevi se necessario. Localizzazione nei soli evidence, attraverso frammenti contigui della stessa fonte/campo/ambito, tutti citati. Spiegazioni classificatorie: solo proprie etichette citate.",
       ...(evidenceGroups.length
