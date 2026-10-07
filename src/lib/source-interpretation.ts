@@ -1,3 +1,4 @@
+import { structuredOutputSchema } from "./structured-output-schema";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { stableDocumentaryJson } from "./documentary-observation";
@@ -19,7 +20,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v54";
+  "documentary-source-interpretation-v55";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -528,6 +529,7 @@ function originalScalarExplanation(rawPath: string, value: unknown) {
 // precise supporting references are located locally within that selection.
 function buildProviderResponseSchema(
   bounds?: Parameters<typeof buildResponseSchema>[0] & {
+    classificationReference?: z.ZodType<string>;
     detailReferenceIdsByScope?: Partial<
       Record<z.infer<typeof scope>, readonly string[]>
     >;
@@ -747,6 +749,7 @@ const providerResponseSchema = buildProviderResponseSchema();
 // source spans and classification -> component links; the stored model is
 // populated by exact projection, never by correcting a proposed quotation.
 function buildSelectionResponseSchema(
+  classifications: SourceClassificationContext,
   ...args: Parameters<typeof buildProviderResponseSchema>
 ) {
   const [resolved, uncertain, conflicting] = buildProviderResponseSchema(
@@ -791,23 +794,55 @@ function buildSelectionResponseSchema(
       meaning,
     }),
   ]);
-  const componentIndexes = (minimum: number) =>
-    z.array(z.number().int().min(0).max(63)).min(minimum).max(64);
-  const links = (uses: readonly [string, ...string[]]) =>
-    z.union([
-      resolved.shape.classificationReadings.element.extend({
-        sourceRefs:
-          resolved.shape.classificationReadings.element.shape.sourceRefs.describe(
-            "Cita la propria etichetta; componentIndexes collega le prestazioni concrete chiarite.",
-          ),
-        use: z.literal("clarifies_domain"),
-        componentIndexes: componentIndexes(1),
-      }),
-      uncertain.shape.classificationReadings.element.extend({
-        use: z.enum(uses),
-        componentIndexes: componentIndexes(0),
-      }),
-    ]);
+  const optionalComponentIndexes = z
+    .array(z.number().int().min(0).max(63))
+    .max(64);
+  const requiredComponentIndexes = z
+    .array(z.number().int().min(0).max(63))
+    .min(1)
+    .max(64);
+  const additionalClassificationRefs = z
+    .array(args[0]?.classificationReference ?? sourceId)
+    .max(32);
+  const links = (
+    item: SourceClassificationContext[number],
+    settled: boolean,
+  ) => {
+    const labelRefs = [
+      ...new Set(item.labels.flatMap((label) => label.sourceRefs)),
+    ];
+    const ownRefs = [
+      ...new Set([...(item.code?.sourceRefs ?? []), ...labelRefs]),
+    ];
+    if (!ownRefs.length)
+      throw new Error("Classification requires original evidence");
+    const baseReading = uncertain.shape.classificationReadings.element
+      .omit({ classificationId: true, sourceRefs: true })
+      .extend({
+        ownSourceRef: z.enum(ownRefs),
+        sourceRefs: additionalClassificationRefs,
+      });
+    const broad = baseReading.extend({
+      use: z.enum([
+        "broad_context",
+        ...(item.appliesTo === "shared_project_context"
+          ? ["shared_project_only" as const]
+          : []),
+        ...(!settled ? ["unresolved" as const, "conflicting" as const] : []),
+      ]),
+      componentIndexes: optionalComponentIndexes,
+    });
+    return labelRefs.length
+      ? z.union([
+          baseReading.extend({
+            use: z.literal("clarifies_domain"),
+            ownSourceRef: z.enum(labelRefs),
+            componentIndexes: requiredComponentIndexes,
+          }),
+          broad,
+        ])
+      : broad;
+  };
   const details = z
     .array(
       z.strictObject({
@@ -824,50 +859,58 @@ function buildSelectionResponseSchema(
     .describe(
       "Estratti originali aggiuntivi; il codice copia testo e riferimenti, senza traduzioni o affermazioni di assenza.",
     );
-  const common = { evidenceFormat: z.literal("source_selections_v9"), details };
+  const common = {
+    evidenceFormat: z.literal("source_selections_v10"),
+    details,
+  };
   const readings = (settled: boolean) =>
-    z
-      .array(
-        links(
-          settled
-            ? ["broad_context", "shared_project_only"]
-            : [
-                "broad_context",
-                "shared_project_only",
-                "unresolved",
-                "conflicting",
-              ],
-        ),
-      )
-      .min(args[0]?.classificationCount ?? 0)
-      .max(args[0]?.classificationCount ?? 1024);
+    z.strictObject(
+      Object.fromEntries(
+        classifications.map((item) => [item.id, links(item, settled)]),
+      ),
+    );
   return z.discriminatedUnion("status", [
-    resolved.extend({
+    resolved.omit({ classificationReadings: true }).extend({
       ...common,
       components: z.array(known).min(1).max(64),
-      classificationReadings: readings(true),
+      classificationReadingsById: readings(true),
     }),
-    uncertain.extend({
+    uncertain.omit({ classificationReadings: true }).extend({
       ...common,
       components: z.array(any).max(64),
-      classificationReadings: readings(false),
+      classificationReadingsById: readings(false),
     }),
-    conflicting.extend({
+    conflicting.omit({ classificationReadings: true }).extend({
       ...common,
       components: z.array(any).max(64),
-      classificationReadings: readings(false),
+      classificationReadingsById: readings(false),
     }),
   ]);
 }
-const selectionResponseSchema = buildSelectionResponseSchema();
 
 function decodeSelectionResponse(
   response: unknown,
   request: SourceInterpretationRequest,
 ) {
-  if (request.providerFormat !== "source_selections_v9")
+  if (request.providerFormat !== "source_selections_v10")
     throw new Error("Source provider protocol does not match its request");
-  const value = selectionResponseSchema.parse(response);
+  const parsed = buildSelectionResponseSchema(
+    request.classificationContext,
+  ).parse(response);
+  const { classificationReadingsById, ...rest } = parsed;
+  const value = {
+    ...rest,
+    classificationReadings: request.classificationContext.map((item) => {
+      const { ownSourceRef, ...reading } = classificationReadingsById[item.id];
+      if (new Set(reading.sourceRefs).size !== reading.sourceRefs.length)
+        throw new Error("Classification repeats source evidence");
+      return {
+        ...reading,
+        classificationId: item.id,
+        sourceRefs: [...new Set([ownSourceRef, ...reading.sourceRefs])],
+      };
+    }),
+  };
   const originals = sourceEvidencePassages(request);
   const groups = componentEvidenceGroups(request.body.passages);
   const selections = value.components.map((component) => {
@@ -1027,7 +1070,7 @@ function decodeProviderResponse(
     return response;
   if (
     (response as { evidenceFormat?: string }).evidenceFormat ===
-    "source_selections_v9"
+    "source_selections_v10"
   )
     return decodeSelectionResponse(response, request);
   if (request.providerFormat !== "component_quotations_v8")
@@ -1463,9 +1506,9 @@ export function buildSourceInterpretationRequest(
       ? {}
       : {
           acceptancePolicy: RADAR_ACCEPTANCE_POLICY,
-          evidenceProtocol: "source_selections_v9",
+          evidenceProtocol: "source_selections_v10",
           selectionRules:
-            "actionSelection/objectSelection selezionano sourceRef sN/gN e startUtf16/endUtf16 relativi al testo originale (gruppo: concatenazione contigua), fine esclusa, massimo 600 caratteri. Non restituire actionText/objectText: il codice copia esattamente la selezione. La prova selezionata deve appartenere a evidence e allo scope del ruolo. classificationReadings.componentIndexes (indici da zero) è l’unico collegamento al significato delle componenti; clarifies_domain richiede almeno una componente concreta e la propria etichetta. Non restituire meaning.classificationContextIds. details aggiuntivi: soltanto estratti originali quoteSelection e kind/scope, mai parafrasi o duplicati di contractClauseDetails. Solo ambiguità materiali restano nelle issues; specifiche non indicate non diventano issues. Non inventare fatti assenti.",
+            "actionSelection/objectSelection selezionano sourceRef sN/gN e startUtf16/endUtf16 relativi al testo originale (gruppo: concatenazione contigua), fine esclusa, massimo 600 caratteri. Non restituire actionText/objectText: il codice copia esattamente la selezione. La prova selezionata deve appartenere a evidence e allo scope del ruolo. classificationReadingsById richiede ogni ID come chiave. ownSourceRef seleziona una propria etichetta o codice; sourceRefs aggiunge eventuali controprove. Solo classificazioni di progetto condivise ammettono shared_project_only. componentIndexes (indici da zero) è l’unico collegamento al significato delle componenti; clarifies_domain richiede almeno una componente concreta e la propria etichetta. Non restituire meaning.classificationContextIds. details aggiuntivi: soltanto estratti originali quoteSelection e kind/scope, mai parafrasi o duplicati di contractClauseDetails. Solo ambiguità materiali restano nelle issues; specifiche non indicate non diventano issues. Non inventare fatti assenti.",
         }),
     task: "Identifica l'acquisto del target: sintesi neutrale, componenti distinte e prove esatte, prima del confronto aziendale.",
     // Keep the required identifiers visible independently of long notes.
@@ -1584,7 +1627,7 @@ export function buildSourceInterpretationRequest(
               )
               .replace(
                 "classificationContextIds riporta le classificazioni usate",
-                "classificationReadings.componentIndexes collega le classificazioni usate",
+                "classificationReadingsById.componentIndexes collega le classificazioni usate",
               )
               .replace(
                 "gN solo in components.evidence; altrove sN/fN originali",
@@ -1626,20 +1669,22 @@ export function buildSourceInterpretationRequest(
   const boundedClassificationId = classificationContext.length
     ? z.enum(classificationContext.map((item) => item.id))
     : classificationId;
-  const providerSchema = buildProviderResponseSchema;
+  const providerSchema = options.legacyProviderFormatForRegression
+    ? buildProviderResponseSchema
+    : (...args: Parameters<typeof buildProviderResponseSchema>) =>
+        buildSelectionResponseSchema(classificationContext, ...args);
   const responseFormat: AutomaticResponseFormat = {
     type: "json_schema",
     json_schema: {
       name: "documentary_source_interpretation",
       strict: true,
-      schema: z.toJSONSchema(
-        (options.legacyProviderFormatForRegression
-          ? providerSchema
-          : buildSelectionResponseSchema)(
+      schema: structuredOutputSchema(
+        providerSchema(
           {
             refs: boundedRefs,
             detailRefs: boundedDetailRefs,
             classificationId: boundedClassificationId,
+            classificationReference: boundedReference,
             classificationCount: classificationContext.length,
             targetRef: z.enum(targets),
             targetScope,
@@ -1666,9 +1711,6 @@ export function buildSourceInterpretationRequest(
             : boundedReference,
           requiredContractClauses.map(({ id }) => ({ id })),
         ),
-        // Repeated reference enums share a JSON Schema definition. Preserve
-        // their exact bounds without charging the long source multiple copies.
-        { reused: "ref" },
       ),
     },
   };
@@ -1691,7 +1733,7 @@ export function buildSourceInterpretationRequest(
     selectedIds: body.passages.map((passage) => passage.id),
     providerFormat: options.legacyProviderFormatForRegression
       ? "component_quotations_v8"
-      : "source_selections_v9",
+      : "source_selections_v10",
     version: SOURCE_INTERPRETATION_VERSION,
     sourceKey,
     inputHash: digest({

@@ -1,6 +1,12 @@
+import { structuredOutputSchema } from "./structured-output-schema";
 import { RADAR_ACCEPTANCE_POLICY } from "./radar-acceptance-policy";
 import {
   coverageProofSchema,
+  bindCoverageWitnesses,
+  coverageSelectionSchema,
+  coverageHasWitnesses,
+  projectCoverageSelection,
+  type CoverageBinding,
   validateCoverageProof,
 } from "./source-coverage-proof";
 import { createHash } from "node:crypto";
@@ -27,7 +33,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v54";
+  "documentary-source-semantic-review-v55";
 export const SOURCE_REVIEW_SUPPORTED_REASON =
   "Le prove indicate sostengono il claim; coverageProof distingue fatti rappresentati e dati facoltativi.";
 const MAX_BYTES = 160_000;
@@ -83,6 +89,7 @@ type ResponseBounds = {
   ownedScopeCoverageIds: string[];
   evidenceHash?: string;
   readingIds?: string[];
+  coverageBindings?: CoverageBinding[];
   claimReadingGroups?: {
     claimIds: string[];
     readingIds: string[];
@@ -101,6 +108,16 @@ const checkShape = z.strictObject({
     .min(1)
     .max(1024),
 });
+// This local view supplies stable types after the per-request strict schema
+// has validated the actual keys, ownership and verdict-dependent selection.
+const providerCheckValue = checkShape
+  .omit({ claimId: true, readingRefs: true })
+  .extend({
+    sourceRefs: z.array(z.string().regex(/^[sf]\d+$/)).max(1024),
+    readingRefs: checkShape.shape.readingRefs.optional(),
+    readingRefsById: z.record(z.string(), z.boolean()).optional(),
+    coverageBySource: z.unknown().optional(),
+  });
 const findingShape = z.strictObject({
   kind: findingKind,
   reason: text(600),
@@ -119,7 +136,8 @@ function providerResponseSchema(
     | "claim_keyed_v1"
     | "claim_keyed_refs_v2"
     | "claim_keyed_refs_v3"
-    | "claim_keyed_refs_v4" = "claim_keyed_v1",
+    | "claim_keyed_refs_v4"
+    | "claim_keyed_refs_v5" = "claim_keyed_v1",
 ) {
   const keyedReadings = format !== "claim_keyed_v1";
   // References identify a set. Its cardinality bounds the wire response while
@@ -133,7 +151,9 @@ function providerResponseSchema(
   // below; the canonical response still requires nonempty, unique evidence.
   const references = boundedRefs(bounds.sourceIds);
   const checkReferences =
-    format === "claim_keyed_refs_v3" || format === "claim_keyed_refs_v4"
+    format === "claim_keyed_refs_v3" ||
+    format === "claim_keyed_refs_v4" ||
+    format === "claim_keyed_refs_v5"
       ? boundedRefs(bounds.sourceIds, 0)
       : references;
   // A keyed selection represents each available reference exactly once.
@@ -169,11 +189,15 @@ function providerResponseSchema(
       // selected passage for that detail. Keep all independent evidence
       // available for criticism, including counterevidence elsewhere.
       schema:
-        group.supportedReadingIds || format === "claim_keyed_refs_v4"
+        group.supportedReadingIds ||
+        format === "claim_keyed_refs_v4" ||
+        format === "claim_keyed_refs_v5"
           ? z.union([
               schema.extend({
                 verdict: z.literal("supported"),
-                ...(format === "claim_keyed_refs_v4"
+                ...(["claim_keyed_refs_v4", "claim_keyed_refs_v5"].includes(
+                  format,
+                )
                   ? {
                       reason: z.literal(SOURCE_REVIEW_SUPPORTED_REASON),
                     }
@@ -220,10 +244,30 @@ function providerResponseSchema(
     checksFormat: z.literal(format),
     checksByClaim: z.strictObject(
       Object.fromEntries(
-        bounds.claimIds.map((id) => [
-          id,
-          groups?.find((group) => group.ids.includes(id))?.schema ?? common,
-        ]),
+        bounds.claimIds.map((id) => {
+          const check =
+            groups?.find((group) => group.ids.includes(id))?.schema ?? common;
+          if (format !== "claim_keyed_refs_v5") return [id, check] as const;
+          const binding = bounds.coverageBindings?.find(
+            (b) => b.claimId === id,
+          );
+          const unproved = {
+            coverageBySource: coverageSelectionSchema(binding),
+          };
+          if (!(check instanceof z.ZodUnion))
+            return [id, check.extend(unproved)] as const;
+          const criticised = check.options[1].extend(unproved);
+          if (!coverageHasWitnesses(binding)) return [id, criticised] as const;
+          return [
+            id,
+            z.union([
+              check.options[0].extend({
+                coverageBySource: coverageSelectionSchema(binding, true),
+              }),
+              criticised,
+            ]),
+          ] as const;
+        }),
       ),
     ),
   });
@@ -1081,12 +1125,29 @@ export function buildGroundedSourceReviewRequests(
         group.claimIds.push(claim.id);
         readingGroups.set(key, group);
       }
+      const coverageBindings = plan.claims
+        .filter((c) => request.assignedClaimIds.includes(c.id))
+        .flatMap((claim) =>
+          claim.kind === "scope_coverage" ||
+          claim.kind === "contract_clause_coverage"
+            ? [
+                bindCoverageWitnesses(
+                  {
+                    claimId: claim.id,
+                    kind: claim.kind,
+                    sourceRefs: claim.sourceRefs,
+                  },
+                  JSON.parse(request.prompt).draft,
+                ),
+              ]
+            : [],
+        );
       const responseFormat: AutomaticResponseFormat = {
         type: "json_schema",
         json_schema: {
           name: "source_semantic_review",
           strict: true,
-          schema: z.toJSONSchema(
+          schema: structuredOutputSchema(
             providerResponseSchema(
               {
                 id: request.id,
@@ -1097,12 +1158,12 @@ export function buildGroundedSourceReviewRequests(
                 evidenceHash: independent.hash,
                 readingIds,
                 claimReadingGroups: [...readingGroups.values()],
+                coverageBindings,
               },
               plan.legacyProviderFormatForRegression
                 ? "claim_keyed_refs_v3"
-                : "claim_keyed_refs_v4",
+                : "claim_keyed_refs_v5",
             ),
-            { reused: "ref" },
           ),
         },
       };
@@ -1118,12 +1179,12 @@ export function buildGroundedSourceReviewRequests(
           ? {}
           : {
               coverageProofRule:
-                "Per ogni claim scope_coverage/contract_clause_coverage, coverageProof contiene ESATTAMENTE una riga per ciascun sourceRef assegnato. represented richiede witnesses con draftPath e quote letterale del campo del draft che cita quel sourceRef; le clausole obbligatorie devono citare details. Non copiare la fonte come prova di presenza nel draft. not_required indica solo un dato amministrativo facoltativo o un originale senza nuova prestazione/limite, mai una clausola obbligatoria; missing indica una prestazione/condizione richiesta assente e vieta supported. Per gli altri claim coverageProof=[]. I witness provano presenza e provenienza, non equivalenza o completezza: verifica ogni proposizione. Le ragioni devono concordare con queste disposizioni; mai dichiarare conservata una data precisa mostrando soltanto una durata stimata.",
+                "coverageBySource richiede ogni sourceRef assegnato come chiave. represented seleziona draftPaths fra quelli consentiti: il codice copia il testo esatto del campo, senza aggiungere o correggere prove. Scegli soltanto campi che esprimono davvero il fatto e tutti i suoi limiti; la presenza della citazione non prova equivalenza o completezza. Le clausole obbligatorie richiedono details. not_required vale solo per dati amministrativi facoltativi o originali senza nuova prestazione/limite; missing indica una prestazione/condizione richiesta assente e vieta supported. Per gli altri claim coverageBySource={}. Non restituire quote o coverageProof. Non dichiarare conservata una data precisa mostrando soltanto una durata stimata.",
             }),
         referenceSelectionFormat: {
           checksFormat: plan.legacyProviderFormatForRegression
             ? "claim_keyed_refs_v3"
-            : "claim_keyed_refs_v4",
+            : "claim_keyed_refs_v5",
           rule: "readingRefsById richiede una chiave booleana per ogni ID previsto: true seleziona una prova, false la lascia inutilizzata. Seleziona almeno una prova. Per o-sN/o-fN il codice collega il sourceRef originale del fatto scelto: non serve ripeterlo in sourceRefs. Cita in sourceRefs le altre prove necessarie. Nessuna nuova chiave o readingRefs. Ambito, significato e sostegno proprio del claim restano da verificare; il collegamento non assegna verdetti.",
         },
         sourceEvidenceHash: independent.hash,
@@ -1190,6 +1251,7 @@ export function buildGroundedSourceReviewRequests(
         readingIds,
         originalFacts,
         claimReadingGroups: [...readingGroups.values()],
+        coverageBindings,
       };
     }),
   );
@@ -1227,7 +1289,7 @@ function validateResponses(
       if (
         !plan.legacyProviderFormatForRegression &&
         (!("checksFormat" in value) ||
-          value.checksFormat !== "claim_keyed_refs_v4")
+          value.checksFormat !== "claim_keyed_refs_v5")
       )
         throw new Error(
           "Source review provider protocol does not match its request",
@@ -1246,19 +1308,36 @@ function validateResponses(
           evidenceHash: independent.hash,
           readingIds: request.readingIds,
           claimReadingGroups: request.claimReadingGroups,
+          coverageBindings: request.coverageBindings,
         },
         "checksFormat" in value &&
           (value.checksFormat === "claim_keyed_refs_v2" ||
             value.checksFormat === "claim_keyed_refs_v3" ||
-            value.checksFormat === "claim_keyed_refs_v4")
+            value.checksFormat === "claim_keyed_refs_v4" ||
+            value.checksFormat === "claim_keyed_refs_v5")
           ? value.checksFormat
           : "claim_keyed_v1",
       ).parse(value);
       return responseShape.parse({
         ...header,
         checks: request.assignedClaimIds.map((claimId) => {
-          const check = checksByClaim[claimId];
-          if ("readingRefsById" in check) {
+          const raw = providerCheckValue.parse(checksByClaim[claimId]);
+          const check =
+            "coverageBySource" in raw
+              ? (() => {
+                  const { coverageBySource, ...rest } = raw;
+                  return {
+                    ...rest,
+                    coverageProof: projectCoverageSelection(
+                      coverageBySource,
+                      request.coverageBindings.find(
+                        (b) => b.claimId === claimId,
+                      ),
+                    ),
+                  };
+                })()
+              : raw;
+          if (check.readingRefsById) {
             const { readingRefsById, ...rest } = check;
             if (new Set(rest.sourceRefs).size !== rest.sourceRefs.length)
               throw new Error("Source review repeats source evidence");
@@ -1272,7 +1351,8 @@ function validateResponses(
               // original facts. Legacy wires and stored responses stay strict.
               // Ownership, scope and semantic guards still run below.
               ...(_format === "claim_keyed_refs_v3" ||
-              _format === "claim_keyed_refs_v4"
+              _format === "claim_keyed_refs_v4" ||
+              _format === "claim_keyed_refs_v5"
                 ? {
                     sourceRefs: unique([
                       ...rest.sourceRefs,

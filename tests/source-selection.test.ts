@@ -108,7 +108,7 @@ const span = (sourceRef: string, startUtf16: number, endUtf16: number) => ({
 });
 function wire(input = context()): any {
   return {
-    evidenceFormat: "source_selections_v9",
+    evidenceFormat: "source_selections_v10",
     status: "resolved",
     targetRef: "s1",
     summary: "Revisione del progetto definitivo.",
@@ -132,15 +132,15 @@ function wire(input = context()): any {
         },
       },
     ],
-    classificationReadings: [
-      {
-        classificationId: "c1",
+    classificationReadingsById: {
+      c1: {
+        ownSourceRef: "s2",
         use: "clarifies_domain",
-        sourceRefs: ["s2"],
+        sourceRefs: [],
         explanation: "Etichetta originale relativa alla progettazione.",
         componentIndexes: [0],
       },
-    ],
+    },
     details: [
       {
         kind: "execution_condition",
@@ -162,7 +162,7 @@ function wire(input = context()): any {
   };
 }
 
-test("V9 copies the original preposition and has one classification-to-component link", () => {
+test("V10 copies the original preposition and has one classification-to-component link", () => {
   const input = context(),
     request = buildSourceInterpretationRequest(input),
     value = wire(input);
@@ -196,7 +196,7 @@ test("V9 copies the original preposition and has one classification-to-component
       v.components[0].meaning.objectText = "il progetto definitivo";
     },
     (v: any) => {
-      v.classificationReadings[0].componentIndexes = [];
+      v.classificationReadingsById.c1.componentIndexes = [];
     },
     (v: any) => {
       v.details[0].explanation = "Senza visita l'offerta non sarà considerata.";
@@ -209,7 +209,7 @@ test("V9 copies the original preposition and has one classification-to-component
   }
   for (const indexes of [[1], [0, 0]]) {
     const bad = structuredClone(value);
-    bad.classificationReadings[0].componentIndexes = indexes;
+    bad.classificationReadingsById.c1.componentIndexes = indexes;
     assert.throws(
       () => recordSourceInterpretation(bad, request, metadata),
       /distinct existing component/,
@@ -403,7 +403,7 @@ test("A source date cannot masquerade as a date preserved in the draft; optional
   );
 });
 
-test("Production review V4 requires explicit coverage proof and cannot emit the false positive preservation reason", () => {
+test("Production review V5 requires explicit coverage proof and cannot emit the false positive preservation reason", () => {
   const input = context(),
     request = buildSourceInterpretationRequest(input);
   const draft = recordSourceInterpretation(wire(input), request, metadata);
@@ -419,7 +419,7 @@ test("Production review V4 requires explicit coverage proof and cannot emit the 
       sourceEvidenceHash: body.sourceEvidenceHash,
       coverage: "complete",
       findings: [],
-      checksFormat: "claim_keyed_refs_v4",
+      checksFormat: "claim_keyed_refs_v5",
       checksByClaim: Object.fromEntries(
         r.assignedClaimIds.map((id) => {
           const claim = plan.claims.find((c) => c.id === id)!;
@@ -471,7 +471,15 @@ test("Production review V4 requires explicit coverage proof and cannot emit the 
                   readings.includes(ref),
                 ]),
               ),
-              coverageProof: proof,
+              coverageBySource: Object.fromEntries(
+                proof.map((row) => [
+                  row.sourceRef,
+                  {
+                    disposition: row.disposition,
+                    draftPaths: row.witnesses.map((w) => w.draftPath),
+                  },
+                ]),
+              ),
             },
           ];
         }),
@@ -479,17 +487,45 @@ test("Production review V4 requires explicit coverage proof and cannot emit the 
     };
   });
   requests.forEach((r, index) => {
+    const native = openaiResponseBody(
+      "gpt-6-luna",
+      r.system,
+      r.prompt,
+      r.maxTokens,
+      r.responseFormat,
+    );
     const accepts = new Ajv2020({ strict: false }).compile(
-      r.responseFormat.json_schema.schema,
+      native.text!.format.schema,
     );
     assert(accepts(responses[index]), JSON.stringify(accepts.errors));
     const bad = structuredClone(responses[index]);
     const check: any = Object.values(bad.checksByClaim).find(
-      (c: any) => c.coverageProof.length,
+      (c: any) => Object.keys(c.coverageBySource).length,
     );
     check.reason =
       "Le date precise sono conservate nei dettagli o nel summary.";
     assert(!accepts(bad));
+    const missing = structuredClone(responses[index]);
+    const mandatory = plan.claims.find(
+      (c) =>
+        r.assignedClaimIds.includes(c.id) &&
+        c.kind === "contract_clause_coverage",
+    );
+    if (mandatory) {
+      const claim: any = missing.checksByClaim[mandatory.id];
+      const original = structuredClone(claim.coverageBySource);
+      claim.coverageBySource = {};
+      assert.equal(accepts(missing), false);
+      claim.coverageBySource = original;
+      const ref = mandatory.sourceRefs[0];
+      claim.coverageBySource[ref] = { disposition: "missing", draftPaths: [] };
+      assert.equal(accepts(missing), false);
+      claim.coverageBySource[ref] = {
+        disposition: "not_required",
+        draftPaths: [],
+      };
+      assert.equal(accepts(missing), false);
+    }
   });
   assert.doesNotThrow(() =>
     recordSourceSemanticReview(responses, plan, {
@@ -500,14 +536,112 @@ test("Production review V4 requires explicit coverage proof and cannot emit the 
   const bad = structuredClone(responses);
   const check: any = bad
     .flatMap((r) => Object.values(r.checksByClaim))
-    .find((c: any) => c.coverageProof.length);
-  check.coverageProof = [];
+    .find((c: any) => Object.keys(c.coverageBySource).length);
+  check.coverageBySource = {};
   assert.throws(
     () =>
       recordSourceSemanticReview(bad, plan, {
         ...metadata,
         sourceEvidence: evidence,
       }),
-    /every owned source/,
+    /./,
   );
+});
+
+test("Classification selections bind every ID to its own label and target scope on the wire", () => {
+  const input = context();
+  const withCpc = {
+    ...input,
+    body: {
+      ...input.body,
+      passages: [
+        ...input.body.passages,
+        {
+          ...passage(
+            "s5",
+            "CPC: altri servizi",
+            "/procurement/cpcCode/label/it",
+          ),
+          role: "context" as const,
+        },
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(withCpc);
+  const original = wire(withCpc);
+  const native = openaiResponseBody(
+    "gpt-6-luna",
+    request.system,
+    request.prompt,
+    request.maxTokens,
+    request.responseFormat,
+  );
+  const accepts = new Ajv2020({ strict: false }).compile(
+    native.text!.format.schema,
+  );
+  assert(accepts({ result: original }));
+  for (const mutate of [
+    (v: any) => {
+      v.classificationReadingsById.c1.ownSourceRef = "s5";
+    },
+    (v: any) => {
+      v.classificationReadingsById.c1.use = "shared_project_only";
+    },
+    (v: any) => {
+      delete v.classificationReadingsById.c1;
+    },
+    (v: any) => {
+      v.classificationReadingsById.c2 = { ...v.classificationReadingsById.c1 };
+    },
+    (v: any) => {
+      v.evidenceFormat = "source_selections_v9";
+    },
+  ]) {
+    const bad = structuredClone(original);
+    mutate(bad);
+    assert(!accepts({ result: bad }));
+    assert.throws(() => recordSourceInterpretation(bad, request, metadata));
+  }
+  const broad = structuredClone(original);
+  broad.classificationReadingsById.c1.use = "broad_context";
+  broad.classificationReadingsById.c1.componentIndexes = [];
+  broad.components[0].meaning.basis = "explicit_text";
+  assert(accepts({ result: broad }));
+  const result = recordSourceInterpretation(broad, request, metadata);
+  assert.deepEqual(result.response.classificationReadings[0].sourceRefs, [
+    "s2",
+  ]);
+  assert.equal(result.response.classificationReadings[0].use, "broad_context");
+});
+
+test("No classification keys are invented when the source has no classification metadata", () => {
+  const original = context();
+  const input = {
+    ...original,
+    body: { ...original.body, classifications: [] },
+  };
+  const request = buildSourceInterpretationRequest(input),
+    value = wire(input);
+  value.classificationReadingsById = {};
+  value.components[0].meaning.basis = "explicit_text";
+  const native = openaiResponseBody(
+    "gpt-6-luna",
+    request.system,
+    request.prompt,
+    request.maxTokens,
+    request.responseFormat,
+  );
+  const accepts = new Ajv2020({ strict: false }).compile(
+    native.text!.format.schema,
+  );
+  assert.equal(accepts({ result: value }), true);
+  const record = recordSourceInterpretation(value, request, metadata);
+  assert.deepEqual(record.response.classificationReadings, []);
+  assert.deepEqual(
+    record.response.components[0].meaning.classificationContextIds,
+    [],
+  );
+  value.classificationReadingsById.c1 = wire().classificationReadingsById.c1;
+  assert.equal(accepts({ result: value }), false);
+  assert.throws(() => recordSourceInterpretation(value, request, metadata));
 });
