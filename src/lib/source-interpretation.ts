@@ -20,7 +20,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v61";
+  "documentary-source-interpretation-v62";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -633,7 +633,7 @@ function buildProviderResponseSchema(
     detail.extend({
       scope: z.literal(value as z.infer<typeof scope>),
       kind:
-        value === "selected_lot"
+        value === "selected_lot" || bounds?.targetScope === "project_context"
           ? z.enum([
               "missing_specification",
               "technical_specification",
@@ -678,7 +678,8 @@ function buildProviderResponseSchema(
     detail.extend({
       scope: z.literal(family.scope),
       kind:
-        family.scope === "selected_lot"
+        family.scope === "selected_lot" ||
+        bounds?.targetScope === "project_context"
           ? z.enum([
               "missing_specification",
               "technical_specification",
@@ -719,7 +720,8 @@ function buildProviderResponseSchema(
                 detail.extend({
                   scope: z.literal(family.scope),
                   kind:
-                    family.scope === "selected_lot"
+                    family.scope === "selected_lot" ||
+                    bounds?.targetScope === "project_context"
                       ? z.enum([
                           "missing_specification",
                           "technical_specification",
@@ -896,17 +898,23 @@ function buildSelectionResponseSchema(
         ])
       : broad;
   };
+  const selectedDetail = z.strictObject({
+    kind: z.enum([
+      "technical_specification",
+      "execution_condition",
+      "shared_project_context",
+    ]),
+    scope,
+    quoteSelection: sourceTextSelectionSchema,
+  });
   const details = z
     .array(
-      z.strictObject({
-        kind: z.enum([
-          "technical_specification",
-          "execution_condition",
-          "shared_project_context",
-        ]),
-        scope,
-        quoteSelection: sourceTextSelectionSchema,
-      }),
+      args[0]?.targetScope === "project_context"
+        ? selectedDetail.extend({
+            scope: z.literal("project_context"),
+            kind: z.enum(["technical_specification", "execution_condition"]),
+          })
+        : selectedDetail,
     )
     .max(32)
     .describe(
@@ -927,7 +935,8 @@ function buildSelectionResponseSchema(
                     const row = detail.extend({
                       scope: z.literal(family.scope),
                       kind:
-                        family.scope === "selected_lot"
+                        family.scope === "selected_lot" ||
+                        args[0]?.targetScope === "project_context"
                           ? z.enum([
                               "missing_specification",
                               "technical_specification",

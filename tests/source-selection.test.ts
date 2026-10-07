@@ -373,6 +373,39 @@ test("Parallel short clauses cannot collapse different original wording", () => 
   assert.equal(JSON.stringify(value), beforeWire);
 });
 
+test("A project without lots cannot request a shared-lot detail in either wire collection", () => {
+  const input = context();
+  const request = buildSourceInterpretationRequest(input);
+  const value = wire(input);
+  const native = openaiResponseBody(
+    "gpt-6-luna",
+    request.system,
+    request.prompt,
+    request.maxTokens,
+    request.responseFormat,
+    "medium",
+  );
+  const accepts = new Ajv2020({ strict: false }).compile(
+    native.text!.format.schema,
+  );
+  assert(accepts({ result: value }), JSON.stringify(accepts.errors));
+  for (const collection of ["mandatory", "additional"]) {
+    const bad = structuredClone(value);
+    const row =
+      collection === "mandatory"
+        ? bad.contractClauseDetails.s4[0]
+        : bad.details[0];
+    row.kind = "shared_project_context";
+    const before = JSON.stringify(bad);
+    assert.equal(accepts({ result: bad }), false);
+    assert.throws(
+      () => recordSourceInterpretation(bad, request, metadata),
+      /Shared project detail requires a lot/,
+    );
+    assert.equal(JSON.stringify(bad), before);
+  }
+});
+
 test("Long parallel clauses retain the reviewed multi-row path without truncation", () => {
   const base = context();
   const input = {
