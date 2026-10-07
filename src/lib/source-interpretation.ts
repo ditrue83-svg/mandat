@@ -5,8 +5,8 @@ import { stableDocumentaryJson } from "./documentary-observation";
 import { sourceEvidencePassages } from "./source-evidence-context";
 import { RADAR_ACCEPTANCE_POLICY } from "./radar-acceptance-policy";
 import {
-  sourceSelectionSchema,
-  resolveSourceSelection,
+  sourceTextSelectionSchema,
+  resolveSourceTextSelection,
 } from "./source-selection";
 import { isContractScopeField } from "./source-contract-clauses";
 import {
@@ -20,7 +20,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v55";
+  "documentary-source-interpretation-v56";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -756,8 +756,8 @@ function buildSelectionResponseSchema(
     ...args,
   ).options;
   const componentSelection = args[1]
-    ? sourceSelectionSchema.extend({ sourceRef: args[1] })
-    : sourceSelectionSchema;
+    ? sourceTextSelectionSchema.extend({ sourceRef: args[1] })
+    : sourceTextSelectionSchema;
   const base = resolved.shape.components.element;
   const selectedEvidence = base.shape.evidence.describe(
     "Passaggi sN o gruppi contigui gN propri di ogni fatto della componente; actionSelection e objectSelection devono rientrare in questa selezione. Non sovrapporre gruppi e passaggi.",
@@ -852,7 +852,7 @@ function buildSelectionResponseSchema(
           "shared_project_context",
         ]),
         scope,
-        quoteSelection: sourceSelectionSchema,
+        quoteSelection: sourceTextSelectionSchema,
       }),
     )
     .max(32)
@@ -860,7 +860,7 @@ function buildSelectionResponseSchema(
       "Estratti originali aggiuntivi; il codice copia testo e riferimenti, senza traduzioni o affermazioni di assenza.",
     );
   const common = {
-    evidenceFormat: z.literal("source_selections_v10"),
+    evidenceFormat: z.literal("source_selections_v11"),
     details,
   };
   const readings = (settled: boolean) =>
@@ -892,7 +892,7 @@ function decodeSelectionResponse(
   response: unknown,
   request: SourceInterpretationRequest,
 ) {
-  if (request.providerFormat !== "source_selections_v10")
+  if (request.providerFormat !== "source_selections_v11")
     throw new Error("Source provider protocol does not match its request");
   const parsed = buildSelectionResponseSchema(
     request.classificationContext,
@@ -914,12 +914,12 @@ function decodeSelectionResponse(
   const originals = sourceEvidencePassages(request);
   const groups = componentEvidenceGroups(request.body.passages);
   const selections = value.components.map((component) => {
-    const action = resolveSourceSelection(
+    const action = resolveSourceTextSelection(
       component.roleEvidence.actionSelection,
       originals,
       groups,
     );
-    const object = resolveSourceSelection(
+    const object = resolveSourceTextSelection(
       component.meaning.objectSelection,
       originals,
       groups,
@@ -954,7 +954,7 @@ function decodeSelectionResponse(
     ...value,
     evidenceFormat: "component_quotations_v8",
     details: value.details.map(({ quoteSelection, ...detail }) => {
-      const selected = resolveSourceSelection(
+      const selected = resolveSourceTextSelection(
         quoteSelection,
         originals,
         groups,
@@ -1070,7 +1070,7 @@ function decodeProviderResponse(
     return response;
   if (
     (response as { evidenceFormat?: string }).evidenceFormat ===
-    "source_selections_v10"
+    "source_selections_v11"
   )
     return decodeSelectionResponse(response, request);
   if (request.providerFormat !== "component_quotations_v8")
@@ -1506,9 +1506,9 @@ export function buildSourceInterpretationRequest(
       ? {}
       : {
           acceptancePolicy: RADAR_ACCEPTANCE_POLICY,
-          evidenceProtocol: "source_selections_v10",
+          evidenceProtocol: "source_selections_v11",
           selectionRules:
-            "actionSelection/objectSelection selezionano sourceRef sN/gN e startUtf16/endUtf16 relativi al testo originale (gruppo: concatenazione contigua), fine esclusa, massimo 600 caratteri. Non restituire actionText/objectText: il codice copia esattamente la selezione. La prova selezionata deve appartenere a evidence e allo scope del ruolo. classificationReadingsById richiede ogni ID come chiave. ownSourceRef seleziona una propria etichetta o codice; sourceRefs aggiunge eventuali controprove. Solo classificazioni di progetto condivise ammettono shared_project_only. componentIndexes (indici da zero) è l’unico collegamento al significato delle componenti; clarifies_domain richiede almeno una componente concreta e la propria etichetta. Non restituire meaning.classificationContextIds. details aggiuntivi: soltanto estratti originali quoteSelection e kind/scope, mai parafrasi o duplicati di contractClauseDetails. Solo ambiguità materiali restano nelle issues; specifiche non indicate non diventano issues. Non inventare fatti assenti.",
+            "actionSelection/objectSelection/quoteSelection indicano sourceRef sN/gN e exactText: copia un estratto letterale unico, con parole intere, massimo 600 caratteri (gruppo: concatenazione contigua). Conserva articoli, refusi e punteggiatura. Se ripetuto, includi contesto per disambiguare. Non calcolare posizioni né restituire actionText/objectText: il codice trova la corrispondenza esatta, rifiuta testi assenti/ambigui e copia solo l’originale. La prova selezionata deve appartenere a evidence e allo scope del ruolo. classificationReadingsById richiede ogni ID come chiave. ownSourceRef seleziona una propria etichetta o codice; sourceRefs aggiunge eventuali controprove. Solo classificazioni di progetto condivise ammettono shared_project_only. componentIndexes (indici da zero) è l’unico collegamento al significato delle componenti; clarifies_domain richiede almeno una componente concreta e la propria etichetta. Non restituire meaning.classificationContextIds. details aggiuntivi: soltanto estratti originali quoteSelection e kind/scope, mai parafrasi o duplicati di contractClauseDetails. Solo ambiguità materiali restano nelle issues; specifiche non indicate non diventano issues. Non inventare fatti assenti.",
         }),
     task: "Identifica l'acquisto del target: sintesi neutrale, componenti distinte e prove esatte, prima del confronto aziendale.",
     // Keep the required identifiers visible independently of long notes.
@@ -1733,7 +1733,7 @@ export function buildSourceInterpretationRequest(
     selectedIds: body.passages.map((passage) => passage.id),
     providerFormat: options.legacyProviderFormatForRegression
       ? "component_quotations_v8"
-      : "source_selections_v10",
+      : "source_selections_v11",
     version: SOURCE_INTERPRETATION_VERSION,
     sourceKey,
     inputHash: digest({

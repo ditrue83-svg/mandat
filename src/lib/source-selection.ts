@@ -10,15 +10,22 @@ export const sourceSelectionSchema = z.strictObject({
 });
 export type SourceSelection = z.infer<typeof sourceSelectionSchema>;
 
-export function resolveSourceSelection(
-  input: SourceSelection,
+// The provider identifies literal text; only the application counts offsets.
+// No normalization, fuzzy matching or repair of the proposed selection.
+export const sourceTextSelectionSchema = z.strictObject({
+  sourceRef: z.string().regex(/^[sfg]\d+$/),
+  exactText: z.string().min(1).max(600),
+});
+export type SourceTextSelection = z.infer<typeof sourceTextSelectionSchema>;
+
+function originalSelectionParts(
+  sourceRef: string,
   passages: readonly ComparisonPassage[],
-  groups: readonly { id: string; sourceRefs: readonly string[] }[] = [],
+  groups: readonly { id: string; sourceRefs: readonly string[] }[],
 ) {
-  const selection = sourceSelectionSchema.parse(input);
-  const ids = selection.sourceRef.startsWith("g")
-    ? groups.find((group) => group.id === selection.sourceRef)?.sourceRefs
-    : [selection.sourceRef];
+  const ids = sourceRef.startsWith("g")
+    ? groups.find((group) => group.id === sourceRef)?.sourceRefs
+    : [sourceRef];
   if (!ids?.length || new Set(ids).size !== ids.length)
     throw new Error("Unknown or repeated source selection");
   const parts = ids.map((id) => {
@@ -38,6 +45,41 @@ export function resolveSourceSelection(
     )
       throw new Error("Source selection crosses fields, scopes or gaps");
   }
+  return parts;
+}
+
+export function resolveSourceTextSelection(
+  input: SourceTextSelection,
+  passages: readonly ComparisonPassage[],
+  groups: readonly { id: string; sourceRefs: readonly string[] }[] = [],
+) {
+  const selection = sourceTextSelectionSchema.parse(input);
+  const original = originalSelectionParts(selection.sourceRef, passages, groups)
+    .map((part) => part.text)
+    .join("");
+  const start = original.indexOf(selection.exactText);
+  if (start < 0)
+    throw new Error("Source text selection is not an exact original span");
+  if (original.indexOf(selection.exactText, start + 1) >= 0)
+    throw new Error("Source text selection is ambiguous; select more context");
+  return resolveSourceSelection(
+    {
+      sourceRef: selection.sourceRef,
+      startUtf16: start,
+      endUtf16: start + selection.exactText.length,
+    },
+    passages,
+    groups,
+  );
+}
+
+export function resolveSourceSelection(
+  input: SourceSelection,
+  passages: readonly ComparisonPassage[],
+  groups: readonly { id: string; sourceRefs: readonly string[] }[] = [],
+) {
+  const selection = sourceSelectionSchema.parse(input);
+  const parts = originalSelectionParts(selection.sourceRef, passages, groups);
   const original = parts.map((part) => part.text).join("");
   const { startUtf16: start, endUtf16: end } = selection;
   if (end <= start || end > original.length || end - start > 600)

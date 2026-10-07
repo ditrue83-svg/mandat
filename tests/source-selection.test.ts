@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import Ajv2020 from "ajv/dist/2020.js";
-import { resolveSourceSelection } from "../src/lib/source-selection";
+import {
+  resolveSourceSelection,
+  resolveSourceTextSelection,
+} from "../src/lib/source-selection";
 import { validateCoverageProof } from "../src/lib/source-coverage-proof";
 import {
   buildSourceInterpretationRequest,
@@ -108,7 +111,7 @@ const span = (sourceRef: string, startUtf16: number, endUtf16: number) => ({
 });
 function wire(input = context()): any {
   return {
-    evidenceFormat: "source_selections_v10",
+    evidenceFormat: "source_selections_v11",
     status: "resolved",
     targetRef: "s1",
     summary: "Revisione del progetto definitivo.",
@@ -122,12 +125,15 @@ function wire(input = context()): any {
         roleEvidence: {
           state: "identified",
           scope: "project_context",
-          actionSelection: span("s1", 0, 9),
+          actionSelection: { sourceRef: "s1", exactText: "Revisione" },
         },
         meaning: {
           state: "identified",
           statement: "Progetto definitivo da revisionare.",
-          objectSelection: span("s1", 10, 33),
+          objectSelection: {
+            sourceRef: "s1",
+            exactText: "del progetto definitivo",
+          },
           basis: "text_with_classification_context",
         },
       },
@@ -145,7 +151,10 @@ function wire(input = context()): any {
       {
         kind: "execution_condition",
         scope: "project_context",
-        quoteSelection: span("s3", 0, input.body.passages[2].text.length),
+        quoteSelection: {
+          sourceRef: "s3",
+          exactText: input.body.passages[2].text,
+        },
       },
     ],
     contractClauseDetails: {
@@ -162,7 +171,7 @@ function wire(input = context()): any {
   };
 }
 
-test("V10 copies the original preposition and has one classification-to-component link", () => {
+test("V11 copies the original preposition and has one classification-to-component link", () => {
   const input = context(),
     request = buildSourceInterpretationRequest(input),
     value = wire(input);
@@ -233,10 +242,10 @@ test("Additional details cannot append a document-source enum or a visit consequ
   );
   assert.deepEqual(record.response.details[1].sourceRefs, ["s4"]);
   const bad = structuredClone(value);
-  bad.details[0].quoteSelection.endUtf16 = 999;
+  bad.details[0].quoteSelection.exactText = "Contenuto inesistente";
   assert.throws(
     () => recordSourceInterpretation(bad, request, metadata),
-    /outside its original span/,
+    /not an exact original span/,
   );
   const docs = {
     ...input,
@@ -317,7 +326,10 @@ test("Selections retain exact contiguous spans and reject gaps, another lot and 
     /splits a character/,
   );
   const value = wire();
-  value.components[0].meaning.objectSelection = span("s3", 0, 10);
+  value.components[0].meaning.objectSelection = {
+    sourceRef: "s3",
+    exactText: "Iscrizione",
+  };
   assert.throws(
     () =>
       recordSourceInterpretation(
@@ -327,6 +339,128 @@ test("Selections retain exact contiguous spans and reject gaps, another lot and 
       ),
     /own component evidence/,
   );
+});
+
+test("Literal selections locate complete actions without asking the provider to count characters", () => {
+  const source = passage(
+    "s1",
+    "🌳 Appalto per il servizio di noleggio, lavaggio e stiratura della biancheria.",
+  );
+  const before = JSON.stringify(source);
+  for (const exactText of [
+    "noleggio",
+    "lavaggio e stiratura",
+    "della biancheria",
+  ])
+    assert.deepEqual(
+      resolveSourceTextSelection({ sourceRef: "s1", exactText }, [source]),
+      {
+        text: exactText,
+        sourceRefs: ["s1"],
+        scope: "project_context",
+      },
+    );
+  for (const exactText of [
+    "noleg",
+    "ggio",
+    "delle biancherie",
+    "Noleggio",
+    " ",
+  ])
+    assert.throws(() =>
+      resolveSourceTextSelection({ sourceRef: "s1", exactText }, [source]),
+    );
+  assert.equal(JSON.stringify(source), before);
+});
+
+test("Literal selectors neither normalize nor choose an arbitrary occurrence", () => {
+  const source = passage(
+    "s1",
+    "Posa di tubi. Posa di raccordi. Caffe\u0300.\nOpere di\nposa.",
+  );
+  assert.throws(
+    () =>
+      resolveSourceTextSelection({ sourceRef: "s1", exactText: "Posa" }, [
+        source,
+      ]),
+    /ambiguous/,
+  );
+  assert.equal(
+    resolveSourceTextSelection(
+      { sourceRef: "s1", exactText: "Posa di raccordi" },
+      [source],
+    ).text,
+    "Posa di raccordi",
+  );
+  for (const exactText of ["Caffè", "Opere di posa", "Caffe"])
+    assert.throws(() =>
+      resolveSourceTextSelection({ sourceRef: "s1", exactText }, [source]),
+    );
+  assert.equal(
+    resolveSourceTextSelection(
+      { sourceRef: "s1", exactText: "Opere di\nposa" },
+      [source],
+    ).text,
+    "Opere di\nposa",
+  );
+  assert.throws(() =>
+    resolveSourceTextSelection(
+      { sourceRef: "s1", exactText: "a".repeat(601) },
+      [source],
+    ),
+  );
+});
+
+test("Literal group selections preserve field ownership and reject scope or location gaps", () => {
+  const first = passage("s1", "Fornitura e ");
+  const second = {
+    ...passage("s2", "posa di condotte."),
+    startUtf16: first.text.length,
+    endUtf16: first.text.length + 17,
+  };
+  const groups = [{ id: "g1", sourceRefs: ["s1", "s2"] }];
+  const selection = { sourceRef: "g1", exactText: "Fornitura e posa" };
+  assert.deepEqual(
+    resolveSourceTextSelection(selection, [first, second], groups).sourceRefs,
+    ["s1", "s2"],
+  );
+  for (const changed of [
+    { ...second, scope: "selected_lot" as const },
+    { ...second, rawPath: "/another/field" },
+    { ...second, url: "https://example.invalid/another" },
+    {
+      ...second,
+      startUtf16: second.startUtf16 + 1,
+      endUtf16: second.endUtf16 + 1,
+    },
+  ])
+    assert.throws(
+      () => resolveSourceTextSelection(selection, [first, changed], groups),
+      /scopes or gaps/,
+    );
+});
+
+test("Production V11 refuses numeric offsets and altered quotations instead of repairing them", () => {
+  const input = context(),
+    request = buildSourceInterpretationRequest(input);
+  for (const mutate of [
+    (v: any) => {
+      v.components[0].roleEvidence.actionSelection = span("s1", 0, 9);
+    },
+    (v: any) => {
+      v.components[0].meaning.objectSelection.exactText =
+        "il progetto definitivo";
+    },
+    (v: any) => {
+      v.evidenceFormat = "source_selections_v10";
+    },
+  ]) {
+    const value = wire(input);
+    mutate(value);
+    const before = JSON.stringify(value);
+    assert.throws(() => recordSourceInterpretation(value, request, metadata));
+    assert.equal(JSON.stringify(value), before);
+  }
 });
 
 const draftForProof = {
