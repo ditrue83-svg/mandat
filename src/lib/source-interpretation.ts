@@ -20,7 +20,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v58";
+  "documentary-source-interpretation-v59";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -881,7 +881,7 @@ function buildSelectionResponseSchema(
       "Estratti originali aggiuntivi; il codice copia testo e riferimenti, senza traduzioni o affermazioni di assenza.",
     );
   const common = {
-    evidenceFormat: z.literal("source_selections_v13"),
+    evidenceFormat: z.literal("source_selections_v14"),
     details,
   };
   const readings = (settled: boolean) =>
@@ -913,7 +913,7 @@ function decodeSelectionResponse(
   response: unknown,
   request: SourceInterpretationRequest,
 ) {
-  if (request.providerFormat !== "source_selections_v13")
+  if (request.providerFormat !== "source_selections_v14")
     throw new Error("Source provider protocol does not match its request");
   const parsed = buildSelectionResponseSchema(
     request.classificationContext,
@@ -1111,7 +1111,7 @@ function decodeProviderResponse(
     return response;
   if (
     (response as { evidenceFormat?: string }).evidenceFormat ===
-    "source_selections_v13"
+    "source_selections_v14"
   )
     return decodeSelectionResponse(response, request);
   if (request.providerFormat !== "component_quotations_v8")
@@ -1554,9 +1554,9 @@ export function buildSourceInterpretationRequest(
       ? {}
       : {
           acceptancePolicy: RADAR_ACCEPTANCE_POLICY,
-          evidenceProtocol: "source_selections_v13",
+          evidenceProtocol: "source_selections_v14",
           selectionRules:
-            "actionSelection/objectSelection/quoteSelection indicano sourceRef sN/gN e exactText: copia un estratto letterale unico, con parole intere, massimo 600 caratteri (gruppo: concatenazione contigua). Conserva articoli, refusi e punteggiatura. Se ripetuto, includi contesto per disambiguare. Non calcolare posizioni né restituire actionText/objectText: il codice trova la corrispondenza esatta, rifiuta testi assenti/ambigui e copia solo l’originale. La prova selezionata deve appartenere a evidence e allo scope del ruolo. classificationReadingsById richiede ogni ID come chiave, use e componentIndexes: niente explanation libera. Nome, codice ed etichette restano quelli originali nel contesto. Motiva ambiguità e conflitti nelle issues con prove proprie. ownSourceRef seleziona una propria etichetta o codice; sourceRefs aggiunge eventuali controprove. Solo classificazioni di progetto condivise ammettono shared_project_only. componentIndexes (indici da zero) è l’unico collegamento al significato delle componenti; clarifies_domain richiede almeno una componente concreta e la propria etichetta. Non restituire meaning.classificationContextIds. details aggiuntivi: soltanto estratti originali quoteSelection e kind/scope, mai parafrasi o duplicati di contractClauseDetails. In ogni stato, anche uncertain/conflicting, contractClauseDetails conserva tutte le clausole richieste nei propri blocchi. Un dubbio sul ruolo non elimina condizioni note. Solo ambiguità materiali restano nelle issues; specifiche non indicate non diventano issues. Non inventare fatti assenti.",
+            "actionSelection/objectSelection/quoteSelection: sourceRef sN/gN ed exactText, stringa letterale unica oppure {startText,endText} con ancore letterali uniche e ordinate nello stesso originale. Il codice copia l’intervallo contiguo, anche HTML e spazi; massimo 600 caratteri, parole intere. Per una parola le ancore coincidono. Conserva articoli, refusi e punteggiatura; disambigua ripetizioni con contesto. Mai calcolare posizioni, riscrivere spazi o restituire actionText/objectText. Le prove rientrano nella evidence e nello scope propri. classificationReadingsById: ogni ID come chiave, use, ownSourceRef proprio, sourceRefs di eventuali controprove, componentIndexes zero-based come unico legame al significato; niente explanation libera o meaning.classificationContextIds. Nome/codice/etichette restano originali. clarifies_domain richiede propria etichetta e componente concreta; shared_project_only solo per classificazioni condivise. Motiva conflitti materiali nelle issues con prove proprie. details aggiuntivi: solo quoteSelection/kind/scope, senza parafrasi o duplicati delle clausole. contractClauseDetails conserva tutte le clausole richieste anche in uncertain/conflicting: un dubbio sul ruolo non elimina condizioni note. Specifiche assenti non sono issues; nessun fatto inventato. Un mandato professionale esplicito per fasi definite resta identificato senza inventare le azioni di dettaglio: conserva funzione e fasi, other se nessun ruolo specifico le riassume. Il solo mestiere non basta; non espandere sigle da memoria né confondere prestazioni professionali con lavori materiali. role_identity richiede una funzione davvero indeterminabile, non il sottotipo mancante.",
         }),
     task: "Identifica l'acquisto del target: sintesi neutrale, componenti distinte e prove esatte, prima del confronto aziendale.",
     // Keep the required identifiers visible independently of long notes.
@@ -1781,7 +1781,7 @@ export function buildSourceInterpretationRequest(
     selectedIds: body.passages.map((passage) => passage.id),
     providerFormat: options.legacyProviderFormatForRegression
       ? "component_quotations_v8"
-      : "source_selections_v13",
+      : "source_selections_v14",
     version: SOURCE_INTERPRETATION_VERSION,
     sourceKey,
     inputHash: digest({
@@ -1845,7 +1845,7 @@ export function validateSourceInterpretation(
   }
   if (
     value.status === "resolved" ||
-    request.providerFormat === "source_selections_v13"
+    request.providerFormat === "source_selections_v14"
   ) {
     const represented = new Set(value.details.flatMap((d) => d.sourceRefs));
     if (request.requiredContractClauseIds.some((id) => !represented.has(id)))
@@ -1858,7 +1858,7 @@ export function validateSourceInterpretation(
         row.sourceRefs.some((ref) => family.sourceRefs.includes(ref)),
       );
       if (
-        request.providerFormat === "source_selections_v13" &&
+        request.providerFormat === "source_selections_v14" &&
         rows.some(
           (row) =>
             row.scope !== family.scope ||

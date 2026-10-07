@@ -14,7 +14,13 @@ export type SourceSelection = z.infer<typeof sourceSelectionSchema>;
 // No normalization, fuzzy matching or repair of the proposed selection.
 export const sourceTextSelectionSchema = z.strictObject({
   sourceRef: z.string().regex(/^[sfg]\d+$/),
-  exactText: z.string().min(1).max(600),
+  exactText: z.union([
+    z.string().min(1).max(600),
+    z.strictObject({
+      startText: z.string().min(1).max(600),
+      endText: z.string().min(1).max(600),
+    }),
+  ]),
 });
 export type SourceTextSelection = z.infer<typeof sourceTextSelectionSchema>;
 
@@ -57,16 +63,31 @@ export function resolveSourceTextSelection(
   const original = originalSelectionParts(selection.sourceRef, passages, groups)
     .map((part) => part.text)
     .join("");
-  const start = original.indexOf(selection.exactText);
-  if (start < 0)
-    throw new Error("Source text selection is not an exact original span");
-  if (original.indexOf(selection.exactText, start + 1) >= 0)
-    throw new Error("Source text selection is ambiguous; select more context");
+  const uniquePosition = (literal: string) => {
+    const position = original.indexOf(literal);
+    if (position < 0)
+      throw new Error("Source text selection is not an exact original span");
+    if (original.indexOf(literal, position + 1) >= 0)
+      throw new Error(
+        "Source text selection is ambiguous; select more context",
+      );
+    return position;
+  };
+  const literal = selection.exactText;
+  const first = typeof literal === "string" ? literal : literal.startText;
+  const last = typeof literal === "string" ? literal : literal.endText;
+  const start = uniquePosition(first);
+  const lastStart = uniquePosition(last);
+  const end = lastStart + last.length;
+  if (lastStart < start || end < start + first.length)
+    throw new Error("Source selection anchors are reversed or truncated");
+  // Copy the untouched interval, including HTML and whitespace between its
+  // literal anchors. Never search approximately or normalize a failed quote.
   return resolveSourceSelection(
     {
       sourceRef: selection.sourceRef,
       startUtf16: start,
-      endUtf16: start + selection.exactText.length,
+      endUtf16: end,
     },
     passages,
     groups,

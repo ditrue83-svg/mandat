@@ -110,9 +110,90 @@ const span = (sourceRef: string, startUtf16: number, endUtf16: number) => ({
   startUtf16,
   endUtf16,
 });
+
+test("literal anchors copy HTML and whitespace without asking the model to recreate them", () => {
+  const text = "<p>Smontaggio \r\n</p><p>e recupero delle ringhiere.</p>";
+  const original = passage("s1", text);
+  const selected = resolveSourceTextSelection(
+    {
+      sourceRef: "s1",
+      exactText: { startText: "Smontaggio", endText: "recupero" },
+    },
+    [original],
+  );
+  assert.equal(selected.text, "Smontaggio \r\n</p><p>e recupero");
+  assert.deepEqual(selected.sourceRefs, ["s1"]);
+  assert.equal(original.text, text);
+  // The rejected literal is still rejected; anchors are a different request,
+  // never a fallback that silently repairs a provider response.
+  assert.throws(
+    () =>
+      resolveSourceTextSelection(
+        { sourceRef: "s1", exactText: "Smontaggio </p><p>e recupero" },
+        [original],
+      ),
+    /not an exact/,
+  );
+});
+
+test("anchors reject absent, repeated, reversed and partial-word boundaries", () => {
+  const originals = [passage("s1", "Posa e verifica. Posa aggiuntiva.")];
+  for (const exactText of [
+    { startText: "Posa", endText: "verifica" },
+    { startText: "Posa e", endText: "collaudo" },
+    { startText: "aggiuntiva", endText: "verifica" },
+    { startText: "osa e", endText: "verifica" },
+    { startText: "Posa e", endText: "verific" },
+  ])
+    assert.throws(() =>
+      resolveSourceTextSelection({ sourceRef: "s1", exactText }, originals),
+    );
+});
+
+test("anchors preserve the same 600-character cap and contiguous source ownership", () => {
+  const long = passage("s1", `Inizio ${"x".repeat(600)} fine`);
+  assert.throws(
+    () =>
+      resolveSourceTextSelection(
+        {
+          sourceRef: "s1",
+          exactText: { startText: "Inizio", endText: "fine" },
+        },
+        [long],
+      ),
+    /outside/,
+  );
+  const first = passage("s1", "Smontaggio ");
+  const second = {
+    ...passage("s2", "e recupero"),
+    startUtf16: first.endUtf16,
+    endUtf16: first.endUtf16 + 10,
+  };
+  const selection = {
+    sourceRef: "g1",
+    exactText: { startText: "Smontaggio", endText: "recupero" },
+  };
+  const groups = [{ id: "g1", sourceRefs: ["s1", "s2"] }];
+  const result = resolveSourceTextSelection(selection, [first, second], groups);
+  assert.equal(result.text, "Smontaggio e recupero");
+  assert.deepEqual(result.sourceRefs, ["s1", "s2"]);
+  for (const bad of [
+    { ...second, scope: "selected_lot" as const },
+    { ...second, rawPath: "/unrelated" },
+    {
+      ...second,
+      startUtf16: second.startUtf16 + 1,
+      endUtf16: second.endUtf16 + 1,
+    },
+  ])
+    assert.throws(
+      () => resolveSourceTextSelection(selection, [first, bad], groups),
+      /crosses/,
+    );
+});
 function wire(input = context()): any {
   return {
-    evidenceFormat: "source_selections_v13",
+    evidenceFormat: "source_selections_v14",
     status: "resolved",
     targetRef: "s1",
     summary: "Revisione del progetto definitivo.",
@@ -170,6 +251,48 @@ function wire(input = context()): any {
     issues: [],
   };
 }
+
+test("V14 anchors survive provider schema and the full own-evidence decoder", () => {
+  const input = context(),
+    request = buildSourceInterpretationRequest(input),
+    value = wire(input);
+  value.components[0].roleEvidence.actionSelection.exactText = {
+    startText: "Revisione",
+    endText: "Revisione",
+  };
+  value.components[0].meaning.objectSelection.exactText = {
+    startText: "del progetto",
+    endText: "definitivo",
+  };
+  const native = openaiResponseBody(
+    "gpt-6-luna",
+    request.system,
+    request.prompt,
+    request.maxTokens,
+    request.responseFormat,
+    "medium",
+  );
+  const accepts = new Ajv2020({ strict: false }).compile(
+    native.text!.format.schema,
+  );
+  assert(accepts({ result: value }), JSON.stringify(accepts.errors));
+  const before = JSON.stringify({ input, value });
+  const record = recordSourceInterpretation(value, request, metadata);
+  assert.equal(
+    record.response.components[0].roleEvidence.actionText,
+    "Revisione",
+  );
+  assert.equal(
+    record.response.components[0].meaning.objectText,
+    "del progetto definitivo",
+  );
+  assert.equal(JSON.stringify({ input, value }), before);
+  value.components[0].evidence = [{ sourceRef: "s2" }];
+  assert.throws(
+    () => recordSourceInterpretation(value, request, metadata),
+    /own component evidence/,
+  );
+});
 
 test("V11 copies the original preposition and has one classification-to-component link", () => {
   const input = context(),

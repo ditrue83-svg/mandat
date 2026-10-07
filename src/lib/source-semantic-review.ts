@@ -33,7 +33,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v55";
+  "documentary-source-semantic-review-v56";
 export const SOURCE_REVIEW_SUPPORTED_REASON =
   "Le prove indicate sostengono il claim; coverageProof distingue fatti rappresentati e dati facoltativi.";
 const MAX_BYTES = 160_000;
@@ -1179,7 +1179,7 @@ export function buildGroundedSourceReviewRequests(
           ? {}
           : {
               coverageProofRule:
-                "coverageBySource richiede ogni sourceRef assegnato come chiave. represented seleziona draftPaths fra quelli consentiti: il codice copia il testo esatto del campo, senza aggiungere o correggere prove. Scegli soltanto campi che esprimono davvero il fatto e tutti i suoi limiti; la presenza della citazione non prova equivalenza o completezza. Le clausole obbligatorie richiedono details. not_required vale solo per dati amministrativi facoltativi o originali senza nuova prestazione/limite; missing indica una prestazione/condizione richiesta assente e vieta supported. Per gli altri claim coverageBySource={}. Non restituire quote o coverageProof. Non dichiarare conservata una data precisa mostrando soltanto una durata stimata.",
+                "coverageBySource richiede ogni sourceRef assegnato come chiave. represented seleziona draftPaths fra quelli consentiti: il codice copia il testo esatto del campo, senza aggiungere o correggere prove. Scegli soltanto campi che esprimono davvero il fatto e tutti i suoi limiti; la presenza della citazione non prova equivalenza o completezza. Le clausole obbligatorie richiedono details. not_required vale solo per dati amministrativi facoltativi o originali senza nuova prestazione/limite. Divieti o permessi di subappalto e limiti organizzativi sono limiti materiali: seleziona i details che li conservano, anche quando hanno un altro claim contract_clause_coverage. Un altro claim corretto non giustifica not_required; missing indica una prestazione/condizione richiesta assente e vieta supported. Per gli altri claim coverageBySource={}. Non restituire quote o coverageProof. Non dichiarare conservata una data precisa mostrando soltanto una durata stimata.",
             }),
         referenceSelectionFormat: {
           checksFormat: plan.legacyProviderFormatForRegression
