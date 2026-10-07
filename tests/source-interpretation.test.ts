@@ -4425,6 +4425,7 @@ test.each([
   "documentary-source-interpretation-v42",
   "documentary-source-interpretation-v44",
   "documentary-source-interpretation-v45",
+  "documentary-source-interpretation-v62",
 ])("Source %s is stale before parsing its historical schema", (version) => {
   const request = buildSourceInterpretationRequest(context());
   assert.equal(request.version, SOURCE_INTERPRETATION_VERSION);

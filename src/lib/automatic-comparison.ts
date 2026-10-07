@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { contractualRoleTaxonomy } from "./contractual-role";
 import { z } from "zod";
 import type { CompanyProfile, Publication } from "./domain";
 import type { PreliminaryTargetMatch } from "./lot-assessment";
@@ -43,7 +44,7 @@ import { SOURCE_EVIDENCE_READING_VERSION } from "./source-evidence-reading";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v79";
+  "documentary-service-comparison-v80";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -884,7 +885,7 @@ export function buildInterpretedComparisonRequest(
         "activitiesOverlap=true richiede almeno un servizio o prodotto concretamente comune: un settore generale o un ruolo uguale non bastano. False richiede attività esplicitamente diverse; informazioni mancanti danno null.",
         "Distingui oggetto noto e famiglia aperta: due prodotti concretamente diversi non diventano affini per una funzione generica inventata. Se invece la fonte nomina soltanto una famiglia di accessori o prodotti senza precisarne i tipi, non puoi escludere un prodotto plausibilmente appartenente a quella famiglia: conserva null e spiega il sottotipo mancante. Non inventare materiali, funzioni o destinazioni assenti nella fonte o nel profilo, neppure nella motivazione di un verdetto corretto.",
         "Esamina tutte le attività aziendali, anche più attività nello stesso passaggio. Una voce precisa non rende precise le altre: se una voce ampia plausibilmente riferita al lavoro non chiarisce oggetto o azione, conserva activitiesOverlap=null, mainScopeCovered=null e comparisonUncertain=true finché manca una prova di sovrapposizione o differenza concreta. Non dichiarato non significa escluso. Lo stesso settore da solo non rende una voce pertinente; quantità, certificazioni o dettagli tecnici mancanti non rendono incerto un mestiere identificato.",
-        "relatedActivity valuta l’affinità professionale, separatamente dalla coincidenza delle prestazioni: shared_professional_function richiede una funzione concreta del bene, servizio o componente richiesto collegata agli impianti, prodotti o servizi su cui la ditta dichiara di lavorare. Nomina tale collegamento: non basta che entrambi siano chiamati trasporto, fornitura, manutenzione o un'altra categoria generale. Non richiedere identica destinazione d’uso, scala, modello, classe tecnica o applicazione per questa sola affinità. Il profilo non deve elencare ogni componente del proprio lavoro. Una differenza edificio/infrastruttura o installazione/fornitura resta da approfondire: non prova capacità di fornitura e non esclude da sola il collegamento. Spiega la funzione comune e la differenza da verificare, citando componentRefs e companyRefs.",
+        "Valuta relatedActivity PRIMA della compatibilità tecnica e della copertura. Nella comparison identifica prima la funzione concreta del prodotto o servizio richiesto e quella dichiarata dalla ditta; poi distingui ciò che cambia. Una funzione professionale comune non diventa contesto incidentale solo perché il prodotto esatto o la sua applicazione differiscono. relatedActivity valuta l’affinità professionale, separatamente dalla coincidenza delle prestazioni: shared_professional_function richiede una funzione concreta del bene, servizio o componente richiesto collegata agli impianti, prodotti o servizi su cui la ditta dichiara di lavorare. Nomina tale collegamento: non basta che entrambi siano chiamati trasporto, fornitura, manutenzione o un'altra categoria generale. Non richiedere identica destinazione d’uso, scala, modello, classe tecnica o applicazione per questa sola affinità. Il profilo non deve elencare ogni componente del proprio lavoro. Una differenza edificio/infrastruttura o installazione/fornitura resta da approfondire: non prova capacità di fornitura e non esclude da sola il collegamento. Spiega la funzione comune e la differenza da verificare, citando componentRefs e companyRefs.",
         "Usa incidental_context se il legame è soltanto lo stesso settore, luogo, clientela, materiale generico, filiera o uno scarto generato dall'attività. Un luogo dove si lavora, un bene soltanto utilizzato e uno scarto da smaltire non sono per questo componenti del sistema su cui si dichiara di lavorare. Questi legami non provano un rapporto funzionale e non rendono pertinente il lavoro. Se manca anche tale legame, usa none. Le attività negate o escluse nel profilo non dimostrano capacità né collegamento. Non affermare copertura parziale quando non esiste alcuna prestazione concretamente comune.",
         "Esempi generali della distinzione: installare impianti idraulici e fornire valvole hanno la funzione idraulica in comune ma ruoli diversi; pulire uffici e fornire computer condividono soltanto un ambiente di lavoro. Gli esempi spiegano il criterio, non aggiungono prestazioni alla fonte o al profilo.",
         "Per sameContractualRole applica alle attività esplicite della ditta le stesse categorie di contractualRoleTaxonomy già usate per component.role della fonte. Confronta le categorie identificate, non il generico fatto che entrambe le parti svolgano un lavoro. Mantieni maintain, install, supply, design e operate distinti da execute. Se il ruolo aziendale non è determinabile usa null, senza inventarlo; la coincidenza del ruolo non prova sovrapposizione delle prestazioni.",
@@ -904,17 +905,7 @@ export function buildInterpretedComparisonRequest(
             ]
           : []),
       ],
-      contractualRoleTaxonomy: {
-        supply: "Fornire beni.",
-        execute: "Svolgere o organizzare una prestazione.",
-        design: "Progettare.",
-        install: "Mettere in opera.",
-        maintain:
-          "Conservare o ripristinare la funzionalità, anche tramite manutenzione e riparazione.",
-        operate: "Gestione continuativa.",
-        advise: "Consulenza.",
-        other: "Altra azione identificata.",
-      },
+      contractualRoleTaxonomy,
       sourceInterpretation: {
         hash: sourceRecord.hash,
         reviewHash: sourceReview.hash,

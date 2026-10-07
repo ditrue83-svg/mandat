@@ -5,10 +5,19 @@ import { test } from "vitest";
 import { ZodError } from "zod";
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 import {
-  buildSourceInterpretationRequest,
+  buildSourceInterpretationRequest as buildCurrentSourceInterpretationRequest,
   recordSourceInterpretation,
   type SourceInterpretationContext,
 } from "../src/lib/source-interpretation";
+// Review regressions deliberately feed faulty producer assertions, including
+// claims that the current atomic-value schema rejects before review. Preserve
+// those negative cases through the existing legacy fixture protocol instead
+// of deleting their false claims. Current producer + review integration is
+// exercised in source-selection.test.ts and automatic-comparison.test.ts.
+const buildSourceInterpretationRequest = (input: SourceInterpretationContext) =>
+  buildCurrentSourceInterpretationRequest(input, {
+    legacyProviderFormatForRegression: true,
+  });
 import {
   SOURCE_SEMANTIC_REVIEW_VERSION,
   buildGroundedSourceReviewRequests,

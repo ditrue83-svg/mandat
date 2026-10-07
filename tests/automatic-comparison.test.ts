@@ -649,12 +649,14 @@ test("A structured subcontract prohibition survives review and stored comparison
     {
       ...sourceResponse(request),
       details: [
-        ...sourceResponse(request).details,
+        ...sourceResponse(request).details.filter(
+          (row) => !row.sourceRefs.includes(fieldId),
+        ),
         {
           kind: "execution_condition",
           scope: "project_context",
           sourceRefs: [fieldId],
-          explanation: "Il subappalto non è consentito.",
+          explanation: "Subappaltatori ammessi, valore originale: false.",
         },
       ],
     },
@@ -1120,7 +1122,7 @@ test("The company comparison keeps explicit maintenance separate from source exe
   const body = JSON.parse(
     buildInterpretedComparisonRequest(request, source).prompt,
   );
-  const roleSchemas: { enum: string[] }[] = [];
+  const roleSchemas: { enum: string[]; description: string }[] = [];
   const findRoles = (value: any) => {
     if (!value || typeof value !== "object") return;
     if (Array.isArray(value.enum) && value.enum.includes("maintain"))
@@ -1131,6 +1133,20 @@ test("The company comparison keeps explicit maintenance separate from source exe
     buildAutomaticSourceRequest(request).responseFormat.json_schema.schema,
   );
   assert.equal(roleSchemas.length, 1);
+  assert.equal(
+    roleSchemas[0].description,
+    Object.entries(body.contractualRoleTaxonomy)
+      .map(([role, definition]) => `${role}: ${definition}`)
+      .join(" "),
+    "Source and company roles must use the same complete definitions",
+  );
+  const reviewPlan = buildAutomaticSourceSemanticReviewRequest(request, source);
+  assert(
+    JSON.parse(reviewPlan.requests[0].prompt).rules.includes(
+      "Ruoli contrattuali: " + roleSchemas[0].description,
+    ),
+    "Semantic review must use the same role definitions as both producers",
+  );
   const roles = roleSchemas[0].enum;
   assert.deepEqual(
     Object.keys(body.contractualRoleTaxonomy).sort(),
@@ -2716,6 +2732,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v78",
     sourceVersion: "documentary-source-interpretation-v45",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v79",
+    sourceVersion: "documentary-source-interpretation-v62",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2749,7 +2769,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v79");
+    assert.equal(request.version, "documentary-service-comparison-v80");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(

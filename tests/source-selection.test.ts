@@ -285,6 +285,174 @@ test("A summary cannot borrow its selected target evidence from a component", ()
   assert(recordSourceInterpretation(valid, request, metadata));
 });
 
+test.each([
+  [
+    "/terms/subContractorAllowed",
+    "yes",
+    "Subappaltatori ammessi, valore originale: yes.",
+    "Subappaltatori ammessi secondo il punto 4.8 del capitolato.",
+  ],
+  [
+    "/terms/consortiumAllowed",
+    "no",
+    "Consorzio ammesso, valore originale: no.",
+    "Consorzio ammesso con al massimo due membri.",
+  ],
+  [
+    "/procurement/options",
+    "unknown",
+    "Opzioni, valore originale: unknown.",
+    "Non ci sono opzioni.",
+  ],
+  [
+    "/dates/documentsAvailable/dateRange/0",
+    "2031-04-01",
+    "Disponibilità documenti, inizio: 2031-04-01.",
+    "Data iniziale del periodo indicato.",
+  ],
+  [
+    "/dates/documentsAvailable/dateRange/1",
+    "2031-05-02",
+    "Disponibilità documenti, fine: 2031-05-02.",
+    "Data finale del periodo indicato.",
+  ],
+  [
+    "/dates/offerValidityDeadlineDate",
+    "2031-08-10",
+    "Validità dell’offerta, data limite: 2031-08-10.",
+    "Disponibilità documenti, fine: 2031-08-10.",
+  ],
+])(
+  "Atomic clause %s retains its own value and event in provider and stored contracts",
+  (rawPath, text, expected, badExplanation) => {
+    const base = context();
+    const additions = [
+      {
+        ...passage("s5", text, rawPath),
+        role: "context",
+      },
+      // A neighbouring original really contains the additional condition. It
+      // remains separately represented and cannot repair the wrong row's proof.
+      {
+        ...passage(
+          "s6",
+          "Secondo il punto 4.8 del capitolato.",
+          "/terms/subContractorNote/it",
+        ),
+        role: "context",
+      },
+    ];
+    const input: SourceInterpretationContext = {
+      ...base,
+      body: {
+        ...base.body,
+        passages: [
+          ...base.body.passages,
+          ...additions.map((p) => ({ ...p, role: "context" as const })),
+        ],
+      },
+    };
+    const original = JSON.stringify(input);
+    const request = buildSourceInterpretationRequest(input);
+    const value = wire(input);
+    value.contractClauseDetails.s5 = [
+      {
+        kind: "execution_condition",
+        scope: "project_context",
+        sourceRefs: ["s5"],
+        explanation: expected,
+      },
+    ];
+    value.contractClauseDetails.s6 = [
+      {
+        kind: "execution_condition",
+        scope: "project_context",
+        sourceRefs: ["s6"],
+        explanation: input.body.passages.at(-1)!.text,
+      },
+    ];
+    const accepts = new Ajv2020({ strict: false }).compile<any>(
+      request.responseFormat.json_schema.schema,
+    );
+    assert(accepts(value), JSON.stringify(accepts.errors));
+    const recorded = recordSourceInterpretation(value, request, metadata);
+    assert.equal(
+      recorded.response.details.find((d) => d.sourceRefs.includes("s5"))!
+        .explanation,
+      expected,
+    );
+    const bad = structuredClone(value);
+    bad.contractClauseDetails.s5[0].explanation = badExplanation;
+    assert(!accepts(bad));
+    assert.throws(
+      () => recordSourceInterpretation(bad, request, metadata),
+      /original value/,
+    );
+    // Directly passing a canonical response must not bypass the same guard.
+    const canonical = structuredClone(recorded.response);
+    canonical.details.find((d) => d.sourceRefs.includes("s5"))!.explanation =
+      badExplanation;
+    assert.throws(
+      () => validateSourceInterpretation(canonical, request),
+      /original value/,
+    );
+    const borrowed = structuredClone(value);
+    borrowed.contractClauseDetails.s5[0].sourceRefs.push("s6");
+    assert(!accepts(borrowed));
+    assert.throws(
+      () => recordSourceInterpretation(borrowed, request, metadata),
+      /own scoped source/,
+    );
+    assert.equal(JSON.stringify(input), original);
+  },
+);
+
+test("Atomic conditions preserve lot scope, boolean false and separate null notes", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      fields: [
+        {
+          scope: "selected_lot",
+          rawPath: "/lots/2/terms/subContractorAllowed",
+          value: false,
+        },
+        {
+          scope: "selected_lot",
+          rawPath: "/lots/2/terms/subContractorNote/it",
+          value: null,
+        },
+        {
+          scope: "selected_lot",
+          rawPath: "/lots/2/dates/documentsAvailable/dateRange/1",
+          value: "2031-05-09",
+        },
+      ],
+    },
+  };
+  // Request construction can preserve both scopes; this does not reinterpret
+  // the project response as a qualified lot decision.
+  const request = buildSourceInterpretationRequest(input);
+  assert.equal(
+    request.contractDetailFamilies.find((f) => f.id === "f0")!
+      .originalScalarExplanation,
+    "Subappaltatori ammessi, valore originale: false.",
+  );
+  assert.equal(
+    request.contractDetailFamilies.find((f) => f.id === "f2")!
+      .originalScalarExplanation,
+    "Disponibilità documenti, fine: 2031-05-09.",
+  );
+  assert.equal(
+    request.contractDetailFamilies.find((f) => f.id === "f0")!.scope,
+    "selected_lot",
+  );
+  assert(!request.requiredContractClauseIds.includes("f1"));
+  assert.equal(input.body.fields[1].value, null);
+});
+
 test("Parallel short clauses cannot collapse different original wording", () => {
   const base = context();
   const de =
