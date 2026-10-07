@@ -34,7 +34,7 @@ import {
   type SourceSemanticReviewRecord,
   buildGroundedSourceReviewRequests,
 } from "../src/lib/source-semantic-review";
-import { recordSourceEvidenceReading } from "../src/lib/source-evidence-reading";
+import { recordInventedSourceEvidenceReading as recordSourceEvidenceReading } from "./helpers/source-evidence-fixture";
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 import {
   captureLotSourceSnapshot,

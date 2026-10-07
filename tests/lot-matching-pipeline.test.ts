@@ -1,5 +1,6 @@
 import {
   inventedSourceEvidenceAnswer,
+  encodeInventedSourceEvidenceAnswer,
   inventedCoverageProof,
   inventedReadingRefs,
 } from "./helpers/source-evidence-fixture";
@@ -162,7 +163,9 @@ afterAll(async () => {
 function inventedAnswer(prompt: string) {
   const data = JSON.parse(prompt);
   if (data.stage === "original_source_evidence")
-    return inventedSourceEvidenceAnswer(data);
+    return encodeInventedSourceEvidenceAnswer(
+      inventedSourceEvidenceAnswer(data),
+    );
   if (data.assignedClaims) {
     return {
       chunkId: data.chunkId,
@@ -409,15 +412,21 @@ it("An uncertain source is cached as review without ever asking for a company co
           use: "unresolved",
         }),
       ),
-      components: answer.components!.map((component) => ({
-        ...component,
-        meaning: {
-          ...component.meaning,
-          state: "ambiguous",
-          basis: "unresolved",
-          statement: "Il servizio inventato richiede chiarimento.",
-        },
-      })),
+      components: answer.components!.map(
+        (
+          component: NonNullable<
+            StoredAutomaticComparison["sourceInterpretation"]["response"]["components"]
+          >[number],
+        ) => ({
+          ...component,
+          meaning: {
+            ...component.meaning,
+            state: "ambiguous",
+            basis: "unresolved",
+            statement: "Il servizio inventato richiede chiarimento.",
+          },
+        }),
+      ),
       issues: [
         {
           explanation: "L'oggetto inventato non è determinabile.",

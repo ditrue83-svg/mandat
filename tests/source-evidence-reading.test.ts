@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import Ajv2020 from "ajv/dist/2020.js";
 import { test } from "vitest";
+import { ZodError } from "zod";
 import {
   buildSourceEvidenceReadingRequest,
-  recordSourceEvidenceReading,
+  recordSourceEvidenceReading as recordProviderSourceEvidenceReading,
   readSourceEvidenceReading,
 } from "../src/lib/source-evidence-reading";
 import {
@@ -26,6 +27,9 @@ const buildSourceSemanticReviewRequest = (
 
 import {
   inventedSourceEvidenceAnswer,
+  encodeInventedSourceEvidenceAnswer,
+  compileInventedSourceEvidenceSchema,
+  recordInventedSourceEvidenceReading as recordSourceEvidenceReading,
   inventedClauseSelections,
 } from "./helpers/source-evidence-fixture";
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
@@ -40,7 +44,7 @@ const metadata = {
   at: "2030-01-01T12:00:00.000Z",
   model: config.model,
 };
-test("Classification alternatives retain distinct first keys in the provider wire schema", () => {
+test("Classification grammar branches start with the actual semantic choice", () => {
   const plan = buildSourceEvidenceReadingRequest(context(), config);
   const original = plan.requests[0].responseFormat.json_schema.schema;
   const wire = openaiJsonSchema(original);
@@ -58,10 +62,29 @@ test("Classification alternatives retain distinct first keys in the provider wir
     if (!value || typeof value !== "object") return;
     if (value.anyOf) {
       const branches = value.anyOf.map(dereference);
-      if (branches.every((b: any) => b.properties?.classificationId)) {
+      if (
+        branches.every(
+          (b: any) =>
+            b.properties &&
+            Object.keys(b.properties).length === 1 &&
+            [
+              "consistent",
+              "broad_context",
+              "not_decisive",
+              "metadata_discrepancy",
+              "conflicting",
+            ].includes(Object.keys(b.properties)[0]),
+        )
+      ) {
         assert.deepEqual(
           branches.map((b: any) => Object.keys(b.properties)[0]),
-          ["explanation", "relationship"],
+          [
+            "consistent",
+            "broad_context",
+            "not_decisive",
+            "metadata_discrepancy",
+            "conflicting",
+          ],
         );
         checked++;
       }
@@ -70,7 +93,7 @@ test("Classification alternatives retain distinct first keys in the provider wir
   };
   visit(wire);
   assert(checked > 0);
-  const accepts = new Ajv2020({ strict: false }).compile(wire);
+  const accepts = compileInventedSourceEvidenceSchema(wire);
   const input = responses(plan)[0];
   const wrap = (answer: unknown) =>
     "result" in (wire.properties as object) ? { result: answer } : answer;
@@ -79,11 +102,58 @@ test("Classification alternatives retain distinct first keys in the provider wir
     "Una prestazione inventata senza prova propria.";
   assert.equal(accepts(wrap(input)), false);
 });
+test("Provider decisions preserve their chosen meaning and reject old flat responses", () => {
+  const plan = buildSourceEvidenceReadingRequest(context(), config);
+  const validate = new Ajv2020({ strict: false }).compile<any>(
+    plan.requests[0].responseFormat.json_schema.schema,
+  );
+  const fixture = responses(plan)[0];
+  assert.equal(validate(fixture), false);
+  assert.throws(() =>
+    recordProviderSourceEvidenceReading([fixture], plan, metadata),
+  );
+  for (const choice of [
+    "consistent",
+    "broad_context",
+    "not_decisive",
+    "metadata_discrepancy",
+    "conflicting",
+  ] as const) {
+    const input = structuredClone(fixture);
+    input.classifications[0].relationship = choice;
+    input.classifications[0].explanation = [
+      "metadata_discrepancy",
+      "conflicting",
+    ].includes(choice)
+      ? "Differenza dichiarata nella prestazione originale citata."
+      : null;
+    input.classifications[0].evidence = [{ sourceRef: "s1" }];
+    const wire = encodeInventedSourceEvidenceAnswer(input);
+    const before = JSON.stringify(wire);
+    assert(validate(wire), JSON.stringify(validate.errors));
+    const record = recordProviderSourceEvidenceReading([wire], plan, metadata);
+    assert.equal(record.responses[0].classifications[0].relationship, choice);
+    assert.equal(JSON.stringify(wire), before);
+    assert.equal(
+      readSourceEvidenceReading(record, plan)?.accepted,
+      choice !== "conflicting",
+    );
+    const invalid = structuredClone(wire);
+    invalid.classifications[0].assessment = {
+      consistent: null,
+      conflicting: "Contraddizione.",
+    };
+    assert.equal(validate(invalid), false);
+    assert.throws(() =>
+      recordProviderSourceEvidenceReading([invalid], plan, metadata),
+    );
+  }
+});
 test("Compatible classification relations cannot introduce uncited narrative claims", () => {
   const original = context();
   const originalBytes = JSON.stringify(original);
   const plan = buildSourceEvidenceReadingRequest(original, config);
-  const accepts = new Ajv2020({ strict: false }).compile(
+  const accepts = compileInventedSourceEvidenceSchema(
     plan.requests[0].responseFormat.json_schema.schema,
   );
   for (const relationship of [
@@ -110,7 +180,7 @@ test("Compatible classification relations cannot introduce uncited narrative cla
     assert.equal(accepts(unsupported[0]), false);
     assert.throws(
       () => recordSourceEvidenceReading(unsupported, plan, metadata),
-      /Classification explanation does not match/,
+      ZodError,
     );
     assert.equal(JSON.stringify(unsupported), before);
     const tampered = structuredClone(record);
@@ -129,7 +199,7 @@ test("Compatible classification relations cannot introduce uncited narrative cla
 });
 test("Classification discrepancies and conflicts retain their concrete reasons", () => {
   const plan = buildSourceEvidenceReadingRequest(context(), config);
-  const accepts = new Ajv2020({ strict: false }).compile(
+  const accepts = compileInventedSourceEvidenceSchema(
     plan.requests[0].responseFormat.json_schema.schema,
   );
   for (const relationship of ["metadata_discrepancy", "conflicting"] as const) {
@@ -139,7 +209,7 @@ test("Classification discrepancies and conflicts retain their concrete reasons",
     assert.equal(accepts(input[0]), false);
     assert.throws(
       () => recordSourceEvidenceReading(input, plan, metadata),
-      /Classification explanation does not match/,
+      ZodError,
     );
     const reason =
       "Differenza inventata tra il prodotto Alfa e la famiglia alimentare indicata.";
@@ -192,14 +262,13 @@ test("Known form obligations cannot be covered only by unknown product specifica
   onlyUnknown[index].requiredClauseSelections.s5 = [
     {
       collection: "missingDetails",
-      index: complete[index].missingDetails.length - 1,
     },
   ];
   assert.throws(
     () => recordSourceEvidenceReading(onlyUnknown, plan, metadata),
     /as an unknown specification/,
   );
-  const accepts = new Ajv2020({ strict: false }).compile(
+  const accepts = compileInventedSourceEvidenceSchema(
     plan.requests[index].responseFormat.json_schema.schema,
   );
   assert.equal(accepts(onlyUnknown[index]), false);
@@ -211,6 +280,20 @@ test("Known form obligations cannot be covered only by unknown product specifica
       .at(-1)
       ?.evidence.find((q) => q.sourceRef === "s5")?.text,
     note,
+  );
+  const missingOnly = structuredClone(record);
+  missingOnly.responses[index].observations = missingOnly.responses[
+    index
+  ].observations.filter(
+    (row) => !row.evidence.some((q) => q.sourceRef === "s5"),
+  );
+  const { hash: _hash, ...unsigned } = missingOnly;
+  missingOnly.hash = createHash("sha256")
+    .update(stableDocumentaryJson(unsigned))
+    .digest("hex");
+  assert.throws(
+    () => readSourceEvidenceReading(missingOnly, plan),
+    /contractual clause evidence coverage/,
   );
   assert.equal(JSON.stringify(input), before);
 });
@@ -405,7 +488,7 @@ test("Independent reading cannot skip submission obligations, validity, document
   assert.equal(JSON.stringify(input), before);
 });
 
-test("Complete independent wire requires every original selection, and indexes cannot replace own evidence", () => {
+test("Complete reading requires every original selection and its own reference in the selected collection", () => {
   const base = context();
   const input: SourceInterpretationContext = {
     ...base,
@@ -434,7 +517,7 @@ test("Complete independent wire requires every original selection, and indexes c
   };
   const plan = buildSourceEvidenceReadingRequest(input, config);
   const complete: any = responses(plan);
-  const accepts = new Ajv2020({ strict: false }).compile<any>(
+  const accepts = compileInventedSourceEvidenceSchema<any>(
     plan.requests[0].responseFormat.json_schema.schema,
   );
   assert(accepts(complete[0]));
@@ -456,26 +539,45 @@ test("Complete independent wire requires every original selection, and indexes c
     );
   }
   const borrowed = structuredClone(complete);
-  borrowed[0].requiredClauseSelections.s5 = [
-    {
-      collection: "observations",
-      index: borrowed[0].observations.findIndex(
-        (o: any) => o.kind === "performance",
-      ),
-    },
-  ];
+  // The original remains in observations: selecting issues cannot borrow it.
+  borrowed[0].requiredClauseSelections.s5 = [{ collection: "issues" }];
+  borrowed[0].issues.push({
+    kind: "object_uncertain",
+    reason: "Un dubbio inventato con una citazione diversa.",
+    evidence: [{ sourceRef: "s4" }],
+  });
   assert.throws(
     () => recordSourceEvidenceReading(borrowed, plan, metadata),
     /own original/,
   );
-  const absentRow = structuredClone(complete);
-  absentRow[0].requiredClauseSelections.s5 = [
-    { collection: "observations", index: 31 },
-  ];
-  assert.throws(
-    () => recordSourceEvidenceReading(absentRow, plan, metadata),
-    /own original/,
+  // The current wire rejects obsolete numeric pointers, even if they point
+  // to a real row. No old provider response is repaired or reinterpreted.
+  const obsolete = encodeInventedSourceEvidenceAnswer(
+    structuredClone(complete[0]),
   );
+  obsolete.requiredClauseSelections.s5[0].index = 1;
+  assert.throws(
+    () => recordProviderSourceEvidenceReading([obsolete], plan, metadata),
+    ZodError,
+  );
+  const reordered = structuredClone(complete);
+  reordered[0].observations.reverse();
+  const reorderedRecord = recordSourceEvidenceReading(
+    reordered,
+    plan,
+    metadata,
+  );
+  assert(readSourceEvidenceReading(reorderedRecord, plan)?.accepted);
+  for (const id of ["s5", "f2"]) {
+    const absentProof = structuredClone(complete);
+    absentProof[0].observations = absentProof[0].observations.filter(
+      (row: any) => !row.evidence.some((q: any) => q.sourceRef === id),
+    );
+    assert.throws(
+      () => recordSourceEvidenceReading(absentProof, plan, metadata),
+      /own original/,
+    );
+  }
   const duplicated = structuredClone(complete);
   duplicated[0].requiredClauseSelections.s5.push({
     ...duplicated[0].requiredClauseSelections.s5[0],
@@ -1021,7 +1123,7 @@ test("An explicit output limit binds requests, plan, record and hash without cha
 test("A project cannot be described as a selected lot partition in the provider schema", () => {
   const plan = buildSourceEvidenceReadingRequest(context(), config);
   const answers = responses(plan);
-  const validate = new Ajv2020({ strict: false }).compile(
+  const validate = compileInventedSourceEvidenceSchema(
     plan.requests[0].responseFormat.json_schema.schema,
   );
   assert(validate(answers[0]));
@@ -1052,7 +1154,7 @@ test("Independent reading contains original source only and preserves label evid
     [0, false],
   );
   assert(
-    new Ajv2020({ strict: false }).compile(
+    compileInventedSourceEvidenceSchema(
       plan.requests[0].responseFormat.json_schema.schema,
     )(answers[0]),
   );
@@ -1500,7 +1602,7 @@ test("Reference selections preserve complete HTML and Unicode without accepting 
   assert.equal(record.responses[0].observations[0].evidence[0].text, original);
   assert.equal(JSON.stringify(selections), before);
   assert.equal(readSourceEvidenceReading(record, plan)?.accepted, true);
-  const wire = new Ajv2020({ strict: false }).compile(
+  const wire = compileInventedSourceEvidenceSchema(
     plan.requests[0].responseFormat.json_schema.schema,
   );
   for (const suppliedText of [original, "<p>Fornitura Alfa 🧹.</p>"]) {
@@ -1546,6 +1648,7 @@ test("Stored evidence cannot replace the original passage with a reconstructed o
     "source-evidence-reading-v20",
     "source-evidence-reading-v21",
     "source-evidence-reading-v29",
+    "source-evidence-reading-v30",
   ])
     assert.equal(readSourceEvidenceReading({ ...record, version }, plan), null);
 });
@@ -1566,7 +1669,7 @@ test("Evidence observations preserve original contractual parties and reject an 
       evidence: [{ sourceRef: "s4" }],
     },
   ];
-  const wire = new Ajv2020({ strict: false }).compile(
+  const wire = compileInventedSourceEvidenceSchema(
     plan.requests[0].responseFormat.json_schema.schema,
   );
   assert.equal(wire(answer[0]), true);
@@ -1644,7 +1747,7 @@ test("Fragmented classification labels are copied completely from their ordered 
 
 test("The wire schema limits citations to existing text and scalar field references", () => {
   const plan = buildSourceEvidenceReadingRequest(context(), config);
-  const validate = new Ajv2020({ strict: false }).compile(
+  const validate = compileInventedSourceEvidenceSchema(
     plan.requests[0].responseFormat.json_schema.schema,
   );
   for (const sourceRef of ["s999", "f999"]) {
@@ -1724,7 +1827,7 @@ test("Classifications retain all original languages without delegating label ass
   const invalid: any = responses(plan);
   invalid[0].classifications[0].label = { sourceRefs: ["s3", "s5"] };
   assert.equal(
-    new Ajv2020({ strict: false }).compile(
+    compileInventedSourceEvidenceSchema(
       plan.requests[0].responseFormat.json_schema.schema,
     )(invalid[0]),
     false,
@@ -1772,7 +1875,7 @@ test("Missing details select absent aspects without inventing known objects or p
     evidence: [{ sourceRef: "s4" }],
     missingAspects: ["quantities", "technical_specifications"],
   });
-  const validate = new Ajv2020({ strict: false }).compile(
+  const validate = compileInventedSourceEvidenceSchema(
     plan.requests[0].responseFormat.json_schema.schema,
   );
   assert(validate(answers[0]));
@@ -1827,7 +1930,7 @@ test("Contract metadata alone cannot be promoted to a performance and earlier ev
 test("The provider schema requires descriptive evidence for performances and missing details", () => {
   const plan = buildSourceEvidenceReadingRequest(context(), config);
   const answers: any[] = responses(plan);
-  const validate = new Ajv2020({ strict: false }).compile(
+  const validate = compileInventedSourceEvidenceSchema(
     plan.requests[0].responseFormat.json_schema.schema,
   );
   answers[0].observations[0].serviceRef = "s2";
@@ -1908,7 +2011,7 @@ test("Lot facts and shared facts remain separate in the provider schema and stor
     serviceRef: "s5",
     evidence: [{ sourceRef: "s5" }],
   });
-  const validate = new Ajv2020({ strict: false }).compile(
+  const validate = compileInventedSourceEvidenceSchema(
     plan.requests[0].responseFormat.json_schema.schema,
   );
   assert.equal(validate(valid[0]), true);
@@ -1958,7 +2061,7 @@ test("A territorial partition identifies the lot only with a separately grounded
   const answers: any[] = responses(plan);
   const local = answers[0].observations.find((o: any) => o.serviceRef === "s5");
   local.kind = "target_partition";
-  const validate = new Ajv2020({ strict: false }).compile(
+  const validate = compileInventedSourceEvidenceSchema(
     plan.requests[0].responseFormat.json_schema.schema,
   );
   assert.equal(validate(answers[0]), true);

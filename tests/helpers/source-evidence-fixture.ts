@@ -1,13 +1,53 @@
 // Explicitly invented favorable responses for contract/queue tests only.
 // These helpers are not a semantic benchmark or an AI quality judgment.
 import {
-  recordSourceEvidenceReading,
+  recordSourceEvidenceReading as recordProviderSourceEvidenceReading,
   type SourceEvidenceReadingRecord,
 } from "../../src/lib/source-evidence-reading";
 import {
   buildGroundedSourceReviewRequests,
   type SourceSemanticReviewPlan,
 } from "../../src/lib/source-semantic-review";
+import Ajv2020 from "ajv/dist/2020.js";
+
+// Wire encoding for explicitly invented fixtures only. Preserve every choice,
+// explanation, reference and extra field so invalid fixtures stay invalid.
+// Never call this helper on recorded provider outputs or historical evidence.
+export function encodeInventedSourceEvidenceAnswer(answer: any): any {
+  if (answer?.result)
+    return {
+      ...answer,
+      result: encodeInventedSourceEvidenceAnswer(answer.result),
+    };
+  return {
+    ...answer,
+    classifications: answer.classifications.map(
+      ({ relationship, explanation, ...rest }: any) => ({
+        ...rest,
+        assessment: { [relationship]: explanation },
+      }),
+    ),
+  };
+}
+export function recordInventedSourceEvidenceReading(
+  values: unknown[],
+  ...args: Tail<Parameters<typeof recordProviderSourceEvidenceReading>>
+) {
+  return recordProviderSourceEvidenceReading(
+    values.map(encodeInventedSourceEvidenceAnswer),
+    ...args,
+  );
+}
+type Tail<T extends unknown[]> = T extends [unknown, ...infer R] ? R : never;
+export function compileInventedSourceEvidenceSchema<T = unknown>(schema: any) {
+  const validate = new Ajv2020({ strict: false }).compile<T>(schema);
+  const check = ((answer: any) =>
+    validate(encodeInventedSourceEvidenceAnswer(answer))) as ((
+    answer: any,
+  ) => boolean) & { errors: unknown };
+  Object.defineProperty(check, "errors", { get: () => validate.errors });
+  return check;
+}
 
 // Encode only references already selected in an invented fixture. This never
 // adds original evidence, decides meaning, or operates on a provider response.
@@ -19,12 +59,13 @@ export function inventedClauseSelections(
     required.map((id) => [
       id,
       ["observations", "issues"].flatMap((collection) =>
-        (answer[collection] ?? []).flatMap((row: any, index: number) =>
-          row.serviceRef === id ||
-          row.evidence.some((e: any) => e.sourceRef === id)
-            ? [{ collection, index }]
-            : [],
-        ),
+        (answer[collection] ?? []).some(
+          (row: any) =>
+            row.serviceRef === id ||
+            row.evidence.some((e: any) => e.sourceRef === id),
+        )
+          ? [{ collection }]
+          : [],
       ),
     ]),
   );
@@ -139,7 +180,7 @@ const evidence = new WeakMap<
 export function inventedSourceEvidence(plan: SourceSemanticReviewPlan) {
   let record = evidence.get(plan);
   if (!record) {
-    record = recordSourceEvidenceReading(
+    record = recordInventedSourceEvidenceReading(
       plan.evidencePlan.requests.map((r) =>
         inventedSourceEvidenceAnswer(JSON.parse(r.prompt)),
       ),

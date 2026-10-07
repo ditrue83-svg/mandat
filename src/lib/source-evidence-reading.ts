@@ -10,7 +10,7 @@ import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v30";
+export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v31";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -129,6 +129,18 @@ const selectedClassification = classification
     explanation: text(600).nullable(),
     evidence: references,
   });
+// Every grammar branch starts with the semantic choice itself. The model
+// must not select an anomaly branch merely to emit a narrative explanation.
+const classificationAssessment = z.union([
+  z.strictObject({ consistent: z.null() }),
+  z.strictObject({ broad_context: z.null() }),
+  z.strictObject({ not_decisive: z.null() }),
+  z.strictObject({ metadata_discrepancy: text(600) }),
+  z.strictObject({ conflicting: text(600) }),
+]);
+const wireClassification = selectedClassification
+  .omit({ relationship: true, explanation: true })
+  .extend({ assessment: classificationAssessment });
 const classificationRelationLabels = {
   consistent: "Classificazione coerente con i passaggi originali selezionati.",
   broad_context:
@@ -143,7 +155,6 @@ function classificationRelationLabel(relationship: string) {
 }
 const clauseSelection = z.strictObject({
   collection: z.enum(["observations", "missingDetails", "issues"]),
-  index: z.number().int().min(0).max(31),
 });
 const selectionSchema = responseSchema
   .omit({
@@ -160,9 +171,12 @@ const selectionSchema = responseSchema
       .max(32),
     missingDetails: z.array(selectedDetail).max(32),
     requiredClauseSelections: z
-      .record(z.string().regex(/^[sf]\d+$/), z.array(clauseSelection).max(32))
+      .record(z.string().regex(/^[sf]\d+$/), z.array(clauseSelection).max(3))
       .optional(),
   });
+const wireSelectionSchema = selectionSchema
+  .omit({ classifications: true })
+  .extend({ classifications: z.array(wireClassification).max(1024) });
 const unique = (values: string[]) => [...new Set(values)];
 function freeze<T>(value: T): T {
   if (value && typeof value === "object") {
@@ -263,23 +277,9 @@ export function buildSourceEvidenceReadingRequest(
         ? z.enum(group.classificationIds)
         : selectedClassification.shape.classificationId,
     });
-    const classifiedRelation = z.union([
-      // The provider grammar needs distinct first keys for object alternatives.
-      // Ordering does not change which JSON values either branch accepts.
-      z.strictObject({
-        explanation: z.null(),
-        ...assignedClassification.omit({ explanation: true }).shape,
-        relationship: z.enum(["consistent", "broad_context", "not_decisive"]),
-      }),
-      z.strictObject({
-        relationship: z.enum(["metadata_discrepancy", "conflicting"]),
-        ...assignedClassification.omit({
-          relationship: true,
-          explanation: true,
-        }).shape,
-        explanation: text(600),
-      }),
-    ]);
+    const classifiedRelation = assignedClassification
+      .omit({ relationship: true, explanation: true })
+      .extend({ assessment: classificationAssessment });
     // The model selects a mandatory descriptive anchor. Its original scope
     // is assigned by the application; no conditional JSON-schema keywords
     // are needed to require a real service description.
@@ -313,7 +313,7 @@ export function buildSourceEvidenceReadingRequest(
     const boundedDetails = z
       .array(selectedDetail.safeExtend(boundedAnchor))
       .max(serviceIds.length ? 32 : 0);
-    const bounded = selectionSchema
+    const bounded = wireSelectionSchema
       .omit({ requiredClauseSelections: true })
       .safeExtend({
         chunkId: z.literal(id),
@@ -343,14 +343,14 @@ export function buildSourceEvidenceReadingRequest(
                     }),
                   )
                   .min(1)
-                  .max(32)
-              : z.array(clauseSelection).max(32),
+                  .max(2)
+              : z.array(clauseSelection).max(3),
           ]),
         ),
       );
-    // Mandatory originals select bounded rows instead of relying on the
-    // model to remember an unstructured coverage list. Meaning remains a
-    // separate judgment; selecting an index never establishes support.
+    // Mandatory originals select collections that must contain their own exact
+    // reference. No generated row number can mislink two existing quotations.
+    // Selecting a collection never supplies missing evidence or proves meaning.
     const providerSchema = requiredClauses.length
       ? z.discriminatedUnion("coverage", [
           bounded.extend({
@@ -373,7 +373,7 @@ export function buildSourceEvidenceReadingRequest(
     };
     const prompt = JSON.stringify({
       stage: "original_source_evidence",
-      task: "Identifica il lavoro acquistato: famiglia dell'oggetto, azioni, esclusioni e ambito. Produci una lettura essenziale per capire che cosa bisogna fornire o svolgere, non una scheda amministrativa. Considera tutta la fonte per interpretare correttamente descrizione, classificazioni e target; separa dettagli non precisati e impedimenti reali. Non stai confermando un riassunto.",
+      task: "Identifica il lavoro acquistato e seleziona le prove originali: famiglia dell'oggetto, azioni, esclusioni, ambito e tutte le condizioni obbligatorie elencate in requiredClausePassages/Fields. Anche le condizioni amministrative elencate devono essere conservate, senza redigere una scheda o un riassunto. Considera tutta la fonte per interpretare descrizione, classificazioni e target; separa dettagli non precisati e impedimenti reali.",
       interpretationMethod: {
         order: [
           "Individua nella descrizione l'azione contrattuale e conserva la denominazione originale del bene.",
@@ -417,15 +417,15 @@ export function buildSourceEvidenceReadingRequest(
       rules: [
         ...(requiredClauses.length
           ? [
-              "requiredClauseSelections: OGNI ID obbligatorio seleziona righe proprie tramite collection/index zero-based. Per complete almeno una observations o issues conserva il fatto noto; missingDetails da sola non basta. Anche istruzioni amministrative note vanno in condition: scaricare, compilare tutte le parti, consegnare tutte le pagine. Un rinvio può lasciare ignoti articoli o quantità, ma non rende ignoti gli obblighi scritti. missingDetails aggiunge solo le specifiche davvero assenti. Non omettere tipi/date/valori. Nessun testo duplicato nella mappa; unreadable può avere selezioni vuote.",
+              "requiredClauseSelections: per OGNI ID obbligatorio indica la collection che contiene la sua prova. Lo stesso ID deve comparire davvero nel serviceRef o evidence di una riga di quella collection; scriverlo soltanto nella mappa non basta. Non produrre indici di riga. Per complete almeno una observations o issues conserva il fatto noto; missingDetails da sola non basta. Anche istruzioni amministrative note vanno in condition: scaricare, compilare tutte le parti, consegnare tutte le pagine. Un rinvio può lasciare ignoti articoli o quantità, ma non rende ignoti gli obblighi scritti. missingDetails aggiunge solo le specifiche davvero assenti. Non omettere tipi/date/valori. Nessun testo duplicato nella mappa; unreadable può avere selezioni vuote.",
             ]
           : []),
         "originalCoverage descrive soltanto il materiale fornito qui. linkedDocumentsRead false o hasProjectDocuments false non provano indisponibilità esterna: conserva email/portali e condizioni di richiesta presenti. Non negare un documento perché non è archiviato o non è stato letto.",
         "Le observations sono selezioni di prove originali, non un riassunto. Scegli kind, serviceRef ed evidence per individuare tutte le prestazioni e condizioni rilevanti; non produrre parafrasi, traduzioni o un campo statement. Il codice conserva i passaggi integrali. Oggetto, azione, soggetto contrattuale, destinatario, permessi e obblighi rimangono nel testo originale selezionato, che il revisore dovrà leggere direttamente. La sola selezione di un riferimento non dimostra un significato né l'applicabilità al target.",
-        "requiredClausePassages e requiredClauseFields elencano note e valori originali su subappalto, opzioni o esecuzione assegnati a questa parte. Per coverage complete conserva ogni riferimento, incluse tutte le lingue e i segmenti, in observations, missingDetails o issues secondo il suo significato. Leggi i valori strutturati insieme al percorso originale: il divieto di subappalto espresso da subContractorAllowed no o false delimita il lavoro delegabile anche senza una nota testuale. null significa non indicato, non divieto; non inventare il significato di valori sconosciuti. Una clausola che delimita ruoli, parti delegabili, obblighi od opzioni va in condition con una descrizione del lavoro dello stesso ambito. Un rinvio privo dei dettagli necessari va in missingDetails; un impedimento materiale in issues. Se non riesci a coprirle usa unreadable. Il nome del campo da solo non prova prestazioni, restrizioni, capacità o idoneità non dichiarate dal valore o testo originale.",
+        "requiredClausePassages e requiredClauseFields elencano note e valori originali su subappalto, opzioni o esecuzione assegnati a questa parte. Per coverage complete conserva ogni riferimento, incluse tutte le lingue e i segmenti, in observations o issues secondo il suo significato; missingDetails può solo aggiungere dubbi sui dettagli assenti, non sostituire fatti noti. Leggi i valori strutturati insieme al percorso originale: il divieto di subappalto espresso da subContractorAllowed no o false delimita il lavoro delegabile anche senza una nota testuale. null significa non indicato, non divieto; non inventare il significato di valori sconosciuti. Una clausola che delimita ruoli, parti delegabili, obblighi od opzioni va in condition con una descrizione del lavoro dello stesso ambito. Un rinvio privo dei dettagli necessari va in missingDetails; un impedimento materiale in issues. Se non riesci a coprirle usa unreadable. Il nome del campo da solo non prova prestazioni, restrizioni, capacità o idoneità non dichiarate dal valore o testo originale.",
         "Le etichette classificatorie dichiarano il contesto originale. Una denominazione generica o polisemica non dimostra che la classificazione sia sbagliata: non inventare una discrepanza né un sottotipo. Una classificazione ampia non aggiunge tutte le attività della sua etichetta.",
         "Per ciascuna assignedClassificationIds restituisci una relazione con la descrizione. Non restituire label: il codice conserva codice ed etichette originali. In evidence scegli le prove della relazione; i riferimenti della classificazione sono aggiunti dal codice. consistent o broad_context conserva la famiglia compatibile; not_decisive non determina da sola la prestazione locale. metadata_discrepancy segnala una differenza di etichetta senza incompatibilità materiale: richiede in evidence una descrizione originale role service dello stesso ambito, selezionata come serviceRef o prova propria di una performance esplicita, e una spiegazione della differenza, senza correggere il codice. Non risolve oggetti ambigui, fonti incomplete o clausole opposte. conflicting richiede caratteristiche o affermazioni realmente incompatibili, con controprova originale esterna alla classificazione.",
-        "Classifications: per consistent, broad_context e not_decisive explanation è null. Il codice nomina soltanto la relazione scelta e conserva le prove integrali: non riscrivere oggetti o azioni. La relazione resta da verificare semanticamente. Per metadata_discrepancy e conflicting explanation deve identificare la differenza concreta, sostenendo ogni sua affermazione con la propria evidence; non eredita prove da observations o da altre classificazioni.",
+        "Classifications: restituisci classificationId, evidence e assessment. assessment contiene una sola chiave, che è la tua scelta: consistent, broad_context o not_decisive con valore null; metadata_discrepancy o conflicting con una spiegazione sostenuta dalla propria evidence. Scegli prima il significato della relazione, non il ramo che permette di scrivere una spiegazione. Un testo che conclude che le prestazioni sono compatibili non può accompagnare conflicting. Per le relazioni compatibili il codice nomina soltanto la scelta e conserva le prove integrali, senza riscrivere oggetti o azioni. La scelta resta da verificare semanticamente. La spiegazione delle anomalie non eredita prove da observations o da altre classificazioni.",
         "Le osservazioni performance descrivono acquisti e azioni: fornitura di beni, esecuzione, gestione, installazione, manutenzione, progettazione o consulenza. Manutenzione conserva o ripristina un bene: luogo, destinatario o settore non la dimostrano. Metadati e classificazioni non sono prestazioni autonome.",
         "Prima di confrontare le classificazioni, identifica il ruolo contrattuale nella frase completa: chi è incaricato e quale prestazione deve svolgere. Le fasi del progetto non sono azioni attribuite automaticamente all'incaricato. Prestazioni di un ingegnere nelle fasi di appalto o realizzazione, direzione o supervisione dei lavori restano servizi professionali, salvo un distinto obbligo esplicito di eseguire materialmente le opere. Non isolare realizzazione, esecuzione o un codice di fase dal soggetto e dal lavoro cui si riferiscono. Conserva invece fornitura e posa quando entrambe sono effettivamente richieste allo stesso operatore.",
         "Prima di scegliere conflicting, indica due contenuti originali che non possono valere insieme per la stessa prestazione e lo stesso ruolo. Una classificazione progettuale o ingegneristica e un incarico professionale durante appalto o realizzazione non sono opposti per la sola differenza delle parole. La fonte non chiarisce il rapporto con la categoria o mancano dettagli non sono controprove di incompatibilità. Se il servizio è identificato, conserva il contesto compatibile o la discrepanza nominale e segnala soltanto i dettagli realmente mancanti; non inventare un conflitto. Clausole realmente opposte restano bloccanti.",
@@ -574,7 +574,14 @@ function materialize(values: unknown[], plan: SourceEvidenceReadingPlan) {
     throw new Error("Incomplete source evidence coverage");
   const byId = new Map(plan.evidencePassages.map((p) => [p.id, p]));
   return values.map((value, index) => {
-    const selected = selectionSchema.parse(value);
+    const wire = wireSelectionSchema.parse(value);
+    const selected = selectionSchema.parse({
+      ...wire,
+      classifications: wire.classifications.map(({ assessment, ...rest }) => {
+        const [relationship, explanation] = Object.entries(assessment)[0];
+        return { ...rest, relationship, explanation };
+      }),
+    });
     const request = plan.requests[index];
     const { requiredClauseSelections: selections, ...selectionBody } = selected;
     if (
@@ -599,18 +606,16 @@ function materialize(values: unknown[], plan: SourceEvidenceReadingPlan) {
         );
       const seen = new Set<string>();
       for (const pointer of pointers) {
-        const key = `${pointer.collection}:${pointer.index}`;
+        const key = pointer.collection;
         if (seen.has(key))
           throw new Error("Repeated independent source clause selection");
         seen.add(key);
-        const row = selected[pointer.collection][pointer.index];
-        if (
-          !row ||
-          !(
+        const ownsReference = selected[pointer.collection].some(
+          (row) =>
             row.evidence.some((q) => q.sourceRef === id) ||
-            ("serviceRef" in row && row.serviceRef === id)
-          )
-        )
+            ("serviceRef" in row && row.serviceRef === id),
+        );
+        if (!ownsReference)
           throw new Error(
             "Incomplete independent source contractual clause evidence coverage: selection lacks its own original",
           );
@@ -889,7 +894,7 @@ function validate(values: unknown[], plan: SourceEvidenceReadingPlan) {
     });
     if (value.coverage === "complete") {
       const represented = new Set(
-        [...value.observations, ...value.missingDetails, ...value.issues]
+        [...value.observations, ...value.issues]
           .flatMap((item) => item.evidence)
           .map((q) => q.sourceRef),
       );

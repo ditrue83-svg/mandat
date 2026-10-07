@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import Ajv2020 from "ajv/dist/2020.js";
 import { test } from "vitest";
+import { ZodError } from "zod";
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
 import {
   buildSourceInterpretationRequest,
@@ -28,13 +29,11 @@ const buildSourceSemanticReviewRequest = (
 import {
   inventedSourceEvidence,
   inventedSourceEvidenceAnswer,
+  recordInventedSourceEvidenceReading as recordSourceEvidenceReading,
   inventedGroundedReviewRequests,
   inventedReadingRefs,
 } from "./helpers/source-evidence-fixture";
-import {
-  recordSourceEvidenceReading,
-  readSourceEvidenceReading,
-} from "../src/lib/source-evidence-reading";
+import { readSourceEvidenceReading } from "../src/lib/source-evidence-reading";
 import { openaiJsonSchema } from "../src/lib/openai-responses";
 function recordSourceSemanticReview(
   responses: unknown[],
@@ -3770,7 +3769,7 @@ test("Review preserves original classification evidence without inheriting a pri
     const rejectedOriginal = JSON.stringify(responses);
     assert.throws(
       () => recordSourceEvidenceReading(responses, plan.evidencePlan, metadata),
-      /Classification explanation does not match/,
+      ZodError,
     );
     assert.equal(JSON.stringify(responses), rejectedOriginal);
     // A separate invented valid response follows the new provider contract.
