@@ -20,7 +20,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v57";
+  "documentary-source-interpretation-v58";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -543,6 +543,7 @@ function buildProviderResponseSchema(
   },
   reference: z.ZodType<string> = z.string().regex(/^[sg]\d+$/),
   requiredClauses?: readonly { id: string }[],
+  requireClausesForEveryStatus = false,
 ) {
   const [resolved, uncertain, conflicting] =
     buildResponseSchema(bounds).options;
@@ -718,32 +719,49 @@ function buildProviderResponseSchema(
         ),
       )
     : z.record(z.string().regex(/^[sf]\d+$/), z.array(detail).min(1).max(32));
+  const clauseFields =
+    requiredClauses?.length === 0
+      ? {}
+      : {
+          contractClauseDetails: requiredClauses
+            ? contractClauseDetails
+            : contractClauseDetails.optional(),
+        };
   const unresolvedFields = {
     evidenceFormat,
     components: z.array(anyComponent).max(64).describe(componentsDescription),
+    // An uncertain role or conflicting object cannot erase other explicit
+    // original conditions. Keep the old protocol only for legacy regressions.
+    ...(requireClausesForEveryStatus ? clauseFields : {}),
   };
   return z.discriminatedUnion("status", [
     resolved.extend({
       evidenceFormat,
       details: resolvedDetails,
-      ...(requiredClauses?.length === 0
-        ? {}
-        : {
-            contractClauseDetails: requiredClauses
-              ? contractClauseDetails
-              : contractClauseDetails.optional(),
-          }),
+      ...clauseFields,
       components: z
         .array(identifiedComponent)
         .min(1)
         .max(64)
         .describe(componentsDescription),
     }),
-    uncertain.extend({ ...unresolvedFields, details }),
-    conflicting.extend({ ...unresolvedFields, details }),
+    uncertain.extend({
+      ...unresolvedFields,
+      details: requireClausesForEveryStatus ? resolvedDetails : details,
+    }),
+    conflicting.extend({
+      ...unresolvedFields,
+      details: requireClausesForEveryStatus ? resolvedDetails : details,
+    }),
   ]);
 }
 const providerResponseSchema = buildProviderResponseSchema();
+const completeProviderResponseSchema = buildProviderResponseSchema(
+  undefined,
+  undefined,
+  undefined,
+  true,
+);
 
 // V9 has one owner for each mechanical relationship. The provider selects
 // source spans and classification -> component links; the stored model is
@@ -753,7 +771,10 @@ function buildSelectionResponseSchema(
   ...args: Parameters<typeof buildProviderResponseSchema>
 ) {
   const [resolved, uncertain, conflicting] = buildProviderResponseSchema(
-    ...args,
+    args[0],
+    args[1],
+    args[2],
+    true,
   ).options;
   const componentSelection = args[1]
     ? sourceTextSelectionSchema.extend({ sourceRef: args[1] })
@@ -860,7 +881,7 @@ function buildSelectionResponseSchema(
       "Estratti originali aggiuntivi; il codice copia testo e riferimenti, senza traduzioni o affermazioni di assenza.",
     );
   const common = {
-    evidenceFormat: z.literal("source_selections_v12"),
+    evidenceFormat: z.literal("source_selections_v13"),
     details,
   };
   const readings = (settled: boolean) =>
@@ -892,7 +913,7 @@ function decodeSelectionResponse(
   response: unknown,
   request: SourceInterpretationRequest,
 ) {
-  if (request.providerFormat !== "source_selections_v12")
+  if (request.providerFormat !== "source_selections_v13")
     throw new Error("Source provider protocol does not match its request");
   const parsed = buildSelectionResponseSchema(
     request.classificationContext,
@@ -1002,10 +1023,14 @@ function decodeSelectionResponse(
     }),
   };
   const canonical = sourceInterpretationResponseSchema.parse(
-    decodeProviderResponse(projected, {
-      ...request,
-      providerFormat: "component_quotations_v8",
-    }),
+    decodeProviderResponse(
+      projected,
+      {
+        ...request,
+        providerFormat: "component_quotations_v8",
+      },
+      true,
+    ),
   );
   return {
     ...canonical,
@@ -1076,6 +1101,7 @@ function componentEvidenceGroups(
 function decodeProviderResponse(
   response: unknown,
   request: SourceInterpretationRequest,
+  requireClausesForEveryStatus = false,
 ): unknown {
   if (
     !response ||
@@ -1085,17 +1111,24 @@ function decodeProviderResponse(
     return response;
   if (
     (response as { evidenceFormat?: string }).evidenceFormat ===
-    "source_selections_v12"
+    "source_selections_v13"
   )
     return decodeSelectionResponse(response, request);
   if (request.providerFormat !== "component_quotations_v8")
     throw new Error("Source provider protocol does not match its request");
-  const parsed = providerResponseSchema.parse(response);
+  const parsed = (
+    requireClausesForEveryStatus
+      ? completeProviderResponseSchema
+      : providerResponseSchema
+  ).parse(response);
   const { evidenceFormat: _format, components, ...value } = parsed;
   let details = value.details;
-  if (parsed.status === "resolved") {
-    const declared = parsed.contractClauseDetails as
-      Record<string, typeof details> | undefined;
+  if (parsed.status === "resolved" || requireClausesForEveryStatus) {
+    const declared = (
+      "contractClauseDetails" in parsed
+        ? parsed.contractClauseDetails
+        : undefined
+    ) as Record<string, typeof details> | undefined;
     if (
       JSON.stringify(Object.keys(declared ?? {}).sort()) !==
       JSON.stringify(
@@ -1521,9 +1554,9 @@ export function buildSourceInterpretationRequest(
       ? {}
       : {
           acceptancePolicy: RADAR_ACCEPTANCE_POLICY,
-          evidenceProtocol: "source_selections_v12",
+          evidenceProtocol: "source_selections_v13",
           selectionRules:
-            "actionSelection/objectSelection/quoteSelection indicano sourceRef sN/gN e exactText: copia un estratto letterale unico, con parole intere, massimo 600 caratteri (gruppo: concatenazione contigua). Conserva articoli, refusi e punteggiatura. Se ripetuto, includi contesto per disambiguare. Non calcolare posizioni né restituire actionText/objectText: il codice trova la corrispondenza esatta, rifiuta testi assenti/ambigui e copia solo l’originale. La prova selezionata deve appartenere a evidence e allo scope del ruolo. classificationReadingsById richiede ogni ID come chiave, use e componentIndexes: niente explanation libera. Nome, codice ed etichette restano quelli originali nel contesto. Motiva ambiguità e conflitti nelle issues con prove proprie. ownSourceRef seleziona una propria etichetta o codice; sourceRefs aggiunge eventuali controprove. Solo classificazioni di progetto condivise ammettono shared_project_only. componentIndexes (indici da zero) è l’unico collegamento al significato delle componenti; clarifies_domain richiede almeno una componente concreta e la propria etichetta. Non restituire meaning.classificationContextIds. details aggiuntivi: soltanto estratti originali quoteSelection e kind/scope, mai parafrasi o duplicati di contractClauseDetails. Solo ambiguità materiali restano nelle issues; specifiche non indicate non diventano issues. Non inventare fatti assenti.",
+            "actionSelection/objectSelection/quoteSelection indicano sourceRef sN/gN e exactText: copia un estratto letterale unico, con parole intere, massimo 600 caratteri (gruppo: concatenazione contigua). Conserva articoli, refusi e punteggiatura. Se ripetuto, includi contesto per disambiguare. Non calcolare posizioni né restituire actionText/objectText: il codice trova la corrispondenza esatta, rifiuta testi assenti/ambigui e copia solo l’originale. La prova selezionata deve appartenere a evidence e allo scope del ruolo. classificationReadingsById richiede ogni ID come chiave, use e componentIndexes: niente explanation libera. Nome, codice ed etichette restano quelli originali nel contesto. Motiva ambiguità e conflitti nelle issues con prove proprie. ownSourceRef seleziona una propria etichetta o codice; sourceRefs aggiunge eventuali controprove. Solo classificazioni di progetto condivise ammettono shared_project_only. componentIndexes (indici da zero) è l’unico collegamento al significato delle componenti; clarifies_domain richiede almeno una componente concreta e la propria etichetta. Non restituire meaning.classificationContextIds. details aggiuntivi: soltanto estratti originali quoteSelection e kind/scope, mai parafrasi o duplicati di contractClauseDetails. In ogni stato, anche uncertain/conflicting, contractClauseDetails conserva tutte le clausole richieste nei propri blocchi. Un dubbio sul ruolo non elimina condizioni note. Solo ambiguità materiali restano nelle issues; specifiche non indicate non diventano issues. Non inventare fatti assenti.",
         }),
     task: "Identifica l'acquisto del target: sintesi neutrale, componenti distinte e prove esatte, prima del confronto aziendale.",
     // Keep the required identifiers visible independently of long notes.
@@ -1748,7 +1781,7 @@ export function buildSourceInterpretationRequest(
     selectedIds: body.passages.map((passage) => passage.id),
     providerFormat: options.legacyProviderFormatForRegression
       ? "component_quotations_v8"
-      : "source_selections_v12",
+      : "source_selections_v13",
     version: SOURCE_INTERPRETATION_VERSION,
     sourceKey,
     inputHash: digest({
@@ -1810,7 +1843,10 @@ export function validateSourceInterpretation(
         "Source summary selected lot number requires its own original field evidence",
       );
   }
-  if (value.status === "resolved") {
+  if (
+    value.status === "resolved" ||
+    request.providerFormat === "source_selections_v13"
+  ) {
     const represented = new Set(value.details.flatMap((d) => d.sourceRefs));
     if (request.requiredContractClauseIds.some((id) => !represented.has(id)))
       throw new Error("Incomplete source interpretation contract clauses");
@@ -1818,10 +1854,21 @@ export function validateSourceInterpretation(
     // Never repair an explanation by copying facts or references from a
     // neighbouring row, even when that other row is correct.
     for (const family of request.contractDetailFamilies) {
-      if (!family.originalScalarExplanation) continue;
       const rows = value.details.filter((row) =>
         row.sourceRefs.some((ref) => family.sourceRefs.includes(ref)),
       );
+      if (
+        request.providerFormat === "source_selections_v13" &&
+        rows.some(
+          (row) =>
+            row.scope !== family.scope ||
+            row.sourceRefs.some((ref) => !family.sourceRefs.includes(ref)),
+        )
+      )
+        throw new Error(
+          "Contract clause detail must cite its own scoped source",
+        );
+      if (!family.originalScalarExplanation) continue;
       if (
         rows.some((row) => row.explanation !== family.originalScalarExplanation)
       )

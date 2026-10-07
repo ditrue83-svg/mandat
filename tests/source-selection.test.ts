@@ -9,6 +9,7 @@ import { validateCoverageProof } from "../src/lib/source-coverage-proof";
 import {
   buildSourceInterpretationRequest,
   recordSourceInterpretation,
+  validateSourceInterpretation,
   type SourceInterpretationContext,
 } from "../src/lib/source-interpretation";
 import {
@@ -111,7 +112,7 @@ const span = (sourceRef: string, startUtf16: number, endUtf16: number) => ({
 });
 function wire(input = context()): any {
   return {
-    evidenceFormat: "source_selections_v12",
+    evidenceFormat: "source_selections_v13",
     status: "resolved",
     targetRef: "s1",
     summary: "Revisione del progetto definitivo.",
@@ -836,12 +837,6 @@ test("Structured classification relations still require the original conflict ev
     request = buildSourceInterpretationRequest(input);
   const value = wire(input);
   value.status = "conflicting";
-  value.details.push({
-    kind: "execution_condition",
-    scope: "project_context",
-    quoteSelection: { sourceRef: "s4", exactText: input.body.passages[3].text },
-  });
-  delete value.contractClauseDetails;
   value.components[0].meaning.basis = "explicit_text";
   value.classificationReadingsById.c1.use = "conflicting";
   value.classificationReadingsById.c1.componentIndexes = [];
@@ -874,4 +869,122 @@ test("Structured classification relations still require the original conflict ev
   );
   bad.issues = [];
   assert.throws(() => recordSourceInterpretation(bad, request, metadata));
+});
+
+test("Uncertainty and conflict retain mandatory clauses and cannot bypass their own proof", () => {
+  const input = context(),
+    request = buildSourceInterpretationRequest(input);
+  const native = openaiResponseBody(
+    "gpt-6-luna",
+    request.system,
+    request.prompt,
+    request.maxTokens,
+    request.responseFormat,
+  );
+  const accepts = new Ajv2020({ strict: false }).compile(
+    native.text!.format.schema,
+  );
+  for (const status of ["uncertain", "conflicting"]) {
+    const value = wire(input);
+    value.status = status;
+    value.details = [];
+    value.components[0].role = null;
+    value.components[0].roleEvidence.state = "unresolved";
+    value.issues = [
+      {
+        kind: "role_identity",
+        explanation:
+          "Dubbio del test inventato: nessun verdetto semantico automatico.",
+        sourceRefs: ["s1", "s2"],
+        scope: "project_context",
+        componentIndexes: [0],
+      },
+    ];
+    if (status === "conflicting")
+      value.issues.push({
+        ...value.issues[0],
+        kind: "source_conflict",
+      });
+    assert(accepts({ result: value }), JSON.stringify(accepts.errors));
+    const original = JSON.stringify(value);
+    const record = recordSourceInterpretation(value, request, metadata);
+    assert.equal(record.response.status, status);
+    assert.equal(record.response.components[0].role, null);
+    assert.deepEqual(record.response.issues, value.issues);
+    assert.deepEqual(record.response.details, value.contractClauseDetails.s4);
+    assert.equal(JSON.stringify(value), original);
+    assert.throws(
+      () =>
+        validateSourceInterpretation(
+          {
+            ...record.response,
+            details: [],
+          },
+          request,
+        ),
+      /Incomplete source interpretation contract clauses/,
+    );
+    assert.throws(
+      () =>
+        validateSourceInterpretation(
+          {
+            ...record.response,
+            details: [
+              { ...record.response.details[0], sourceRefs: ["s4", "s3"] },
+            ],
+          },
+          request,
+        ),
+      /own scoped source/,
+    );
+    for (const mutate of [
+      (v: any) => {
+        delete v.contractClauseDetails;
+      },
+      (v: any) => {
+        v.contractClauseDetails = {};
+      },
+      (v: any) => {
+        v.contractClauseDetails.s4 = [];
+      },
+      (v: any) => {
+        v.contractClauseDetails.s4[0].sourceRefs = ["s3"];
+      },
+      (v: any) => {
+        v.contractClauseDetails.s4[0].scope = "selected_lot";
+      },
+      (v: any) => {
+        v.evidenceFormat = "source_selections_v12";
+      },
+    ]) {
+      const bad = structuredClone(value);
+      mutate(bad);
+      assert(!accepts({ result: bad }));
+      assert.throws(() => recordSourceInterpretation(bad, request, metadata));
+    }
+    const duplicate = structuredClone(value);
+    duplicate.details = [
+      {
+        kind: "execution_condition",
+        scope: "project_context",
+        quoteSelection: {
+          sourceRef: "s4",
+          exactText: input.body.passages[3].text,
+        },
+      },
+    ];
+    assert.throws(
+      () => recordSourceInterpretation(duplicate, request, metadata),
+      /bound field block/,
+    );
+    const overflow = structuredClone(value);
+    overflow.contractClauseDetails.s4 = Array.from({ length: 32 }, () =>
+      structuredClone(value.contractClauseDetails.s4[0]),
+    );
+    overflow.details = wire(input).details;
+    assert.throws(
+      () => recordSourceInterpretation(overflow, request, metadata),
+      /aggregate limit/,
+    );
+  }
 });
