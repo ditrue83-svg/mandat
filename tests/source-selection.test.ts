@@ -252,6 +252,143 @@ function wire(input = context()): any {
   };
 }
 
+test("A summary cannot borrow its selected target evidence from a component", () => {
+  const base = context();
+  const title = "Mandato professionale.";
+  const input = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[0],
+          id: "s5",
+          rawPath: "/title/it",
+          text: title,
+          endUtf16: title.length,
+        },
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const bad = wire(input);
+  bad.summarySourceRefs = ["s5"];
+  const before = JSON.stringify(bad);
+  assert.throws(
+    () => recordSourceInterpretation(bad, request, metadata),
+    /summary must cite its own selected target/,
+  );
+  assert.equal(JSON.stringify(bad), before);
+  const valid = structuredClone(bad);
+  valid.summarySourceRefs = ["s5", "s1"];
+  assert(recordSourceInterpretation(valid, request, metadata));
+});
+
+test("Parallel short clauses cannot collapse different original wording", () => {
+  const base = context();
+  const de =
+    "Vorbehalten bleiben die Beschaffungsreife des Projektes sowie die Verfügbarkeit der Kredite.";
+  const it =
+    "Ciò non pregiudica la maturità del progetto in termini di appalto né la disponibilità dei finanziamenti.";
+  const input = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages.filter((p) => p.id !== "s4"),
+        ...[
+          ["s4", "de", de],
+          ["s5", "it", it],
+        ].map(([id, language, text]) => ({
+          ...base.body.passages[3],
+          id,
+          rawPath: `/terms/otherRequirements/${language}`,
+          text,
+          endUtf16: text.length,
+        })),
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const value = wire(input);
+  const literal = `DE: ${de}\nIT: ${it}`;
+  value.contractClauseDetails.s4[0] = {
+    kind: "execution_condition",
+    scope: "project_context",
+    explanation: literal,
+    sourceRefs: ["s4", "s5"],
+  };
+  const native = openaiResponseBody(
+    "gpt-6-luna",
+    request.system,
+    request.prompt,
+    request.maxTokens,
+    request.responseFormat,
+    "medium",
+  );
+  const accepts = new Ajv2020({ strict: false }).compile(
+    native.text!.format.schema,
+  );
+  assert(accepts({ result: value }), JSON.stringify(accepts.errors));
+  const record = recordSourceInterpretation(value, request, metadata);
+  assert(record.response.details.some((d) => d.explanation === literal));
+  for (const explanation of [
+    de,
+    it,
+    "Restano riservate la maturità del progetto e la disponibilità dei finanziamenti.",
+  ]) {
+    const bad = structuredClone(value);
+    bad.contractClauseDetails.s4[0].explanation = explanation;
+    const before = JSON.stringify(bad);
+    assert.equal(accepts({ result: bad }), false);
+    assert.throws(
+      () => recordSourceInterpretation(bad, request, metadata),
+      /multilingual detail/,
+    );
+    assert.equal(JSON.stringify(bad), before);
+  }
+});
+
+test("Long parallel clauses retain the reviewed multi-row path without truncation", () => {
+  const base = context();
+  const input = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages.filter((p) => p.id !== "s4"),
+        ...["de", "it"].map((language, index) => {
+          const text =
+            `${language}: ` + "Una condizione originale completa. ".repeat(12);
+          return {
+            ...base.body.passages[3],
+            id: `s${4 + index}`,
+            rawPath: `/terms/otherRequirements/${language}`,
+            text,
+            endUtf16: text.length,
+          };
+        }),
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  assert.equal(
+    request.contractDetailFamilies[0].originalMultilingualExplanation,
+    undefined,
+  );
+  const value = wire(input);
+  value.contractClauseDetails.s4 = input.body.passages.slice(-2).map((p) => ({
+    kind: "execution_condition",
+    scope: "project_context",
+    explanation: p.text,
+    sourceRefs: ["s4", "s5"],
+  }));
+  const before = JSON.stringify(input);
+  assert(recordSourceInterpretation(value, request, metadata));
+  assert.equal(JSON.stringify(input), before);
+});
+
 test("V14 anchors survive provider schema and the full own-evidence decoder", () => {
   const input = context(),
     request = buildSourceInterpretationRequest(input),

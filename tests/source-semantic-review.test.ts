@@ -3925,7 +3925,7 @@ test("Grounded review keeps numeric evidence and missing details without letting
     evidence: [{ sourceRef: "f0" }],
   });
   wire[0].missingDetails.push({
-    description: "Marca non precisata.",
+    missingAspects: ["brands"],
     serviceRef: "s1",
     evidence: [{ sourceRef: "s1" }],
   });
@@ -4002,10 +4002,10 @@ test("An AI uncertainty note cannot replace the original allocation of aggregate
   const wire: any[] = plan.evidencePlan.requests.map((request) =>
     inventedSourceEvidenceAnswer(JSON.parse(request.prompt)),
   );
-  const speculation = "Le quantità si riferiscono soltanto alla sede A.";
+  const speculation = "Non precisati nel materiale fornito: quantità.";
   wire[0].missingDetails.push({
     serviceRef: "s1",
-    description: speculation,
+    missingAspects: ["quantities"],
     evidence: [{ sourceRef: "s1" }],
   });
   const evidence = recordSourceEvidenceReading(wire, plan.evidencePlan, {

@@ -10,7 +10,7 @@ import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v26";
+export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v27";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -94,9 +94,35 @@ const anchoredSelection = {
 const selectedObservation = observation
   .omit({ scope: true, evidence: true })
   .extend(anchoredSelection);
+const missingAspectLabels = {
+  subtype: "sottotipo",
+  composition: "composizione o materiali",
+  quantities: "quantità",
+  dimensions: "dimensioni",
+  models: "modelli",
+  brands: "marche",
+  technical_specifications: "specifiche tecniche di dettaglio",
+  task_breakdown: "dettaglio delle attività",
+  execution_conditions: "condizioni di esecuzione di dettaglio",
+  location: "ubicazione puntuale",
+  timing: "tempi di esecuzione di dettaglio",
+  referenced_documents: "contenuto dei documenti richiamati",
+} as const;
+const missingAspects = z
+  .array(
+    z.enum(
+      Object.keys(missingAspectLabels) as [
+        keyof typeof missingAspectLabels,
+        ...(keyof typeof missingAspectLabels)[],
+      ],
+    ),
+  )
+  .min(1)
+  .max(12)
+  .refine((items) => new Set(items).size === items.length);
 const selectedDetail = missingDetail
-  .omit({ scope: true, evidence: true })
-  .extend(anchoredSelection);
+  .omit({ scope: true, evidence: true, description: true })
+  .extend({ ...anchoredSelection, missingAspects });
 const selectedClassification = classification
   .omit({ label: true, evidence: true })
   .extend({
@@ -367,7 +393,7 @@ export function buildSourceEvidenceReadingRequest(
         "Conserva il ciclo della commessa attuale anche quando precisato in criteri o tempi: montaggio e collaudo attuali sono azioni, con prove originali e ambito propri. Referenze passate, qualifiche, prezzi e permessi non sono nuovi acquisti. Un titolo che chiede un'offerta non identifica da solo l'azione professionale.",
         "Una sola osservazione per ciascuna prestazione distinta, con oggetto e azione insieme. Quando titolo e descrizione attestano la stessa prestazione, seleziona entrambi nella sua evidence: un riferimento alternativo non prova il contenuto di quello omesso. Mantieni separati ambiti diversi e segnala le contraddizioni; non unire titoli o descrizioni riferiti a prestazioni diverse. Non creare una seconda performance per ripetere orderType, supplyType o un altro campo amministrativo. Ogni performance e target_partition deve citare almeno una descrizione originale role service dello stesso ambito. Non aggiungere una citazione irrilevante solo per rispettare lo schema.",
         "missingDetails elenca specifiche non determinate nella fonte fornita: sottotipo, composizione, quantità, modelli o condizioni rinviate ai documenti. Non proporre possibili sottotipi. Queste lacune non diventano issues se famiglia dell'oggetto e azione contrattuale sono identificabili. Per esempio: fornitura di arredi senza dimensioni -> prestazione identificata, dimensioni in missingDetails; solo 'incarico Delta' senza descrizione né famiglia -> object_uncertain. Non trasferire azioni generali o di altri lotti al target.",
-        "Limita missingDetails alle lacune sull'oggetto, con una descrizione role service. Ogni fatto presente nella description ha prove PROPRIE nella stessa evidence o serviceRef, incluse località, cantoni, destinatari, date e limiti. Non ereditare citazioni da altre observations/missingDetails: cita il campo originale esatto oppure ometti dalla frase quel fatto non necessario per spiegare la lacuna. Non inventare possibili requisiti o modalità né ricavare esecuzione/consegna dalla presentazione delle offerte. condition conserva limiti, opzioni e attività complementari. ECCEZIONE: per requiredClausePassages/Fields conserva anche ogni obbligo amministrativo noto come condition, distinto dalle specifiche mancanti. Altre cronologie/contatti non pertinenti al lavoro possono essere omessi.",
+        "missingDetails: scegli serviceRef/evidence propri e missingAspects, solo categorie di specifiche realmente assenti dopo aver letto TUTTA la fonte fornita. Non restituire description: il codice nomina le categorie senza aggiungere oggetti, luoghi, date o requisiti. Il testo originale del serviceRef identifica l'oggetto della lacuna; non eredita prove da altre righe. Una categoria parzialmente precisata non è interamente assente: conserva il fatto noto in observations ed evita una negazione generica. referenced_documents significa contenuto non fornito, mai documento indisponibile. condition conserva limiti e obblighi noti, anche amministrativi per requiredClausePassages/Fields, distinti dalle specifiche mancanti.",
         "Una clausola che limita quali parti del lavoro possono svolgere altri operatori delimita i ruoli contrattuali e va conservata come condition: per esempio subappalto ammesso solo per determinate attività o parti riservate all'aggiudicatario. Mantieni l'elenco delle attività e il carattere permesso, obbligatorio o escluso come dichiarati, con la citazione originale della clausola e una descrizione del lavoro. Non trasformare le attività subappaltabili in gare autonome o obblighi principali, né dedurre idoneità delle ditte. Questa condizione è diversa dai soli moduli o adempimenti per presentare l'offerta.",
         "issues contiene solo impedimenti materiali: object_uncertain quando non si può identificare neppure la famiglia o l'azione; target_uncertain quando non si può stabilire l'ambito; source_conflict per affermazioni incompatibili sul medesimo oggetto, senza precedenza o rettifica. Due clausole che includono ed escludono reciprocamente la stessa prestazione restano un conflitto, mai un semplice dettaglio da controllare. Non trasformare dati compatibili o traduzioni in conflitti.",
         "In ogni observations e missingDetails scegli serviceRef: una descrizione principale role service. Il codice ne ricava scope e conserva la citazione; non restituire scope. Gli eventuali riferimenti aggiuntivi in evidence devono appartenere allo stesso ambito originale di serviceRef, non a un’applicabilità dedotta. Conserva le informazioni del progetto in project_context e quelle del lotto in selected_lot, in osservazioni distinte. Il revisore successivo potrà esaminare insieme le due serie; non perderne una e non combinarle in un fatto locale.",
@@ -629,7 +655,18 @@ function materialize(values: unknown[], plan: SourceEvidenceReadingPlan) {
         ...item,
         evidence: resolve(item.evidence),
       })),
-      missingDetails: selected.missingDetails.map(resolveAnchored),
+      missingDetails: selected.missingDetails.map((item) => {
+        const { missingAspects, ...resolved } = resolveAnchored(item);
+        // The model judges which specifications are missing. It does not
+        // narrate known objects/places again with potentially unrelated refs.
+        // This projection is not evidence that its absence judgment is true.
+        return {
+          ...resolved,
+          description: `Non precisati nel materiale fornito: ${missingAspects
+            .map((aspect) => missingAspectLabels[aspect])
+            .join("; ")}.`,
+        };
+      }),
     };
   });
 }

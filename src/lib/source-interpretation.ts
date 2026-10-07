@@ -20,7 +20,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v59";
+  "documentary-source-interpretation-v60";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -416,13 +416,13 @@ function buildResponseSchema(bounds?: {
       ? z.array(item).length(bounds.classificationCount)
       : z.array(item).max(1024);
   const commonFields = {
-    summary: text(1200).describe(
-      "Oggetti, tutte le azioni, ambito, esclusioni e condizioni esecutive per fase. I details non sostituiscono la sintesi. Ogni fatto ha summarySourceRefs.",
-    ),
-    // Share the exact reference schema with details; another described clone
-    // would repeat the long source enum in the provider's JSON Schema.
-    summarySourceRefs: bounds?.detailRefs ?? detailRefs,
     targetRef: bounds?.targetRef ?? sourceId,
+    // Select the evidence before writing its summary. Each summary still
+    // undergoes a semantic review; valid IDs alone do not prove its claims.
+    summarySourceRefs: bounds?.detailRefs ?? detailRefs,
+    summary: text(1200).describe(
+      "Oggetti, azioni, ambito, esclusioni e condizioni per fase. Cita targetRef e prove proprie di ogni fatto; titoli generici e details non sostituiscono tali prove.",
+    ),
     details: z
       .array(detail)
       .max(32)
@@ -525,6 +525,27 @@ function originalScalarExplanation(rawPath: string, value: unknown) {
   return `${label}: ${value} ${value === 1 ? "giorno" : "giorni"}.`;
 }
 
+function originalMultilingualExplanation(
+  originals: readonly { rawPath: string; text?: string }[],
+) {
+  const languages = originals.map(
+    (p) => p.rawPath.match(/\/(de|en|fr|it|rm)$/)?.[1],
+  );
+  if (
+    new Set(languages).size < 2 ||
+    languages.some((language) => !language) ||
+    originals.some((p) => typeof p.text !== "string")
+  )
+    return undefined;
+  // Preserve short parallel clauses literally, including different wording.
+  // This makes no claim that translations agree or that one prevails. Longer
+  // families retain the bounded, reviewed multi-row path; never truncate them.
+  const literal = originals
+    .map((p, index) => `${languages[index]!.toUpperCase()}: ${p.text}`)
+    .join("\n");
+  return literal.length <= 600 ? literal : undefined;
+}
+
 // The provider selects passages and quotes the action and object. Their
 // precise supporting references are located locally within that selection.
 function buildProviderResponseSchema(
@@ -539,6 +560,7 @@ function buildProviderResponseSchema(
       rawPath: string;
       sourceRefs: readonly string[];
       originalScalarExplanation?: string;
+      originalMultilingualExplanation?: string;
     }[];
   },
   reference: z.ZodType<string> = z.string().regex(/^[sg]\d+$/),
@@ -710,7 +732,9 @@ function buildProviderResponseSchema(
                     .max(family.sourceRefs.length),
                   explanation: family.originalScalarExplanation
                     ? z.literal(family.originalScalarExplanation)
-                    : detail.shape.explanation,
+                    : family.originalMultilingualExplanation
+                      ? z.literal(family.originalMultilingualExplanation)
+                      : detail.shape.explanation,
                 }),
               )
               .min(1)
@@ -1510,6 +1534,10 @@ export function buildSourceInterpretationRequest(
                     "value" in clause ? clause.value : clause.text,
                   )
                 : undefined,
+            originalMultilingualExplanation:
+              options.legacyProviderFormatForRegression
+                ? undefined
+                : originalMultilingualExplanation(originals),
           },
         ] as const;
       }),
@@ -1868,12 +1896,21 @@ export function validateSourceInterpretation(
         throw new Error(
           "Contract clause detail must cite its own scoped source",
         );
-      if (!family.originalScalarExplanation) continue;
       if (
+        family.originalScalarExplanation &&
         rows.some((row) => row.explanation !== family.originalScalarExplanation)
       )
         throw new Error(
           "Contract scalar detail must preserve only its original value",
+        );
+      if (
+        family.originalMultilingualExplanation &&
+        rows.some(
+          (row) => row.explanation !== family.originalMultilingualExplanation,
+        )
+      )
+        throw new Error(
+          "Contract multilingual detail must preserve every original wording",
         );
     }
   }
@@ -1934,6 +1971,11 @@ export function validateSourceInterpretation(
     throw new Error(
       "Source interpretation requires selected-target service evidence",
     );
+  if (
+    request.providerFormat === "source_selections_v14" &&
+    !value.summarySourceRefs.includes(value.targetRef)
+  )
+    throw new Error("Source summary must cite its own selected target");
   if (
     !value.summarySourceRefs.some((id) => {
       const passage = originals.find((item) => item.id === id);

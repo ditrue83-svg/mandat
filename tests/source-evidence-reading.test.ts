@@ -67,7 +67,7 @@ test("Known form obligations cannot be covered only by unknown product specifica
   );
   complete[index].missingDetails.push({
     serviceRef: "s1",
-    description: "Specifiche degli articoli non fornite.",
+    missingAspects: ["technical_specifications"],
     evidence: [{ sourceRef: "s5" }],
   });
   const onlyUnknown = structuredClone(complete);
@@ -713,7 +713,7 @@ test("Unreadable work clauses stay blocked and missing-detail quotations cannot 
   moved[0].missingDetails = [
     {
       serviceRef: "s5",
-      description: "Dettagli inventati da verificare.",
+      missingAspects: ["technical_specifications"],
       evidence: [{ sourceRef: "s6" }],
     },
   ];
@@ -1600,7 +1600,7 @@ test("Missing specifications remain visible without clearing material uncertaint
   const plan = buildSourceEvidenceReadingRequest(context(), config);
   const answers: any[] = responses(plan);
   answers[0].missingDetails.push({
-    description: "Il sottotipo non è precisato nella fonte fornita.",
+    missingAspects: ["subtype"],
     serviceRef: "s1",
     evidence: [{ sourceRef: "s4" }],
   });
@@ -1626,6 +1626,47 @@ test("Missing specifications remain visible without clearing material uncertaint
     )!.accepted,
     false,
   );
+});
+
+test("Missing details select absent aspects without inventing known objects or places", () => {
+  const plan = buildSourceEvidenceReadingRequest(context(), config);
+  const answers: any[] = responses(plan);
+  answers[0].missingDetails.push({
+    serviceRef: "s1",
+    evidence: [{ sourceRef: "s4" }],
+    missingAspects: ["quantities", "technical_specifications"],
+  });
+  const validate = new Ajv2020({ strict: false }).compile(
+    plan.requests[0].responseFormat.json_schema.schema,
+  );
+  assert(validate(answers[0]));
+  const before = JSON.stringify(answers);
+  const record = recordSourceEvidenceReading(answers, plan, metadata);
+  assert.equal(
+    record.responses[0].missingDetails[0].description,
+    "Non precisati nel materiale fornito: quantità; specifiche tecniche di dettaglio.",
+  );
+  assert.deepEqual(
+    record.responses[0].missingDetails[0].evidence.map((q) => q.sourceRef),
+    ["s1", "s4"],
+  );
+  assert.equal(JSON.stringify(answers), before);
+  const inventedObject = structuredClone(answers);
+  inventedObject[0].missingDetails[0].description =
+    "Quantità delle condotte a Lugano non precisate.";
+  assert.equal(validate(inventedObject[0]), false);
+  assert.throws(() =>
+    recordSourceEvidenceReading(inventedObject, plan, metadata),
+  );
+  for (const aspects of [
+    [],
+    ["unknown_object"],
+    ["quantities", "quantities"],
+  ]) {
+    const bad = structuredClone(answers);
+    bad[0].missingDetails[0].missingAspects = aspects;
+    assert.throws(() => recordSourceEvidenceReading(bad, plan, metadata));
+  }
 });
 
 test("Contract metadata alone cannot be promoted to a performance and earlier evidence stays stale", () => {
@@ -1659,7 +1700,7 @@ test("The provider schema requires descriptive evidence for performances and mis
   answers[0].observations[0].serviceRef = "s1";
   assert.equal(validate(answers[0]), true);
   answers[0].missingDetails.push({
-    description: "Specifiche non precisate.",
+    missingAspects: ["technical_specifications"],
     serviceRef: "s4",
     evidence: [{ sourceRef: "s4" }],
   });
@@ -1727,7 +1768,7 @@ test("Lot facts and shared facts remain separate in the provider schema and stor
   valid[0].observations[0].serviceRef = "s5";
   valid[0].observations[0].evidence = [{ sourceRef: "s5" }];
   valid[0].missingDetails.push({
-    description: "Specifiche del lotto da verificare nei documenti.",
+    missingAspects: ["referenced_documents"],
     serviceRef: "s5",
     evidence: [{ sourceRef: "s5" }],
   });
