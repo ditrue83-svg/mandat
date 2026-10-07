@@ -264,12 +264,19 @@ export function buildSourceEvidenceReadingRequest(
         : selectedClassification.shape.classificationId,
     });
     const classifiedRelation = z.union([
-      assignedClassification.safeExtend({
-        relationship: z.enum(["consistent", "broad_context", "not_decisive"]),
+      // The provider grammar needs distinct first keys for object alternatives.
+      // Ordering does not change which JSON values either branch accepts.
+      z.strictObject({
         explanation: z.null(),
+        ...assignedClassification.omit({ explanation: true }).shape,
+        relationship: z.enum(["consistent", "broad_context", "not_decisive"]),
       }),
-      assignedClassification.safeExtend({
+      z.strictObject({
         relationship: z.enum(["metadata_discrepancy", "conflicting"]),
+        ...assignedClassification.omit({
+          relationship: true,
+          explanation: true,
+        }).shape,
         explanation: text(600),
       }),
     ]);

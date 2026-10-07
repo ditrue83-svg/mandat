@@ -29,6 +29,7 @@ import {
   inventedClauseSelections,
 } from "./helpers/source-evidence-fixture";
 import { stableDocumentaryJson } from "../src/lib/documentary-observation";
+import { openaiJsonSchema } from "../src/lib/openai-responses";
 
 const config = {
   model: "invented-independent-model",
@@ -39,6 +40,45 @@ const metadata = {
   at: "2030-01-01T12:00:00.000Z",
   model: config.model,
 };
+test("Classification alternatives retain distinct first keys in the provider wire schema", () => {
+  const plan = buildSourceEvidenceReadingRequest(context(), config);
+  const original = plan.requests[0].responseFormat.json_schema.schema;
+  const wire = openaiJsonSchema(original);
+  const dereference = (value: any): any => {
+    if (!value.$ref) return value;
+    return dereference(
+      value.$ref
+        .slice(2)
+        .split("/")
+        .reduce((v: any, k: string) => v[k], wire),
+    );
+  };
+  let checked = 0;
+  const visit = (value: any) => {
+    if (!value || typeof value !== "object") return;
+    if (value.anyOf) {
+      const branches = value.anyOf.map(dereference);
+      if (branches.every((b: any) => b.properties?.classificationId)) {
+        assert.deepEqual(
+          branches.map((b: any) => Object.keys(b.properties)[0]),
+          ["explanation", "relationship"],
+        );
+        checked++;
+      }
+    }
+    for (const child of Object.values(value)) visit(child);
+  };
+  visit(wire);
+  assert(checked > 0);
+  const accepts = new Ajv2020({ strict: false }).compile(wire);
+  const input = responses(plan)[0];
+  const wrap = (answer: unknown) =>
+    "result" in (wire.properties as object) ? { result: answer } : answer;
+  assert(accepts(wrap(input)), JSON.stringify(accepts.errors));
+  input.classifications[0].explanation =
+    "Una prestazione inventata senza prova propria.";
+  assert.equal(accepts(wrap(input)), false);
+});
 test("Compatible classification relations cannot introduce uncited narrative claims", () => {
   const original = context();
   const originalBytes = JSON.stringify(original);
