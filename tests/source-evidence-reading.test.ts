@@ -39,6 +39,84 @@ const metadata = {
   at: "2030-01-01T12:00:00.000Z",
   model: config.model,
 };
+test("Compatible classification relations cannot introduce uncited narrative claims", () => {
+  const original = context();
+  const originalBytes = JSON.stringify(original);
+  const plan = buildSourceEvidenceReadingRequest(original, config);
+  const accepts = new Ajv2020({ strict: false }).compile(
+    plan.requests[0].responseFormat.json_schema.schema,
+  );
+  for (const relationship of [
+    "consistent",
+    "broad_context",
+    "not_decisive",
+  ] as const) {
+    const input = responses(plan);
+    input[0].classifications[0].relationship = relationship;
+    input[0].classifications[0].evidence = [{ sourceRef: "s1" }];
+    assert(accepts(input[0]), JSON.stringify(accepts.errors));
+    const record = recordSourceEvidenceReading(input, plan, metadata);
+    const classification = record.responses[0].classifications[0];
+    assert.equal(classification.relationship, relationship);
+    assert(!classification.explanation.includes("Alfa"));
+    assert.deepEqual(
+      classification.evidence.map((q) => q.sourceRef),
+      ["s1", "s2", "s3"],
+    );
+    const unsupported = structuredClone(input);
+    unsupported[0].classifications[0].explanation =
+      "Sono richiesti fornitura, posa e collaudo in una sede diversa.";
+    const before = JSON.stringify(unsupported);
+    assert.equal(accepts(unsupported[0]), false);
+    assert.throws(
+      () => recordSourceEvidenceReading(unsupported, plan, metadata),
+      /Classification explanation does not match/,
+    );
+    assert.equal(JSON.stringify(unsupported), before);
+    const tampered = structuredClone(record);
+    tampered.responses[0].classifications[0].explanation =
+      "Ulteriore prestazione non citata.";
+    const { hash: _hash, ...unsigned } = tampered;
+    tampered.hash = createHash("sha256")
+      .update(stableDocumentaryJson(unsigned))
+      .digest("hex");
+    assert.throws(
+      () => readSourceEvidenceReading(tampered, plan),
+      /Classification relation label was modified/,
+    );
+  }
+  assert.equal(JSON.stringify(original), originalBytes);
+});
+test("Classification discrepancies and conflicts retain their concrete reasons", () => {
+  const plan = buildSourceEvidenceReadingRequest(context(), config);
+  const accepts = new Ajv2020({ strict: false }).compile(
+    plan.requests[0].responseFormat.json_schema.schema,
+  );
+  for (const relationship of ["metadata_discrepancy", "conflicting"] as const) {
+    const input = responses(plan);
+    input[0].classifications[0].relationship = relationship;
+    input[0].classifications[0].evidence = [{ sourceRef: "s1" }];
+    assert.equal(accepts(input[0]), false);
+    assert.throws(
+      () => recordSourceEvidenceReading(input, plan, metadata),
+      /Classification explanation does not match/,
+    );
+    const reason =
+      "Differenza inventata tra il prodotto Alfa e la famiglia alimentare indicata.";
+    input[0].classifications[0].explanation = reason;
+    assert(accepts(input[0]), JSON.stringify(accepts.errors));
+    const record = recordSourceEvidenceReading(input, plan, metadata);
+    const result = readSourceEvidenceReading(record, plan)!;
+    assert.equal(record.responses[0].classifications[0].explanation, reason);
+    assert.equal(
+      relationship === "conflicting"
+        ? result.findings.length
+        : result.warnings.length,
+      1,
+    );
+    if (relationship === "conflicting") assert.equal(result.accepted, false);
+  }
+});
 test("Known form obligations cannot be covered only by unknown product specifications", () => {
   const base = contractContext();
   const note =
@@ -1005,6 +1083,8 @@ test("Independent classification conflicts, uncertainty and incomplete readings 
   for (const mutate of [
     (a: any) => {
       a.classifications[0].relationship = "conflicting";
+      a.classifications[0].explanation =
+        "Differenza inventata fra la categoria e il prodotto Alfa della fonte.";
       a.classifications[0].evidence.push(quote);
     },
     (a: any) => {
@@ -1031,6 +1111,8 @@ test("Independent classification conflicts, uncertainty and incomplete readings 
   }
   const insufficient = responses(plan);
   insufficient[0].classifications[0].relationship = "conflicting";
+  insufficient[0].classifications[0].explanation =
+    "Differenza inventata fra la categoria e il prodotto Alfa della fonte.";
   assert.throws(
     () => recordSourceEvidenceReading(insufficient, plan, metadata),
     /non-classification evidence/,
@@ -1163,6 +1245,8 @@ test("Metadata advisories require a selected original performance, not a code or
   for (const refs of [["s2", "s3"], ["s4"]]) {
     const input = responses(plan);
     input[0].classifications[0].relationship = "metadata_discrepancy";
+    input[0].classifications[0].explanation =
+      "Differenza inventata fra la categoria e il prodotto Alfa della fonte.";
     input[0].classifications[0].evidence = refs.map((sourceRef) => ({
       sourceRef,
     }));
@@ -1173,6 +1257,8 @@ test("Metadata advisories require a selected original performance, not a code or
   }
   const input = responses(plan);
   input[0].classifications[0].relationship = "metadata_discrepancy";
+  input[0].classifications[0].explanation =
+    "Differenza inventata fra la categoria e il prodotto Alfa della fonte.";
   input[0].classifications[0].evidence.push({ sourceRef: "s1" });
   input[0].observations[0].kind = "condition";
   assert.throws(
@@ -1210,6 +1296,8 @@ test("A metadata advisory can cite an owned service passage without changing the
     },
   ];
   answers[0].classifications[0].relationship = "metadata_discrepancy";
+  answers[0].classifications[0].explanation =
+    "Differenza inventata fra la categoria e il prodotto Alfa della fonte.";
   answers[0].classifications[0].evidence = [{ sourceRef: "s5" }];
   const before = structuredClone({ input, answers });
   const result = readSourceEvidenceReading(
@@ -1270,6 +1358,8 @@ test("Attached metadata proof must be an owned service passage in the classifica
       },
     ];
     answers[0].classifications[0].relationship = "metadata_discrepancy";
+    answers[0].classifications[0].explanation =
+      "Differenza inventata fra la categoria e il prodotto Alfa della fonte.";
     answers[0].classifications[0].evidence = [{ sourceRef: proof }];
     const before = structuredClone(answers);
     assert.throws(

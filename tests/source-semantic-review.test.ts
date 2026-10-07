@@ -3767,7 +3767,16 @@ test("Review preserves original classification evidence without inheriting a pri
     const opinion = "IPOTESI AI INVENTATA: ignorare la famiglia originale.";
     responses[0].classifications[0].relationship = relationship;
     responses[0].classifications[0].explanation = opinion;
-    const evidence = recordSourceEvidenceReading(responses, plan.evidencePlan, {
+    const rejectedOriginal = JSON.stringify(responses);
+    assert.throws(
+      () => recordSourceEvidenceReading(responses, plan.evidencePlan, metadata),
+      /Classification explanation does not match/,
+    );
+    assert.equal(JSON.stringify(responses), rejectedOriginal);
+    // A separate invented valid response follows the new provider contract.
+    const valid = structuredClone(responses);
+    valid[0].classifications[0].explanation = null;
+    const evidence = recordSourceEvidenceReading(valid, plan.evidencePlan, {
       ...metadata,
       id: `invented-${relationship}`,
     });
@@ -3800,7 +3809,11 @@ test("Review preserves original classification evidence without inheriting a pri
     }
     // Keep the original response and its hash available for diagnostics.
     assert.equal(JSON.stringify(evidence), before);
-    assert.equal(evidence.responses[0].classifications[0].explanation, opinion);
+    assert.notEqual(
+      evidence.responses[0].classifications[0].explanation,
+      opinion,
+    );
+    assert.equal(JSON.stringify(responses), rejectedOriginal);
   }
 });
 

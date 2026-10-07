@@ -10,7 +10,7 @@ import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v28";
+export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v29";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -126,8 +126,21 @@ const selectedDetail = missingDetail
 const selectedClassification = classification
   .omit({ label: true, evidence: true })
   .extend({
+    explanation: text(600).nullable(),
     evidence: references,
   });
+const classificationRelationLabels = {
+  consistent: "Classificazione coerente con i passaggi originali selezionati.",
+  broad_context:
+    "Classificazione compatibile come contesto generale; non aggiunge prestazioni ai passaggi originali selezionati.",
+  not_decisive:
+    "La classificazione non determina da sola la prestazione nei passaggi originali selezionati.",
+} as const;
+function classificationRelationLabel(relationship: string) {
+  return classificationRelationLabels[
+    relationship as keyof typeof classificationRelationLabels
+  ];
+}
 const clauseSelection = z.strictObject({
   collection: z.enum(["observations", "missingDetails", "issues"]),
   index: z.number().int().min(0).max(31),
@@ -245,6 +258,21 @@ export function buildSourceEvidenceReadingRequest(
     const boundedClassification = selectedClassification.safeExtend({
       evidence: boundedReferences,
     });
+    const assignedClassification = boundedClassification.safeExtend({
+      classificationId: group.classificationIds.length
+        ? z.enum(group.classificationIds)
+        : selectedClassification.shape.classificationId,
+    });
+    const classifiedRelation = z.union([
+      assignedClassification.safeExtend({
+        relationship: z.enum(["consistent", "broad_context", "not_decisive"]),
+        explanation: z.null(),
+      }),
+      assignedClassification.safeExtend({
+        relationship: z.enum(["metadata_discrepancy", "conflicting"]),
+        explanation: text(600),
+      }),
+    ]);
     // The model selects a mandatory descriptive anchor. Its original scope
     // is assigned by the application; no conditional JSON-schema keywords
     // are needed to require a real service description.
@@ -291,15 +319,9 @@ export function buildSourceEvidenceReadingRequest(
           )
           .max(32),
         missingDetails: boundedDetails,
-        classifications: group.classificationIds.length
-          ? z
-              .array(
-                boundedClassification.safeExtend({
-                  classificationId: z.enum(group.classificationIds),
-                }),
-              )
-              .length(group.classificationIds.length)
-          : z.array(boundedClassification).length(0),
+        classifications: z
+          .array(classifiedRelation)
+          .length(group.classificationIds.length),
       });
     const coverageSchema = (complete: boolean) =>
       z.strictObject(
@@ -396,6 +418,7 @@ export function buildSourceEvidenceReadingRequest(
         "requiredClausePassages e requiredClauseFields elencano note e valori originali su subappalto, opzioni o esecuzione assegnati a questa parte. Per coverage complete conserva ogni riferimento, incluse tutte le lingue e i segmenti, in observations, missingDetails o issues secondo il suo significato. Leggi i valori strutturati insieme al percorso originale: il divieto di subappalto espresso da subContractorAllowed no o false delimita il lavoro delegabile anche senza una nota testuale. null significa non indicato, non divieto; non inventare il significato di valori sconosciuti. Una clausola che delimita ruoli, parti delegabili, obblighi od opzioni va in condition con una descrizione del lavoro dello stesso ambito. Un rinvio privo dei dettagli necessari va in missingDetails; un impedimento materiale in issues. Se non riesci a coprirle usa unreadable. Il nome del campo da solo non prova prestazioni, restrizioni, capacità o idoneità non dichiarate dal valore o testo originale.",
         "Le etichette classificatorie dichiarano il contesto originale. Una denominazione generica o polisemica non dimostra che la classificazione sia sbagliata: non inventare una discrepanza né un sottotipo. Una classificazione ampia non aggiunge tutte le attività della sua etichetta.",
         "Per ciascuna assignedClassificationIds restituisci una relazione con la descrizione. Non restituire label: il codice conserva codice ed etichette originali. In evidence scegli le prove della relazione; i riferimenti della classificazione sono aggiunti dal codice. consistent o broad_context conserva la famiglia compatibile; not_decisive non determina da sola la prestazione locale. metadata_discrepancy segnala una differenza di etichetta senza incompatibilità materiale: richiede in evidence una descrizione originale role service dello stesso ambito, selezionata come serviceRef o prova propria di una performance esplicita, e una spiegazione della differenza, senza correggere il codice. Non risolve oggetti ambigui, fonti incomplete o clausole opposte. conflicting richiede caratteristiche o affermazioni realmente incompatibili, con controprova originale esterna alla classificazione.",
+        "Classifications: per consistent, broad_context e not_decisive explanation è null. Il codice nomina soltanto la relazione scelta e conserva le prove integrali: non riscrivere oggetti o azioni. La relazione resta da verificare semanticamente. Per metadata_discrepancy e conflicting explanation deve identificare la differenza concreta, sostenendo ogni sua affermazione con la propria evidence; non eredita prove da observations o da altre classificazioni.",
         "Le osservazioni performance descrivono acquisti e azioni: fornitura di beni, esecuzione, gestione, installazione, manutenzione, progettazione o consulenza. Manutenzione conserva o ripristina un bene: luogo, destinatario o settore non la dimostrano. Metadati e classificazioni non sono prestazioni autonome.",
         "Conserva il ciclo della commessa attuale anche quando precisato in criteri o tempi: montaggio e collaudo attuali sono azioni, con prove originali e ambito propri. Referenze passate, qualifiche, prezzi e permessi non sono nuovi acquisti. Un titolo che chiede un'offerta non identifica da solo l'azione professionale.",
         "Una sola osservazione per ciascuna prestazione distinta, con oggetto e azione insieme. Quando titolo e descrizione attestano la stessa prestazione, seleziona entrambi nella sua evidence: un riferimento alternativo non prova il contenuto di quello omesso. Mantieni separati ambiti diversi e segnala le contraddizioni; non unire titoli o descrizioni riferiti a prestazioni diverse. Non creare una seconda performance per ripetere orderType, supplyType o un altro campo amministrativo. Ogni performance e target_partition deve citare almeno una descrizione originale role service dello stesso ambito. Non aggiungere una citazione irrilevante solo per rispettare lo schema.",
@@ -635,6 +658,11 @@ function materialize(values: unknown[], plan: SourceEvidenceReadingPlan) {
       ...selectionBody,
       observations: selected.observations.map(resolveAnchored),
       classifications: selected.classifications.map((c) => {
+        const relationLabel = classificationRelationLabel(c.relationship);
+        if (relationLabel ? c.explanation !== null : !c.explanation)
+          throw new Error(
+            "Classification explanation does not match its relation",
+          );
         const original = plan.classifications.find(
           (item) => item.id === c.classificationId,
         );
@@ -647,6 +675,9 @@ function materialize(values: unknown[], plan: SourceEvidenceReadingPlan) {
         ]);
         return {
           ...c,
+          // This names the model's choice, not a semantic approval. It cannot
+          // repeat work/places/actions that were only cited in another row.
+          explanation: relationLabel ?? c.explanation!,
           label: label
             ? { sourceRefs: [...label.sourceRefs], text: label.text }
             : null,
@@ -754,6 +785,9 @@ function validate(values: unknown[], plan: SourceEvidenceReadingPlan) {
         );
     }
     for (const c of value.classifications) {
+      const relationLabel = classificationRelationLabel(c.relationship);
+      if (relationLabel && c.explanation !== relationLabel)
+        throw new Error("Classification relation label was modified");
       checkQuotes(c.evidence);
       const original = plan.classifications.find(
         (x) => x.id === c.classificationId,

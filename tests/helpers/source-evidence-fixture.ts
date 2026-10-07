@@ -109,7 +109,7 @@ export function inventedSourceEvidenceAnswer(data: any) {
       return {
         classificationId: id,
         relationship: "broad_context",
-        explanation: "Relazione inventata per la sola verifica tecnica.",
+        explanation: null as string | null,
         evidence: refs.map(quote),
       };
     }),
