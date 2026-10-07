@@ -111,7 +111,7 @@ const span = (sourceRef: string, startUtf16: number, endUtf16: number) => ({
 });
 function wire(input = context()): any {
   return {
-    evidenceFormat: "source_selections_v11",
+    evidenceFormat: "source_selections_v12",
     status: "resolved",
     targetRef: "s1",
     summary: "Revisione del progetto definitivo.",
@@ -143,7 +143,6 @@ function wire(input = context()): any {
         ownSourceRef: "s2",
         use: "clarifies_domain",
         sourceRefs: [],
-        explanation: "Etichetta originale relativa alla progettazione.",
         componentIndexes: [0],
       },
     },
@@ -778,4 +777,101 @@ test("No classification keys are invented when the source has no classification 
   value.classificationReadingsById.c1 = wire().classificationReadingsById.c1;
   assert.equal(accepts({ result: value }), false);
   assert.throws(() => recordSourceInterpretation(value, request, metadata));
+});
+
+test("Classification identity stays in original metadata; the provider cannot narrate a different taxonomy", () => {
+  const input = context();
+  const request = buildSourceInterpretationRequest(input);
+  const value = wire(input);
+  const native = openaiResponseBody(
+    "gpt-6-luna",
+    request.system,
+    request.prompt,
+    request.maxTokens,
+    request.responseFormat,
+  );
+  const accepts = new Ajv2020({ strict: false }).compile(
+    native.text!.format.schema,
+  );
+  const original = JSON.stringify({ input, value });
+  const record = recordSourceInterpretation(value, request, metadata);
+  assert.equal(record.classificationContext[0].rawPath, "/procurement/cpvCode");
+  assert.deepEqual(
+    record.classificationContext[0].labels,
+    input.body.classifications[0].labels,
+  );
+  assert.deepEqual(record.response.classificationReadings[0].sourceRefs, [
+    "s2",
+  ]);
+  assert.deepEqual(
+    record.response.components[0].meaning.classificationContextIds,
+    ["c1"],
+  );
+  assert.equal(
+    record.response.classificationReadings[0].use,
+    "clarifies_domain",
+  );
+  assert.equal(JSON.stringify({ input, value }), original);
+  for (const explanation of [
+    "La classificazione CPC attesta progettazione.",
+    "La classificazione CPV include anche la posa, non presente nella fonte.",
+    "Etichetta corretta ma narrazione libera non prevista dal protocollo.",
+  ]) {
+    const bad = structuredClone(value);
+    bad.classificationReadingsById.c1.explanation = explanation;
+    assert(!accepts({ result: bad }));
+    assert.throws(() => recordSourceInterpretation(bad, request, metadata));
+  }
+  const old = structuredClone(value);
+  old.evidenceFormat = "source_selections_v11";
+  assert(!accepts({ result: old }));
+  assert.throws(
+    () => recordSourceInterpretation(old, request, metadata),
+    /protocol/,
+  );
+});
+
+test("Structured classification relations still require the original conflict evidence and issue", () => {
+  const input = context(),
+    request = buildSourceInterpretationRequest(input);
+  const value = wire(input);
+  value.status = "conflicting";
+  value.details.push({
+    kind: "execution_condition",
+    scope: "project_context",
+    quoteSelection: { sourceRef: "s4", exactText: input.body.passages[3].text },
+  });
+  delete value.contractClauseDetails;
+  value.components[0].meaning.basis = "explicit_text";
+  value.classificationReadingsById.c1.use = "conflicting";
+  value.classificationReadingsById.c1.componentIndexes = [];
+  value.classificationReadingsById.c1.sourceRefs = ["s1"];
+  value.issues = [
+    {
+      kind: "source_conflict",
+      explanation: "Conflitto ipotetico del solo test locale.",
+      sourceRefs: ["s1", "s2"],
+      scope: "project_context",
+      componentIndexes: [0],
+    },
+  ];
+  const record = recordSourceInterpretation(value, request, metadata);
+  assert.equal(record.response.status, "conflicting");
+  assert.deepEqual(record.response.issues, value.issues);
+  assert.deepEqual(record.response.classificationReadings[0].sourceRefs, [
+    "s2",
+    "s1",
+  ]);
+  assert.deepEqual(
+    record.response.components[0].meaning.classificationContextIds,
+    [],
+  );
+  const bad = structuredClone(value);
+  bad.issues[0].sourceRefs = ["s1", "s3"];
+  assert.throws(
+    () => recordSourceInterpretation(bad, request, metadata),
+    /Conflicting classification requires/,
+  );
+  bad.issues = [];
+  assert.throws(() => recordSourceInterpretation(bad, request, metadata));
 });

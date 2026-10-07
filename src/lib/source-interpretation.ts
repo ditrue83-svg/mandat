@@ -20,7 +20,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v56";
+  "documentary-source-interpretation-v57";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -817,7 +817,7 @@ function buildSelectionResponseSchema(
     if (!ownRefs.length)
       throw new Error("Classification requires original evidence");
     const baseReading = uncertain.shape.classificationReadings.element
-      .omit({ classificationId: true, sourceRefs: true })
+      .omit({ classificationId: true, sourceRefs: true, explanation: true })
       .extend({
         ownSourceRef: z.enum(ownRefs),
         sourceRefs: additionalClassificationRefs,
@@ -860,7 +860,7 @@ function buildSelectionResponseSchema(
       "Estratti originali aggiuntivi; il codice copia testo e riferimenti, senza traduzioni o affermazioni di assenza.",
     );
   const common = {
-    evidenceFormat: z.literal("source_selections_v11"),
+    evidenceFormat: z.literal("source_selections_v12"),
     details,
   };
   const readings = (settled: boolean) =>
@@ -892,7 +892,7 @@ function decodeSelectionResponse(
   response: unknown,
   request: SourceInterpretationRequest,
 ) {
-  if (request.providerFormat !== "source_selections_v11")
+  if (request.providerFormat !== "source_selections_v12")
     throw new Error("Source provider protocol does not match its request");
   const parsed = buildSelectionResponseSchema(
     request.classificationContext,
@@ -907,6 +907,21 @@ function decodeSelectionResponse(
       return {
         ...reading,
         classificationId: item.id,
+        // Describe only the model's declared relation. Classification names,
+        // labels, codes and scope already belong to the immutable context;
+        // asking the model to narrate them again can misattribute CPV to CPC.
+        // This projection does not establish whether the relation is correct.
+        explanation: {
+          clarifies_domain:
+            "Relazione dichiarata: la classificazione originale chiarisce l’ambito delle componenti collegate.",
+          broad_context:
+            "Classificazione originale conservata come contesto generale.",
+          shared_project_only:
+            "Classificazione originale riferita al contesto condiviso del progetto.",
+          unresolved:
+            "Relazione con la classificazione originale dichiarata non risolta.",
+          conflicting: "Conflitto dichiarato con la classificazione originale.",
+        }[reading.use],
         sourceRefs: [...new Set([ownSourceRef, ...reading.sourceRefs])],
       };
     }),
@@ -1070,7 +1085,7 @@ function decodeProviderResponse(
     return response;
   if (
     (response as { evidenceFormat?: string }).evidenceFormat ===
-    "source_selections_v11"
+    "source_selections_v12"
   )
     return decodeSelectionResponse(response, request);
   if (request.providerFormat !== "component_quotations_v8")
@@ -1506,9 +1521,9 @@ export function buildSourceInterpretationRequest(
       ? {}
       : {
           acceptancePolicy: RADAR_ACCEPTANCE_POLICY,
-          evidenceProtocol: "source_selections_v11",
+          evidenceProtocol: "source_selections_v12",
           selectionRules:
-            "actionSelection/objectSelection/quoteSelection indicano sourceRef sN/gN e exactText: copia un estratto letterale unico, con parole intere, massimo 600 caratteri (gruppo: concatenazione contigua). Conserva articoli, refusi e punteggiatura. Se ripetuto, includi contesto per disambiguare. Non calcolare posizioni né restituire actionText/objectText: il codice trova la corrispondenza esatta, rifiuta testi assenti/ambigui e copia solo l’originale. La prova selezionata deve appartenere a evidence e allo scope del ruolo. classificationReadingsById richiede ogni ID come chiave. ownSourceRef seleziona una propria etichetta o codice; sourceRefs aggiunge eventuali controprove. Solo classificazioni di progetto condivise ammettono shared_project_only. componentIndexes (indici da zero) è l’unico collegamento al significato delle componenti; clarifies_domain richiede almeno una componente concreta e la propria etichetta. Non restituire meaning.classificationContextIds. details aggiuntivi: soltanto estratti originali quoteSelection e kind/scope, mai parafrasi o duplicati di contractClauseDetails. Solo ambiguità materiali restano nelle issues; specifiche non indicate non diventano issues. Non inventare fatti assenti.",
+            "actionSelection/objectSelection/quoteSelection indicano sourceRef sN/gN e exactText: copia un estratto letterale unico, con parole intere, massimo 600 caratteri (gruppo: concatenazione contigua). Conserva articoli, refusi e punteggiatura. Se ripetuto, includi contesto per disambiguare. Non calcolare posizioni né restituire actionText/objectText: il codice trova la corrispondenza esatta, rifiuta testi assenti/ambigui e copia solo l’originale. La prova selezionata deve appartenere a evidence e allo scope del ruolo. classificationReadingsById richiede ogni ID come chiave, use e componentIndexes: niente explanation libera. Nome, codice ed etichette restano quelli originali nel contesto. Motiva ambiguità e conflitti nelle issues con prove proprie. ownSourceRef seleziona una propria etichetta o codice; sourceRefs aggiunge eventuali controprove. Solo classificazioni di progetto condivise ammettono shared_project_only. componentIndexes (indici da zero) è l’unico collegamento al significato delle componenti; clarifies_domain richiede almeno una componente concreta e la propria etichetta. Non restituire meaning.classificationContextIds. details aggiuntivi: soltanto estratti originali quoteSelection e kind/scope, mai parafrasi o duplicati di contractClauseDetails. Solo ambiguità materiali restano nelle issues; specifiche non indicate non diventano issues. Non inventare fatti assenti.",
         }),
     task: "Identifica l'acquisto del target: sintesi neutrale, componenti distinte e prove esatte, prima del confronto aziendale.",
     // Keep the required identifiers visible independently of long notes.
@@ -1733,7 +1748,7 @@ export function buildSourceInterpretationRequest(
     selectedIds: body.passages.map((passage) => passage.id),
     providerFormat: options.legacyProviderFormatForRegression
       ? "component_quotations_v8"
-      : "source_selections_v11",
+      : "source_selections_v12",
     version: SOURCE_INTERPRETATION_VERSION,
     sourceKey,
     inputHash: digest({
