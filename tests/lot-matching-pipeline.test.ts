@@ -194,32 +194,35 @@ function inventedAnswer(prompt: string) {
     return {
       status: "resolved",
       details:
-        data.contractDetailFamilies?.flatMap(
+        data.contractDetailFamilies?.map(
           (family: {
             scope: string;
             sourceRefs: string[];
             originalTextPartCount?: number;
             originalMultilingualExplanation?: string;
             originalScalarExplanation?: string;
-          }) =>
-            (
-              (family.originalTextPartCount
-                ? originalClauseTextParts(
-                    data.passages.filter((p: { id: string }) =>
-                      family.sourceRefs.includes(p.id),
-                    ),
-                  )
-                : undefined) ?? [
-                family.originalMultilingualExplanation ??
-                  family.originalScalarExplanation ??
-                  "Condizione strutturata inventata.",
-              ]
-            ).map((explanation) => ({
+          }) => {
+            const parts = (family.originalTextPartCount
+              ? originalClauseTextParts(
+                  data.passages.filter((p: { id: string }) =>
+                    family.sourceRefs.includes(p.id),
+                  ),
+                )
+              : undefined) ?? [
+              family.originalMultilingualExplanation ??
+                family.originalScalarExplanation ??
+                "Condizione strutturata inventata.",
+            ];
+            return {
               kind: "execution_condition",
               scope: family.scope,
               sourceRefs: family.sourceRefs,
-              explanation,
-            })),
+              explanation: parts[0],
+              ...(parts.length > 1
+                ? { originalTextContinuation: parts.slice(1) }
+                : {}),
+            };
+          },
         ) ?? [],
       summary:
         "Potatura degli alberi, fonte inventata per la verifica della coda.",

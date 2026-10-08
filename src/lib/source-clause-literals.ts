@@ -61,3 +61,21 @@ export function originalClauseTextParts(originals: readonly ClausePassage[]) {
     throw new Error("Original clause text cannot form complete literal parts");
   return parts;
 }
+
+// A stored detail represents one selected original field, even when its
+// literal text needs several bounded pieces. This projection exposes EVERY
+// piece to review and comparison; it makes no semantic judgment.
+export function expandOriginalClauseDetails<
+  T extends {
+    explanation: string;
+    originalTextContinuation?: readonly string[];
+  },
+>(details: readonly T[]): Omit<T, "originalTextContinuation">[] {
+  return details.flatMap(({ originalTextContinuation, ...detail }) => [
+    detail,
+    ...(originalTextContinuation ?? []).map((explanation) => ({
+      ...detail,
+      explanation,
+    })),
+  ]);
+}

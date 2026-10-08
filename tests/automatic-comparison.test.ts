@@ -29,6 +29,7 @@ import {
 } from "../src/lib/source-interpretation";
 import {
   recordSourceSemanticReview,
+  buildSourceSemanticReviewRequest,
   SOURCE_REVIEW_SUPPORTED_REASON,
   type SourceSemanticReviewRecord,
   buildGroundedSourceReviewRequests,
@@ -216,20 +217,22 @@ function sourceResponse(
   )!.id;
   return {
     status,
-    details: sourceRequest.contractDetailFamilies.flatMap((family) =>
-      (
-        family.originalTextParts ?? [
-          family.originalMultilingualExplanation ??
-            family.originalScalarExplanation ??
-            "Condizione originale inventata per il test.",
-        ]
-      ).map((explanation) => ({
+    details: sourceRequest.contractDetailFamilies.map((family) => {
+      const parts = family.originalTextParts ?? [
+        family.originalMultilingualExplanation ??
+          family.originalScalarExplanation ??
+          "Condizione originale inventata per il test.",
+      ];
+      return {
         kind: "execution_condition" as const,
-        explanation,
+        explanation: parts[0],
+        ...(parts.length > 1
+          ? { originalTextContinuation: parts.slice(1) }
+          : {}),
         sourceRefs: [...family.sourceRefs],
         scope: family.scope,
-      })),
-    ),
+      };
+    }),
     summary:
       "Servizi inventati, interpretazione simulata per verificare il contratto.",
     summarySourceRefs: [targetRef],
@@ -2741,6 +2744,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v79",
     sourceVersion: "documentary-source-interpretation-v62",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v80",
+    sourceVersion: "documentary-source-interpretation-v64",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2774,7 +2781,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v80");
+    assert.equal(request.version, "documentary-service-comparison-v81");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(
@@ -2987,5 +2994,78 @@ test("Foreign targets, altered snapshots and unsupported structure cannot receiv
       ...input,
       snapshot: { ...input.snapshot, snapshotHash: "0".repeat(64) },
     }),
+  );
+});
+
+test("Every original continuation reaches both semantic review and the final company comparison", () => {
+  const detail = raw();
+  const note =
+    "Istruzione originale da conservare integralmente. ".repeat(30) +
+    "CONDIZIONE_FINALE: consegnare tutte le pagine entro il 15 marzo 2031.";
+  const input = fixture({
+    ...detail,
+    "project-info": {
+      ...detail["project-info"],
+      offerSpecificNote: { it: note, de: null, fr: null },
+    },
+  });
+  const request = buildAutomaticComparisonRequest(input);
+  const source = sourceRecord(request);
+  assert(
+    source.response.details.some((d) =>
+      d.originalTextContinuation?.some((p) => p.includes("CONDIZIONE_FINALE")),
+    ),
+  );
+  const plan = buildAutomaticSourceSemanticReviewRequest(request, source);
+  assert(
+    plan.claims.some(
+      (c) => c.kind === "detail" && c.text.includes("CONDIZIONE_FINALE"),
+    ),
+  );
+  const review = sourceReview(request, source); // Invented approvals test transport, not AI quality.
+  const final = buildWithRequiredReview(request, source, review);
+  const body = JSON.parse(final.prompt);
+  const own = body.sourceInterpretation.details.filter(
+    (d: { sourceRefs: string[] }) =>
+      d.sourceRefs.some((ref) =>
+        request.passages.some(
+          (p) =>
+            p.id === ref && p.rawPath === "/project-info/offerSpecificNote/it",
+        ),
+      ),
+  );
+  assert.equal(
+    own.map((d: { explanation: string }) => d.explanation).join(""),
+    note,
+  );
+  assert(!own.some((d: object) => "originalTextContinuation" in d));
+  const tampered = structuredClone(source);
+  const row = tampered.response.details.find(
+    (d) => d.originalTextContinuation,
+  )!;
+  row.originalTextContinuation![0] = "La condizione originale è stata omessa.";
+  const { hash: _hash, ...unsigned } = tampered;
+  tampered.hash = createHash("sha256")
+    .update(stableDocumentaryJson(unsigned))
+    .digest("hex");
+  assert.throws(
+    () => buildAutomaticSourceSemanticReviewRequest(request, tampered),
+    /every original part|differs from/,
+  );
+  const {
+    binding,
+    targetScope,
+    coverage,
+    readings,
+    body: sourceBody,
+  } = buildAutomaticSourceRequest(request);
+  assert.throws(
+    () =>
+      buildSourceSemanticReviewRequest(
+        { binding, targetScope, coverage, readings, body: sourceBody },
+        tampered,
+        { model: automaticComparisonModel() },
+      ),
+    /differs from its complete source field/,
   );
 });

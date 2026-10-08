@@ -1,4 +1,8 @@
 import { structuredOutputSchema } from "./structured-output-schema";
+import {
+  expandOriginalClauseDetails,
+  originalClauseTextParts,
+} from "./source-clause-literals";
 import { RADAR_ACCEPTANCE_POLICY } from "./radar-acceptance-policy";
 import {
   coverageProofSchema,
@@ -37,7 +41,7 @@ import {
 } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v59";
+  "documentary-source-semantic-review-v60";
 export const SOURCE_REVIEW_SUPPORTED_REASON =
   "Le prove indicate sostengono il claim; coverageProof distingue fatti rappresentati e dati facoltativi.";
 const MAX_BYTES = 160_000;
@@ -495,8 +499,40 @@ export function buildSourceSemanticReviewRequest(
     stableDocumentaryJson(classificationContext)
   )
     throw new Error("Review classification context changed");
+  // Review the lossless text projection, not merely the first stored piece.
+  // Paths below address this explicit draft view, bound by the original hash.
+  const draftDetails = expandOriginalClauseDetails(draft.response.details);
   const originalPassages = sourceEvidencePassages(context);
   const byId = new Map(originalPassages.map((item) => [item.id, item]));
+  // Continuations are documentary copies, not model-authored statements.
+  // Recheck against the FULL original field even if someone recomputed the
+  // record hash after changing a part, reference, language or scope.
+  for (const detail of draft.response.details) {
+    if (!detail.originalTextContinuation) continue;
+    const first = byId.get(detail.sourceRefs[0]);
+    const path = first?.rawPath.replace(/\/(de|en|fr|it|rm)$/, "");
+    const originals = originalPassages.filter(
+      (p) =>
+        p.id.startsWith("s") && // Null/scalar fields are separate facts, never literal wording.
+        p.scope === detail.scope &&
+        p.rawPath.replace(/\/(de|en|fr|it|rm)$/, "") === path,
+    );
+    const parts = originalClauseTextParts(originals);
+    if (
+      !parts ||
+      parts.length < 2 ||
+      stableDocumentaryJson(originals.map((p) => p.id).sort()) !==
+        stableDocumentaryJson([...detail.sourceRefs].sort()) ||
+      stableDocumentaryJson(parts) !==
+        stableDocumentaryJson([
+          detail.explanation,
+          ...detail.originalTextContinuation,
+        ])
+    )
+      throw new Error(
+        "Review original continuation differs from its complete source field",
+      );
+  }
   // Decode only these standard geographic identifiers at their original
   // address paths. This supplies vocabulary, never a location inferred from
   // a buyer, a city name, a classification or another scope.
@@ -598,7 +634,7 @@ ${item.meaning.statement}`,
             : required,
       );
   });
-  draft.response.details.forEach((item, index) =>
+  draftDetails.forEach((item, index) =>
     add("detail", `/details/${index}`, item.explanation, item.sourceRefs),
   );
   draft.response.classificationReadings.forEach((item, index) => {
@@ -629,6 +665,7 @@ ${item.meaning.statement}`,
   const draftView = {
     hash: draftHash,
     ...draft.response,
+    details: draftDetails,
     components: draft.response.components.map((item, index) => ({
       id: `u${index + 1}`,
       ...item,
@@ -648,7 +685,7 @@ ${item.meaning.statement}`,
   // Other groups still see the full draft and source, but do not repeatedly
   // judge administrative omissions outside their assigned responsibility.
   const clauseCandidates = (clause: (typeof requiredContractClauses)[number]) =>
-    draft.response.details.flatMap((detail, index) =>
+    draftDetails.flatMap((detail, index) =>
       detail.scope === clause.scope && detail.sourceRefs.includes(clause.id)
         ? [{ index, explanation: detail.explanation }]
         : [],
@@ -730,7 +767,7 @@ ${item.meaning.statement}`,
         componentIndexes: draft.response.components.flatMap((item, index) =>
           item.sourceRefs.includes(sourceRef) ? [index] : [],
         ),
-        detailIndexes: draft.response.details.flatMap((item, index) =>
+        detailIndexes: draftDetails.flatMap((item, index) =>
           item.sourceRefs.includes(sourceRef) ? [index] : [],
         ),
       }),

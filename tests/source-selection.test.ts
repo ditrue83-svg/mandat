@@ -11,6 +11,7 @@ import {
   coverageSelectionSchema,
   validateCoverageProof,
 } from "../src/lib/source-coverage-proof";
+import { expandOriginalClauseDetails } from "../src/lib/source-clause-literals";
 import { isProcurementLocationField } from "../src/lib/source-contract-clauses";
 import {
   buildSourceInterpretationRequest,
@@ -626,19 +627,24 @@ test("Long parallel clauses retain every original part without truncation", () =
     `DE: ${input.body.passages.at(-2)!.text}\nIT: ${input.body.passages.at(-1)!.text}`,
   );
   assert.deepEqual(
-    recorded.response.details
+    expandOriginalClauseDetails(recorded.response.details)
       .filter((d) => d.sourceRefs.includes("s4"))
       .map((d) => d.explanation),
     parts,
   );
   const missing = structuredClone(recorded.response);
-  missing.details.pop();
+  delete missing.details.find((d) => d.sourceRefs.includes("s4"))!
+    .originalTextContinuation;
   assert.throws(
     () => validateSourceInterpretation(missing, request),
     /every original part/,
   );
   const reordered = structuredClone(recorded.response);
-  reordered.details.reverse();
+  const reversed = reordered.details.find((d) => d.sourceRefs.includes("s4"))!;
+  [reversed.explanation, reversed.originalTextContinuation![0]] = [
+    reversed.originalTextContinuation![0],
+    reversed.explanation,
+  ];
   assert.throws(
     () => validateSourceInterpretation(reordered, request),
     /every original part/,
@@ -648,7 +654,7 @@ test("Long parallel clauses retain every original part without truncation", () =
     ["s4"];
   assert.throws(
     () => validateSourceInterpretation(missingCitation, request),
-    /complete references/,
+    /complete references|Incomplete.*contract clauses/,
   );
   const plan = buildSourceSemanticReviewRequest(input, recorded, {
     model: metadata.model,
@@ -695,41 +701,110 @@ test("Repeated literal parts retain their positions and cannot be silently dedup
     },
   ];
   const record = recordSourceInterpretation(value, request, metadata);
-  const rows = record.response.details.filter((d) =>
-    d.sourceRefs.includes("s4"),
+  const rows = expandOriginalClauseDetails(record.response.details).filter(
+    (d) => d.sourceRefs.includes("s4"),
   );
   assert.equal(rows[0].explanation, rows[1].explanation);
   assert.equal(rows.map((d) => d.explanation).join(""), note);
   const deduplicated = structuredClone(record.response);
-  deduplicated.details.splice(
-    deduplicated.details.indexOf(
-      deduplicated.details.find((d) => d.sourceRefs.includes("s4"))!,
-    ),
-    1,
-  );
+  deduplicated.details
+    .find((d) => d.sourceRefs.includes("s4"))!
+    .originalTextContinuation!.shift();
   assert.throws(
     () => validateSourceInterpretation(deduplicated, request),
     /every original part/,
   );
 });
 
-test("Long mandatory text cannot evade the existing aggregate detail cap", () => {
+test("Long selected originals retain all parts while generated detail and text caps stay unchanged", () => {
   const base = context();
   const note = "Original condition must remain complete. ".repeat(600);
+  const fragments = Array.from(
+    { length: Math.ceil(note.length / 1200) },
+    (_, i) => ({
+      ...base.body.passages[3],
+      id: `s${i + 4}`,
+      text: note.slice(i * 1200, (i + 1) * 1200),
+      startUtf16: i * 1200,
+      endUtf16: Math.min(note.length, (i + 1) * 1200),
+    }),
+  );
   const input = {
     ...base,
     body: {
       ...base.body,
-      passages: base.body.passages.map((p) =>
-        p.id === "s4" ? { ...p, text: note, endUtf16: note.length } : p,
-      ),
+      passages: [...base.body.passages.slice(0, 3), ...fragments],
     },
   };
   const before = JSON.stringify(input);
-  assert.throws(
-    () => buildSourceInterpretationRequest(input),
-    /original detail limits/,
+  const request = buildSourceInterpretationRequest(input),
+    value = wire(input);
+  value.contractClauseDetails.s4 = [
+    {
+      kind: "execution_condition",
+      scope: "project_context",
+      sourceRefs: fragments.map((p) => p.id),
+      originalText: true,
+    },
+  ];
+  // Continuations belong only to the locally verified record, never to the AI wire.
+  assert(
+    !JSON.stringify(request.responseFormat).includes(
+      "originalTextContinuation",
+    ),
   );
+  const native = openaiResponseBody(
+    "gpt-6-luna",
+    request.system,
+    request.prompt,
+    request.maxTokens,
+    request.responseFormat,
+    "medium",
+  );
+  const accepts = new Ajv2020({ strict: false }).compile(
+    native.text!.format.schema,
+  );
+  assert(accepts({ result: value }), JSON.stringify(accepts.errors));
+  const record = recordSourceInterpretation(value, request, metadata);
+  const detail = record.response.details.find((d) =>
+    d.sourceRefs.includes("s4"),
+  )!;
+  assert(detail.originalTextContinuation!.length > 31);
+  assert.equal(
+    record.response.details.filter((d) => d.sourceRefs.includes("s4")).length,
+    1,
+  );
+  assert.equal(
+    expandOriginalClauseDetails([detail])
+      .map((d) => d.explanation)
+      .join(""),
+    note,
+  );
+  const injected = structuredClone(value);
+  injected.contractClauseDetails.s4[0].originalTextContinuation = [
+    "Invented condition",
+  ];
+  assert.equal(accepts({ result: injected }), false);
+  assert.throws(() => recordSourceInterpretation(injected, request, metadata));
+  const overCount = structuredClone(value);
+  overCount.details = Array.from({ length: 32 }, () =>
+    structuredClone(value.details[0]),
+  );
+  assert.throws(
+    () => recordSourceInterpretation(overCount, request, metadata),
+    /aggregate limit/,
+  );
+  const altered = structuredClone(record.response);
+  altered.details.find((d) =>
+    d.sourceRefs.includes("s4"),
+  )!.originalTextContinuation![0] = "Invented condition";
+  assert.throws(
+    () => validateSourceInterpretation(altered, request),
+    /every original part/,
+  );
+  const overText = structuredClone(record.response);
+  overText.details[0].explanation = "x".repeat(601);
+  assert.throws(() => validateSourceInterpretation(overText, request));
   assert.equal(JSON.stringify(input), before);
 });
 

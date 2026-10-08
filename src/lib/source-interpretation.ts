@@ -10,7 +10,10 @@ import {
   resolveSourceTextSelection,
 } from "./source-selection";
 import { isContractScopeField } from "./source-contract-clauses";
-import { originalClauseTextParts } from "./source-clause-literals";
+import {
+  originalClauseTextParts,
+  expandOriginalClauseDetails,
+} from "./source-clause-literals";
 import {
   isOriginalPassageQuotation,
   originalQuotationReferences,
@@ -22,7 +25,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v64";
+  "documentary-source-interpretation-v65";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -408,6 +411,9 @@ function buildResponseSchema(bounds?: {
   const detail = z.strictObject({
     kind: detailKind,
     explanation: text(600),
+    // Local serialization of an explicitly selected original field only.
+    // Never offered to the provider. Every byte is checked against its source.
+    originalTextContinuation: z.array(text(600)).min(1).max(1024).optional(),
     sourceRefs: bounds?.detailRefs ?? detailRefs,
     scope,
   });
@@ -662,7 +668,9 @@ function buildProviderResponseSchema(
       }),
   ]);
   const evidenceFormat = z.literal("component_quotations_v8");
-  const detail = resolved.shape.details.element;
+  const detail = resolved.shape.details.element.omit({
+    originalTextContinuation: true,
+  });
   // The scope of every original reference is already known. Encode this
   // structural relationship in the provider contract as well as retaining
   // the existing local check; never relabel or repair a generated detail.
@@ -692,12 +700,10 @@ function buildProviderResponseSchema(
     scopedDetails.length === 2
       ? z.union([scopedDetails[0], scopedDetails[1]])
       : (scopedDetails[0] ?? detail);
-  const details = scopedDetails.length
-    ? z
-        .array(providerDetail)
-        .max(32)
-        .describe(resolved.shape.details.description!)
-    : resolved.shape.details;
+  const details = z
+    .array(providerDetail)
+    .max(32)
+    .describe(resolved.shape.details.description!);
   // Encode the same ownership rule enforced by the local clause decoder.
   // A mandatory clause cannot select a generic row that mixes unrelated
   // fields, even if that row also happens to cite the clause's own ID.
@@ -833,9 +839,11 @@ const completeProviderResponseSchema = buildProviderResponseSchema(
 // source spans and classification -> component links; the stored model is
 // populated by exact projection, never by correcting a proposed quotation.
 const selectedContractDetail = z.union([
-  sourceInterpretationResponseSchema.options[0].shape.details.element,
+  sourceInterpretationResponseSchema.options[0].shape.details.element.omit({
+    originalTextContinuation: true,
+  }),
   sourceInterpretationResponseSchema.options[0].shape.details.element
-    .omit({ explanation: true })
+    .omit({ explanation: true, originalTextContinuation: true })
     .extend({ originalText: z.literal(true) }),
 ]);
 function buildSelectionResponseSchema(
@@ -843,7 +851,9 @@ function buildSelectionResponseSchema(
   ...args: Parameters<typeof buildProviderResponseSchema>
 ) {
   const detail =
-    sourceInterpretationResponseSchema.options[0].shape.details.element;
+    sourceInterpretationResponseSchema.options[0].shape.details.element.omit({
+      originalTextContinuation: true,
+    });
   const [resolved, uncertain, conflicting] = buildProviderResponseSchema(
     args[0],
     args[1],
@@ -1103,7 +1113,9 @@ function decodeSelectionResponse(
               "Original contract text selection requires its own complete scoped family",
             );
           const { originalText: _selection, ...owned } = row;
-          return parts.map((explanation) => ({ ...owned, explanation }));
+          // Keep one provider-selected row. Attach remaining ORIGINAL text
+          // after the strict provider decoder, never as generated prose.
+          return [{ ...owned, explanation: parts[0] }];
         }),
       ];
     }),
@@ -1224,6 +1236,19 @@ function decodeSelectionResponse(
   );
   return {
     ...canonical,
+    details: canonical.details.map((detail) => {
+      const family = request.contractDetailFamilies.find(
+        (f) =>
+          f.originalTextParts &&
+          detail.sourceRefs.some((ref) => f.sourceRefs.includes(ref)),
+      );
+      return family?.originalTextParts && family.originalTextParts.length > 1
+        ? {
+            ...detail,
+            originalTextContinuation: family.originalTextParts.slice(1),
+          }
+        : detail;
+    }),
     components: canonical.components.map((component, index) => ({
       ...component,
       roleEvidence: {
@@ -1734,11 +1759,7 @@ export function buildSourceInterpretationRequest(
   ];
   if (
     contractDetailFamilies.length > 32 ||
-    contractDetailFamilies.some((family) => family.sourceRefs.length > 32) ||
-    contractDetailFamilies.reduce(
-      (sum, family) => sum + (family.originalTextParts?.length ?? 1),
-      0,
-    ) > 32
+    contractDetailFamilies.some((family) => family.sourceRefs.length > 32)
   )
     throw new Error(
       "Source interpretation clause families exceed original detail limits",
@@ -2089,6 +2110,20 @@ export function validateSourceInterpretation(
     value.status === "resolved" ||
     request.providerFormat === "source_selections_v14"
   ) {
+    for (const row of value.details) {
+      if (
+        row.originalTextContinuation &&
+        !request.contractDetailFamilies.some(
+          (family) =>
+            family.originalTextParts &&
+            family.originalTextParts.length > 1 &&
+            row.sourceRefs.some((ref) => family.sourceRefs.includes(ref)),
+        )
+      )
+        throw new Error(
+          "Original continuation requires its own complete source field",
+        );
+    }
     const represented = new Set(value.details.flatMap((d) => d.sourceRefs));
     if (request.requiredContractClauseIds.some((id) => !represented.has(id)))
       throw new Error("Incomplete source interpretation contract clauses");
@@ -2128,8 +2163,10 @@ export function validateSourceInterpretation(
         );
       if (
         family.originalTextParts &&
-        (JSON.stringify(rows.map((row) => row.explanation)) !==
-          JSON.stringify(family.originalTextParts) ||
+        (rows.length !== 1 ||
+          JSON.stringify(
+            expandOriginalClauseDetails(rows).map((row) => row.explanation),
+          ) !== JSON.stringify(family.originalTextParts) ||
           rows.some(
             (row) =>
               JSON.stringify([...row.sourceRefs].sort()) !==
@@ -2466,7 +2503,7 @@ export function validateSourceInterpretation(
     summarySourceRefs: value.summarySourceRefs,
     targetRef: value.targetRef,
     issues: value.issues,
-    details: value.details,
+    details: expandOriginalClauseDetails(value.details),
     classificationContext: request.classificationContext,
     classificationReadings: value.classificationReadings,
     evidence,
