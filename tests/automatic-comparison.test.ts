@@ -405,6 +405,19 @@ function response(
   relation: "direct" | "different" | "review" = "direct",
 ) {
   return {
+    functionCheck: {
+      requested: {
+        description: "Funzione richiesta simulata per il contratto tecnico.",
+        componentRefs: ["u1"],
+      },
+      declared: {
+        description: "Funzione dichiarata simulata per il contratto tecnico.",
+        companyRefs: [request.companyPassages[0].id],
+      },
+      relationship:
+        "Rapporto simulato: questi test non verificano il giudizio semantico del modello.",
+      differences: "Differenze simulate per verificare il contratto tecnico.",
+    },
     comparison:
       "Confronto inventato per verificare il contratto, non la qualità semantica del modello.",
     facts: {
@@ -736,6 +749,7 @@ test("A structured subcontract prohibition survives review and stored comparison
     },
   );
   const comparison = {
+    functionCheck: response(request, source).functionCheck,
     comparison: "Confronto inventato per la sola verifica del flusso.",
     facts: {
       companyIdentifiesService: true,
@@ -1502,19 +1516,23 @@ test("An excluded component alone cannot justify a service rejection but remains
     },
   );
   const negative = response(request, source, "different");
+  const withComponentRefs = (componentRefs: string[]) => ({
+    ...negative,
+    componentRefs,
+    functionCheck: {
+      ...negative.functionCheck,
+      requested: { ...negative.functionCheck.requested, componentRefs },
+    },
+  });
   assert.throws(
     () =>
-      validateAutomaticComparison(
-        { ...negative, componentRefs: ["u3"] },
-        request,
-        source,
-      ),
+      validateAutomaticComparison(withComponentRefs(["u3"]), request, source),
     /Service comparison requires evidence of a requested component/,
   );
   for (const requestedRef of ["u1", "u2"])
     assert.equal(
       validateAutomaticComparison(
-        { ...negative, componentRefs: [requestedRef, "u3"] },
+        withComponentRefs([requestedRef, "u3"]),
         request,
         source,
       ).relation,
@@ -1523,8 +1541,7 @@ test("An excluded component alone cannot justify a service rejection but remains
   assert.equal(
     validateAutomaticComparison(
       {
-        ...negative,
-        componentRefs: ["u3"],
+        ...withComponentRefs(["u3"]),
         facts: { ...negative.facts, comparisonUncertain: true },
       },
       request,
@@ -1713,6 +1730,83 @@ test("Related work may share a contractual role without becoming a direct or app
   assert.equal(result.signalEligible, false);
   assert.equal(result.quality, "unresolved");
   assert.deepEqual(result.qualityEventIds, []);
+});
+
+test("Functional comparison needs separate source and company evidence before any verdict", () => {
+  const request = buildAutomaticComparisonRequest(fixture());
+  const source = sourceRecord(request);
+  const answer = response(request, source, "different");
+  const { functionCheck: _missing, ...legacy } = answer;
+  assert.throws(() => validateAutomaticComparison(legacy, request, source));
+  for (const functionCheck of [
+    {
+      ...answer.functionCheck,
+      requested: { description: " ", componentRefs: ["u1"] },
+    },
+    {
+      ...answer.functionCheck,
+      declared: { description: "Attivita simulata", companyRefs: [] },
+    },
+    {
+      ...answer.functionCheck,
+      requested: {
+        ...answer.functionCheck.requested,
+        componentRefs: ["u99999"],
+      },
+    },
+    {
+      ...answer.functionCheck,
+      declared: { ...answer.functionCheck.declared, companyRefs: ["c99999"] },
+    },
+    { ...answer.functionCheck, relationship: "" },
+    { ...answer.functionCheck, differences: "" },
+    {
+      ...answer.functionCheck,
+      requested: {
+        ...answer.functionCheck.requested,
+        componentRefs: ["u1", "u1"],
+      },
+    },
+  ])
+    assert.throws(() =>
+      validateAutomaticComparison(
+        { ...answer, functionCheck },
+        request,
+        source,
+      ),
+    );
+
+  // The structural check never creates affinity or repairs an AI verdict.
+  for (const relatedActivity of [
+    "none",
+    "incidental_context",
+    "shared_professional_function",
+  ] as const) {
+    const candidate = {
+      ...answer,
+      facts: { ...answer.facts, relatedActivity },
+    };
+    const before = JSON.stringify(candidate);
+    const result = validateAutomaticComparison(candidate, request, source);
+    assert.deepEqual(result.response!.functionCheck, candidate.functionCheck);
+    assert.equal(
+      result.relation,
+      relatedActivity === "shared_professional_function"
+        ? "review"
+        : "different",
+    );
+    assert.equal(JSON.stringify(candidate), before);
+  }
+  const wire = buildInterpretedComparisonRequest(request, source);
+  const schema = wire.responseFormat.json_schema.schema as any;
+  assert(schema.required.includes("functionCheck"));
+  assert.deepEqual(schema.properties.functionCheck.required, [
+    "requested",
+    "declared",
+    "relationship",
+    "differences",
+  ]);
+  assert.match(wire.prompt, /functionCheck PRIMA di comparison e facts/);
 });
 
 test("Related activity cannot assert coverage, erase uncertainty or omit its new fact", () => {
@@ -2748,6 +2842,14 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v80",
     sourceVersion: "documentary-source-interpretation-v64",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v81",
+    sourceVersion: "documentary-source-interpretation-v66",
+  },
+  {
+    comparisonVersion: "documentary-service-comparison-v82",
+    sourceVersion: "documentary-source-interpretation-v63",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2781,7 +2883,7 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v81");
+    assert.equal(request.version, "documentary-service-comparison-v83");
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(

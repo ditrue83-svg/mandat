@@ -278,6 +278,18 @@ function inventedAnswer(prompt: string) {
     };
   }
   return {
+    functionCheck: {
+      requested: {
+        description: "Funzione richiesta simulata per il test della coda.",
+        componentRefs: [data.sourceInterpretation.components[0].id],
+      },
+      declared: {
+        description: "Funzione dichiarata simulata per il test della coda.",
+        companyRefs: [data.company.activities[0].id],
+      },
+      relationship: "Rapporto simulato per il solo test tecnico della coda.",
+      differences: "Nessuna differenza nella simulazione tecnica.",
+    },
     comparison: "Risposta inventata per la sola verifica tecnica della coda.",
     interpretationHash: data.sourceInterpretation.hash,
     reviewHash: data.sourceInterpretation.reviewHash,
