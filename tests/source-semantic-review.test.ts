@@ -1,3 +1,8 @@
+import {
+  coverageSelectionSchema,
+  projectCoverageSelection,
+  validateCoverageProof,
+} from "../src/lib/source-coverage-proof";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import Ajv2020 from "ajv/dist/2020.js";
@@ -4555,4 +4560,81 @@ test("Not-stated importance remains an explicit semantic judgment with blocking 
   for (const part of missing)
     part.checks = part.checks.filter((c) => c.claimId !== claim.id);
   assert.throws(() => recordSourceSemanticReview(missing, plan, metadata));
+});
+
+test("Mandatory clauses cannot become optional in scope coverage while unrelated metadata stays optional", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[3],
+          id: "s5",
+          rawPath: "/procurement/canContractBeExtended",
+          text: "no",
+          endUtf16: 2,
+        },
+      ],
+    },
+  };
+  const original = recordSourceInterpretation(
+    {
+      ...draft(base).response,
+      details: [
+        ...draft(base).response.details,
+        {
+          kind: "execution_condition",
+          scope: "project_context",
+          sourceRefs: ["s5"],
+          explanation: "no",
+        },
+      ],
+    },
+    buildSourceInterpretationRequest(input),
+    { ...metadata, model: input.binding.model },
+  );
+  const before = JSON.stringify({ input, original });
+  const plan = buildCurrentSourceSemanticReviewRequest(input, original, config);
+  const parts = inventedGroundedReviewRequests(plan);
+  const binding = parts
+    .flatMap((p) => p.coverageBindings)
+    .find((b) => b.kind === "scope_coverage" && b.sourceRefs.includes("s5"))!;
+  assert(binding);
+  assert(binding.requiredSourceRefs?.includes("s5"));
+  assert(!binding.requiredSourceRefs?.includes("s2"));
+  const selection = Object.fromEntries(
+    binding.sourceRefs.map((id) => [
+      id,
+      { disposition: "not_required", draftPaths: [] },
+    ]),
+  );
+  assert.throws(() => coverageSelectionSchema(binding).parse(selection));
+  selection.s5 = { disposition: "missing", draftPaths: [] };
+  coverageSelectionSchema(binding).parse(selection);
+  const proof = projectCoverageSelection(selection, binding);
+  const payload = JSON.parse(
+    parts.find((p) => p.coverageBindings.includes(binding))!.prompt,
+  );
+  assert.throws(() =>
+    validateCoverageProof({
+      proof,
+      ownedSourceRefs: binding.sourceRefs,
+      requiredSourceRefs: binding.requiredSourceRefs,
+      kind: binding.kind,
+      verdict: "supported",
+      draft: payload.draft,
+    }),
+  );
+  validateCoverageProof({
+    proof,
+    ownedSourceRefs: binding.sourceRefs,
+    requiredSourceRefs: binding.requiredSourceRefs,
+    kind: binding.kind,
+    verdict: "not_verifiable",
+    draft: payload.draft,
+  });
+  assert.equal(JSON.stringify({ input, original }), before);
 });
