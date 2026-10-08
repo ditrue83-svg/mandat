@@ -25,7 +25,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v65";
+  "documentary-source-interpretation-v66";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -1818,7 +1818,9 @@ export function buildSourceInterpretationRequest(
         : []),
       ...(requiredContractClauses.length
         ? [
-            "contractClauseDetails: ogni famiglia ha righe complete con TUTTI i propri refs/scope. Massimo 32 righe TOTALI di 600 caratteri, incluse details; riserva prima una riga per famiglia, poi usa il residuo per dividere note lunghe. Non troncare frasi, diciture, obblighi o eccezioni per rientrare in una riga. Conserva anche differenze fra lingue: diciture letterali, orari, esclusioni e candidature multiple. Mai unire famiglie o flag/note. Se non rappresentabile: uncertain con issue, non resolved. I refs non provano completezza.",
+            options.legacyProviderFormatForRegression
+              ? "contractClauseDetails: ogni famiglia ha righe complete con TUTTI i propri refs/scope. Massimo 32 righe TOTALI di 600 caratteri, incluse details; riserva prima una riga per famiglia, poi usa il residuo per dividere note lunghe. Non troncare frasi, diciture, obblighi o eccezioni per rientrare in una riga. Conserva anche differenze fra lingue: diciture letterali, orari, esclusioni e candidature multiple. Mai unire famiglie o flag/note. Se non rappresentabile: uncertain con issue, non resolved. I refs non provano completezza."
+              : "contractClauseDetails: una selezione per famiglia con TUTTI i propri refs/scope. originalText true conserva automaticamente l’intero testo, comprese note lunghe e differenze fra lingue: non dividerle in righe aggiuntive né abbreviare frasi, diciture, obblighi o eccezioni. Massimo 32 righe generate TOTALI, incluse details; ciascuna explanation generata resta entro 600 caratteri. Il testo originale selezionato è conservato integralmente dal codice. Mai unire famiglie o flag/note. Significato e applicabilità restano da verificare; i refs non provano completezza.",
             ...(requiredContractClauses.length > 32
               ? [
                   "Segmenti/traduzioni dello stesso campo/scope possono selezionare la stessa riga completa con TUTTI i refs. Non copiarla per ciascuna chiave. Mai presumere traduzioni uguali o unire famiglie, flag/note o ambiti diversi. Il limite è 32 righe totali, non 32 citazioni.",
