@@ -10,6 +10,7 @@ import {
   resolveSourceTextSelection,
 } from "./source-selection";
 import { isContractScopeField } from "./source-contract-clauses";
+import { originalClauseTextParts } from "./source-clause-literals";
 import {
   isOriginalPassageQuotation,
   originalQuotationReferences,
@@ -21,7 +22,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v63";
+  "documentary-source-interpretation-v64";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -599,6 +600,7 @@ function buildProviderResponseSchema(
       sourceRefs: readonly string[];
       originalScalarExplanation?: string;
       originalMultilingualExplanation?: string;
+      originalTextParts?: readonly string[];
     }[];
   },
   reference: z.ZodType<string> = z.string().regex(/^[sg]\d+$/),
@@ -998,7 +1000,26 @@ function buildSelectionResponseSchema(
                               }),
                             )
                             .length(1)
-                        : z.array(row).min(1).max(32),
+                        : family.originalTextParts
+                          ? z
+                              .array(
+                                family.originalTextParts.length === 1
+                                  ? z.union([
+                                      row.omit({ explanation: true }).extend({
+                                        originalText: z.literal(true),
+                                      }),
+                                      row.extend({
+                                        explanation: z.literal(
+                                          family.originalTextParts[0],
+                                        ),
+                                      }),
+                                    ])
+                                  : row.omit({ explanation: true }).extend({
+                                      originalText: z.literal(true),
+                                    }),
+                              )
+                              .length(1)
+                          : z.array(row).min(1).max(32),
                     ];
                   }),
                 ),
@@ -1053,16 +1074,26 @@ function decodeSelectionResponse(
         (item) => item.id === id,
       );
       const literal = family?.originalMultilingualExplanation;
+      const parts = literal ? [literal] : family?.originalTextParts;
       if (literal && (rows.length !== 1 || !("originalText" in rows[0])))
         throw new Error(
           "Contract multilingual detail requires explicit original text selection",
         );
+      if (
+        parts &&
+        (rows.length !== 1 ||
+          (!("originalText" in rows[0]) &&
+            (parts.length !== 1 || rows[0].explanation !== parts[0])))
+      )
+        throw new Error(
+          "Contract literal detail requires complete original text selection",
+        );
       return [
         id,
-        rows.map((row) => {
-          if (!("originalText" in row)) return row;
+        rows.flatMap((row) => {
+          if (!("originalText" in row)) return [row];
           if (
-            !literal ||
+            !parts ||
             !family ||
             row.scope !== family.scope ||
             JSON.stringify([...row.sourceRefs].sort()) !==
@@ -1072,7 +1103,7 @@ function decodeSelectionResponse(
               "Original contract text selection requires its own complete scoped family",
             );
           const { originalText: _selection, ...owned } = row;
-          return { ...owned, explanation: literal };
+          return parts.map((explanation) => ({ ...owned, explanation }));
         }),
       ];
     }),
@@ -1372,11 +1403,23 @@ function decodeProviderResponse(
     // A fully referenced row may serve several scoped fragments. Validate
     // every selected row before removing only byte-identical duplicates;
     // never merge meanings or add a reference to repair a missing proof.
-    const uniqueDetails = [
-      ...new Map(
-        details.map((detail) => [stableDocumentaryJson(detail), detail]),
-      ).values(),
-    ];
+    const seenDetails = new Set<string>();
+    const uniqueDetails = details.filter((detail) => {
+      // Repeated text can occur in different consecutive literal parts. Keep
+      // the explicitly selected sequence; its full order is checked below.
+      if (
+        request.contractDetailFamilies.some(
+          (family) =>
+            family.originalTextParts &&
+            detail.sourceRefs.some((ref) => family.sourceRefs.includes(ref)),
+        )
+      )
+        return true;
+      const key = stableDocumentaryJson(detail);
+      if (seenDetails.has(key)) return false;
+      seenDetails.add(key);
+      return true;
+    });
     details = uniqueDetails;
   }
   const classificationRefs = new Set(
@@ -1679,6 +1722,11 @@ export function buildSourceInterpretationRequest(
               options.legacyProviderFormatForRegression
                 ? undefined
                 : originalMultilingualExplanation(originals),
+            originalTextParts:
+              options.legacyProviderFormatForRegression ||
+              originalMultilingualExplanation(originals)
+                ? undefined
+                : originalClauseTextParts(originals),
           },
         ] as const;
       }),
@@ -1686,7 +1734,11 @@ export function buildSourceInterpretationRequest(
   ];
   if (
     contractDetailFamilies.length > 32 ||
-    contractDetailFamilies.some((family) => family.sourceRefs.length > 32)
+    contractDetailFamilies.some((family) => family.sourceRefs.length > 32) ||
+    contractDetailFamilies.reduce(
+      (sum, family) => sum + (family.originalTextParts?.length ?? 1),
+      0,
+    ) > 32
   )
     throw new Error(
       "Source interpretation clause families exceed original detail limits",
@@ -1791,7 +1843,7 @@ export function buildSourceInterpretationRequest(
         : [
             "classificationContext immutabile: ogni ID una volta, proprie etichette/codici/ambiti. Ogni reading cita un ref proprio; clarifies_domain cita la propria etichetta e collega una componente. Altrimenti broad_context o shared_project_only. Non citare CPC sotto CPV o classificazioni diverse. Senza etichetta niente decodifica da memoria. Nomi diversi non provano conflitto: una categoria di servizio complessivo non esclude un lavoro specifico. Per source_conflict cita due caratteristiche o obblighi incompatibili sullo stesso oggetto; la sola differenza tra etichetta ampia e prestazione esplicita resta contesto, non impedimento.",
             "Sintesi: lavoro acquistato e ambito, con prove proprie. Le date, durate, scadenze e istruzioni amministrative restano nei campi originali o nei dettagli richiesti, non nella sintesi. Le date di contratto e di esecuzione sono fatti distinti anche quando coincidono.",
-            "Clausole con originalMultilingualExplanation: seleziona originalText true con tutti i riferimenti propri e lo scope richiesto. Il codice conserva ogni formulazione originale integrale; non restituire explanation, traduzioni o conclusioni sulla compatibilità. Le clausole lunghe conservano il percorso a più righe e la revisione del significato.",
+            "Clausole con originalMultilingualExplanation o originalTextPartCount: seleziona originalText true con tutti i riferimenti propri e lo scope richiesto. Il codice conserva integralmente tutti i testi e le parti previste, senza traduzioni o conclusioni sulla compatibilità. Non abbreviare né restituire explanation per le note lunghe. Significato e applicabilità restano da verificare.",
           ]),
       "meaning identifica l'oggetto nel suo dominio: evidence cita prove non classificatorie; classificationContextIds riporta le classificazioni usate. Non basta ripetere o tradurre un termine ambiguo: disambigua con le etichette originali, senza scegliere settori esterni o dichiarare errata la classificazione per salvare un'ipotesi. explicit_text si fonda sul testo; text_with_classification_context richiede un'etichetta del target. Solo per un lotto senza classificazioni proprie può usare un'etichetta condivisa insieme a prove locali del significato. Famiglie classificatorie non provano equivalenza, capacità o ammissibilità.",
       "meaning.objectText/actionText: citazioni letterali, inclusi articoli/preposizioni/iniziali/punteggiatura, mai riscrittura grammaticale. Scegli estratti più brevi se necessario. Localizzazione nei soli evidence, attraverso frammenti contigui della stessa fonte/campo/ambito, tutti citati. Spiegazioni classificatorie: solo proprie etichette citate.",
@@ -1805,7 +1857,7 @@ export function buildSourceInterpretationRequest(
       "uncertain richiede un issue materiale tipizzato. object_identity collega componentIndexes (zero-based) a meaning ambiguous; role_identity a role null e roleEvidence unresolved; unreadable_source richiede una lettura unreadable. representation_incomplete cita prestazioni non rappresentate, non informazioni commerciali o specifiche assenti. Non inserire issues per dichiarare assenza di incertezza, e non dichiarare completa una rappresentazione incompleta.",
       "roleEvidence: azione acquistata, anche nominale, nello stesso scope; non mestiere/luogo/destinatario/offerta. Cita la funzione specifica: progettazione/posa/manutenzione non diventano execute negli appalti di lavori. Conserva azioni composite; other solo se non classificabili nei ruoli definiti. Se ignoto: role null/unresolved/role_identity. details/roleEvidence: scope originali; issues: target. target_scope solo lotti con prove nei due ambiti.",
       "source_conflict: conflicting con due asserti originali opposti/ref diverse sul target. Confronta tutti i titoli/descrizioni/riassunti: oggetto/destinatari/luogo/periodo. Precedenza solo ufficiale citata, mai maggioranza/lingua/ripetizione/refusi; inferenze/categorie/dettagli/traduzioni/frammenti isolati non bastano. unreadable vieta resolved.",
-      "components.evidence: prove PROPRIE di OGNI azione/oggetto/destinatario/luogo/periodo/limite in description/roleEvidence/meaning; mai ereditate da summary/details/altre componenti. Territorio non identifica istituto: cita titolo o ometti luogo attribuito. Conserva principali/accessorie; excluded con prove proprie, niente azioni acquistate ereditate. Non creare servizi da lavori di terzi/dati/codici/traduzioni/intestazioni; classificazione/catalogazione solo se acquistate.",
+      "components.evidence: prove PROPRIE di OGNI azione/oggetto/destinatario/luogo/periodo/limite in description/roleEvidence/meaning; mai ereditate da summary/details/altre componenti. Cita anche ogni lingua menzionata. Territorio non identifica istituto: cita titolo o ometti luogo attribuito. Conserva principali/accessorie; excluded con prove proprie, niente azioni acquistate ereditate. Non creare servizi da lavori di terzi/dati/codici/traduzioni/intestazioni; classificazione/catalogazione solo se acquistate.",
       ...(body.passages.some(
         (p) =>
           p.role === "service" &&
@@ -1867,7 +1919,20 @@ export function buildSourceInterpretationRequest(
     coverage: context.coverage,
     readings,
     requiredContractClauses,
-    ...(contractDetailFamilies.length ? { contractDetailFamilies } : {}),
+    ...(contractDetailFamilies.length
+      ? {
+          contractDetailFamilies: contractDetailFamilies.map(
+            ({ originalTextParts, ...family }) => ({
+              ...family,
+              // Full text is already present in the original passages.
+              // Only the deterministic serializer needs the split copies.
+              ...(originalTextParts
+                ? { originalTextPartCount: originalTextParts.length }
+                : {}),
+            }),
+          ),
+        }
+      : {}),
     ...(clauseBlocks.length ? { contractClauseBlocks: clauseBlocks } : {}),
     ...(evidenceGroups.length
       ? { componentEvidenceGroups: evidenceGroups }
@@ -2060,6 +2125,19 @@ export function validateSourceInterpretation(
       )
         throw new Error(
           "Contract multilingual detail must preserve every original wording",
+        );
+      if (
+        family.originalTextParts &&
+        (JSON.stringify(rows.map((row) => row.explanation)) !==
+          JSON.stringify(family.originalTextParts) ||
+          rows.some(
+            (row) =>
+              JSON.stringify([...row.sourceRefs].sort()) !==
+              JSON.stringify([...family.sourceRefs].sort()),
+          ))
+      )
+        throw new Error(
+          "Contract literal detail must preserve every original part in order with its complete references",
         );
     }
   }

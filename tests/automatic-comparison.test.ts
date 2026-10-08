@@ -5,7 +5,6 @@ import {
   inventedReadingRefs,
   inventedSourceEvidenceAnswer,
 } from "./helpers/source-evidence-fixture";
-import { sourceEvidencePassages } from "../src/lib/source-evidence-context";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test, vi } from "vitest";
@@ -217,14 +216,20 @@ function sourceResponse(
   )!.id;
   return {
     status,
-    details: sourceEvidencePassages(sourceRequest)
-      .filter((p) => sourceRequest.requiredContractClauseIds.includes(p.id))
-      .map((p) => ({
+    details: sourceRequest.contractDetailFamilies.flatMap((family) =>
+      (
+        family.originalTextParts ?? [
+          family.originalMultilingualExplanation ??
+            family.originalScalarExplanation ??
+            "Condizione originale inventata per il test.",
+        ]
+      ).map((explanation) => ({
         kind: "execution_condition" as const,
-        explanation: `Territorio originale del test: ${p.text}.`,
-        sourceRefs: [p.id],
-        scope: p.scope,
+        explanation,
+        sourceRefs: [...family.sourceRefs],
+        scope: family.scope,
       })),
+    ),
     summary:
       "Servizi inventati, interpretazione simulata per verificare il contratto.",
     summarySourceRefs: [targetRef],

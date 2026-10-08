@@ -580,7 +580,7 @@ test("A project without lots cannot request a shared-lot detail in either wire c
   }
 });
 
-test("Long parallel clauses retain the reviewed multi-row path without truncation", () => {
+test("Long parallel clauses retain every original part without truncation", () => {
   const base = context();
   const input = {
     ...base,
@@ -608,14 +608,128 @@ test("Long parallel clauses retain the reviewed multi-row path without truncatio
     undefined,
   );
   const value = wire(input);
-  value.contractClauseDetails.s4 = input.body.passages.slice(-2).map((p) => ({
-    kind: "execution_condition",
-    scope: "project_context",
-    explanation: p.text,
-    sourceRefs: ["s4", "s5"],
-  }));
+  value.contractClauseDetails.s4 = [
+    {
+      kind: "execution_condition",
+      scope: "project_context",
+      originalText: true,
+      sourceRefs: ["s4", "s5"],
+    },
+  ];
   const before = JSON.stringify(input);
-  assert(recordSourceInterpretation(value, request, metadata));
+  const recorded = recordSourceInterpretation(value, request, metadata);
+  const parts = request.contractDetailFamilies[0].originalTextParts!;
+  assert(parts.length > 1);
+  assert(parts.every((p) => p.length <= 600));
+  assert.equal(
+    parts.join(""),
+    `DE: ${input.body.passages.at(-2)!.text}\nIT: ${input.body.passages.at(-1)!.text}`,
+  );
+  assert.deepEqual(
+    recorded.response.details
+      .filter((d) => d.sourceRefs.includes("s4"))
+      .map((d) => d.explanation),
+    parts,
+  );
+  const missing = structuredClone(recorded.response);
+  missing.details.pop();
+  assert.throws(
+    () => validateSourceInterpretation(missing, request),
+    /every original part/,
+  );
+  const reordered = structuredClone(recorded.response);
+  reordered.details.reverse();
+  assert.throws(
+    () => validateSourceInterpretation(reordered, request),
+    /every original part/,
+  );
+  const missingCitation = structuredClone(recorded.response);
+  missingCitation.details.find((d) => d.sourceRefs.includes("s4"))!.sourceRefs =
+    ["s4"];
+  assert.throws(
+    () => validateSourceInterpretation(missingCitation, request),
+    /complete references/,
+  );
+  const plan = buildSourceSemanticReviewRequest(input, recorded, {
+    model: metadata.model,
+  });
+  const reviews = buildGroundedSourceReviewRequests(
+    plan,
+    inventedSourceEvidence(plan),
+  );
+  const bindings = reviews
+    .flatMap((review) => JSON.parse(review.prompt).contractClauseDraftBindings)
+    .filter((binding) => binding.sourceRef === "s4");
+  assert(bindings.length);
+  for (const binding of bindings)
+    assert.deepEqual(
+      binding.candidateDetails.map(
+        (detail: { explanation: string }) => detail.explanation,
+      ),
+      parts,
+    );
+  assert.equal(JSON.stringify(input), before);
+});
+
+test("Repeated literal parts retain their positions and cannot be silently deduplicated", () => {
+  const base = context();
+  const repeated = "Condizione originale. ".repeat(27); // 594 UTF-16 units.
+  const note = repeated + repeated + "Clausola finale obbligatoria.";
+  const input = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: base.body.passages.map((p) =>
+        p.id === "s4" ? { ...p, text: note, endUtf16: note.length } : p,
+      ),
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const value = wire(input);
+  value.contractClauseDetails.s4 = [
+    {
+      kind: "execution_condition",
+      scope: "project_context",
+      sourceRefs: ["s4"],
+      originalText: true,
+    },
+  ];
+  const record = recordSourceInterpretation(value, request, metadata);
+  const rows = record.response.details.filter((d) =>
+    d.sourceRefs.includes("s4"),
+  );
+  assert.equal(rows[0].explanation, rows[1].explanation);
+  assert.equal(rows.map((d) => d.explanation).join(""), note);
+  const deduplicated = structuredClone(record.response);
+  deduplicated.details.splice(
+    deduplicated.details.indexOf(
+      deduplicated.details.find((d) => d.sourceRefs.includes("s4"))!,
+    ),
+    1,
+  );
+  assert.throws(
+    () => validateSourceInterpretation(deduplicated, request),
+    /every original part/,
+  );
+});
+
+test("Long mandatory text cannot evade the existing aggregate detail cap", () => {
+  const base = context();
+  const note = "Original condition must remain complete. ".repeat(600);
+  const input = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: base.body.passages.map((p) =>
+        p.id === "s4" ? { ...p, text: note, endUtf16: note.length } : p,
+      ),
+    },
+  };
+  const before = JSON.stringify(input);
+  assert.throws(
+    () => buildSourceInterpretationRequest(input),
+    /original detail limits/,
+  );
   assert.equal(JSON.stringify(input), before);
 });
 
@@ -1048,7 +1162,7 @@ test("Production review V5 requires explicit coverage proof and cannot emit the 
     {
       kind: "technical_specification",
       scope: "project_context",
-      explanation: "Città indicata: Lugano.",
+      originalText: true,
       sourceRefs: ["s5"],
     },
   ];
@@ -1619,10 +1733,9 @@ test("Uncertainty and conflict retain mandatory clauses and cannot bypass their 
       /bound field block/,
     );
     const overflow = structuredClone(value);
-    overflow.contractClauseDetails.s4 = Array.from({ length: 32 }, () =>
-      structuredClone(value.contractClauseDetails.s4[0]),
+    overflow.details = Array.from({ length: 32 }, () =>
+      structuredClone(wire(input).details[0]),
     );
-    overflow.details = wire(input).details;
     assert.throws(
       () => recordSourceInterpretation(overflow, request, metadata),
       /aggregate limit/,

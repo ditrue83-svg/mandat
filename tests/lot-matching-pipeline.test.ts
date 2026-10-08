@@ -5,6 +5,7 @@ import {
   inventedReadingRefs,
 } from "./helpers/source-evidence-fixture";
 import { SOURCE_REVIEW_SUPPORTED_REASON } from "../src/lib/source-semantic-review";
+import { originalClauseTextParts } from "../src/lib/source-clause-literals";
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
@@ -192,16 +193,34 @@ function inventedAnswer(prompt: string) {
     );
     return {
       status: "resolved",
-      details: data.requiredContractClauses.map(
-        (clause: { id: string; scope: string; text?: string }) => ({
-          kind: "execution_condition",
-          scope: clause.scope,
-          sourceRefs: [clause.id],
-          explanation: (
-            clause.text ?? "Condizione strutturata inventata."
-          ).slice(0, 600),
-        }),
-      ),
+      details:
+        data.contractDetailFamilies?.flatMap(
+          (family: {
+            scope: string;
+            sourceRefs: string[];
+            originalTextPartCount?: number;
+            originalMultilingualExplanation?: string;
+            originalScalarExplanation?: string;
+          }) =>
+            (
+              (family.originalTextPartCount
+                ? originalClauseTextParts(
+                    data.passages.filter((p: { id: string }) =>
+                      family.sourceRefs.includes(p.id),
+                    ),
+                  )
+                : undefined) ?? [
+                family.originalMultilingualExplanation ??
+                  family.originalScalarExplanation ??
+                  "Condizione strutturata inventata.",
+              ]
+            ).map((explanation) => ({
+              kind: "execution_condition",
+              scope: family.scope,
+              sourceRefs: family.sourceRefs,
+              explanation,
+            })),
+        ) ?? [],
       summary:
         "Potatura degli alberi, fonte inventata per la verifica della coda.",
       summarySourceRefs: [target.id],

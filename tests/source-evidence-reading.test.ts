@@ -696,7 +696,7 @@ test.each([
   },
 );
 
-test("A flat lot extension deadline reaches semantic review even when a cited draft detail omits it", () => {
+test("A flat lot extension deadline rejects an omitted condition and reaches semantic review in full", () => {
   const base = lotContext("Fornitura di prodotti Alfa inventati.");
   const note =
     "Il committente può chiedere nuovi prezzi prima della scadenza indicata. È ammessa una sola proroga di due anni.";
@@ -773,9 +773,19 @@ test("A flat lot extension deadline reaches semantic review even when a cited dr
       }),
     /Incomplete.*contract clauses/,
   );
-  // A reference alone cannot prove semantic completeness. Keep the entire
-  // original note beside the partial candidate for the separate review.
-  const source = recordSourceInterpretation(answer, request, {
+  // The reference alone cannot repair omitted text. Reject that candidate
+  // and use a separate complete invented fixture for the review plumbing.
+  assert.throws(
+    () =>
+      recordSourceInterpretation(answer, request, {
+        ...metadata,
+        model: input.binding.model,
+      }),
+    /every original part/,
+  );
+  const complete = structuredClone(answer);
+  complete.details[0].explanation = note;
+  const source = recordSourceInterpretation(complete, request, {
     ...metadata,
     model: input.binding.model,
   });
@@ -798,9 +808,7 @@ test("A flat lot extension deadline reaches semantic review even when a cited dr
   const binding = bodies
     .flatMap((body) => body.contractClauseDraftBindings)
     .find((item: { sourceRef: string }) => item.sourceRef === "s901");
-  assert.deepEqual(binding.candidateDetails, [
-    { index: 0, explanation: "È ammessa una sola proroga di due anni." },
-  ]);
+  assert.deepEqual(binding.candidateDetails, [{ index: 0, explanation: note }]);
   assert.equal(JSON.stringify(answer), before);
 });
 
