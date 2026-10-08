@@ -1116,6 +1116,36 @@ test("Production review V5 requires explicit coverage proof and cannot emit the 
       native.text!.format.schema,
     );
     assert(accepts(responses[index]), JSON.stringify(accepts.errors));
+    // A supported group cannot cite only neighbouring context, including
+    // when its own originals are null fields. Reject this on the provider
+    // wire, before the unchanged canonical ownership validator runs.
+    for (const id of r.assignedClaimIds) {
+      const own = plan.claims.find((c) => c.id === id)!;
+      const group = r.claimReadingGroups.find((g) => g.claimIds.includes(id))!;
+      assert.deepEqual(group.supportedSourceIds, own.sourceRefs);
+      const missingOwn = structuredClone(responses[index]);
+      missingOwn.checksByClaim[id].sourceRefs = [];
+      assert.equal(accepts(missingOwn), false);
+      const contextRef = r.sourceIds.find(
+        (ref) => !own.sourceRefs.includes(ref),
+      );
+      if (!contextRef) continue;
+      missingOwn.checksByClaim[id].sourceRefs = [contextRef];
+      assert.equal(accepts(missingOwn), false);
+      // Criticism must still be able to cite evidence outside the claim.
+      const negative: any = missingOwn.checksByClaim[id];
+      negative.verdict = "not_verifiable";
+      negative.draftQuote = own.text;
+      negative.reason =
+        "Controprova inventata, non un giudizio sul bando reale.";
+      negative.readingRefsById = Object.fromEntries(
+        group.readingIds.map((ref) => [
+          ref,
+          negative.readingRefsById[ref] ?? false,
+        ]),
+      );
+      assert(accepts(missingOwn), JSON.stringify(accepts.errors));
+    }
     const bad = structuredClone(responses[index]);
     const check: any = Object.values(bad.checksByClaim).find(
       (c: any) => Object.keys(c.coverageBySource).length,

@@ -34,7 +34,7 @@ import { sourceEvidencePassages } from "./source-evidence-context";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v57";
+  "documentary-source-semantic-review-v58";
 export const SOURCE_REVIEW_SUPPORTED_REASON =
   "Le prove indicate sostengono il claim; coverageProof distingue fatti rappresentati e dati facoltativi.";
 const MAX_BYTES = 160_000;
@@ -95,6 +95,7 @@ type ResponseBounds = {
     claimIds: string[];
     readingIds: string[];
     supportedReadingIds?: string[];
+    supportedSourceIds?: string[];
   }[];
 };
 const checkShape = z.strictObject({
@@ -196,6 +197,11 @@ function providerResponseSchema(
           ? z.union([
               schema.extend({
                 verdict: z.literal("supported"),
+                // Nearby Note/value context cannot replace the original
+                // evidence of the claim being approved.
+                ...(group.supportedSourceIds
+                  ? { sourceRefs: boundedRefs(group.supportedSourceIds) }
+                  : {}),
                 ...(["claim_keyed_refs_v4", "claim_keyed_refs_v5"].includes(
                   format,
                 )
@@ -1079,6 +1085,7 @@ export function buildGroundedSourceReviewRequests(
           claimIds: string[];
           readingIds: string[];
           supportedReadingIds?: string[];
+          supportedSourceIds?: string[];
         }
       >();
       for (const claim of plan.claims.filter((c) =>
@@ -1118,11 +1125,19 @@ export function buildGroundedSourceReviewRequests(
                   .map((item) => item.id),
               ])
             : undefined;
-        const key = JSON.stringify([ownFacts, supportedReadingIds]);
+        const supportedSourceIds = plan.legacyProviderFormatForRegression
+          ? undefined
+          : claim.sourceRefs;
+        const key = JSON.stringify([
+          ownFacts,
+          supportedReadingIds,
+          supportedSourceIds,
+        ]);
         const group = readingGroups.get(key) ?? {
           claimIds: [],
           readingIds: [...independentReadingIds, ...ownFacts],
           ...(supportedReadingIds ? { supportedReadingIds } : {}),
+          ...(supportedSourceIds ? { supportedSourceIds } : {}),
         };
         group.claimIds.push(claim.id);
         readingGroups.set(key, group);
@@ -1174,7 +1189,9 @@ export function buildGroundedSourceReviewRequests(
         rules: JSON.parse(request.prompt).rules.map((rule: string) =>
           rule.replace(
             "e cita lo stesso sN o fN in sourceRefs.",
-            "e seleziona il relativo o-sN/o-fN: il formato v3 collega il suo sourceRef originale.",
+            plan.legacyProviderFormatForRegression
+              ? "e seleziona il relativo o-sN/o-fN: il formato v3 collega il suo sourceRef originale."
+              : "e seleziona il relativo o-sN/o-fN; supported richiede anche un originale proprio esplicito in sourceRefs.",
           ),
         ),
         ...(plan.legacyProviderFormatForRegression
@@ -1187,7 +1204,9 @@ export function buildGroundedSourceReviewRequests(
           checksFormat: plan.legacyProviderFormatForRegression
             ? "claim_keyed_refs_v3"
             : "claim_keyed_refs_v5",
-          rule: "readingRefsById richiede una chiave booleana per ogni ID previsto: true seleziona una prova, false la lascia inutilizzata. Seleziona almeno una prova. Per o-sN/o-fN il codice collega il sourceRef originale del fatto scelto: non serve ripeterlo in sourceRefs. Cita in sourceRefs le altre prove necessarie. Nessuna nuova chiave o readingRefs. Ambito, significato e sostegno proprio del claim restano da verificare; il collegamento non assegna verdetti.",
+          rule: plan.legacyProviderFormatForRegression
+            ? "readingRefsById richiede una chiave booleana per ogni ID previsto: true seleziona una prova, false la lascia inutilizzata. Seleziona almeno una prova. Per o-sN/o-fN il codice collega il sourceRef originale del fatto scelto: non serve ripeterlo in sourceRefs. Cita in sourceRefs le altre prove necessarie. Nessuna nuova chiave o readingRefs. Ambito, significato e sostegno proprio del claim restano da verificare; il collegamento non assegna verdetti."
+            : "readingRefsById: true seleziona una prova, false la lascia inutilizzata; seleziona almeno una prova pertinente. Per supported sourceRefs richiede almeno un originale proprio del claim, scelto fra quelli consentiti, anche per gruppi di campi null: il solo contesto vicino non li prova. I readingRefs o-sN/o-fN possono aggiungere il contesto originale collegato; non sostituiscono la selezione esplicita in sourceRefs. Per esiti negativi restano disponibili le controprove del gruppo. Nessuna nuova chiave o readingRefs. Selezionare un riferimento non approva significato, completezza o applicabilita.",
         },
         sourceEvidenceHash: independent.hash,
         originalFacts,
