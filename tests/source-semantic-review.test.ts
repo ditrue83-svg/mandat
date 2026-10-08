@@ -4457,3 +4457,102 @@ test("Review criticisms quote their assigned text without confusing summary and 
     true,
   );
 });
+
+test("Dense null and scalar originals fit grounded review with exact ownership and unchanged values", () => {
+  const base = context();
+  const input = {
+    ...base,
+    body: {
+      ...base.body,
+      fields: Array.from({ length: 300 }, (_, i) => ({
+        scope: "project_context" as const,
+        rawPath: `/metadata/dense/${i}`,
+        value: i % 3 === 0 ? null : i % 3 === 1 ? false : 0,
+      })),
+    },
+    coverage: { ...base.coverage, fields: 304 },
+  };
+  const original = draft(input),
+    before = JSON.stringify(input);
+  const plan = buildCurrentSourceSemanticReviewRequest(input, original, config);
+  const grounded = inventedGroundedReviewRequests(plan);
+  assert(grounded.length > 1 && grounded.length <= 32);
+  assert.deepEqual(
+    grounded.flatMap((r) => r.coverage.passageIds),
+    input.body.passages.map((p) => p.id),
+  );
+  assert.deepEqual(
+    grounded.flatMap((r) => r.coverage.fieldIndexes),
+    input.body.fields.map((_, i) => i),
+  );
+  const claims = grounded.flatMap((r) => r.assignedClaimIds);
+  assert.equal(new Set(claims).size, claims.length);
+  assert.deepEqual([...claims].sort(), plan.claims.map((c) => c.id).sort());
+  for (const request of grounded) {
+    assert(request.assignedClaimIds.length <= 8);
+    assert(
+      Buffer.byteLength(
+        request.system +
+          request.prompt +
+          JSON.stringify(request.responseFormat),
+      ) <= 160000,
+    );
+    const body = JSON.parse(request.prompt);
+    for (const index of request.coverage.fieldIndexes) {
+      const field = body.fields.find((f: any) => f.id === `f${index}`);
+      assert.equal(field.value, input.body.fields[index].value);
+      assert.equal(field.rawPath, input.body.fields[index].rawPath);
+      assert(request.scopeCoverageClaim!.sourceRefs.includes(`f${index}`));
+      assert(request.originalFacts.some((f) => f.sourceRef === `f${index}`));
+    }
+  }
+  assert.equal(JSON.stringify(input), before);
+});
+
+test("Not-stated importance remains an explicit semantic judgment with blocking negative outcomes", () => {
+  const input = context(),
+    seed = draft(input);
+  const original = recordSourceInterpretation(
+    {
+      ...seed.response,
+      components: seed.response.components.map((c) => ({
+        ...c,
+        importance: "not_stated" as const,
+      })),
+    },
+    buildSourceInterpretationRequest(input),
+    { ...metadata, model: input.binding.model },
+  );
+  const plan = buildSourceSemanticReviewRequest(input, original, config);
+  const claim = plan.claims.find((c) => c.kind === "component_importance")!;
+  assert(claim.text.startsWith("not_stated"));
+  const responses = answers(plan);
+  assert.equal(
+    readSourceSemanticReview(
+      recordSourceSemanticReview(responses, plan, metadata),
+      plan,
+    )?.accepted,
+    true,
+  );
+  const negative = structuredClone(responses);
+  const check = negative
+    .flatMap((r) => r.checks)
+    .find((c) => c.claimId === claim.id)!;
+  Object.assign(check, {
+    verdict: "not_verifiable",
+    draftQuote: "not_stated",
+    reason:
+      "Giudizio negativo inventato: deve restare bloccante, senza approvazione automatica dell'assenza di gerarchia.",
+  });
+  assert.equal(
+    readSourceSemanticReview(
+      recordSourceSemanticReview(negative, plan, metadata),
+      plan,
+    )?.accepted,
+    false,
+  );
+  const missing = structuredClone(responses);
+  for (const part of missing)
+    part.checks = part.checks.filter((c) => c.claimId !== claim.id);
+  assert.throws(() => recordSourceSemanticReview(missing, plan, metadata));
+});
