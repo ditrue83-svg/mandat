@@ -44,7 +44,7 @@ import { SOURCE_EVIDENCE_READING_VERSION } from "./source-evidence-reading";
 import { isContractScopeField } from "./source-contract-clauses";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v80";
+  "documentary-service-comparison-v82";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -128,6 +128,25 @@ export const automaticReadingSchema = z.strictObject({
 });
 export const automaticComparisonResponseSchema = z
   .strictObject({
+    functionCheck: z
+      .strictObject({
+        requested: z.strictObject({
+          description: z.string().trim().min(1).max(300),
+          componentRefs: z
+            .array(z.string().regex(/^u[1-9]\d*$/))
+            .min(1)
+            .max(64),
+        }),
+        declared: z.strictObject({
+          description: z.string().trim().min(1).max(300),
+          companyRefs: z.array(profileIdSchema).min(1).max(8),
+        }),
+        relationship: z.string().trim().min(1).max(400),
+        differences: z.string().trim().min(1).max(300),
+      })
+      .describe(
+        "Prima dei verdetti: identifica separatamente bene/servizio e funzione professionale delle componenti richieste e delle attivita dichiarate, con prove proprie. Spiega il rapporto funzionale e POI le differenze di applicazione, oggetto, ruolo e copertura. Non e una valutazione di idoneita.",
+      ),
     comparison: z.string().min(1).max(900),
     facts: z.strictObject({
       companyIdentifiesService: z
@@ -199,9 +218,26 @@ export const automaticComparisonResponseSchema = z
         code: "custom",
         message: "Unresolved contractual role requires uncertainty",
       });
-    for (const references of [value.componentRefs, value.companyRefs])
+    for (const references of [
+      value.componentRefs,
+      value.companyRefs,
+      value.functionCheck.requested.componentRefs,
+      value.functionCheck.declared.companyRefs,
+    ])
       if (new Set(references).size !== references.length)
         context.addIssue({ code: "custom", message: "Repeated references" });
+    if (
+      value.functionCheck.requested.componentRefs.some(
+        (id) => !value.componentRefs.includes(id),
+      ) ||
+      value.functionCheck.declared.companyRefs.some(
+        (id) => !value.companyRefs.includes(id),
+      )
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Functional evidence must belong to the comparison evidence",
+      });
   });
 
 export function automaticBasisFromFacts(
@@ -865,6 +901,22 @@ export function buildInterpretedComparisonRequest(
   const responseFormat = structuredFormat(
     "interpreted_service_comparison",
     automaticComparisonResponseSchema.safeExtend({
+      functionCheck:
+        automaticComparisonResponseSchema.shape.functionCheck.safeExtend({
+          requested: z.strictObject({
+            description: z.string().trim().min(1).max(300),
+            componentRefs: z.array(z.enum(componentIds)).min(1).max(64),
+          }),
+          declared: z.strictObject({
+            description: z.string().trim().min(1).max(300),
+            companyRefs: z
+              .array(
+                z.enum(request.companyPassages.map((passage) => passage.id)),
+              )
+              .min(1)
+              .max(8),
+          }),
+        }),
       interpretationHash: z.literal(sourceRecord.hash),
       reviewHash: z.literal(sourceReview.hash),
       componentRefs: z.array(z.enum(componentIds)).min(1).max(64),
@@ -880,6 +932,8 @@ export function buildInterpretedComparisonRequest(
     {
       task: "Usa soltanto le prestazioni identificate in sourceInterpretation per il confronto. Motiva brevemente la sovrapposizione o la differenza concreta e cita gli identificativi delle componenti e delle attività aziendali. Non reinterpretare la terminologia originaria per adattarla alla ditta.",
       rules: [
+        "Compila functionCheck PRIMA di comparison e facts. In requested descrivi il bene/servizio richiesto e la sua funzione nel lavoro, usando le componenti citate; in declared fai lo stesso soltanto con le attivita aziendali citate, incluse le esclusioni. In relationship confronta queste due funzioni, anche quando ritieni il legame assente o incidentale; non sostituire questo confronto con la mancata identita del prodotto. In differences separa le differenze effettive e le capacita non dichiarate. Non inventare materiali, mezzi trasportati, destinazioni, caratteristiche o nuove prestazioni per costruire la funzione. Se non identificabile, scrivi cosa manca e conserva l'incertezza nei fatti.",
+        "Un bene o componente che svolge la stessa funzione professionale in due applicazioni diverse puo giustificare shared_professional_function senza provare lo stesso prodotto o la copertura della commessa. Per incidental_context spiega invece perche il rapporto riguarda soltanto un luogo, cliente, settore o materiale generico e non la funzione del bene o servizio concretamente richiesto. La sola differenza di applicazione non e questa spiegazione. functionCheck e una verifica motivata, non un obbligo di trovare affinita: conserva le reali differenze, le esclusioni e l'assenza di collegamento.",
         "Prima di valutare affinità, leggi per ogni componente richiesta le attività positive e le esclusioni esplicite della ditta. Se il profilo esclude proprio quella prestazione, la componente non ha sovrapposizione né shared_professional_function con quell'attività: un verbo, settore o ruolo comune non supera l'esclusione. Non dichiarato resta diverso da escluso. Una differenza di scala, modello o applicazione non è da sola un'esclusione del servizio. Valuta separatamente eventuali altre componenti richieste e attività dichiarate: un'esclusione non cancella una loro reale sovrapposizione. Motiva con gli oggetti e le azioni concrete, non con la sola categoria generale.",
         "Una prestazione principale e lo stesso ruolo consentono una corrispondenza professionale, senza pretendere quantità, modelli, qualifiche, certificazioni o ogni dettaglio tecnico nel profilo.",
         "activitiesOverlap=true richiede almeno un servizio o prodotto concretamente comune: un settore generale o un ruolo uguale non bastano. False richiede attività esplicitamente diverse; informazioni mancanti danno null.",
