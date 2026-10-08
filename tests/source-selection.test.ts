@@ -5,7 +5,13 @@ import {
   resolveSourceSelection,
   resolveSourceTextSelection,
 } from "../src/lib/source-selection";
-import { validateCoverageProof } from "../src/lib/source-coverage-proof";
+import {
+  bindCoverageWitnesses,
+  coverageHasWitnesses,
+  coverageSelectionSchema,
+  validateCoverageProof,
+} from "../src/lib/source-coverage-proof";
+import { isProcurementLocationField } from "../src/lib/source-contract-clauses";
 import {
   buildSourceInterpretationRequest,
   recordSourceInterpretation,
@@ -1022,9 +1028,31 @@ test("A source date cannot masquerade as a date preserved in the draft; optional
 });
 
 test("Production review V5 requires explicit coverage proof and cannot emit the false positive preservation reason", () => {
-  const input = context(),
-    request = buildSourceInterpretationRequest(input);
-  const draft = recordSourceInterpretation(wire(input), request, metadata);
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...passage("s5", "Lugano", "/procurement/orderAddress/city/it"),
+          role: "context",
+        },
+      ],
+    },
+  };
+  const request = buildSourceInterpretationRequest(input);
+  const value = wire(input);
+  value.contractClauseDetails.s5 = [
+    {
+      kind: "technical_specification",
+      scope: "project_context",
+      explanation: "Città indicata: Lugano.",
+      sourceRefs: ["s5"],
+    },
+  ];
+  const draft = recordSourceInterpretation(value, request, metadata);
   const plan = buildSourceSemanticReviewRequest(input, draft, {
     model: metadata.model,
   });
@@ -1116,6 +1144,23 @@ test("Production review V5 requires explicit coverage proof and cannot emit the 
       native.text!.format.schema,
     );
     assert(accepts(responses[index]), JSON.stringify(accepts.errors));
+    // The same location must not become optional when its scope-coverage
+    // judgment and its individual clause happen to belong to different groups.
+    const territory = r.coverageBindings.find(
+      (b) => b.kind === "scope_coverage" && b.sourceRefs.includes("s5"),
+    );
+    if (territory) {
+      assert.deepEqual(territory.requiredSourceRefs, ["s5"]);
+      const optional = structuredClone(responses[index]);
+      const check = optional.checksByClaim[territory.claimId];
+      check.coverageBySource.s5 = {
+        disposition: "not_required",
+        draftPaths: [],
+      };
+      assert.equal(accepts(optional), false);
+      check.coverageBySource.s5 = { disposition: "missing", draftPaths: [] };
+      assert.equal(accepts(optional), false);
+    }
     // A supported group cannot cite only neighbouring context, including
     // when its own originals are null fields. Reject this on the provider
     // wire, before the unchanged canonical ownership validator runs.
@@ -1193,6 +1238,88 @@ test("Production review V5 requires explicit coverage proof and cannot emit the 
         sourceEvidence: evidence,
       }),
     /./,
+  );
+});
+
+test("Procurement territory needs proof while administrative addresses and absent fields remain distinct", () => {
+  for (const path of [
+    "/procurement/orderAddress/city/it",
+    "/procurement/orderAddress/cantonId",
+    "/lots/2/orderAddressDescription/fr",
+  ])
+    assert.equal(isProcurementLocationField(path), true);
+  for (const path of [
+    "/project-info/documentsSourceAddress/city/it",
+    "/dates/offerOpeningCity/it",
+    "/procOffice/address/city/it",
+    "/procurement/orderAddress/cityNote/it",
+  ])
+    assert.equal(isProcurementLocationField(path), false);
+
+  const draft = {
+    summary: "Fornitura di tubi.",
+    summarySourceRefs: ["s1"],
+    components: [],
+    details: [{ explanation: "Luogo: Lugano.", sourceRefs: ["s2"] }],
+  };
+  const binding = bindCoverageWitnesses(
+    {
+      claimId: "q1",
+      kind: "scope_coverage",
+      sourceRefs: ["s2", "s3"],
+      requiredSourceRefs: ["s2"],
+    },
+    draft,
+  );
+  const preserved = {
+    s2: { disposition: "represented", draftPaths: ["/details/0/explanation"] },
+    s3: { disposition: "not_required", draftPaths: [] },
+  };
+  assert(coverageSelectionSchema(binding, true).safeParse(preserved).success);
+  assert.equal(
+    coverageSelectionSchema(binding, true).safeParse({
+      ...preserved,
+      s2: { disposition: "not_required", draftPaths: [] },
+    }).success,
+    false,
+  );
+  const missing = {
+    ...preserved,
+    s2: { disposition: "missing", draftPaths: [] },
+  };
+  assert(coverageSelectionSchema(binding).safeParse(missing).success);
+  assert.equal(
+    coverageSelectionSchema(binding, true).safeParse(missing).success,
+    false,
+  );
+  assert.throws(
+    () =>
+      validateCoverageProof({
+        proof: [
+          { sourceRef: "s2", disposition: "not_required", witnesses: [] },
+        ],
+        ownedSourceRefs: ["s2"],
+        requiredSourceRefs: ["s2"],
+        kind: "scope_coverage",
+        verdict: "supported",
+        draft,
+      }),
+    /mandatory clause/,
+  );
+  const absent = bindCoverageWitnesses(
+    {
+      claimId: "q1",
+      kind: "scope_coverage",
+      sourceRefs: ["s2"],
+      requiredSourceRefs: ["s2"],
+    },
+    { ...draft, details: [] },
+  );
+  assert.equal(coverageHasWitnesses(absent), false);
+  assert(coverageSelectionSchema(absent).safeParse({ s2: missing.s2 }).success);
+  assert.throws(
+    () => coverageSelectionSchema(absent, true),
+    /requires a draft candidate/,
   );
 });
 

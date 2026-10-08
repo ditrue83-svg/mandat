@@ -38,6 +38,7 @@ export type CoverageDraft = {
 export function validateCoverageProof(input: {
   proof: CoverageProof;
   ownedSourceRefs: readonly string[];
+  requiredSourceRefs?: readonly string[];
   kind: "scope_coverage" | "contract_clause_coverage";
   verdict: "supported" | "contradicted" | "not_verifiable";
   draft: CoverageDraft;
@@ -71,7 +72,8 @@ export function validateCoverageProof(input: {
         throw new Error("Absent fact cannot claim a draft witness");
       if (
         row.disposition === "not_required" &&
-        input.kind === "contract_clause_coverage"
+        (input.kind === "contract_clause_coverage" ||
+          input.requiredSourceRefs?.includes(row.sourceRef))
       )
         throw new Error("A mandatory clause cannot be classified as optional");
       if (row.disposition === "missing" && input.verdict === "supported")
@@ -111,13 +113,17 @@ export type CoverageBinding = {
   claimId: string;
   kind: "scope_coverage" | "contract_clause_coverage";
   sourceRefs: string[];
+  requiredSourceRefs?: string[];
   witnessesBySource: Record<string, { draftPath: string; quote: string }[]>;
 };
 
 // A candidate proves that a cited field exists, never that its meaning covers
 // the fact. The reviewer must select it and judge every proposition separately.
 export function bindCoverageWitnesses(
-  claim: Pick<CoverageBinding, "claimId" | "kind" | "sourceRefs">,
+  claim: Pick<
+    CoverageBinding,
+    "claimId" | "kind" | "sourceRefs" | "requiredSourceRefs"
+  >,
   draft: CoverageDraft,
 ): CoverageBinding {
   const fields = coverageDraftFields(draft);
@@ -141,8 +147,13 @@ export function bindCoverageWitnesses(
 
 export function coverageHasWitnesses(binding?: CoverageBinding) {
   return (
-    binding?.kind !== "contract_clause_coverage" ||
-    binding.sourceRefs.every((ref) => binding.witnessesBySource[ref].length > 0)
+    !binding ||
+    binding.sourceRefs.every(
+      (ref) =>
+        (binding.kind !== "contract_clause_coverage" &&
+          !binding.requiredSourceRefs?.includes(ref)) ||
+        binding.witnessesBySource[ref].length > 0,
+    )
   );
 }
 
@@ -179,14 +190,16 @@ export function coverageSelectionSchema(
           const paths = binding!.witnessesBySource[sourceRef].map(
             (w) => w.draftPath,
           );
-          const absent =
-            binding!.kind === "contract_clause_coverage"
-              ? missingSelection
-              : supported
-                ? optionalSelection
-                : absentSelection;
+          const required =
+            binding!.kind === "contract_clause_coverage" ||
+            binding!.requiredSourceRefs?.includes(sourceRef);
+          const absent = required
+            ? missingSelection
+            : supported
+              ? optionalSelection
+              : absentSelection;
           if (!paths.length) {
-            if (supported && binding!.kind === "contract_clause_coverage")
+            if (supported && required)
               throw new Error(
                 "Supported mandatory coverage requires a draft candidate",
               );
@@ -198,7 +211,7 @@ export function coverageSelectionSchema(
           });
           return [
             sourceRef,
-            supported && binding!.kind === "contract_clause_coverage"
+            supported && required
               ? represented
               : z.union([represented, absent]),
           ] as const;

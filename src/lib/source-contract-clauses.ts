@@ -24,3 +24,10 @@ const contractScopePaths = [
 
 export const isContractScopeField = (rawPath: string) =>
   contractScopePaths.some((pattern) => pattern.test(rawPath));
+
+// The procurement location delimits the work. Office, submission and document
+// collection addresses have different roles and must not inherit this rule.
+export const isProcurementLocationField = (rawPath: string) =>
+  /^(?:\/procurement|\/lots\/\d+)\/(?:orderAddressDescription|orderAddress\/(?:cantonId|city))(?:\/|$)/.test(
+    rawPath,
+  );

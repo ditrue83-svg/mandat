@@ -31,10 +31,13 @@ import type {
   ComparisonPassage,
 } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
-import { isContractScopeField } from "./source-contract-clauses";
+import {
+  isContractScopeField,
+  isProcurementLocationField,
+} from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v58";
+  "documentary-source-semantic-review-v59";
 export const SOURCE_REVIEW_SUPPORTED_REASON =
   "Le prove indicate sostengono il claim; coverageProof distingue fatti rappresentati e dati facoltativi.";
 const MAX_BYTES = 160_000;
@@ -1153,6 +1156,21 @@ export function buildGroundedSourceReviewRequests(
                     claimId: claim.id,
                     kind: claim.kind,
                     sourceRefs: claim.sourceRefs,
+                    // Bind the original target location, never nearby office
+                    // addresses, null fields or another lot's territory. This
+                    // requires a coverage decision, not a positive verdict.
+                    ...(plan.legacyProviderFormatForRegression
+                      ? {}
+                      : {
+                          requiredSourceRefs: plan.context.body.passages
+                            .filter(
+                              (p) =>
+                                claim.sourceRefs.includes(p.id) &&
+                                p.scope === plan.context.targetScope &&
+                                isProcurementLocationField(p.rawPath),
+                            )
+                            .map((p) => p.id),
+                        }),
                   },
                   JSON.parse(request.prompt).draft,
                 ),
@@ -1198,7 +1216,7 @@ export function buildGroundedSourceReviewRequests(
           ? {}
           : {
               coverageProofRule:
-                "coverageBySource richiede ogni sourceRef assegnato come chiave. represented seleziona draftPaths fra quelli consentiti: il codice copia il testo esatto del campo, senza aggiungere o correggere prove. Scegli soltanto campi che esprimono davvero il fatto e tutti i suoi limiti; la presenza della citazione non prova equivalenza o completezza. Le clausole obbligatorie richiedono details. not_required vale solo per dati amministrativi facoltativi o originali senza nuova prestazione/limite. Divieti o permessi di subappalto e limiti organizzativi sono limiti materiali: seleziona i details che li conservano, anche quando hanno un altro claim contract_clause_coverage. Un altro claim corretto non giustifica not_required; missing indica una prestazione/condizione richiesta assente e vieta supported. Per gli altri claim coverageBySource={}. Non restituire quote o coverageProof. Non dichiarare conservata una data precisa mostrando soltanto una durata stimata.",
+                "coverageBySource richiede ogni sourceRef assegnato come chiave. represented seleziona draftPaths fra quelli consentiti: il codice copia il testo esatto del campo, senza aggiungere o correggere prove. Scegli soltanto campi che esprimono davvero il fatto e tutti i suoi limiti; la presenza della citazione non prova equivalenza o completezza. Le clausole obbligatorie richiedono details. not_required vale solo per dati amministrativi facoltativi o originali senza nuova prestazione/limite. Il territorio del lavoro è un limite materiale, distinto dagli indirizzi amministrativi. Divieti o permessi di subappalto e limiti organizzativi sono limiti materiali: seleziona i details che li conservano, anche quando hanno un altro claim contract_clause_coverage. Un altro claim corretto non giustifica not_required; missing indica una prestazione/condizione richiesta assente e vieta supported. Per gli altri claim coverageBySource={}. Non restituire quote o coverageProof. Non dichiarare conservata una data precisa mostrando soltanto una durata stimata.",
             }),
         referenceSelectionFormat: {
           checksFormat: plan.legacyProviderFormatForRegression
@@ -1480,6 +1498,9 @@ function validateResponses(
           validateCoverageProof({
             proof: check.coverageProof,
             ownedSourceRefs: claim.sourceRefs,
+            requiredSourceRefs: request.coverageBindings.find(
+              (binding) => binding.claimId === claim.id,
+            )?.requiredSourceRefs,
             kind: claim.kind,
             verdict: check.verdict,
             draft: JSON.parse(request.prompt).draft,
