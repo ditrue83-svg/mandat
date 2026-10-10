@@ -1,13 +1,23 @@
-import { readCanonicalFeedback } from "./canonical-feedback";
-import { and, eq } from "drizzle-orm";
+import {
+  readCanonicalFeedback,
+  readCanonicalFeedbackBatch,
+} from "./canonical-feedback";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { companies, matches, feedback, publications } from "@/db/schema";
 import {
   compareCanonicalPublications,
   sourceAvailable,
 } from "./canonical-publication";
-import { readSourceReviewContext } from "./source-reviews";
-import { lockCanonicalPublications } from "./canonical-lock";
+import {
+  readSourceReviewContext,
+  readSourceReviewContexts,
+} from "./source-reviews";
+import {
+  lockCanonicalPublications,
+  lockCanonicalPublicationGroups,
+  CanonicalMembershipConflict,
+} from "./canonical-lock";
 import {
   readLotMatchReview,
   type LoadedLotMatchReview,
@@ -235,6 +245,130 @@ export async function readCanonicalMatch(
         : available.sort(compareCanonicalPublications)[0];
     if (!publication) return null;
     return readPublicationMatch(tx, publication, companyId, now);
+  });
+}
+
+// List-only batch reader: keep the canonical -> company -> match lock order,
+// reselect the representative under the lock, and batch legacy dependencies.
+// A source adopted during loading still uses the full documentary reader.
+export async function readCanonicalLegacyMatches(
+  companyId: string,
+  publicationIds: readonly string[],
+  now = new Date(),
+) {
+  return getDb().transaction(async (tx) => {
+    const ids = [...new Set(publicationIds)];
+    const result = new Map<
+      string,
+      NonNullable<Awaited<ReturnType<typeof readCanonicalMatch>>>
+    >();
+    if (!ids.length) return result;
+    const observed = await tx
+      .select({ id: publications.id, canonicalId: publications.canonicalId })
+      .from(publications)
+      .where(inArray(publications.id, ids));
+    const members = await lockCanonicalPublicationGroups(
+      tx,
+      observed.map((p) => p.canonicalId),
+    );
+    const byGroup = new Map<string, typeof members>();
+    for (const member of members) {
+      const group = byGroup.get(member.canonicalId) ?? [];
+      group.push(member);
+      byGroup.set(member.canonicalId, group);
+    }
+    const selected = observed.flatMap((row) => {
+      const group = byGroup.get(row.canonicalId) ?? [];
+      if (!group.some((p) => p.id === row.id))
+        throw new CanonicalMembershipConflict(
+          "Il gruppo della pubblicazione è cambiato: ripetere la transazione.",
+        );
+      const representative = group
+        .filter((p) => sourceAvailable(p.source))
+        .sort(compareCanonicalPublications)[0];
+      return representative
+        ? [{ requestedId: row.id, publication: representative }]
+        : [];
+    });
+    if (!selected.length) return result;
+    const [company] = await tx
+      .select()
+      .from(companies)
+      .where(eq(companies.id, companyId))
+      .for("share");
+    if (!company) return result;
+    const selectedIds = [...new Set(selected.map((r) => r.publication.id))];
+    const matched = await tx
+      .select()
+      .from(matches)
+      .where(
+        and(
+          eq(matches.companyId, companyId),
+          inArray(matches.publicationId, selectedIds),
+        ),
+      )
+      .for("share");
+    const byPublication = new Map(matched.map((m) => [m.publicationId, m]));
+    const legacy = selected.filter((r) => !r.publication.documentarySnapshotId);
+    const contexts = await readSourceReviewContexts(
+      tx,
+      legacy.map((r) => r.publication),
+    );
+    const canonicalFeedback = await readCanonicalFeedbackBatch(
+      tx,
+      companyId,
+      legacy.map((r) => r.publication.canonicalId),
+    );
+    const feedbackRows = legacy.length
+      ? await tx
+          .select()
+          .from(feedback)
+          .where(
+            and(
+              eq(feedback.companyId, companyId),
+              inArray(
+                feedback.publicationId,
+                legacy.map((r) => r.publication.id),
+              ),
+            ),
+          )
+          .for("share")
+      : [];
+    const feedbackByPublication = new Map(
+      feedbackRows.map((f) => [f.publicationId, f]),
+    );
+    for (const { requestedId, publication } of selected) {
+      if (publication.documentarySnapshotId) {
+        const row = await readPublicationMatch(tx, publication, companyId, now);
+        if (row) result.set(requestedId, row);
+        continue;
+      }
+      const match = byPublication.get(publication.id) ?? null;
+      const f = feedbackByPublication.get(publication.id);
+      if (!match) {
+        result.set(requestedId, {
+          publication,
+          company,
+          match: null,
+          loaded: null,
+          sourceReview: null,
+          feedback: null,
+        });
+      } else {
+        result.set(requestedId, {
+          publication,
+          company,
+          match,
+          loaded: null,
+          sourceReview: contexts.get(publication.id) ?? null,
+          feedback: {
+            ...canonicalFeedback.get(publication.canonicalId)!,
+            relevant: f?.relevant ?? null,
+          },
+        });
+      }
+    }
+    return result;
   });
 }
 

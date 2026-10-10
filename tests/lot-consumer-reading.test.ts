@@ -1503,3 +1503,33 @@ it("an unreadable correction keeps priority over the closed publication explanat
   expect(detail?.lotReview?.signalEligible).toBe(false);
   expect(await listOpportunities(who)).toEqual([]);
 });
+
+it("Radar skips documentary trees without recorded judgments, preserving every match", async () => {
+  const f = await fixture();
+  const who = await customer(f);
+  const before = await matchRows(f.p.id);
+  const read = vi.spyOn(lotReaders, "readCanonicalMatch");
+  expect(await listOpportunities(who, { includeRelatedReview: true })).toEqual(
+    [],
+  );
+  expect(read).not.toHaveBeenCalled();
+  expect(await matchRows(f.p.id)).toEqual(before);
+});
+
+it("Radar legacy batch preserves canonical selection and tenant identity", async () => {
+  const f = await fixture({ adopt: false });
+  const who = await customer(f);
+  const direct = await lotReaders.readCanonicalMatch(who.companyId, f.p.id);
+  const batch = await lotReaders.readCanonicalLegacyMatches(who.companyId, [
+    f.p.id,
+  ]);
+  expect(batch.get(f.p.id)).toEqual(direct);
+  const unknown = await lotReaders.readCanonicalLegacyMatches(
+    "other-company-not-existing",
+    [f.p.id],
+  );
+  expect(unknown.size).toBe(0);
+  expect(
+    await lotReaders.readCanonicalLegacyMatches(who.companyId, []),
+  ).toEqual(new Map());
+});

@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import {
   readCanonicalMatch,
+  readCanonicalLegacyMatches,
   presentLotOpportunity,
   lotOpportunityVisible,
 } from "./lot-readers";
@@ -256,31 +257,92 @@ export async function listOpportunities(
     viewer.companyId,
     representatives.map((publication) => publication.canonicalId),
   );
-  const candidates = await classifyPublicationRows(
-    db,
-    representatives.filter((publication) => {
-      const match = matchByPublication.get(publication.id);
-      const state = canonicalFeedback.get(publication.canonicalId);
-      if (options.includeInactive) return !!state?.saved;
-      // Both human evaluations and automatic comparisons are resolved below
-      // against the current canonical source and company. A null human
-      // evaluation does not imply that an AI comparison is missing.
-      return !!match;
-    }),
+  // Only records which can possibly be visible need their full, locked
+  // document-tree resolution. This is a conservative read optimization, not
+  // an approval: every candidate still passes the unchanged final reader.
+  const documentaryMatchIds = representatives
+    .filter((p) => p.documentarySnapshotId)
+    .flatMap((p) => {
+      const m = matchByPublication.get(p.id);
+      return m ? [m.id] : [];
+    });
+  const completedAutomatic =
+    !options.includeInactive && documentaryMatchIds.length
+      ? await db
+          .select({ matchId: automaticMatchRuns.matchId })
+          .from(automaticMatchRuns)
+          .where(
+            and(
+              eq(automaticMatchRuns.companyId, viewer.companyId),
+              eq(automaticMatchRuns.status, "completed"),
+              inArray(automaticMatchRuns.matchId, documentaryMatchIds),
+            ),
+          )
+      : [];
+  const automaticCandidates = new Set(completedAutomatic.map((r) => r.matchId));
+  const candidates = representatives.filter((publication) => {
+    const match = matchByPublication.get(publication.id);
+    const state = canonicalFeedback.get(publication.canonicalId);
+    if (publication.visibleAt > now) return false;
+    if (options.includeInactive) return !!state?.saved;
+    if (!match || publication.status !== "open") return false;
+    if (!publication.documentarySnapshotId)
+      return (
+        !(publication.deadline && publication.deadline <= now) &&
+        match.approved !== false
+      );
+    // Legacy approvals cannot admit an adopted source. A documentary result
+    // needs a recorded per-target judgment, a completed automatic comparison,
+    // or an explicit dismissal displayed in Excluse. Do not use the container's
+    // deadline here: each current lot retains its own operational date gates.
+    return (
+      match.lotEvaluations !== null ||
+      automaticCandidates.has(match.id) ||
+      !!state?.dismissed
+    );
+  });
+  const legacyRows = await readCanonicalLegacyMatches(
+    viewer.companyId,
+    candidates
+      .filter((p) => !p.documentarySnapshotId && matchByPublication.has(p.id))
+      .map((p) => p.id),
+    now,
   );
+  const classifiedSaved = options.includeInactive
+    ? new Map(
+        (
+          await classifyPublicationRows(
+            db,
+            candidates.filter((p) => !matchByPublication.has(p.id)),
+          )
+        ).map((p) => [p.id, p]),
+      )
+    : new Map<string, (typeof representatives)[number]>();
   const result: Opportunity[] = [];
   for (const publication of candidates) {
     if (publication.visibleAt > now) continue;
     const state = canonicalFeedback.get(publication.canonicalId);
     if (!matchByPublication.has(publication.id)) {
       if (options.includeInactive && state?.saved)
-        result.push(catalogSavedOpportunity(publication, now));
+        result.push(
+          catalogSavedOpportunity(
+            classifiedSaved.get(publication.id) ?? publication,
+            now,
+          ),
+        );
       continue;
     }
-    const row = await readCanonicalMatch(viewer.companyId, publication.id, now);
+    const row = publication.documentarySnapshotId
+      ? await readCanonicalMatch(viewer.companyId, publication.id, now)
+      : legacyRows.get(publication.id);
     if (!row) {
       if (options.includeInactive && state?.saved)
-        result.push(catalogSavedOpportunity(publication, now));
+        result.push(
+          catalogSavedOpportunity(
+            classifiedSaved.get(publication.id) ?? publication,
+            now,
+          ),
+        );
       continue;
     }
     const item = canonicalOpportunity(
