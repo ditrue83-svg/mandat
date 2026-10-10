@@ -2781,7 +2781,10 @@ async function useOperationalTransport(
               const ref = (p: any) => {
                 const index = decoded.originalProofCatalog.findIndex((q: any) => q.scope === p.scope && q.path === p.path && q.quote === p.quote);
                 if (index < 0) return "invalid-original-proof";
-                return payload.fieldIdentityCatalog.find((row: any) => row[1] === index)[0];
+                const row = payload.originalProofCatalog[index];
+                if (row[1] !== p.scope || row[2] !== p.path)
+                  throw new Error("Invented transport proof row mismatch");
+                return row[0];
               };
               if (answer.checks) answer = {binding:payload.binding,checks:Object.fromEntries(Object.entries(answer.checks).map(([k,v]:[string,any])=>[k,{...v,evidence:v.evidence.map(ref)}])),issues:answer.issues};
               else answer = {binding:payload.binding,country:answer.country,countryEvidence:answer.countryEvidence.map(ref),canton:answer.canton,cantonEvidence:answer.cantonEvidence.map(ref),city:answer.city,cityEvidence:answer.cityEvidence.map(ref),deadline:{value:answer.deadline,appliesToTarget:answer.deadlineAppliesToTarget,dateFieldId:answer.deadlineEvidence.length?ref(answer.deadlineEvidence[0]):null,submissionFieldIds:[],lotApplicabilityFieldIds:[],otherEvidenceFieldIds:answer.deadlineEvidence.slice(1).map(ref)},rationale:answer.rationale,issues:answer.issues};
