@@ -8,9 +8,13 @@ import {
 } from "./source-interpretation";
 import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
-import { isContractScopeField } from "./source-contract-clauses";
+import {
+  isContractScopeField,
+  sourceScopedCriterionContext,
+} from "./source-contract-clauses";
 
-export const SOURCE_EVIDENCE_READING_VERSION = "source-evidence-reading-v31";
+export const SOURCE_EVIDENCE_READING_VERSION =
+  "source-evidence-reading-v37-map-domain-bound";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -30,6 +34,7 @@ const configSchema = z.strictObject({
   model: text(200),
   reasoningEffort: reasoning.optional(),
   maxTokens: z.number().int().min(1).max(16_384).optional(),
+  legacyProviderFormatForRegression: z.boolean().optional(),
 });
 const quote = z.strictObject({
   sourceRef: z.string().regex(/^[sf]\d+$/),
@@ -195,6 +200,7 @@ export function buildSourceEvidenceReadingRequest(
     model: string;
     reasoningEffort?: "none" | "low" | "medium" | "high";
     maxTokens?: number;
+    legacyProviderFormatForRegression?: boolean;
   },
 ) {
   const context = validateSourceInterpretationContext(input);
@@ -217,6 +223,13 @@ export function buildSourceEvidenceReadingRequest(
   // Stable target context does not depend on which passages a draft selected.
   const mandatory = unique([
     ...(targetPassages[0] ? [targetPassages[0].id] : []),
+    ...context.body.passages
+      .filter(
+        (p) =>
+          p.scope === context.targetScope &&
+          (/orderDescription/.test(p.rawPath) || /\/title\//.test(p.rawPath)),
+      )
+      .map((p) => p.id),
     ...classifications.flatMap(classRefs),
   ]);
   const system =
@@ -234,12 +247,28 @@ export function buildSourceEvidenceReadingRequest(
   const makeRequest = (group: Group, number: number) => {
     const id = `evidence${number}`;
     const requiredClausePassages = context.body.passages.filter(
-      (p) => group.passageIds.includes(p.id) && isContractScopeField(p.rawPath),
+      (p) =>
+        group.passageIds.includes(p.id) &&
+        isContractScopeField(
+          p.rawPath,
+          p.scope,
+          context.targetScope,
+          config.legacyProviderFormatForRegression,
+        ) &&
+        (!config.legacyProviderFormatForRegression ||
+          !/\/orderDescription(?:\/|$)/.test(p.rawPath)),
     );
     const requiredClauseFields = group.fieldIndexes
       .map((index) => ({ id: `f${index}`, ...context.body.fields[index] }))
       .filter(
-        (field) => field.value !== null && isContractScopeField(field.rawPath),
+        (field) =>
+          field.value !== null &&
+          isContractScopeField(
+            field.rawPath,
+            field.scope,
+            context.targetScope,
+            config.legacyProviderFormatForRegression,
+          ),
       );
     const requiredClauses = [
       ...requiredClausePassages,
@@ -256,7 +285,12 @@ export function buildSourceEvidenceReadingRequest(
         return anchor ? [anchor.id] : [];
       }),
     );
+    const scopedDocumentContext = config.legacyProviderFormatForRegression
+      ? { criteria: [], authorityOriginalRefs: [] }
+      : sourceScopedCriterionContext(context.body.passages, group.passageIds);
     const sourceIds = unique([
+      ...scopedDocumentContext.criteria.flatMap((c) => c.originalRefs),
+      ...scopedDocumentContext.authorityOriginalRefs,
       ...mandatory,
       ...clauseAnchors,
       ...group.passageIds,
@@ -291,27 +325,51 @@ export function buildSourceEvidenceReadingRequest(
           !classificationSourceRefs.has(p.id),
       )
       .map((p) => p.id);
-    const boundedAnchor = {
-      serviceRef: serviceIds.length
-        ? z.enum(serviceIds)
-        : anchoredSelection.serviceRef,
-      evidence: z
-        .array(z.strictObject({ sourceRef: z.enum(sourceIds) }))
-        .max(15),
-    };
+    const scopeGroups = (["project_context", "selected_lot"] as const).flatMap(
+      (scope) => {
+        const anchors = serviceIds.filter(
+          (id) => evidencePassages.find((p) => p.id === id)!.scope === scope,
+        );
+        if (!anchors.length) return [];
+        const ids = sourceIds.filter(
+          (id) => evidencePassages.find((p) => p.id === id)!.scope === scope,
+        );
+        return [
+          {
+            scope,
+            anchor: {
+              serviceRef: z.enum(anchors),
+              evidence: z
+                .array(z.strictObject({ sourceRef: z.enum(ids) }))
+                .max(15),
+            },
+          },
+        ];
+      },
+    );
+    const observations = scopeGroups.map(({ scope, anchor }) =>
+      selectedObservation.safeExtend({
+        ...anchor,
+        kind:
+          scope === "project_context"
+            ? z.enum(["performance", "condition"])
+            : selectedObservation.shape.kind,
+      }),
+    );
+    const details = scopeGroups.map(({ anchor }) =>
+      selectedDetail.safeExtend(anchor),
+    );
     const boundedObservations = z
       .array(
-        selectedObservation.safeExtend({
-          ...boundedAnchor,
-          kind:
-            context.targetScope === "project_context"
-              ? z.enum(["performance", "condition"])
-              : selectedObservation.shape.kind,
-        }),
+        observations.length > 1
+          ? z.union(observations)
+          : (observations[0] ?? selectedObservation),
       )
       .max(serviceIds.length ? 32 : 0);
     const boundedDetails = z
-      .array(selectedDetail.safeExtend(boundedAnchor))
+      .array(
+        details.length > 1 ? z.union(details) : (details[0] ?? selectedDetail),
+      )
       .max(serviceIds.length ? 32 : 0);
     const bounded = wireSelectionSchema
       .omit({ requiredClauseSelections: true })
@@ -414,7 +472,20 @@ export function buildSourceEvidenceReadingRequest(
           },
         ],
       },
+      ...(scopedDocumentContext.criteria.length
+        ? {
+            scopedDocumentContext,
+            scopedDocumentContextRule:
+              "Questi originali sono contesto del medesimo criterio/scope. Leggi tutte le lingue e l'eventuale regola ufficiale: disponibilità non è precedenza, applicabilità solo quando attestata al documento/oggetto preciso. Non trasferire anno o referenza fra criteri diversi. Non risolvere divergenze con lingua/maggioranza. La ripetizione non impone nuove observations, non assegna coverage e non dimostra idoneità.",
+          }
+        : {}),
       rules: [
+        "missingAspects dichiara assente l'intera categoria per la prestazione citata, non soltanto un dettaglio ulteriore. Controlla TUTTA la fonte e ogni observation prima di sceglierla: dimensioni/volumi/livelli già noti vietano dimensions generico, materiali/norme/quantità note vietano technical_specifications generico, volumi indicativi non sono quantità assenti. Sottotipo commerciale ignoto non cancella tipologia nota. Periodi, limiti e località noti restano condizioni; referenced_documents significa contenuto non letto, mai indisponibile. Fatti parziali vanno conservati, non negati. Non sostituire una lacuna non esprimibile con una categoria falsa.",
+        "Ogni prestazione distinta richiesta dalla commessa ha performance propria e scope originale, anche se espressa nelle condizioni di qualificazione. Capacità, certificazioni e referenze del concorrente restano condition: non creano acquisti o idoneità. Acquisto generale e lotto sono performance separate solo se entrambi espliciti; target_partition geografica non sostituisce performance. Clausole obbligatorie oltre15refs richiedono ulteriori condition nello scope proprio, non omissioni né citazioni aggiunte dalla sola mappa.",
+        "Questa richiesta è una parte della fonte, non tutto il documento. Titoli e descrizione stabile non cancellano altri campi: non dichiarare assenza o assenza di precedenza da questa sola parte. Quantità principali designa una tabella, non necessariamente gerarchia contrattuale. Traduzione AI non è seconda prova originale di conflitto.",
+        "Le differenze amministrative tra versioni linguistiche restano condizioni originali distinte: conservale tutte in condition con prove proprie, senza armonizzarle o decidere una precedenza non attestata. Per esempio, lingue diverse ammesse per porre domande non rendono indeterminati oggetto e ruolo del lavoro acquistato. source_conflict resta bloccante quando la contraddizione impedisce identificare prestazione, azione, destinatario, luogo, periodo o ambito del target, oppure include ed esclude la medesima prestazione. Non trasformare un dubbio amministrativo nella negazione dell’identità del lavoro. In una parte non dichiarare assente una precedenza o rettifica che potrebbe comparire nelle altre parti.",
+        "Questa richiesta può leggere soltanto una parte della fonte: coverage complete copre tutti e soli gli originali assegnati. Le clausole obbligatorie assegnate sono al massimo16 e richiedono prove effettive, non la sola mappa. Conserva anche gli obiettivi materiali nel contesto del lavoro. missingDetails non dichiara assenti dati che possono trovarsi in altre parti: seleziona solo lacune esplicite o rinvii a contenuti non forniti.",
+        "Leggi anche gli obiettivi materiali prescritti al risultato dell'opera o progettazione nelle descrizioni dell'appalto: prestazioni, qualità, ambiente, innovazione e altri requisiti noti vanno conservati in condition con prova propria e lavoro dello stesso ambito. Non ridurli a contesto opzionale quando il testo li impone; non creare nuovi acquisti o capacità della ditta da tali obiettivi. Motivazioni storiche e referenze pregresse restano distinte.",
         ...(requiredClauses.length
           ? [
               "requiredClauseSelections: per OGNI ID obbligatorio indica la collection che contiene la sua prova. Lo stesso ID deve comparire davvero nel serviceRef o evidence di una riga di quella collection; scriverlo soltanto nella mappa non basta. Non produrre indici di riga. Per complete almeno una observations o issues conserva il fatto noto; missingDetails da sola non basta. Anche istruzioni amministrative note vanno in condition: scaricare, compilare tutte le parti, consegnare tutte le pagine. Un rinvio può lasciare ignoti articoli o quantità, ma non rende ignoti gli obblighi scritti. missingDetails aggiunge solo le specifiche davvero assenti. Non omettere tipi/date/valori. Nessun testo duplicato nella mappa; unreadable può avere selezioni vuote.",
@@ -488,9 +559,11 @@ export function buildSourceEvidenceReadingRequest(
   const fits = (g: Group) => {
     const r = makeRequest(g, requests.length + 1);
     return (
+      r.requiredClauseIds.length <= 16 &&
       Buffer.byteLength(
         r.system + r.prompt + JSON.stringify(r.responseFormat),
-      ) <= MAX_BYTES
+      ) <= MAX_BYTES &&
+      g.passageIds.length + g.fieldIndexes.length <= 96
     );
   };
   const flush = () => {
@@ -1044,4 +1117,104 @@ export function readSourceEvidenceReading(
     findings,
     warnings,
   });
+}
+
+// The mapping layer lives in the source chain. Its caller must install this
+// schema before inference and this decoder before preserving a live answer.
+// Canonical stored answers are accepted only by an explicit replay option.
+export type SourceMapChunk = {
+  id: string;
+  passageIds: readonly string[];
+  requiredPassageIds?: readonly string[];
+};
+export function buildSourceMapSelectionSchema(chunk: SourceMapChunk) {
+  const required = chunk.requiredPassageIds ?? [];
+  if (
+    chunk.passageIds.length > 64 ||
+    new Set(chunk.passageIds).size !== chunk.passageIds.length ||
+    new Set(required).size !== required.length ||
+    required.some((id) => !chunk.passageIds.includes(id)) ||
+    required.length > 64
+  )
+    throw new Error("Invalid original source map ownership");
+  const optional = chunk.passageIds.filter((id) => !required.includes(id));
+  const header = {
+    chunkId: z.literal(chunk.id),
+    status: z.enum(["complete", "unreadable"]),
+  };
+  return required.length
+    ? z.strictObject({
+        ...header,
+        referenceFormat: z.literal("explicit_required_originals_v2"),
+        requiredSourceRefs: z.strictObject(
+          Object.fromEntries(required.map((id) => [id, z.literal(id)])),
+        ),
+        sourceRefs: optional.length
+          ? z.array(z.enum(optional)).max(64 - required.length)
+          : z.array(z.string()).max(0),
+      })
+    : z.strictObject({
+        ...header,
+        referenceFormat: z.literal("explicit_optional_selection_v2"),
+        selections: z.strictObject(
+          Object.fromEntries(optional.map((id) => [id, z.boolean()])),
+        ),
+      });
+}
+export function normalizeSourceMapSelection(
+  value: unknown,
+  chunk: SourceMapChunk,
+  options: { canonicalStoredRecordForRegression?: boolean } = {},
+) {
+  // Recheck the contract even for an explicitly marked historical regression.
+  buildSourceMapSelectionSchema(chunk);
+  const parsed = options.canonicalStoredRecordForRegression
+    ? z
+        .strictObject({
+          chunkId: z.literal(chunk.id),
+          status: z.enum(["complete", "unreadable"]),
+          sourceRefs: z.array(z.string().regex(/^s\d+$/)).max(64),
+        })
+        .parse(value)
+    : buildSourceMapSelectionSchema(chunk).parse(value);
+  const sourceRefs =
+    "sourceRefs" in parsed
+      ? z.array(z.string()).parse(parsed.sourceRefs)
+      : Object.entries(
+          z.record(z.string(), z.boolean()).parse(parsed.selections),
+        )
+          .filter(([, yes]) => yes)
+          .map(([id]) => id);
+  if ("requiredSourceRefs" in parsed)
+    sourceRefs.unshift(
+      ...Object.values(
+        z.record(z.string(), z.string()).parse(parsed.requiredSourceRefs),
+      ),
+    );
+
+  if (
+    sourceRefs.length > 64 ||
+    new Set(sourceRefs).size !== sourceRefs.length ||
+    sourceRefs.some((id) => !chunk.passageIds.includes(id)) ||
+    (chunk.requiredPassageIds ?? []).some((id) => !sourceRefs.includes(id))
+  )
+    throw new Error("Incomplete or foreign original source map selection");
+  return { chunkId: parsed.chunkId, status: parsed.status, sourceRefs };
+}
+export function requiredSourceMapPassageIds(
+  passages: readonly {
+    id: string;
+    role: string;
+    rawPath: string;
+    scope: string;
+  }[],
+  targetScope: string,
+) {
+  return passages
+    .filter(
+      (p) =>
+        p.role === "service" ||
+        isContractScopeField(p.rawPath, p.scope, targetScope),
+    )
+    .map((p) => p.id);
 }

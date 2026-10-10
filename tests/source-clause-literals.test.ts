@@ -70,7 +70,7 @@ test("Different scopes, empty content and oversized tokens fail without truncati
   ]);
 });
 
-test("Null or nonlinguistic scalar fields do not become invented prose", () => {
+test("Null stays absent and scalar keeps its original path and value", () => {
   assert.equal(originalClauseTextParts([]), undefined);
   assert.equal(
     originalClauseTextParts([
@@ -78,10 +78,10 @@ test("Null or nonlinguistic scalar fields do not become invented prose", () => {
     ]),
     undefined,
   );
-  assert.equal(
+  assert.deepEqual(
     originalClauseTextParts([
       { ...passage("no"), rawPath: "/terms/subContractorAllowed" },
     ]),
-    undefined,
+    ["/terms/subContractorAllowed: no"],
   );
 });

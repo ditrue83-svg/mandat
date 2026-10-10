@@ -466,7 +466,7 @@ test("Operational hashes ignore time, project revision/summaries and an unrelate
     preliminaryLotMatch({ publication: p, profile: pr, context, now: clock });
   const baseline = run();
   assert.match(baseline.operationalInputHash, /^[a-f0-9]{64}$/);
-  assert.equal(PREFILTER_VERSION, "lot-operational-prefilter-v3");
+  assert.equal(PREFILTER_VERSION, "lot-operational-prefilter-v6");
   const unrelated: Publication = {
     ...publication,
     revision: "new-revision",
@@ -620,5 +620,140 @@ test("Execution periods and parent deadline/value corrections never become a lot
     !result.evidence.some((e) =>
       /deadline|valueChf|executionPeriod/.test(e.rawPath),
     ),
+  );
+});
+
+test("A selected-lot bid deadline is used without inheriting a project deadline", () => {
+  const raw = detail();
+  raw.dates.offerDeadline = "2029-01-01T00:00:00+01:00";
+  raw.lots[0]!.offerDeadline = "2030-02-01T12:00:00+01:00";
+  const result = filter(raw);
+  assert.equal(result.eligible, true);
+  assert.equal(result.operational.deadline, "2030-02-01T12:00:00+01:00");
+  assert(!result.automaticReviewReasons.some((x) => x.includes("Termine")));
+  assert(
+    result.evidence.some(
+      (e) =>
+        e.rawPath === "/lots/0/offerDeadline" && e.scope === "selected_lot",
+    ),
+  );
+  delete raw.lots[0]!.offerDeadline;
+  assert.equal(filter(raw).operational.deadline, null);
+  assert(filter(raw).automaticReviewReasons.some((x) => x.includes("Termine")));
+});
+test("Conflicting local deadlines remain held; an exact applicable instant vetoes at expiry", () => {
+  const raw = detail();
+  raw.lots[0]!.offerDeadline = "2030-01-20T12:00:00.000Z";
+  assert.equal(filter(raw).eligible, false);
+  raw.lots[0]!.dates = { offerDeadline: "2030-02-01T12:00:00Z" };
+  const held = filter(raw);
+  assert.equal(held.operational.deadline, null);
+  assert(held.automaticReviewReasons.some((x) => x.includes("riconciliare")));
+});
+import { excludesTicinoHotelPremises } from "../src/lib/lot-matching";
+test("Explicit non-Ticino premises clauses use geography, never station names or fixture identities", () => {
+  const clause =
+    "Alberghi o centri per seminari ubicati nella Svizzera tedesca e nella regione dei Tre Laghi, raggiungibili dalla stazione centrale di Zurigo con i mezzi pubblici o con un servizio di trasporto offerto dall’albergo o dal centro per seminari. Durata massima del tragitto: 90 minuti (porta a porta), secondo l’orario delle FFS.";
+  const lot = {
+    orderType: "service",
+    orderAddressOnlyDescription: "yes",
+    orderAddress: {
+      countryId: "CH",
+      cantonId: null,
+      city: { it: null },
+      postalCode: null,
+    },
+    orderDescription: { it: clause },
+  };
+  assert(excludesTicinoHotelPremises(lot, ["Luganese"]));
+  assert(
+    excludesTicinoHotelPremises({ ...lot, id: "another-invented-target" }, [
+      "Tutto il Ticino",
+    ]),
+  );
+  assert.equal(
+    excludesTicinoHotelPremises(
+      {
+        ...lot,
+        orderDescription: {
+          it: clause + " Sono ammesse strutture anche in Ticino.",
+        },
+      },
+      ["Tutto il Ticino"],
+    ),
+    false,
+  );
+  assert.equal(
+    excludesTicinoHotelPremises(
+      { ...lot, orderDescription: { it: clause, fr: "Hôtels au Tessin." } },
+      ["Tutto il Ticino"],
+    ),
+    false,
+  );
+  assert.equal(
+    excludesTicinoHotelPremises(
+      { ...lot, orderAddress: { ...lot.orderAddress, cantonId: "TI" } },
+      ["Tutto il Ticino"],
+    ),
+    false,
+  );
+  assert.equal(
+    excludesTicinoHotelPremises(
+      { ...lot, title: { it: "Alberghi in Ticino" } },
+      ["Tutto il Ticino"],
+    ),
+    false,
+  );
+  assert.equal(
+    excludesTicinoHotelPremises(
+      {
+        ...lot,
+        orderDescription: {
+          it: clause.replace(
+            "nella Svizzera tedesca e nella regione dei Tre Laghi",
+            "in Ticino",
+          ),
+        },
+      },
+      ["Tutto il Ticino"],
+    ),
+    false,
+  );
+});
+
+import { readFileSync } from "node:fs";
+test("All original Bern-premises languages satisfy the generic geographic grammar; exceptions never do", () => {
+  const lot = JSON.parse(
+    readFileSync(
+      new URL("./fixtures/bern-original-premises.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const before = JSON.stringify(lot);
+  assert(excludesTicinoHotelPremises(lot, ["Tutto il Ticino"]));
+  assert.equal(JSON.stringify(lot), before);
+  assert.equal(
+    excludesTicinoHotelPremises(
+      {
+        ...lot,
+        orderDescription: {
+          ...lot.orderDescription,
+          it: lot.orderDescription.it + " Eccezione: alberghi in Ticino.",
+        },
+      },
+      ["Tutto il Ticino"],
+    ),
+    false,
+  );
+});
+
+test("Equivalent explicit deadline offsets are one instant, not a conflict", () => {
+  const raw = detail();
+  raw.lots[0]!.offerDeadline = "2030-02-01T12:00:00Z";
+  raw.lots[0]!.dates = { offerDeadline: "2030-02-01T13:00:00+01:00" };
+  const result = filter(raw);
+  assert.equal(result.operational.deadline, "2030-02-01T12:00:00Z");
+  assert(
+    !result.automaticReviewReasons.some((x) => x.includes("riconciliare")),
   );
 });

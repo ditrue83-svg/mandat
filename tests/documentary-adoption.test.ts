@@ -820,7 +820,17 @@ test("first accepted adoption atomically inserts the snapshot and pointer while 
   const loaded = await readCurrentLotMatch("company", f.publication.id);
   expect(loaded?.project.signalEligible).toBe(false);
   expect(loaded?.state.evaluations).toBeNull();
-  expect(loaded?.project.lots[0].state).toBe("missing");
+  expect(loaded?.project.lots[0]).toMatchObject({
+    state: "current",
+    operationalVeto: true,
+    evaluation: null,
+    automatic: null,
+    signalEligible: false,
+    preliminary: {
+      eligible: false,
+      reason: "Pubblicazione non ancora diffondibile.",
+    },
+  });
 });
 
 test("existing shadow snapshot is adopted byte-for-byte and exact current replay creates no duplicate job", async () => {

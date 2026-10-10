@@ -6,10 +6,13 @@ import {
   inventedSourceEvidenceAnswer,
 } from "./helpers/source-evidence-fixture";
 import assert from "node:assert/strict";
+import Ajv2020 from "ajv/dist/2020.js";
 import { createHash } from "node:crypto";
 import { test, vi } from "vitest";
 import {
+  AUTOMATIC_COMPARISON_LIMITS,
   buildAutomaticComparisonRequest,
+  normalizeAutomaticSourceReading,
   validateAutomaticComparison as validateWithRequiredReview,
   AutomaticComparisonUnavailable,
   recordAutomaticComparison as recordWithRequiredReview,
@@ -25,10 +28,13 @@ import {
 } from "../src/lib/automatic-comparison";
 import {
   recordSourceInterpretation,
+  materializeSourceInterpretationPassages,
+  materializeSourceInterpretationFields,
   type SourceInterpretationRecord,
 } from "../src/lib/source-interpretation";
 import {
   recordSourceSemanticReview,
+  materializeSourceReviewDraft,
   buildSourceSemanticReviewRequest,
   SOURCE_REVIEW_SUPPORTED_REASON,
   type SourceSemanticReviewRecord,
@@ -337,7 +343,12 @@ function sourceReview(
               verdict === "supported"
                 ? SOURCE_REVIEW_SUPPORTED_REASON
                 : "Giudizio negativo inventato per verificare il flusso.",
-            coverageProof: inventedCoverageProof(body.draft, claim, verdict),
+            coverageProof: inventedCoverageProof(
+              body.draft,
+              claim,
+              verdict,
+              body,
+            ),
             sourceRefs: claim.sourceRefs.length
               ? claim.sourceRefs
               : [body.passages[0].id],
@@ -539,9 +550,7 @@ test("Semantic reviews use the full original source and never company data", () 
   const readings = request.readingRequests.map((chunk) => ({
     chunkId: chunk.id,
     status: "complete",
-    sourceRefs: chunk.passageIds.filter(
-      (id) => request.passages.find((p) => p.id === id)?.role === "service",
-    ),
+    sourceRefs: chunk.requiredPassageIds ?? [],
   }));
   const source = sourceRecord(request, readings);
   const reduced = buildAutomaticSourceRequest(request, readings);
@@ -1164,8 +1173,8 @@ test("The company comparison keeps explicit maintenance separate from source exe
   );
   const reviewPlan = buildAutomaticSourceSemanticReviewRequest(request, source);
   assert(
-    JSON.parse(reviewPlan.requests[0].prompt).rules.includes(
-      "Ruoli contrattuali: " + roleSchemas[0].description,
+    JSON.parse(reviewPlan.requests[0].prompt).rules.some((rule: string) =>
+      rule.includes(roleSchemas[0].description),
     ),
     "Semantic review must use the same role definitions as both producers",
   );
@@ -2225,7 +2234,7 @@ test("A lossy long-source map cannot discard submission conditions or document c
     request.readingRequests.map((chunk) => ({
       chunkId: chunk.id,
       status: "complete",
-      sourceRefs: [],
+      sourceRefs: chunk.requiredPassageIds ?? [],
     })),
     request,
   );
@@ -2240,7 +2249,7 @@ test("A lossy long-source map cannot discard submission conditions or document c
     assert(reduction.requiredContractClauseIds.includes(original.id));
   }
   const prompt = JSON.parse(reduction.prompt);
-  const days = prompt.fields.find(
+  const days = materializeSourceInterpretationFields(reduction.prompt).find(
     (f: any) => f.rawPath === "/dates/offerValidityDeadlineDays",
   );
   assert.equal(days.value, 180);
@@ -2268,12 +2277,20 @@ test("Long-source reduction preserves complete CPV labels even when the map sele
   const readings = request.readingRequests.map((chunk) => ({
     chunkId: chunk.id,
     status: "complete",
-    sourceRefs: [],
+    sourceRefs: chunk.requiredPassageIds ?? [],
   }));
   const reduced = buildAutomaticReductionRequest(readings, request);
   const body = JSON.parse(reduced.prompt);
   const classification = body.classificationContext[0];
-  assert.equal(classification.labels[0].text, label);
+  assert.equal(
+    materializeSourceInterpretationPassages(reduced.prompt)
+      .filter((p: { id: string }) =>
+        classification.labels[0].sourceRefs.includes(p.id),
+      )
+      .map((p: { text: string }) => p.text)
+      .join(""),
+    label,
+  );
   assert.ok(classification.labels[0].sourceRefs.length > 1);
   for (const field of [classification.code, ...classification.labels])
     for (const id of field.sourceRefs) {
@@ -2348,13 +2365,15 @@ test("Long-source maps retain partial offers, language authority and independent
     assert(reduced.selectedIds.includes(original.id), rawPath);
     assert(reduced.requiredContractClauseIds.includes(original.id), rawPath);
     assert.deepEqual(
-      body.passages.find((p: { id: string }) => p.id === original.id),
+      materializeSourceInterpretationPassages(reduced.prompt).find(
+        (p: { id: string }) => p.id === original.id,
+      ),
       (({ url: _url, ...passage }) => passage)(original),
     );
   }
   assert(
-    !body.passages.some((p: { text: string }) =>
-      p.text.includes("SOLO_LOTTO_B"),
+    !materializeSourceInterpretationPassages(reduced.prompt).some(
+      (p: { text: string }) => p.text.includes("SOLO_LOTTO_B"),
     ),
   );
   assert.equal(JSON.stringify(request), before);
@@ -2382,7 +2401,7 @@ test("Long-source maps cannot discard delegation and execution clauses", () => {
     request.readingRequests.map((chunk) => ({
       chunkId: chunk.id,
       status: "complete",
-      sourceRefs: [],
+      sourceRefs: chunk.requiredPassageIds ?? [],
     })),
     request,
   );
@@ -2850,6 +2869,14 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v82",
     sourceVersion: "documentary-source-interpretation-v63",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v83",
+    sourceVersion: "documentary-source-interpretation-v66",
+  },
+  {
+    comparisonVersion: "documentary-service-comparison-v84-central",
+    sourceVersion: "documentary-source-interpretation-v66",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2883,7 +2910,10 @@ test.each([
     };
     const historical = { ...oldUnsigned, hash: digest(oldUnsigned) };
     const before = JSON.stringify(historical);
-    assert.equal(request.version, "documentary-service-comparison-v83");
+    assert.equal(
+      request.version,
+      "documentary-service-comparison-v93-source-map-binding-20261010",
+    );
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
     assert.equal(
@@ -2929,7 +2959,11 @@ test("Long-source maps cannot discard partial-offer notes or substitute their fl
   const required = request.readingRequests.flatMap(
     (r) => r.requiredPassageIds ?? [],
   );
-  assert.equal(required.length, 3);
+  const partialIds = request.passages
+    .filter((p) => /\/partialOffers(?:Note)?(?:\/|$)/.test(p.rawPath))
+    .map((p) => p.id);
+  assert.equal(partialIds.length, 3);
+  assert(partialIds.every((id) => required.includes(id)));
   const readings = request.readingRequests.map((r) => ({
     chunkId: r.id,
     status: "complete",
@@ -2943,7 +2977,7 @@ test("Long-source maps cannot discard partial-offer notes or substitute their fl
     }));
     assert.throws(
       () => buildAutomaticSourceRequest(request, omitted),
-      /Incomplete original partial-offer flag and notes/,
+      /Incomplete required original service or condition passages/,
     );
   }
   assert(accepted.requiredContractClauseIds.length > 0);
@@ -2962,7 +2996,12 @@ test("A long-source reduction preserves all service text even when the map only 
   const readings = request.readingRequests.map((chunk) => ({
     chunkId: chunk.id,
     status: "complete",
-    sourceRefs: chunk.passageIds.includes(tail.id) ? [tail.id] : [],
+    sourceRefs: [
+      ...new Set([
+        ...(chunk.requiredPassageIds ?? []),
+        ...(chunk.passageIds.includes(tail.id) ? [tail.id] : []),
+      ]),
+    ],
   }));
   const reduced = buildAutomaticReductionRequest(readings, request);
   for (const passage of request.passages.filter(
@@ -3119,11 +3158,32 @@ test("Every original continuation reaches both semantic review and the final com
     ),
   );
   const plan = buildAutomaticSourceSemanticReviewRequest(request, source);
-  assert(
-    plan.claims.some(
-      (c) => c.kind === "detail" && c.text.includes("CONDIZIONE_FINALE"),
+  const noteIds = request.passages
+    .filter((p) => p.rawPath === "/project-info/offerSpecificNote/it")
+    .map((p) => p.id);
+  const claim = plan.claims.find(
+    (c) =>
+      c.kind === "detail" && noteIds.every((id) => c.sourceRefs.includes(id)),
+  );
+  assert(claim);
+  const owningRequests = plan.requests.filter((part) =>
+    JSON.parse(part.prompt).assignedClaims.some(
+      (c: { id: string }) => c.id === claim.id,
     ),
   );
+  assert(owningRequests.length > 0);
+  for (const part of owningRequests) {
+    const draft = materializeSourceReviewDraft(part.prompt);
+    assert.equal(
+      draft.details
+        .filter((d: { sourceRefs: string[] }) =>
+          d.sourceRefs.some((id) => noteIds.includes(id)),
+        )
+        .map((d: { explanation: string }) => d.explanation)
+        .join(""),
+      note,
+    );
+  }
   const review = sourceReview(request, source); // Invented approvals test transport, not AI quality.
   const final = buildWithRequiredReview(request, source, review);
   const body = JSON.parse(final.prompt);
@@ -3171,3 +3231,549 @@ test("Every original continuation reaches both semantic review and the final com
     /differs from its complete source field/,
   );
 });
+
+// Consolidation regressions use invented source/review answers. They verify
+// binding, routing and the shipped interpretation contract, not real AI quality.
+test("Consolidated operational context and separate exclusions stay original and dependency bound", () => {
+  const input = fixture(raw(), {
+    activities: "Pulizie di uffici.",
+    exclusions: ["Lavori inventati esplicitamente esclusi"],
+    zones: ["Tutto il Ticino"],
+  });
+  const before = JSON.stringify(input),
+    operationalFrozenBefore = Object.isFrozen(input.preliminary.operational),
+    request = buildAutomaticComparisonRequest(input),
+    source = sourceRecord(request),
+    sourceBefore = JSON.stringify(source);
+  const body = JSON.parse(
+    buildInterpretedComparisonRequest(request, source).prompt,
+  );
+  assert.deepEqual(body.company.exclusions, input.profile.exclusions);
+  assert.deepEqual(body.company.zones, input.profile.zones);
+  assert.deepEqual(
+    body.operationalContext.resolved,
+    input.preliminary.operational,
+  );
+  assert.deepEqual(
+    body.operationalContext.reviewReasons,
+    input.preliminary.automaticReviewReasons,
+  );
+  assert.equal(
+    body.operationalContext.operationalInputHash,
+    input.preliminary.operationalInputHash,
+  );
+  assert.notEqual(
+    request.operationalContext.resolved,
+    input.preliminary.operational,
+  );
+  assert.equal(
+    Object.isFrozen(input.preliminary.operational),
+    operationalFrozenBefore,
+  );
+  assert.equal(body.company.activities[0].text, input.profile.activities);
+  assert.equal(JSON.stringify(input), before);
+  assert.equal(JSON.stringify(source), sourceBefore);
+  const changed = buildAutomaticComparisonRequest({
+    ...input,
+    profile: {
+      ...input.profile,
+      exclusions: ["Altra esclusione originale inventata"],
+    },
+  });
+  assert.equal(changed.sourceKey, request.sourceKey);
+  assert.notEqual(changed.inputHash, request.inputHash);
+  const original = recordAutomaticComparison(
+    response(request, source),
+    request,
+    {
+      id: "invented-separate-exclusion",
+      at: "2030-01-20T12:00:00Z",
+      model: automaticComparisonModel(),
+      sourceInterpretation: source,
+    },
+  );
+  assert.equal(
+    resolveAutomaticComparison(
+      {
+        ...input,
+        profile: {
+          ...input.profile,
+          exclusions: ["Altra esclusione originale inventata"],
+        },
+      },
+      [original],
+    ).comparison,
+    null,
+  );
+});
+
+test.each([
+  {
+    name: "concrete different objects may retain the same contractual role",
+    overlap: false,
+    role: true,
+    scope: false,
+    related: "incidental_context",
+    uncertain: false,
+    relation: "different",
+  },
+  {
+    name: "concrete shared function is review, independently of contractual role",
+    overlap: false,
+    role: false,
+    scope: false,
+    related: "shared_professional_function",
+    uncertain: false,
+    relation: "review",
+  },
+  {
+    name: "an open positive professional family may retain uncertainty",
+    overlap: null,
+    role: true,
+    scope: null,
+    related: "incidental_context",
+    uncertain: true,
+    relation: "review",
+  },
+  {
+    name: "a genuinely partial purchased scope stays review",
+    overlap: true,
+    role: true,
+    scope: false,
+    related: "none",
+    uncertain: false,
+    relation: "review",
+  },
+  {
+    name: "a same profession with complete scope and role remains direct",
+    overlap: true,
+    role: true,
+    scope: true,
+    related: "none",
+    uncertain: false,
+    relation: "direct",
+  },
+] as const)("Consolidated axes: $name", (row) => {
+  const request = buildAutomaticComparisonRequest(fixture()),
+    source = sourceRecord(request),
+    before = JSON.stringify(source),
+    answer = response(request, source);
+  answer.facts = {
+    ...answer.facts,
+    activitiesOverlap: row.overlap,
+    sameContractualRole: row.role,
+    mainScopeCovered: row.scope,
+    relatedActivity: row.related,
+    comparisonUncertain: row.uncertain,
+  } as any;
+  const value = validateAutomaticComparison(answer, request, source);
+  assert.equal(value.relation, row.relation);
+  assert.equal(value.response!.facts.sameContractualRole, row.role);
+  assert.equal(value.response!.facts.activitiesOverlap, row.overlap);
+  assert.equal(value.response!.facts.mainScopeCovered, row.scope);
+  assert.equal(JSON.stringify(source), before);
+});
+
+test("Consolidated accessory guidance keeps relative objects and genuine open professional families distinct", () => {
+  const request = buildAutomaticComparisonRequest(fixture()),
+    source = sourceRecord(request),
+    body = JSON.parse(
+      buildInterpretedComparisonRequest(request, source).prompt,
+    ),
+    rules = body.rules.join(" ");
+  assert.match(rules, /relativi accessori resta quel bene/);
+  assert.match(rules, /famiglia generica autonoma/);
+  assert.match(rules, /Una formula accessoria/);
+  assert.match(rules, /non cancellare una voce ampia/);
+  assert.match(rules, /Non dichiarato resta diverso da escluso/);
+  assert.match(
+    rules,
+    /una negazione aziendale di una sola azione non esclude le altre/,
+  );
+  assert.match(rules, /non attesta|non idoneità|non idoneita/);
+  assert.equal(
+    body.company.activities[0].text,
+    request.companyPassages[0].text,
+  );
+});
+
+test("Consolidated role, condition and profession guidance never changes source ownership or creates purchases", () => {
+  const request = buildAutomaticComparisonRequest(fixture()),
+    source = sourceRecord(request),
+    before = JSON.stringify(source),
+    wire = buildInterpretedComparisonRequest(request, source),
+    body = JSON.parse(wire.prompt),
+    rules = body.rules.join(" ");
+  assert.match(
+    rules,
+    /sameContractualRole=true se almeno una categoria coincide/,
+  );
+  assert.match(rules, /non diventa una componente acquistata autonoma/);
+  assert.match(rules, /assenza dall'elenco components non prova/);
+  assert.match(rules, /categoria di beni o servizi positivamente dichiarata/);
+  assert.match(rules, /restrizione esplicita/);
+  assert.match(body.contractualRoleTaxonomy.other, /più fasi non bastano/);
+  assert.match(body.contractualRoleTaxonomy.other, /Mai al posto di execute/);
+  assert.equal(JSON.stringify(source), before);
+  const bad = response(request, source);
+  bad.functionCheck.requested.componentRefs = ["u99"];
+  assert.throws(() => validateAutomaticComparison(bad, request, source));
+  const borrowed = response(request, source);
+  borrowed.functionCheck.declared.companyRefs = ["c99"];
+  assert.throws(() => validateAutomaticComparison(borrowed, request, source));
+});
+
+test("Consolidation preserves original prompt, response and review caps and public source API", () => {
+  assert.deepEqual(AUTOMATIC_COMPARISON_LIMITS, {
+    sourceUtf16: 200000,
+    singleRequestUtf16: 18000,
+    chunkUtf16: 9000,
+    chunks: 32,
+    promptBytes: 160000,
+    passageUtf16: 1200,
+    passages: 1024,
+  });
+  const request = buildAutomaticComparisonRequest(fixture()),
+    source = sourceRecord(request),
+    wire = buildInterpretedComparisonRequest(request, source);
+  assert.equal(wire.maxTokens, request.maxTokens);
+  assert([1600, 8192].includes(wire.maxTokens));
+  assert(
+    Buffer.byteLength(
+      wire.system + wire.prompt + JSON.stringify(wire.responseFormat),
+    ) <= 160000,
+  );
+  assert.equal(
+    readAutomaticSourceInterpretation(source, request)?.hash,
+    source.hash,
+  );
+  const invalid = response(request, source);
+  invalid.functionCheck.relationship = "x".repeat(401);
+  assert.throws(() => validateAutomaticComparison(invalid, request, source));
+  const contradictory = response(request, source);
+  contradictory.facts.relatedActivity = "shared_professional_function";
+  assert.throws(() =>
+    validateAutomaticComparison(contradictory, request, source),
+  );
+});
+
+// Metadata identity only: no assertion about semantic accuracy or eligibility.
+test.each([
+  { name: "country", patch: { country: "XX" } },
+  { name: "canton", patch: { canton: "XX" } },
+  { name: "zone", patch: { zone: "Zona inventata per il binding" } },
+  { name: "cpv", patch: { cpv: ["00000000"] } },
+  { name: "deadline", patch: { deadline: "2031-01-01T00:00:00Z" } },
+  { name: "valueChf", patch: { valueChf: 123456 } },
+] as const)(
+  "Context binding invalidates prior records for changed resolved $name",
+  ({ patch }) => {
+    const input = fixture(),
+      before = JSON.stringify(input),
+      a = buildAutomaticComparisonRequest(input),
+      source = sourceRecord(a);
+    const prior = recordAutomaticComparison(response(a, source), a, {
+      id: "invented-context-binding-record",
+      at: "2030-01-20T12:00:00Z",
+      model: automaticComparisonModel(),
+      sourceInterpretation: source,
+    });
+    assert.equal(input.target.kind, "project");
+    const preliminary =
+      input.preliminary as import("../src/lib/project-matching").PreliminaryProjectMatch;
+    // Numeric valueChf is an explicitly untyped boundary probe; it grants no validity or verdict.
+    const changed = {
+      ...input,
+      preliminary: {
+        ...preliminary,
+        operational: {
+          ...preliminary.operational,
+          ...patch,
+        } as unknown as typeof preliminary.operational,
+      },
+    };
+    const b = buildAutomaticComparisonRequest(changed),
+      aw = JSON.parse(buildInterpretedComparisonRequest(a, source).prompt),
+      bw = JSON.parse(buildInterpretedComparisonRequest(b, source).prompt);
+    assert.equal(a.sourceKey, b.sourceKey);
+    assert.equal(
+      a.dependency.operationalInputHash,
+      b.dependency.operationalInputHash,
+    );
+    assert.notDeepEqual(aw.operationalContext, bw.operationalContext);
+    assert.notEqual(
+      a.dependency.operationalContextHash,
+      b.dependency.operationalContextHash,
+    );
+    assert.notEqual(a.inputHash, b.inputHash);
+    assert.equal(readAutomaticComparison(prior, b), null);
+    assert.equal(resolveAutomaticComparison(changed, [prior]).comparison, null);
+    assert.deepEqual(aw.sourceInterpretation, bw.sourceInterpretation);
+    assert.equal(JSON.stringify(input), before);
+  },
+);
+
+test.each([
+  ["first review reason", ["Nuovo avviso operativo inventato"]],
+  [
+    "ordered review reasons",
+    ["Primo avviso inventato", "Secondo avviso inventato"],
+  ],
+  ["same text with distinct whitespace", ["Nuovo avviso operativo inventato "]],
+] as const)(
+  "Context binding invalidates prior records for changed $0",
+  (_name, reasons) => {
+    const input = fixture(),
+      a = buildAutomaticComparisonRequest(input),
+      source = sourceRecord(a);
+    const prior = recordAutomaticComparison(response(a, source), a, {
+      id: "invented-review-reason-binding",
+      at: "2030-01-20T12:00:00Z",
+      model: automaticComparisonModel(),
+      sourceInterpretation: source,
+    });
+    const changed = {
+      ...input,
+      preliminary: {
+        ...input.preliminary,
+        automaticReviewReasons: [...reasons],
+      },
+    };
+    const b = buildAutomaticComparisonRequest(changed),
+      aw = JSON.parse(buildInterpretedComparisonRequest(a, source).prompt),
+      bw = JSON.parse(buildInterpretedComparisonRequest(b, source).prompt);
+    assert.equal(a.sourceKey, b.sourceKey);
+    assert.equal(
+      a.dependency.operationalInputHash,
+      b.dependency.operationalInputHash,
+    );
+    assert.notDeepEqual(aw.operationalContext, bw.operationalContext);
+    assert.notEqual(a.inputHash, b.inputHash);
+    assert.equal(readAutomaticComparison(prior, b), null);
+    assert.deepEqual(aw.sourceInterpretation, bw.sourceInterpretation);
+    assert.deepEqual(bw.company, aw.company);
+  },
+);
+
+test("Context binding covers every serialized prompt-context property and retains stable identical inputs", () => {
+  const input = fixture(),
+    a = buildAutomaticComparisonRequest(input),
+    copy = { ...input, preliminary: structuredClone(input.preliminary) },
+    b = buildAutomaticComparisonRequest(copy),
+    source = sourceRecord(a);
+  const body = JSON.parse(buildInterpretedComparisonRequest(a, source).prompt);
+  const expected = createHash("sha256")
+    .update(stableDocumentaryJson(JSON.stringify(body.operationalContext)))
+    .digest("hex");
+  assert.equal(a.dependency.operationalContextHash, expected);
+  assert.equal(a.inputHash, b.inputHash);
+  assert.equal(a.sourceKey, b.sourceKey);
+  assert.deepEqual(body.operationalContext, a.operationalContext);
+  assert.deepEqual(Object.keys(body.operationalContext).sort(), [
+    "declaredZones",
+    "operationalInputHash",
+    "resolved",
+    "reviewReasons",
+  ]);
+  const variants = [
+    { ...input, profile: { ...input.profile, zones: ["Luganese"] } },
+    {
+      ...input,
+      preliminary: {
+        ...input.preliminary,
+        operationalInputHash: "b".repeat(64),
+      },
+    },
+  ];
+  for (const changed of variants) {
+    const request = buildAutomaticComparisonRequest(changed);
+    assert.equal(request.sourceKey, a.sourceKey);
+    assert.notEqual(request.inputHash, a.inputHash);
+    assert.notEqual(request.dependency.operationalContextHash, expected);
+  }
+});
+
+test("Context binding invalidates the preceding consolidated version without relabeling its records", () => {
+  const input = fixture(),
+    request = buildAutomaticComparisonRequest(input),
+    source = sourceRecord(request);
+  const record = recordAutomaticComparison(response(request, source), request, {
+    id: "invented-pre-binding-version",
+    at: "2030-01-20T12:00:00Z",
+    model: automaticComparisonModel(),
+    sourceInterpretation: source,
+  });
+  const old = {
+    ...record,
+    version: "documentary-service-comparison-v91-consolidated-20261010",
+  };
+  const before = JSON.stringify(old);
+  assert.equal(readAutomaticComparison(old, request), null);
+  assert.equal(resolveAutomaticComparison(input, [old]).comparison, null);
+  assert.equal(JSON.stringify(old), before);
+});
+
+test("Context binding preserves exact serialized identity even when resolved property order differs", () => {
+  const input = fixture(),
+    a = buildAutomaticComparisonRequest(input),
+    source = sourceRecord(a);
+  const prior = recordAutomaticComparison(response(a, source), a, {
+    id: "invented-serialized-context-order",
+    at: "2030-01-20T12:00:00Z",
+    model: automaticComparisonModel(),
+    sourceInterpretation: source,
+  });
+  const preliminary =
+    input.preliminary as import("../src/lib/project-matching").PreliminaryProjectMatch;
+  const operational = Object.fromEntries(
+    Object.entries(preliminary.operational).reverse(),
+  ) as typeof preliminary.operational;
+  const b = buildAutomaticComparisonRequest({
+    ...input,
+    preliminary: { ...preliminary, operational },
+  });
+  const aw = JSON.parse(buildInterpretedComparisonRequest(a, source).prompt),
+    bw = JSON.parse(buildInterpretedComparisonRequest(b, source).prompt);
+  assert.deepEqual(aw.operationalContext, bw.operationalContext);
+  assert.notEqual(
+    JSON.stringify(aw.operationalContext),
+    JSON.stringify(bw.operationalContext),
+  );
+  assert.equal(a.sourceKey, b.sourceKey);
+  assert.notEqual(a.inputHash, b.inputHash);
+  assert.equal(readAutomaticComparison(prior, b), null);
+});
+
+test("The live mapping boundary accepts only explicit owned selections and preserves every required original", () => {
+  const detail = raw();
+  detail.procurement.orderDescription.it =
+    "Prestazione inventata da conservare integralmente. ".repeat(650);
+  const original = JSON.stringify(detail);
+  const request = buildAutomaticComparisonRequest(fixture(detail));
+  assert(request.readingRequests.length > 1);
+  const ajv = new Ajv2020({ strict: false });
+  const readings = request.readingRequests.map((chunk) => {
+    const required = chunk.requiredPassageIds ?? [];
+    const selected = required.length
+      ? {
+          chunkId: chunk.id,
+          status: "complete",
+          referenceFormat: "explicit_required_originals_v2",
+          requiredSourceRefs: Object.fromEntries(
+            required.map((id) => [id, id]),
+          ),
+          sourceRefs: [],
+        }
+      : {
+          chunkId: chunk.id,
+          status: "complete",
+          referenceFormat: "explicit_optional_selection_v2",
+          selections: Object.fromEntries(
+            chunk.passageIds.map((id) => [id, false]),
+          ),
+        };
+    const validate = ajv.compile(chunk.responseFormat.json_schema.schema);
+    assert(validate(selected), JSON.stringify(validate.errors));
+    const normalized = normalizeAutomaticSourceReading(
+      selected,
+      request,
+      chunk.id,
+    );
+    assert.deepEqual(normalized.sourceRefs, required);
+    assert.throws(() =>
+      normalizeAutomaticSourceReading(normalized, request, chunk.id),
+    );
+    if (required.length) {
+      const omitted = structuredClone(selected) as typeof selected & {
+        requiredSourceRefs: Record<string, string>;
+      };
+      delete omitted.requiredSourceRefs[required[0]];
+      assert.equal(validate(omitted), false);
+      assert.throws(() =>
+        normalizeAutomaticSourceReading(omitted, request, chunk.id),
+      );
+    }
+    const foreign = { ...selected, chunkId: "chunk9999" };
+    assert.equal(validate(foreign), false);
+    assert.throws(() =>
+      normalizeAutomaticSourceReading(foreign, request, chunk.id),
+    );
+    return normalized;
+  });
+  const reduced = buildAutomaticSourceRequest(request, readings);
+  for (const id of request.readingRequests.flatMap(
+    (part) => part.requiredPassageIds ?? [],
+  ))
+    assert(reduced.selectedIds.includes(id));
+  assert.equal(JSON.stringify(detail), original);
+});
+
+// Independent watch-item regression: invented records exercise real binding
+// and read paths, with no provider and no asserted semantic qualification.
+test.each(["direct", "different", "review"] as const)(
+  "A native deadline expiry preserves the professional %s relation",
+  (relation) => {
+    const detail = raw(true);
+    detail.lots = [detail.lots[0]];
+    Object.assign(detail.lots[0], { offerDeadline: "2030-01-21T12:00:00Z" });
+    const input = fixture(detail),
+      beforeNow = new Date("2030-01-20T12:00:00Z"),
+      afterNow = new Date("2030-01-22T12:00:00Z");
+    const context = resolveLotSourceContext(
+      input.snapshot,
+      input.target,
+      input.history,
+    );
+    const afterInput = {
+      ...input,
+      preliminary: preliminaryAssessmentMatch({
+        publication: input.publication,
+        profile: input.profile,
+        context,
+        now: afterNow,
+      }),
+    };
+    const beforeRequest = buildAutomaticComparisonRequest(input),
+      afterRequest = buildAutomaticComparisonRequest(afterInput);
+    assert.equal(input.preliminary.eligible, true);
+    assert.equal(afterInput.preliminary.eligible, false);
+    assert.equal(
+      beforeRequest.inputHash,
+      afterRequest.inputHash,
+      "Expiry leaves the original/native context unchanged; record remains current",
+    );
+    const source = sourceRecord(beforeRequest),
+      record = recordAutomaticComparison(
+        response(beforeRequest, source, relation),
+        beforeRequest,
+        {
+          id: `invented-expiry-${relation}`,
+          at: beforeNow.toISOString(),
+          model: automaticComparisonModel(),
+          sourceInterpretation: source,
+        },
+      );
+    const before = resolveProjectLotAssessment({
+      ...input,
+      evaluationSet: null,
+      automaticComparisons: [record],
+      now: beforeNow,
+    });
+    const after = resolveProjectLotAssessment({
+      ...input,
+      evaluationSet: null,
+      automaticComparisons: [record],
+      now: afterNow,
+    });
+    const dto = projectLotAssessmentDto(after);
+    assert.equal(after.targets[0].automatic?.relation, relation);
+    assert.equal(after.targets[0].operationalVeto, true);
+    assert.equal(after.signalEligible, false);
+    assert.equal(dto.targets[0].result, relation);
+    assert.equal(
+      after.allDifferent,
+      relation === "different",
+      "operational exclusion must not manufacture professional allDifferent",
+    );
+  },
+);

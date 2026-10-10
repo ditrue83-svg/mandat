@@ -6,9 +6,13 @@ import {
   classifyProcurement,
   lotClassificationInput,
 } from "./sector-classification";
+import {
+  readOperationalEvidence,
+  explicitOperationalDeadline,
+} from "./lot-operational-evidence";
 import { zoneForExactCity } from "./ticino-localities";
 
-export const PREFILTER_VERSION = "lot-operational-prefilter-v3";
+export const PREFILTER_VERSION = "lot-operational-prefilter-v6";
 export type LotOperationalEvidence = {
   scope: "publication" | "project_context" | "selected_lot";
   url: string;
@@ -16,6 +20,7 @@ export type LotOperationalEvidence = {
   value: unknown;
   presence?: "present" | "absent";
   purpose:
+    | "deadline"
     | "availability"
     | "location"
     | "classification"
@@ -31,13 +36,14 @@ export type PreliminaryLotMatch = {
   evidence: readonly LotOperationalEvidence[];
   reviewReasons: readonly string[];
   automaticReviewReasons: readonly string[];
+  informationalReviewReasons?: readonly string[];
   signals: { sectors: readonly Sector[]; keyword: boolean };
   operational: {
     country: string | null;
     canton: string | null;
     zone: string | null;
     cpv: readonly string[];
-    deadline: null;
+    deadline: string | null;
     valueChf: null;
   };
 };
@@ -116,18 +122,99 @@ function hasTicinoCityVariant(value: unknown): boolean {
   );
 }
 
+export const REGIONAL_PREMISES_VETO_REASON =
+  "La struttura richiesta dal lotto si trova fuori dal territorio selezionato (Ticino).";
+// Complete execution-premises clauses only: station names denote travel origins.
+// Unknown languages, extra exceptions and structured conflicts retain review.
+export function excludesTicinoHotelPremises(
+  record: unknown,
+  zones: readonly string[],
+) {
+  const lot = object(record);
+  if (
+    !lot ||
+    !zones.length ||
+    lot.orderType !== "service" ||
+    lot.orderAddressOnlyDescription !== "yes"
+  )
+    return false;
+  const ticinoZones = new Set([
+    "Tutto il Ticino",
+    "Bellinzonese",
+    "Blenio",
+    "Leventina",
+    "Locarnese",
+    "Luganese",
+    "Mendrisiotto",
+    "Riviera",
+    "Vallemaggia",
+  ]);
+  if (zones.some((z) => !ticinoZones.has(z))) return false;
+  const address = object(lot.orderAddress),
+    descriptions = object(lot.orderDescription);
+  if (
+    !address ||
+    address.countryId !== "CH" ||
+    address.cantonId != null ||
+    (typeof address.city === "string"
+      ? !!address.city.trim()
+      : Object.values(object(address.city) ?? {}).some(
+          (v) => v != null && v !== "",
+        )) ||
+    address.postalCode != null ||
+    !descriptions
+  )
+    return false;
+  for (const field of ["title", "orderAddressDescription"]) {
+    const variants = object(lot[field]);
+    if (
+      variants &&
+      Object.values(variants).some(
+        (v) =>
+          typeof v === "string" && /\b(?:ticino|tessin)\b/i.test(plainText(v)),
+      )
+    )
+      return false;
+  }
+  const present = Object.entries(descriptions).filter(
+    ([, v]) => v != null && v !== "",
+  );
+  const grammar: Record<string, RegExp> = {
+    it: /^alberghi o centri per seminari ubicati nella svizzera tedesca (?:e|o) nella regione dei tre laghi, raggiungibili dalla stazione centrale di [\p{L} -]+ con i mezzi pubblici o con un servizio di trasporto offerto dall'albergo o dal centro per seminari\. durata massima del tragitto: [1-9]\d* minuti \(porta a porta\), secondo l'orario delle ffs\.(?: tali strutture non devono trovarsi nell'agglomerato di [\p{L} -]+ \(cfr\. mappa, allegato \d+ \[solo in tedesco\]: hauptkern, kernstadt und hauptkern, übrige hauptkerngemeinden\)\.)?$/u,
+    de: /^hotels oder seminarzentren in der deutschschweiz und im drei-seen-land, die vom hauptbahnhof [\p{L} -]+ mit dem öffentlichen verkehr oder einem transportdienst des hotels\/seminarzentrums in maximal [1-9]\d* minuten \(von tür zu tür\) gemäss sbb-fahrplan erreichbar sind\.(?: diese hotels und\/oder seminarzentren dürfen sich nicht in der agglomeration [\p{L} -]+ befinden \(anhang \d+: hauptkern, kernstadt und hauptkern, übrige hauptkerngemeinden\)\.)?$/u,
+    fr: /^hôtels ou centres de séminaire en suisse alémanique ou dans le pays des trois-lacs, accessibles depuis la gare centrale de [\p{L} -]+ en transports publics ou avec le service de navettes assurées par l'hôtel ou le centre de séminaire en [1-9]\d* minutes au maximum \(porte à porte\) selon l'horaire des cff\.(?: ces hôtels ou centres de séminaire ne doivent pas se trouver dans l'agglomération [\p{L} -]+ \(annexe \d+ \[en allemand uniquement\] : hauptkern, kernstadt und hauptkern, übrige hauptkerngemeinden\)\.)?$/u,
+  };
+  return (
+    present.length > 0 &&
+    present.every(
+      ([lang, value]) =>
+        typeof value === "string" &&
+        grammar[lang]?.test(
+          plainText(value)
+            .normalize("NFC")
+            .toLowerCase()
+            .replace(/[’‘]/gu, "'")
+            .replace(/\s+/gu, " ")
+            .trim(),
+        ),
+    )
+  );
+}
+
 // This is a filter on a verified server source context, never an approval of a
 // firm's work or an alternative to the source/dependency check at commit time.
 export function preliminaryLotMatch({
   publication,
   profile,
   context,
+  operationalReadings = [],
   now = new Date(),
 }: {
   publication: Publication;
   profile: CompanyProfile;
   context: LotSourceContext;
   now?: Date;
+  operationalReadings?: readonly unknown[];
 }): PreliminaryLotMatch {
   if (
     context.target.kind !== "lot" ||
@@ -307,6 +394,142 @@ export function preliminaryLotMatch({
     } else review("Luogo di esecuzione del lotto da verificare.");
   }
 
+  if (
+    lot &&
+    content?.selectedLot &&
+    excludesTicinoHotelPremises(lot, profile.zones)
+  ) {
+    veto ||= REGIONAL_PREMISES_VETO_REASON;
+    for (const [language, value] of Object.entries(
+      object(lot.orderDescription) ?? {},
+    ))
+      if (typeof value === "string" && value)
+        add({
+          scope: "selected_lot",
+          url: content.identity.detailUrl,
+          rawPath: `${content.selectedLot.path}/orderDescription/${language}`,
+          value,
+          purpose: "location",
+        });
+  }
+
+  const operationalReading = readOperationalEvidence(
+    operationalReadings,
+    context,
+  );
+  let deadline: string | null = null;
+  const localDeadlines =
+    content?.selectedLot && lot
+      ? [
+          {
+            path: `${content.selectedLot.path}/offerDeadline`,
+            value: own(lot, "offerDeadline"),
+          },
+          {
+            path: `${content.selectedLot.path}/dates/offerDeadline`,
+            value: own(object(own(lot, "dates")) ?? {}, "offerDeadline"),
+          },
+        ].filter((item) => item.value !== null && item.value !== "")
+      : [];
+  for (const item of localDeadlines)
+    add({
+      scope: "selected_lot",
+      url: content!.identity.detailUrl,
+      rawPath: item.path,
+      value: item.value,
+      purpose: "deadline",
+    });
+  const validLocal = localDeadlines.map((item) =>
+    explicitOperationalDeadline(item.value),
+  );
+  const localDeadlineConflict =
+    localDeadlines.length > 0 &&
+    (validLocal.some((value) => value === null) ||
+      new Set(
+        validLocal.map((value) => (value === null ? null : Date.parse(value))),
+      ).size !== 1);
+  if (localDeadlineConflict)
+    review("Termini originali di presentazione del lotto da riconciliare.");
+  else deadline = validLocal[0] ?? null;
+  if (operationalReading) {
+    const answer = operationalReading.answer;
+    used.push({ operationalReadingHash: operationalReading.hash });
+    for (const key of ["country", "canton", "city", "deadline"] as const)
+      for (const proof of answer[`${key}Evidence`])
+        add({
+          scope: proof.scope,
+          url: content!.identity.detailUrl,
+          rawPath: proof.path,
+          value: proof.quote,
+          purpose: key === "deadline" ? "deadline" : "location",
+        });
+    const readCountry = code(answer.country, countries);
+    const readCanton = code(answer.canton, cantons);
+    const readZone = answer.city ? exactZone(answer.city) : null;
+    const originalAddress = object(lot ? own(lot, "orderAddress") : null);
+    const originalCountry = code(
+      originalAddress ? own(originalAddress, "countryId") : null,
+      countries,
+    );
+    const originalCanton = code(
+      originalAddress ? own(originalAddress, "cantonId") : null,
+      cantons,
+    );
+    const conflicts =
+      (originalCountry && readCountry && originalCountry !== readCountry) ||
+      (originalCanton && readCanton && originalCanton !== readCanton) ||
+      (country && readCountry && country !== readCountry) ||
+      (canton && readCanton && canton !== readCanton) ||
+      (zone && readZone && zone !== readZone) ||
+      (readCountry && readCountry !== "CH" && readCanton) ||
+      (readZone &&
+        ((readCountry && readCountry !== "CH") ||
+          (readCanton && readCanton !== "TI")));
+    if (conflicts)
+      review(
+        "La lettura operativa e il territorio originale del lotto sono discordanti.",
+      );
+    else if (
+      !automaticReviewReasons.some((reason) => reason.includes("discordanti"))
+    ) {
+      country = readCountry ?? country;
+      canton = readCanton ?? canton;
+      zone = readZone ?? zone;
+      if (
+        (country && country !== "CH") ||
+        (country === "CH" && canton && canton !== "TI")
+      )
+        veto ||= "Il lavoro del lotto si trova fuori dal Ticino.";
+      if (country === "CH" && canton === "TI") {
+        const clear = (reason: string) => {
+          for (const list of [reviewReasons, automaticReviewReasons]) {
+            const index = list.indexOf(reason);
+            if (index >= 0) list.splice(index, 1);
+          }
+        };
+        clear("Luogo di esecuzione del lotto da verificare.");
+        if (profile.zones.includes("Tutto il Ticino"))
+          clear("Zona di esecuzione del lotto da verificare.");
+        else if (!zone) review("Zona di esecuzione del lotto da verificare.");
+        else if (!profile.zones.includes(zone))
+          veto ||= "Il lavoro del lotto si trova fuori dalle zone selezionate.";
+        else clear("Zona di esecuzione del lotto da verificare.");
+      }
+    }
+    if (
+      deadline &&
+      answer.deadline &&
+      Date.parse(deadline) !== Date.parse(answer.deadline)
+    ) {
+      deadline = null;
+      review(
+        "Termine locale e lettura della scadenza applicabile al lotto sono discordanti.",
+      );
+    } else if (!localDeadlineConflict) deadline = answer.deadline ?? deadline;
+  }
+  if (deadline && now.getTime() >= Date.parse(deadline))
+    veto ||= "Il termine di presentazione applicabile al lotto è scaduto.";
+
   const texts: {
     raw: string;
     normalized: string;
@@ -427,7 +650,8 @@ export function preliminaryLotMatch({
   // The verified lot fields currently expose execution/contract periods, not a
   // bid deadline or CHF value. Do not manufacture those mappings or inherit
   // project corrections; a future explicit target-bound adapter must supply them.
-  review("Termine di presentazione applicabile al lotto da verificare.");
+  if (!deadline)
+    review("Termine di presentazione applicabile al lotto da verificare.");
   if (profile.minValue !== null || profile.maxValue !== null)
     review("Importo del lotto rispetto alla fascia selezionata da verificare.");
   const operationalInputHash = hash({
@@ -453,7 +677,7 @@ export function preliminaryLotMatch({
       form: context.form,
       barrierState: context.projectBarrier.state,
     },
-    unavailable: ["lot_bid_deadline", "lot_value_chf"],
+    unavailable: [...(!deadline ? ["lot_bid_deadline"] : []), "lot_value_chf"],
   });
   return {
     eligible: !veto,
@@ -466,13 +690,16 @@ export function preliminaryLotMatch({
     evidence,
     reviewReasons,
     automaticReviewReasons,
+    informationalReviewReasons: deadline
+      ? []
+      : ["Termine di presentazione applicabile al lotto da verificare."],
     signals: { sectors: [...sectors], keyword },
     operational: {
       country,
       canton,
       zone,
       cpv: [...new Set(cpv)],
-      deadline: null,
+      deadline,
       valueChf: null,
     },
   };

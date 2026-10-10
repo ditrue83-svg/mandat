@@ -545,3 +545,105 @@ it("il pulsante apre il progetto simap corretto, mantiene l’etichetta richiest
     }),
   ).toBe("");
 });
+
+it("conserva limite delle offerte parziali e criteri locali piatti con prove del solo lotto", () => {
+  const lotOne = "33000000-0000-4000-8000-000000000003",
+    lotTwo = "44000000-0000-4000-8000-000000000004";
+  const { publication, archive, raw } = briefFixture({
+    base: {
+      id: briefIdentity.publicationId,
+      projectId: briefIdentity.projectId,
+      lotsType: "with",
+    },
+    lots: [
+      {
+        id: lotOne,
+        lotNumber: 1,
+        partialOffers: "yes",
+        partialOffersNote: {
+          it: "Ma non all’interno di un medesimo lotto.",
+          de: "Teilangebote innerhalb eines Loses sind nicht zugelassen.",
+        },
+        variants: "no",
+        variantsNote: { it: "Nessuna variante del lotto uno." },
+        qualificationCriteriaInDocuments: "yes",
+        qualificationCriteriaAsPDF: true,
+        qualificationCriteriaNote: {
+          it: "Tutti i criteri del solo lotto uno devono essere attestati.",
+        },
+        qualificationCriteria: [
+          {
+            description: { it: "Personale per il solo lotto uno." },
+            verification: { it: "Conferma delle risorse del solo lotto uno." },
+          },
+        ],
+        weightedQualificationCriteriaNote: {
+          it: "Selezione del solo lotto uno.",
+        },
+        weightedQualificationCriteria: [
+          {
+            description: { it: "Esperienza del solo lotto uno." },
+            verification: { it: "Prove del solo lotto uno." },
+          },
+        ],
+      },
+      { id: lotTwo, lotNumber: 2, partialOffers: "no" },
+    ],
+  });
+  const brief = buildTenderBrief(publication, archive),
+    one = brief.lots[0],
+    two = brief.lots[1];
+  expect(texts(one.requirements)).toContain(
+    "Ma non all’interno di un medesimo lotto.",
+  );
+  expect(texts(one.requirements)).toContain(
+    "Teilangebote innerhalb eines Loses sind nicht zugelassen.",
+  );
+  expect(texts(one.requirements)).toContain("Nessuna variante del lotto uno.");
+  expect(texts(one.requirements)).toContain("Personale per il solo lotto uno.");
+  expect(texts(one.requirements)).toContain("Esperienza del solo lotto uno.");
+  expect(texts(one.documents)).toContain(
+    "Conferma delle risorse del solo lotto uno.",
+  );
+  expect(texts(one.documents)).toContain("Prove del solo lotto uno.");
+  expect(texts(two.requirements)).not.toContain("lotto uno");
+  expect(two.documents).toEqual([]);
+  expect(one.deadlines).toEqual([]);
+  for (const fact of [...one.requirements, ...one.documents]) {
+    expect(fact.source.path.startsWith("/lots/0/")).toBe(true);
+    const value = fact.source.path
+      .split("/")
+      .slice(1)
+      .reduce((v: unknown, key) => (v as Record<string, unknown>)[key], raw);
+    expect(fact.source.quote).toBe(
+      typeof value === "string" ? value : JSON.stringify(value),
+    );
+  }
+});
+
+it("mostra la restrizione originale insieme al flag positivo senza cambiare la valutazione", () => {
+  const lotId = "33000000-0000-4000-8000-000000000003";
+  const { publication, archive } = briefFixture({
+    base: {
+      id: briefIdentity.publicationId,
+      projectId: briefIdentity.projectId,
+      lotsType: "with",
+    },
+    lots: [
+      {
+        id: lotId,
+        lotNumber: 1,
+        partialOffers: "yes",
+        partialOffersNote: {
+          it: "Le frazioni interne al lotto non sono ammesse.",
+        },
+      },
+    ],
+  });
+  const brief = buildTenderBrief(publication, archive);
+  const html = renderToStaticMarkup(
+    createElement(TenderBriefPanels, { brief, relevance: null }),
+  );
+  expect(html).toContain("Ammesso");
+  expect(html).toContain("Le frazioni interne al lotto non sono ammesse.");
+});

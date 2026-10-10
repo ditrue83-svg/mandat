@@ -304,6 +304,73 @@ function sourceSections(
       ),
     );
   for (const [key, label] of Object.entries({
+    partialOffersNote: "Condizioni per le offerte parziali",
+    variantsNote: "Condizioni per le varianti",
+  }))
+    add(
+      requirements,
+      label,
+      procurement[key],
+      `${lot ? "" : "/procurement"}/${key}`,
+    );
+  // SIMAP lot criteria are direct fields of /lots/N. Preserve that ownership;
+  // nested project /criteria and its instructions remain separate.
+  if (lot) {
+    for (const [key, label] of Object.entries({
+      qualificationCriteriaNote: "Criteri di idoneità del lotto",
+      weightedQualificationCriteriaNote: "Selezione dei partecipanti del lotto",
+    }))
+      add(requirements, label, sections[key], `/${key}`);
+    for (const [key, label] of [
+      ["qualificationCriteria", "Criterio di idoneità del lotto"],
+      ["weightedQualificationCriteria", "Criterio di selezione del lotto"],
+    ] as const) {
+      const values = sections[key];
+      if (Array.isArray(values))
+        values.forEach((value, index) => {
+          const criterion = object(value),
+            path = `/${key}/${index}`;
+          add(
+            requirements,
+            label,
+            criterion.description ?? value,
+            typeof value === "string" ? path : `${path}/description`,
+          );
+          add(
+            documents,
+            "Documenti e prove richiesti per il lotto",
+            criterion.verification,
+            `${path}/verification`,
+          );
+        });
+    }
+    if (sections.qualificationCriteriaInDocuments === "yes")
+      requirements.push(
+        ...coded(
+          "Criteri di idoneità del lotto",
+          sections.qualificationCriteriaInDocuments,
+          `${prefix}/qualificationCriteriaInDocuments`,
+          url,
+          {
+            yes: "Consulta anche i criteri e le condizioni complete nei documenti di gara.",
+          },
+        ),
+      );
+    if (
+      sections.qualificationCriteriaAsPDF === true ||
+      sections.qualificationCriteriaAsPDF === "yes"
+    )
+      requirements.push({
+        label: "Criteri di idoneità del lotto in allegato",
+        text: "Consulta l’allegato nella pubblicazione ufficiale.",
+        source: {
+          url,
+          path: `${prefix}/qualificationCriteriaAsPDF`,
+          quote: JSON.stringify(sections.qualificationCriteriaAsPDF),
+        },
+      });
+  }
+  for (const [key, label] of Object.entries({
     qualificationCriteriaNote: "Criteri di idoneità",
     weightedQualificationCriteriaNote: "Selezione dei partecipanti",
   }))

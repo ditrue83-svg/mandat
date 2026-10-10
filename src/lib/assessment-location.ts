@@ -9,7 +9,47 @@ export function assessmentLocation(
   kind: "project" | "lot",
 ): string {
   const { country, canton, zone } = preliminary.operational;
-  const fallback = zone || canton || country || "Non indicato";
+  const fallback = zone || canton || country || "Luogo da verificare";
+  const ownScope = kind === "project" ? "project_context" : "selected_lot";
+  const ownDescription = preliminary.evidence.find(
+    (e) =>
+      e.scope === ownScope &&
+      e.purpose === "location" &&
+      e.rawPath.endsWith("/orderAddressDescription"),
+  );
+  const ownDescriptionOnly = preliminary.evidence.find(
+    (e) =>
+      e.scope === ownScope &&
+      e.purpose === "location" &&
+      ownDescription &&
+      e.rawPath ===
+        ownDescription.rawPath.replace(/Description$/, "OnlyDescription"),
+  )?.value;
+  if (
+    ownDescriptionOnly === "yes" &&
+    ownDescription?.value &&
+    typeof ownDescription.value === "object" &&
+    !Array.isArray(ownDescription.value)
+  ) {
+    const texts = Object.entries(ownDescription.value).filter(
+      ([, value]) => value !== null && value !== "",
+    );
+    if (
+      texts.length &&
+      texts.every(
+        ([language, value]) =>
+          ["it", "de", "fr", "en"].includes(language) &&
+          typeof value === "string",
+      )
+    ) {
+      const names = [
+        ...new Set(
+          texts.map(([, value]) => plainText(value as string)).filter(Boolean),
+        ),
+      ];
+      if (names.length) return names.join(" / ");
+    }
+  }
   // The operational filter clears these values on conflicting addresses.
   if (!country && !canton && !zone) return fallback;
   const scope = kind === "project" ? "project_context" : "selected_lot";

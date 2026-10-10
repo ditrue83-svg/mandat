@@ -1,10 +1,19 @@
 import {
+  encodeInventedSourceSelections,
   inventedSourceEvidenceAnswer,
   encodeInventedSourceEvidenceAnswer,
   inventedCoverageProof,
   inventedReadingRefs,
 } from "./helpers/source-evidence-fixture";
+import {
+  materializeSourceInterpretationPassages,
+  materializeSourceInterpretationFields,
+  type SourceInterpretationContext,
+} from "../src/lib/source-interpretation";
 import { SOURCE_REVIEW_SUPPORTED_REASON } from "../src/lib/source-semantic-review";
+import { buildSourceLiteralCatalogue } from "../src/lib/source-literal-catalogue";
+import { resolveSourceSelection } from "../src/lib/source-selection";
+import { componentEvidenceGroups } from "../src/lib/source-interpretation";
 import { originalClauseTextParts } from "../src/lib/source-clause-literals";
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
@@ -161,37 +170,228 @@ afterAll(async () => {
   await pg.close();
 });
 
+function inventedReviewWire(prompt: string, data: any): any {
+  const call = vi
+    .mocked(infer)
+    .mock.calls.findLast((args) => args[2] === prompt);
+  const schema: any = call?.[6]?.json_schema?.schema;
+  if (!schema)
+    throw Error("Invented review requires its bound provider schema");
+  const deref = (node: any): any =>
+    node?.$ref
+      ? deref(
+          node.$ref
+            .slice(2)
+            .split("/")
+            .reduce(
+              (v: any, key: string) =>
+                v[key.replace(/~1/g, "/").replace(/~0/g, "~")],
+              schema,
+            ),
+        )
+      : node;
+  const checks = deref(deref(schema).properties.checksByClaim).properties;
+  return {
+    chunkId: data.chunkId,
+    sourceEvidenceHash: data.sourceEvidenceHash,
+    coverage: "complete",
+    checksFormat: data.referenceSelectionFormat.checksFormat,
+    checksByClaim: Object.fromEntries(
+      data.assignedClaims.map((claim: any) => {
+        const choice = deref(checks[claim.id]);
+        const supported = choice.anyOf
+          ? choice.anyOf
+              .map(deref)
+              .find(
+                (s: any) =>
+                  deref(s.properties.verdict).const === "supported" ||
+                  deref(s.properties.verdict).enum?.includes("supported"),
+              )
+          : choice;
+        const readingShape = deref(supported.properties.readingRefsById);
+        const readingAlternatives = readingShape.anyOf
+          ? readingShape.anyOf.map(deref)
+          : [readingShape];
+        const readingIds = Object.keys(readingAlternatives[0].properties ?? {});
+        if (
+          readingAlternatives.some(
+            (branch: any) =>
+              JSON.stringify(Object.keys(branch.properties ?? {})) !==
+              JSON.stringify(readingIds),
+          )
+        )
+          throw Error("Invented reading alternatives differ in ownership");
+        const selected = inventedReadingRefs(data, claim);
+        if (selected.some((id: string) => !readingIds.includes(id)))
+          throw Error("Invented review choice outside its reading ownership");
+        const proof = inventedCoverageProof(
+          data.draft,
+          claim,
+          "supported",
+          data,
+        );
+        const coverage = supported.properties.coverageBySource
+          ? deref(supported.properties.coverageBySource).properties
+          : {};
+        const coverageBySource = Object.fromEntries(
+          Object.keys(coverage).map((ref) => {
+            const row = proof.find((p: any) => p.sourceRef === ref);
+            if (!row)
+              throw Error("Invented review missing explicit coverage choice");
+            const shape = deref(coverage[ref]);
+            const represented = shape.anyOf
+              ? shape.anyOf
+                  .map(deref)
+                  .find(
+                    (s: any) =>
+                      deref(s.properties?.disposition)?.const ===
+                        "represented" ||
+                      deref(s.properties?.disposition)?.enum?.includes(
+                        "represented",
+                      ),
+                  )
+              : shape;
+            return [
+              ref,
+              row.disposition !== "represented"
+                ? { disposition: row.disposition, draftPaths: [] }
+                : represented.properties.draftPathsByPath
+                  ? {
+                      disposition: "represented",
+                      draftPathsByPath: Object.fromEntries(
+                        Object.keys(
+                          deref(represented.properties.draftPathsByPath)
+                            .properties,
+                        ).map((path) => [
+                          path,
+                          row.witnesses.some((w: any) => w.draftPath === path),
+                        ]),
+                      ),
+                    }
+                  : {
+                      disposition: "represented",
+                      draftPaths: row.witnesses.map((w: any) => w.draftPath),
+                    },
+            ];
+          }),
+        );
+        return [
+          claim.id,
+          {
+            verdict: "supported",
+            draftQuote: null,
+            reason: SOURCE_REVIEW_SUPPORTED_REASON,
+            sourceRefs: claim.sourceRefs,
+            readingRefsById: Object.fromEntries(
+              readingIds.map((id) => [id, selected.includes(id)]),
+            ),
+            coverageBySource,
+          },
+        ];
+      }),
+    ),
+    findings: [],
+  };
+}
+function inventedNegativeReview(
+  prompt: string,
+  answer: any,
+  firstOnly: boolean,
+): any {
+  const data = JSON.parse(prompt),
+    call = vi.mocked(infer).mock.calls.findLast((args) => args[2] === prompt),
+    schema: any = call?.[6]?.json_schema?.schema;
+  const deref = (node: any): any =>
+    node?.$ref
+      ? deref(
+          node.$ref
+            .slice(2)
+            .split("/")
+            .reduce(
+              (v: any, key: string) =>
+                v[key.replace(/~1/g, "/").replace(/~0/g, "~")],
+              schema,
+            ),
+        )
+      : node;
+  const choices = deref(deref(schema).properties.checksByClaim).properties;
+  return {
+    ...answer,
+    checksByClaim: Object.fromEntries(
+      Object.entries(answer.checksByClaim).map(
+        ([id, check]: [string, any], index) => {
+          if (firstOnly && index !== 0) return [id, check];
+          const alternatives = deref(choices[id]).anyOf.map(deref),
+            negative = alternatives.find((s: any) =>
+              deref(s.properties.verdict).enum?.includes("not_verifiable"),
+            );
+          const ids = Object.keys(
+            deref(negative.properties.readingRefsById).properties,
+          );
+          if (
+            Object.entries(check.readingRefsById).some(
+              ([ref, chosen]) => chosen && !ids.includes(ref),
+            )
+          )
+            throw Error("Invented negative choice loses an original selection");
+          return [
+            id,
+            {
+              ...check,
+              verdict: firstOnly ? "contradicted" : "not_verifiable",
+              draftQuote: data.assignedClaims
+                .find((c: any) => c.id === id)
+                .text.slice(0, 1200),
+              reason: firstOnly
+                ? "Contraddizione inventata per verificare l'arresto del confronto."
+                : "Riscontro inventato non determinabile.",
+              readingRefsById: Object.fromEntries(
+                ids.map((ref) => [ref, check.readingRefsById[ref] ?? false]),
+              ),
+            },
+          ];
+        },
+      ),
+    ),
+  };
+}
 function inventedAnswer(prompt: string) {
   const data = JSON.parse(prompt);
+  if (data.items) {
+    const ids = data.items.flatMap((item: any) =>
+      item.passage ? [item.passage.id] : [],
+    );
+    const required = data.requiredPassageIds ?? [];
+    return required.length
+      ? {
+          chunkId: data.chunkId,
+          status: "complete",
+          referenceFormat: "explicit_required_originals_v2",
+          requiredSourceRefs: Object.fromEntries(
+            required.map((id: string) => [id, id]),
+          ),
+          sourceRefs: ids.filter((id: string) => !required.includes(id)),
+        }
+      : {
+          chunkId: data.chunkId,
+          status: "complete",
+          referenceFormat: "explicit_optional_selection_v2",
+          selections: Object.fromEntries(ids.map((id: string) => [id, true])),
+        };
+  }
   if (data.stage === "original_source_evidence")
     return encodeInventedSourceEvidenceAnswer(
       inventedSourceEvidenceAnswer(data),
     );
-  if (data.assignedClaims) {
-    return {
-      chunkId: data.chunkId,
-      sourceEvidenceHash: data.sourceEvidenceHash,
-      coverage: "complete",
-      checks: data.assignedClaims.map(
-        (claim: { id: string; sourceRefs: string[]; text: string }) => ({
-          claimId: claim.id,
-          draftQuote: claim.text.slice(0, 1200),
-          readingRefs: inventedReadingRefs(data, claim),
-          verdict: "supported",
-          reason: SOURCE_REVIEW_SUPPORTED_REASON,
-          coverageProof: inventedCoverageProof(data.draft, claim, "supported"),
-          sourceRefs: claim.sourceRefs,
-        }),
-      ),
-      findings: [],
-    };
-  }
+  if (data.assignedClaims) return inventedReviewWire(prompt, data);
   if (!data.company) {
+    data.passages = materializeSourceInterpretationPassages(prompt);
+    data.fields = materializeSourceInterpretationFields(prompt);
     const target = data.passages.find(
       (passage: { scope: string; role: string }) =>
         passage.scope === data.targetScope && passage.role === "service",
     );
-    return {
+    const choice = {
       status: "resolved",
       details:
         data.contractDetailFamilies?.map(
@@ -276,7 +476,148 @@ function inventedAnswer(prompt: string) {
       issues: [],
       targetRef: target.id,
     };
+    const selected: any = {
+      ...choice,
+      evidenceFormat: "source_selections_v19",
+      details: [],
+      contractClauseDetails: {},
+      classificationReadingsById: Object.fromEntries(
+        data.classificationContext.map((c: any) => [
+          c.id,
+          {
+            ownSourceRef: c.labels[0]?.sourceRefs[0] ?? c.code.sourceRefs[0],
+            use:
+              c.appliesTo === "shared_project_context"
+                ? "shared_project_only"
+                : "broad_context",
+            sourceRefs: [],
+            componentIndexes: [],
+          },
+        ]),
+      ),
+    };
+    delete selected.classificationReadings;
+    selected.summaryAdditionalSourceRefs = choice.summarySourceRefs.filter(
+      (id) => id !== choice.targetRef,
+    );
+    delete selected.summarySourceRefs;
+    selected.components = choice.components.map(
+      ({ sourceRefs, roleEvidence, meaning, ...c }: any) => ({
+        ...c,
+        evidence: sourceRefs.map((sourceRef: string) => ({ sourceRef })),
+        roleEvidence: {
+          state: roleEvidence.state,
+          scope: roleEvidence.scope,
+          actionSelection: {
+            sourceRef: roleEvidence.sourceRefs[0],
+            exactText: roleEvidence.actionText,
+          },
+        },
+        meaning: {
+          state: meaning.state,
+          statement: meaning.statement,
+          basis: meaning.basis,
+          objectSelection: {
+            sourceRef: meaning.objectRefs[0],
+            exactText: meaning.objectText,
+          },
+        },
+      }),
+    );
+    const context: any = {
+      binding: {
+        target:
+          data.target.kind === "lot"
+            ? {
+                kind: "lot",
+                publicationId: "invented-fixture",
+                sourceProjectId: "invented-project",
+                lotId: data.target.lot.id,
+              }
+            : { kind: "project", publicationId: "invented-fixture" },
+        source: { invented: true },
+        fieldsHash: "a".repeat(64),
+        shapeEpochToken: "invented-fixture",
+        model: "invented-model",
+        reasoningEffort: "medium",
+        maxTokens: 8192,
+      },
+      targetScope: data.targetScope,
+      coverage: data.coverage,
+      body: {
+        target: data.target,
+        classifications: data.classificationContext.map(
+          ({ id, ...c }: any) => ({
+            ...c,
+            code: c.code
+              ? {
+                  sourceRefs: c.code.sourceRefs,
+                  text: c.code.sourceRefs
+                    .map(
+                      (ref: string) =>
+                        data.passages.find((p: any) => p.id === ref)!.text,
+                    )
+                    .join(""),
+                }
+              : null,
+            labels: c.labels.map((l: any) => ({
+              ...l,
+              text: l.sourceRefs
+                .map(
+                  (ref: string) =>
+                    data.passages.find((p: any) => p.id === ref)!.text,
+                )
+                .join(""),
+            })),
+          }),
+        ),
+        fields: data.fields.map(({ id, ...f }: any) => f),
+        passages: data.passages.map((p: any) => ({
+          ...p,
+          url: "https://example.invalid/invented-pipeline-source",
+        })),
+      },
+      readings: data.readings,
+    };
+    const groups = componentEvidenceGroups(context.body.passages),
+      catalogue = buildSourceLiteralCatalogue(context.body.passages, groups);
+    const literal = catalogue.selections.find(
+      (s) =>
+        s.sourceRef === target.id ||
+        groups.some(
+          (g) => g.id === s.sourceRef && g.sourceRefs.includes(target.id),
+        ),
+    )!;
+    if (!literal)
+      throw Error("Invented fixture lacks its declared original literal part");
+    const own = resolveSourceSelection(
+      {
+        sourceRef: literal.sourceRef,
+        startUtf16: literal.startUtf16,
+        endUtf16: literal.endUtf16,
+      },
+      context.body.passages,
+      groups,
+    );
+    const encoded = encodeInventedSourceSelections(context, {
+      ...selected,
+      components: [],
+    });
+    encoded.components = selected.components.map((c: any) => ({
+      ...c,
+      evidence: own.sourceRefs.map((sourceRef) => ({ sourceRef })),
+      roleEvidence: {
+        ...c.roleEvidence,
+        actionSelection: { literalSelectionId: literal.id },
+      },
+      meaning: {
+        ...c.meaning,
+        objectSelection: { literalSelectionId: literal.id },
+      },
+    }));
+    return encoded;
   }
+
   return {
     functionCheck: {
       requested: {
@@ -371,7 +712,7 @@ it("Durably schedules once, completes a referenced comparison, and never creates
   expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
     status: "skipped",
   });
-  expect(infer).toHaveBeenCalledTimes(5);
+  expect(infer).toHaveBeenCalledTimes(6);
   for (const call of vi.mocked(infer).mock.calls)
     expect(call[7]?.timeoutMs).toBe(300_000);
   const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
@@ -398,6 +739,7 @@ it("Reuses only the public interpretation for another company and creates a fres
   expect(firstCalls.map((call) => call[1])).toEqual([
     "documentary-source-interpretation",
     "documentary-source-evidence",
+    "documentary-source-semantic-review",
     "documentary-source-semantic-review",
     "documentary-source-semantic-review",
     "documentary-service-comparison",
@@ -438,13 +780,13 @@ it("An uncertain source is cached as review without ever asking for a company co
     return {
       ...answer,
       status: "uncertain",
-      classificationReadings: answer.classificationReadings.map(
-        (
-          reading: StoredAutomaticComparison["sourceInterpretation"]["response"]["classificationReadings"][number],
-        ) => ({
-          ...reading,
-          use: "unresolved",
-        }),
+      classificationReadingsById: Object.fromEntries(
+        Object.entries(answer.classificationReadingsById).map(
+          ([id, reading]: [string, any]) => [
+            id,
+            { ...reading, use: "unresolved" },
+          ],
+        ),
       ),
       components: answer.components!.map(
         (
@@ -496,19 +838,11 @@ it("A rejected semantic review beyond twenty older source-only rows is reused ac
   vi.mocked(infer).mockImplementation(async (_pub, purpose, prompt) => {
     const answer = inventedAnswer(prompt);
     if (purpose !== "documentary-source-semantic-review") return answer;
-    if (!("checks" in answer)) throw new Error("Expected semantic review");
+    if (!("checksByClaim" in answer))
+      throw new Error("Expected semantic review");
     return {
       ...answer,
-      checks: answer.checks.map(
-        (check: { claimId: string }, index: number) => ({
-          ...check,
-          verdict: index === 0 ? "contradicted" : "supported",
-          reason:
-            index === 0
-              ? "Contraddizione inventata per verificare l'arresto del confronto."
-              : SOURCE_REVIEW_SUPPORTED_REASON,
-        }),
-      ),
+      ...inventedNegativeReview(prompt, answer, true),
     };
   });
   expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
@@ -521,6 +855,7 @@ it("A rejected semantic review beyond twenty older source-only rows is reused ac
   expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
     "documentary-source-interpretation",
     "documentary-source-evidence",
+    "documentary-source-semantic-review",
     "documentary-source-semantic-review",
     "documentary-source-semantic-review",
   ]);
@@ -613,6 +948,7 @@ for (const changed of ["missing", "version", "reasoning"] as const)
       "documentary-source-evidence",
       "documentary-source-semantic-review",
       "documentary-source-semantic-review",
+      "documentary-source-semantic-review",
       "documentary-service-comparison",
     ]);
     expect(vi.mocked(infer).mock.calls[0][7]?.reasoningEffort).toBe(
@@ -645,14 +981,11 @@ it("An older row without review cannot hide a later rejection for the same exact
       return inventedAnswer(prompt);
     expect(purpose).toBe("documentary-source-semantic-review");
     const answer = inventedAnswer(prompt);
-    if (!("checks" in answer)) throw new Error("Expected semantic review");
+    if (!("checksByClaim" in answer))
+      throw new Error("Expected semantic review");
     return {
       ...answer,
-      checks: answer.checks.map((check: { claimId: string }) => ({
-        ...check,
-        verdict: "not_verifiable",
-        reason: "Riscontro inventato non determinabile.",
-      })),
+      ...inventedNegativeReview(prompt, answer, false),
     };
   });
   const secondJob = await automaticJob(f.p.id, await company());
@@ -709,16 +1042,28 @@ it("Reads every long-source chunk before interpretation and reuses those reading
     if (purpose === "documentary-source-reading") {
       const reading = JSON.parse(prompt);
       expect(reading.company).toBeUndefined();
-      return {
-        chunkId: reading.chunkId,
-        status: "complete",
-        sourceRefs: reading.items.flatMap(
-          (item: { passage?: { id: string; rawPath: string } }) =>
-            item.passage?.rawPath === "/lots/0/orderDescription/it"
-              ? [item.passage.id]
+      const declared: any = inventedAnswer(prompt);
+      if (declared.requiredSourceRefs)
+        declared.sourceRefs = reading.items.flatMap((item: any) =>
+          item.passage?.rawPath === "/lots/0/orderDescription/it" &&
+          !reading.requiredPassageIds.includes(item.passage.id)
+            ? [item.passage.id]
+            : [],
+        );
+      else
+        declared.selections = Object.fromEntries(
+          reading.items.flatMap((item: any) =>
+            item.passage
+              ? [
+                  [
+                    item.passage.id,
+                    item.passage.rawPath === "/lots/0/orderDescription/it",
+                  ],
+                ]
               : [],
-        ),
-      };
+          ),
+        );
+      return declared;
     }
     return inventedAnswer(prompt);
   });
@@ -766,7 +1111,11 @@ it("Reads every long-source chunk before interpretation and reuses those reading
   });
   expect(calls.at(-1)![3]).toBe(8192);
   expect(calls.at(-1)![7]?.reasoningEffort).toBe("high");
-  const interpretationPrompt = JSON.parse(interpretationCall[2]);
+  const interpretationPrompt = {
+    ...JSON.parse(interpretationCall[2]),
+    passages: materializeSourceInterpretationPassages(interpretationCall[2]),
+    fields: materializeSourceInterpretationFields(interpretationCall[2]),
+  };
   expect(interpretationPrompt.coverage.completeProvidedSource).toBe(true);
   expect(interpretationPrompt.coverage.linkedDocumentsRead).toBe(false);
   const described = interpretationPrompt.passages
@@ -804,7 +1153,20 @@ it("Reads every long-source chunk before interpretation and reuses those reading
     expect(reviewCall[7]?.reasoningEffort).toBe("high");
     const reviewPrompt = JSON.parse(reviewCall[2]);
     expect(reviewPrompt.company).toBeUndefined();
-    for (const passage of reviewPrompt.passages) {
+    for (const encodedPassage of reviewPrompt.passages) {
+      const passage = {
+        ...encodedPassage,
+        text:
+          encodedPassage.text ??
+          encodedPassage.textParts
+            .map((part: any) =>
+              reviewPrompt.originalTextPieces[part.piece].slice(
+                part.startUtf16,
+                part.endUtf16,
+              ),
+            )
+            .join(""),
+      };
       if (
         passage.rawPath === "/lots/0/orderDescription/it" &&
         reviewPrompt.coverage.passageIds.includes(passage.id)
@@ -898,6 +1260,7 @@ for (const changed of ["source", "source_reasoning"] as const)
     expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
       "documentary-source-interpretation",
       "documentary-source-evidence",
+      "documentary-source-semantic-review",
       "documentary-source-semantic-review",
       "documentary-source-semantic-review",
       "documentary-service-comparison",
@@ -1142,7 +1505,7 @@ it("An expired lease can be recovered once, while a live lease prevents a duplic
   expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
     status: "completed",
   });
-  expect(infer).toHaveBeenCalledTimes(5);
+  expect(infer).toHaveBeenCalledTimes(6);
 });
 
 it("An abandoned third attempt is closed once without another provider call", async () => {
@@ -1377,7 +1740,7 @@ it("Returning to a superseded profile requeues its input once and preserves the 
     .from(schema.automaticMatchRuns)
     .where(eq(schema.automaticMatchRuns.id, job.runId));
   expect(exhausted).toMatchObject({ status: "superseded", attempts: 3 });
-  expect(infer).toHaveBeenCalledTimes(5);
+  expect(infer).toHaveBeenCalledTimes(6);
 });
 
 it("A job for another company cannot read, run or update the owner's comparison", async () => {

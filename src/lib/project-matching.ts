@@ -1,3 +1,4 @@
+import { allExactTicinoHospitalExecutionSites } from "./ticino-hospital-execution-sites";
 import { createHash } from "node:crypto";
 import type { CompanyProfile, Publication, Sector } from "./domain";
 import type { LotSourceContext } from "./lot-source-context";
@@ -7,13 +8,15 @@ import {
   classifyProcurement,
   projectClassificationInput,
 } from "./sector-classification";
+import { zoneForExplicitExecutionArea } from "./execution-area-notes";
 import { zoneForExactCity } from "./ticino-localities";
 import {
   explicitlyNoSiteVisit,
+  explicitlyNoVisitWithAssumedKnowledge,
   explicitlyUnscheduledIndividualVisit,
 } from "./site-visit-notes";
 
-export const PROJECT_PREFILTER_VERSION = "project-operational-prefilter-v5";
+export const PROJECT_PREFILTER_VERSION = "project-operational-prefilter-v8";
 export type ProjectOperationalEvidence = {
   scope: "publication" | "project_context";
   url: string;
@@ -357,8 +360,12 @@ export function preliminaryProjectMatch({
           plainText(text).trim(),
         ),
       );
+    const descriptionZone = zoneForExplicitExecutionArea(rawDescription);
     let locationConflict = false;
-    if (descriptionOnly === "yes" && wholeTicino) {
+    if (
+      descriptionOnly === "yes" &&
+      (wholeTicino || allExactTicinoHospitalExecutionSites(rawDescription))
+    ) {
       const originalCountry = code(own(address, "countryId"), countries);
       const originalCanton = code(own(address, "cantonId"), cantons);
       const editorialCanton = code(publication.canton, cantons);
@@ -366,14 +373,72 @@ export function preliminaryProjectMatch({
       if (
         (originalCountry !== null && originalCountry !== "CH") ||
         (originalCanton !== null && originalCanton !== "TI") ||
-        (editorialCanton !== null && editorialCanton !== "TI")
+        (editorialCanton !== null && editorialCanton !== "TI") ||
+        (own(address, "cantonId") !== null &&
+          own(address, "cantonId") !== "" &&
+          originalCanton === null) ||
+        (typeof rawCity === "string"
+          ? !!plainText(rawCity)
+          : Object.values(object(rawCity)).some(
+              (v) => v !== null && v !== "",
+            )) ||
+        (own(address, "postalCode") !== null &&
+          own(address, "postalCode") !== "")
       ) {
         review("Città, paese o cantone del progetto sono discordanti.");
       } else if (originalCountry === "CH") {
         country = originalCountry;
         canton = "TI";
         if (!profile.zones.includes("Tutto il Ticino"))
-          review("Il progetto interessa tutto il Ticino: zone da verificare.");
+          review(
+            wholeTicino
+              ? "Il progetto interessa tutto il Ticino: zone da verificare."
+              : "Le sedi ospedaliere originali sono in Ticino: zone da verificare.",
+          );
+      } else review("Luogo di esecuzione del progetto da verificare.");
+    } else if (descriptionOnly === "yes" && descriptionZone !== null) {
+      const originalCountry = code(own(address, "countryId"), countries);
+      const originalCanton = code(own(address, "cantonId"), cantons);
+      const editorialCanton = code(publication.canton, cantons);
+      publicationField("canton", "editorial");
+      publicationField("zone", "editorial");
+      // A conflicting or extra structured location is not discarded merely
+      // because the publisher selected a description-only address.
+      const hasStructuredPlace =
+        (typeof rawCity === "string"
+          ? !!plainText(rawCity)
+          : rawCity !== null &&
+            (typeof rawCity !== "object" ||
+              Object.values(object(rawCity)).some(
+                (v) => v !== null && v !== "",
+              ))) ||
+        (own(address, "postalCode") !== null &&
+          own(address, "postalCode") !== "");
+      const hasUnknownCanton =
+        own(address, "cantonId") !== null &&
+        own(address, "cantonId") !== "" &&
+        originalCanton === null;
+      if (
+        (originalCountry !== null && originalCountry !== "CH") ||
+        (originalCanton !== null && originalCanton !== "TI") ||
+        (editorialCanton !== null && editorialCanton !== "TI") ||
+        (publication.zone !== null && publication.zone !== descriptionZone) ||
+        hasStructuredPlace ||
+        hasUnknownCanton
+      ) {
+        review(
+          "Luogo corrente e fonte originale del progetto da riconciliare.",
+        );
+      } else if (originalCountry === "CH") {
+        country = originalCountry;
+        canton = "TI";
+        zone = descriptionZone;
+        if (
+          !profile.zones.includes("Tutto il Ticino") &&
+          !profile.zones.includes(zone)
+        )
+          veto ||=
+            "Il lavoro del progetto si trova fuori dalle zone selezionate.";
       } else review("Luogo di esecuzione del progetto da verificare.");
     } else if (
       Object.keys(address).length &&
@@ -404,7 +469,9 @@ export function preliminaryProjectMatch({
       for (const key of ["location", "canton", "zone"] as const)
         publicationField(key, "editorial");
       if (
-        (canton && publication.canton !== canton) ||
+        (canton &&
+          publication.canton !== null &&
+          publication.canton !== canton) ||
         (zone && publication.zone !== null && publication.zone !== zone) ||
         (cityVariants &&
           !cityVariants.map(plainText).includes(publication.location))
@@ -454,6 +521,7 @@ export function preliminaryProjectMatch({
       );
       if (
         !explicitlyNoSiteVisit(visit) &&
+        !explicitlyNoVisitWithAssumedKnowledge(visit) &&
         !explicitlyUnscheduledIndividualVisit(visit)
       )
         review(

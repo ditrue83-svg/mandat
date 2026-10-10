@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   buildAutomaticComparisonRequest,
   buildAutomaticSourceRequest,
+  normalizeAutomaticSourceReading,
   readAutomaticSourceInterpretation,
   buildAutomaticSourceSemanticReviewRequest,
   readAutomaticSourceSemanticReview,
@@ -93,17 +94,18 @@ export async function compareDocumentaryTarget(
     const readings: unknown[] = [];
     for (const chunk of request.readingRequests) {
       await beforeRequest?.();
+      const reading = await infer(
+        input.publication,
+        "documentary-source-reading",
+        chunk.prompt,
+        2_400,
+        transport,
+        chunk.system,
+        chunk.responseFormat,
+        { ...configuration, reasoningEffort: chunk.reasoningEffort },
+      );
       readings.push(
-        await infer(
-          input.publication,
-          "documentary-source-reading",
-          chunk.prompt,
-          2_400,
-          transport,
-          chunk.system,
-          chunk.responseFormat,
-          { ...configuration, reasoningEffort: chunk.reasoningEffort },
-        ),
+        normalizeAutomaticSourceReading(reading, request, chunk.id),
       );
     }
     const sourceRequest = buildAutomaticSourceRequest(request, readings);

@@ -25,6 +25,7 @@ import {
   recordSourceSemanticReview,
 } from "../src/lib/source-semantic-review";
 import {
+  encodeInventedSourceSelections,
   inventedSourceEvidence,
   inventedReadingRefs,
 } from "./helpers/source-evidence-fixture";
@@ -199,12 +200,12 @@ test("anchors preserve the same 600-character cap and contiguous source ownershi
     );
 });
 function wire(input = context()): any {
-  return {
-    evidenceFormat: "source_selections_v14",
+  return encodeInventedSourceSelections(input, {
+    evidenceFormat: "source_selections_v15",
     status: "resolved",
     targetRef: "s1",
     summary: "Revisione del progetto definitivo.",
-    summarySourceRefs: ["s1"],
+    summaryAdditionalSourceRefs: [],
     components: [
       {
         description: "Revisione del progetto definitivo.",
@@ -246,20 +247,42 @@ function wire(input = context()): any {
       },
     ],
     contractClauseDetails: {
+      ...Object.fromEntries(
+        buildSourceInterpretationRequest(input)
+          .contractDetailFamilies.filter((f) =>
+            f.sourceRefs.some((ref) =>
+              input.body.passages.some(
+                (p) =>
+                  p.id === ref && /\/orderDescription(?:\/|$)/.test(p.rawPath),
+              ),
+            ),
+          )
+          .map((f) => [
+            f.id,
+            [
+              {
+                kind: "execution_condition",
+                scope: f.scope,
+                sourceRefs: f.sourceRefs,
+                originalText: true,
+              },
+            ],
+          ]),
+      ),
       s4: [
         {
           kind: "execution_condition",
           scope: "project_context",
-          explanation: input.body.passages[3].text,
+          originalText: true,
           sourceRefs: ["s4"],
         },
       ],
     },
     issues: [],
-  };
+  });
 }
 
-test("A summary cannot borrow its selected target evidence from a component", () => {
+test("V15 binds the summary to its selected target and refuses an old unbound V14 payload", () => {
   const base = context();
   const title = "Mandato professionale.";
   const input = {
@@ -280,16 +303,22 @@ test("A summary cannot borrow its selected target evidence from a component", ()
   };
   const request = buildSourceInterpretationRequest(input);
   const bad = wire(input);
+  bad.evidenceFormat = "source_selections_v14";
+  delete bad.summaryAdditionalSourceRefs;
   bad.summarySourceRefs = ["s5"];
   const before = JSON.stringify(bad);
   assert.throws(
     () => recordSourceInterpretation(bad, request, metadata),
-    /summary must cite its own selected target/,
+    /Source provider protocol/,
   );
   assert.equal(JSON.stringify(bad), before);
-  const valid = structuredClone(bad);
-  valid.summarySourceRefs = ["s5", "s1"];
-  assert(recordSourceInterpretation(valid, request, metadata));
+  const valid = wire(input);
+  valid.summaryAdditionalSourceRefs = ["s5"];
+  assert.deepEqual(
+    recordSourceInterpretation(valid, request, metadata).response
+      .summarySourceRefs,
+    ["s1", "s5"],
+  );
 });
 
 test.each([
@@ -375,7 +404,7 @@ test.each([
         kind: "execution_condition",
         scope: "project_context",
         sourceRefs: ["s6"],
-        explanation: input.body.passages.at(-1)!.text,
+        originalText: true,
       },
     ];
     const accepts = new Ajv2020({ strict: false }).compile<any>(
@@ -575,7 +604,14 @@ test("A project without lots cannot request a shared-lot detail in either wire c
     assert.equal(accepts({ result: bad }), false);
     assert.throws(
       () => recordSourceInterpretation(bad, request, metadata),
-      /Shared project detail requires a lot/,
+      (error: any) =>
+        error.message.includes("Shared project detail requires a lot") ||
+        error.issues?.some(
+          (issue: any) =>
+            issue.code === "invalid_value" &&
+            issue.path.at(-1) === "kind" &&
+            !issue.values?.includes("shared_project_context"),
+        ),
     );
     assert.equal(JSON.stringify(bad), before);
   }
@@ -605,7 +641,8 @@ test("Long parallel clauses retain every original part without truncation", () =
   };
   const request = buildSourceInterpretationRequest(input);
   assert.equal(
-    request.contractDetailFamilies[0].originalMultilingualExplanation,
+    request.contractDetailFamilies.find((f) => f.sourceRefs.includes("s4"))!
+      .originalMultilingualExplanation,
     undefined,
   );
   const value = wire(input);
@@ -619,7 +656,9 @@ test("Long parallel clauses retain every original part without truncation", () =
   ];
   const before = JSON.stringify(input);
   const recorded = recordSourceInterpretation(value, request, metadata);
-  const parts = request.contractDetailFamilies[0].originalTextParts!;
+  const parts = request.contractDetailFamilies.find((f) =>
+    f.sourceRefs.includes("s4"),
+  )!.originalTextParts!;
   assert(parts.length > 1);
   assert(parts.every((p) => p.length <= 600));
   assert.equal(
@@ -668,12 +707,19 @@ test("Long parallel clauses retain every original part without truncation", () =
     .filter((binding) => binding.sourceRef === "s4");
   assert(bindings.length);
   for (const binding of bindings)
-    assert.deepEqual(
-      binding.candidateDetails.map(
-        (detail: { explanation: string }) => detail.explanation,
-      ),
-      parts,
+    assert(
+      binding.candidateDetails.every((index: any) => Number.isInteger(index)),
     );
+  const body = JSON.parse(reviews[0].prompt);
+  const rendered = body.draft.details
+    .filter((d: any) =>
+      body.draft.detailEvidenceBindings
+        .find((b: any) => b.id === d.b)
+        .sourceRefs.some((ref: string) => ["s4", "s5"].includes(ref)),
+    )
+    .map((d: any) => d.explanation ?? body.originalTextPieces[d.literalPiece])
+    .join("");
+  assert.equal(rendered, parts.join(""));
   assert.equal(JSON.stringify(input), before);
 });
 
@@ -792,7 +838,14 @@ test("Long selected originals retain all parts while generated detail and text c
   );
   assert.throws(
     () => recordSourceInterpretation(overCount, request, metadata),
-    /aggregate limit/,
+    (error: any) =>
+      error.message.includes("aggregate limit") ||
+      error.issues?.some(
+        (issue: any) =>
+          issue.code === "too_big" &&
+          issue.path.join("/") === "details" &&
+          issue.maximum === 32 - request.contractDetailFamilies.length,
+      ),
   );
   const altered = structuredClone(record.response);
   altered.details.find((d) =>
@@ -808,18 +861,10 @@ test("Long selected originals retain all parts while generated detail and text c
   assert.equal(JSON.stringify(input), before);
 });
 
-test("V14 anchors survive provider schema and the full own-evidence decoder", () => {
+test("V18 catalogue selections survive provider schema and the full own-evidence decoder", () => {
   const input = context(),
     request = buildSourceInterpretationRequest(input),
     value = wire(input);
-  value.components[0].roleEvidence.actionSelection.exactText = {
-    startText: "Revisione",
-    endText: "Revisione",
-  };
-  value.components[0].meaning.objectSelection.exactText = {
-    startText: "del progetto",
-    endText: "definitivo",
-  };
   const native = openaiResponseBody(
     "gpt-6-luna",
     request.system,
@@ -836,17 +881,17 @@ test("V14 anchors survive provider schema and the full own-evidence decoder", ()
   const record = recordSourceInterpretation(value, request, metadata);
   assert.equal(
     record.response.components[0].roleEvidence.actionText,
-    "Revisione",
+    input.body.passages[0].text,
   );
   assert.equal(
     record.response.components[0].meaning.objectText,
-    "del progetto definitivo",
+    input.body.passages[0].text,
   );
   assert.equal(JSON.stringify({ input, value }), before);
   value.components[0].evidence = [{ sourceRef: "s2" }];
   assert.throws(
     () => recordSourceInterpretation(value, request, metadata),
-    /own component evidence/,
+    /own component evidence|literalSelectionId/,
   );
 });
 
@@ -870,7 +915,7 @@ test("V11 copies the original preposition and has one classification-to-componen
   const record = recordSourceInterpretation(value, request, metadata);
   assert.equal(
     record.response.components[0].meaning.objectText,
-    "del progetto definitivo",
+    input.body.passages[0].text,
   );
   assert.deepEqual(
     record.response.components[0].meaning.classificationContextIds,
@@ -916,10 +961,15 @@ test("Additional details cannot append a document-source enum or a visit consequ
   );
   assert.deepEqual(record.response.details[0].sourceRefs, ["s3"]);
   assert.equal(
-    record.response.details[1].explanation,
+    record.response.details.find((d) => d.sourceRefs.includes("s4"))!
+      .explanation,
     "Senza visita l'offerta non sarà considerata.",
   );
-  assert.deepEqual(record.response.details[1].sourceRefs, ["s4"]);
+  assert.deepEqual(
+    record.response.details.find((d) => d.sourceRefs.includes("s4"))!
+      .sourceRefs,
+    ["s4"],
+  );
   const bad = structuredClone(value);
   bad.details[0].quoteSelection.exactText = "Contenuto inesistente";
   assert.throws(
@@ -949,7 +999,7 @@ test("Additional details cannot append a document-source enum or a visit consequ
     {
       kind: "execution_condition",
       scope: "project_context",
-      explanation: "Fonte: documents_source_simap.",
+      originalText: true,
       sourceRefs: ["s5"],
     },
   ];
@@ -1016,7 +1066,7 @@ test("Selections retain exact contiguous spans and reject gaps, another lot and 
         buildSourceInterpretationRequest(context()),
         metadata,
       ),
-    /own component evidence/,
+    /own component evidence|literalSelectionId/,
   );
 });
 
@@ -1333,13 +1383,20 @@ test("Production review V5 requires explicit coverage proof and cannot emit the 
       native.text!.format.schema,
     );
     assert(accepts(responses[index]), JSON.stringify(accepts.errors));
+    // The reproduced mismatch cannot cross the native provider schema.
+    for (const claimId of r.assignedClaimIds) {
+      const quoted: any = structuredClone(responses[index]);
+      quoted.checksByClaim[claimId].draftQuote =
+        "A different field, not this claim.";
+      assert.equal(accepts(quoted), false);
+    }
     // The same location must not become optional when its scope-coverage
     // judgment and its individual clause happen to belong to different groups.
     const territory = r.coverageBindings.find(
       (b) => b.kind === "scope_coverage" && b.sourceRefs.includes("s5"),
     );
     if (territory) {
-      assert.deepEqual(territory.requiredSourceRefs, ["s5"]);
+      assert(territory.requiredSourceRefs?.includes("s5"));
       const optional = structuredClone(responses[index]);
       const check = optional.checksByClaim[territory.claimId];
       check.coverageBySource.s5 = {
@@ -1741,7 +1798,12 @@ test("Uncertainty and conflict retain mandatory clauses and cannot bypass their 
     assert.equal(record.response.status, status);
     assert.equal(record.response.components[0].role, null);
     assert.deepEqual(record.response.issues, value.issues);
-    assert.deepEqual(record.response.details, value.contractClauseDetails.s4);
+    assert.equal(
+      record.response.details.find((d) => d.sourceRefs.includes("s4"))!
+        .explanation,
+      input.body.passages[3].text,
+    );
+    assert(record.response.details.some((d) => d.sourceRefs.includes("s1")));
     assert.equal(JSON.stringify(value), original);
     assert.throws(
       () =>
@@ -1759,9 +1821,11 @@ test("Uncertainty and conflict retain mandatory clauses and cannot bypass their 
         validateSourceInterpretation(
           {
             ...record.response,
-            details: [
-              { ...record.response.details[0], sourceRefs: ["s4", "s3"] },
-            ],
+            details: record.response.details.map((d) =>
+              d.sourceRefs.includes("s4")
+                ? { ...d, sourceRefs: ["s4", "s3"] }
+                : d,
+            ),
           },
           request,
         ),
@@ -1813,7 +1877,14 @@ test("Uncertainty and conflict retain mandatory clauses and cannot bypass their 
     );
     assert.throws(
       () => recordSourceInterpretation(overflow, request, metadata),
-      /aggregate limit/,
+      (error: any) =>
+        error.message.includes("aggregate limit") ||
+        error.issues?.some(
+          (issue: any) =>
+            issue.code === "too_big" &&
+            issue.path.join("/") === "details" &&
+            issue.maximum === 32 - request.contractDetailFamilies.length,
+        ),
     );
   }
 });

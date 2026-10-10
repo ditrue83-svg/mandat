@@ -3,9 +3,9 @@ import { plainText } from "./plain-text";
 // Recognize only complete, unqualified absence statements. A substring match
 // could discard a later obligation, a language conflict, or a visit by request.
 const absence: Record<string, RegExp> = {
-  it: /^(?:nessun sopralluogo(?: (?:è )?previsto)?|sopralluogo non previsto|non è previsto (?:alcun |nessun |il )?sopralluogo|non sono previsti sopralluoghi)\.?$/u,
+  it: /^(?:nessun sopralluogo(?: (?:è )?previsto)?|sopralluogo non previsto|non è previsto (?:alcun |nessun |il )?sopralluogo|non sono previsti sopralluoghi|non viene effettuata alcun sopraluogo|non viene effettuato alcun sopralluogo)\.?$/u,
   fr: /^(?:aucune visite(?: des lieux)? n'est prévue|pas de visite(?: des lieux)? prévue)\.?$/u,
-  de: /^(?:es ist keine (?:besichtigung|begehung) vorgesehen|keine (?:besichtigung|begehung)(?: vorgesehen)?)\.?$/u,
+  de: /^(?:es ist keine (?:besichtigung|begehung) vorgesehen|keine (?:besichtigung|begehung)(?: vorgesehen)?|es findet keine begehung statt)\.?$/u,
   en: /^(?:no (?:site visit|site inspection)(?: is)? (?:planned|scheduled)|no site visit)\.?$/u,
 };
 
@@ -71,5 +71,38 @@ export function explicitlyNoSiteVisit(notes: unknown): boolean {
       const patterns = language ? [absence[language]] : Object.values(absence);
       return patterns.some((pattern) => pattern?.test(normalized));
     })
+  );
+}
+
+// These complete absence statements also retain a presumption of knowledge.
+// That presumption is a contractual condition, not a dated visit, attendance,
+// reservation or certificate requirement. Source generation/review still sees
+// every original sentence; this only resolves the attendance filter.
+const absenceWithKnowledge: Readonly<Record<string, RegExp>> = {
+  it: /^nessun sopralluogo previsto\. si assume che gli offerenti conoscano bene il luogo di intervento, le condizioni ambientali e quelle di lavoro valide per la presente commessa\.$/u,
+  fr: /^aucune visite des lieux n'est prévue\. on part du principe que les soumissionnaires connaissent bien le lieu d'intervention, ainsi que les conditions environnementales et de travail applicables au présent marché\.$/u,
+};
+export function explicitlyNoVisitWithAssumedKnowledge(notes: unknown): boolean {
+  if (!notes || typeof notes !== "object" || Array.isArray(notes)) return false;
+  const entries = Object.entries(notes).filter(([, value]) =>
+    typeof value === "string" ? !!plainText(value) : value !== null,
+  );
+  let hasKnowledge = false;
+  return (
+    entries.length > 0 &&
+    entries.every(([language, value]) => {
+      if (typeof value !== "string") return false;
+      const normalized = plainText(value)
+        .toLowerCase()
+        .replace(/[’‘]/gu, "'")
+        .replace(/\s+/gu, " ")
+        .trim();
+      if (absenceWithKnowledge[language]?.test(normalized)) {
+        hasKnowledge = true;
+        return true;
+      }
+      return explicitlyNoSiteVisit({ [language]: value });
+    }) &&
+    hasKnowledge
   );
 }

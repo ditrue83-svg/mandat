@@ -1,0 +1,340 @@
+{
+  "id": "aa48ad67-2920-4f36-a5bc-ba78515e0b19",
+  "title": {
+    "de": "AZB: Deutschschweiz und Drei-Seen-Land",
+    "en": null,
+    "fr": "CFAF : Suisse alémanique et Pays des Trois-Lacs",
+    "it": "CFAF: Svizzera tedesca e regione dei Tre Laghi"
+  },
+  "options": "yes",
+  "bkpCodes": [],
+  "npkCodes": [],
+  "variants": "no",
+  "lotNumber": 1,
+  "orderType": "service",
+  "ebkphCodes": [],
+  "ebkptCodes": [],
+  "optionsNote": {
+    "de": "Das offene Verfahren ist rein optional.\n\nOption 1: 01.01.2028 – 31.12.2029\nOption 2: 01.01.2030 – 31.12.2032",
+    "en": null,
+    "fr": "La procédure ouverte est purement optionnelle.\n\nOption 1 : 01.01.2028 – 31.12.2029\nOption 2 : 01.01.2030 – 31.12.2032",
+    "it": "La procedura aperta è puramente opzionale.\n\nOpzione 1: 01.01.2028 – 31.12.2029\nOpzione 2: 01.01.2030 – 31.12.2032"
+  },
+  "processType": "open",
+  "contractDays": null,
+  "orderAddress": {
+    "city": {
+      "de": null,
+      "en": null,
+      "fr": null,
+      "it": null
+    },
+    "cantonId": null,
+    "countryId": "CH",
+    "postalCode": null
+  },
+  "variantsNote": {
+    "de": null,
+    "en": null,
+    "fr": null,
+    "it": null
+  },
+  "awardCriteria": [
+    {
+      "id": "cc4802d3-4286-430f-8d6b-81d42b9e8dd1",
+      "title": {
+        "de": "ZK 1",
+        "en": null,
+        "fr": "CAd 1",
+        "it": "CA 1"
+      },
+      "maxPoints": 6000,
+      "weighting": 60,
+      "description": {
+        "de": "<p>Preis</p>",
+        "en": null,
+        "fr": "<p>Prix</p>",
+        "it": "<p>Prezzo</p>"
+      },
+      "verification": null,
+      "isPriceCriterion": true
+    },
+    {
+      "id": "14874139-1e59-4e51-a641-320e2fc1c1f6",
+      "title": {
+        "de": "ZK 2",
+        "en": null,
+        "fr": "CAd 2",
+        "it": "CA 2"
+      },
+      "maxPoints": 1000,
+      "weighting": 10,
+      "description": {
+        "de": "<p>Verpflegung</p>",
+        "en": null,
+        "fr": "<p>Restauration</p>",
+        "it": "<p>Vitto</p>"
+      },
+      "verification": null,
+      "isPriceCriterion": false
+    },
+    {
+      "id": "27531109-1013-43d6-8a4c-44887a936668",
+      "title": {
+        "de": "ZK 3",
+        "en": null,
+        "fr": "CAd 3",
+        "it": "CA 3"
+      },
+      "maxPoints": 1000,
+      "weighting": 10,
+      "description": {
+        "de": "<p>Umgebung</p>",
+        "en": null,
+        "fr": "<p>Cadre environnant</p>",
+        "it": "<p>Area circostante</p>"
+      },
+      "verification": null,
+      "isPriceCriterion": false
+    },
+    {
+      "id": "277150d4-ea02-4aed-8bef-47f43cf1465c",
+      "title": {
+        "de": "ZK 4",
+        "en": null,
+        "fr": "CAd 4",
+        "it": "CA 4"
+      },
+      "maxPoints": 1000,
+      "weighting": 10,
+      "description": {
+        "de": "<p>Nachhaltigkeit</p>",
+        "en": null,
+        "fr": "<p>Durabilité</p>",
+        "it": "<p>Sostenibilità</p>"
+      },
+      "verification": null,
+      "isPriceCriterion": false
+    },
+    {
+      "id": "c0cb696e-c932-490f-a125-2fabbd91b141",
+      "title": {
+        "de": "ZK 5",
+        "en": null,
+        "fr": "CAd 5",
+        "it": "CA 5"
+      },
+      "maxPoints": 1000,
+      "weighting": 10,
+      "description": {
+        "de": "<p>Ausbildung von Lernenden</p>",
+        "en": null,
+        "fr": "<p>Formation d’apprentis</p>",
+        "it": "<p>Formazione degli apprendisti</p>"
+      },
+      "verification": null,
+      "isPriceCriterion": false
+    }
+  ],
+  "executionDays": null,
+  "executionNote": {
+    "de": "Die Reservationen für Seminare erfolgen bis zu zwei Jahren vor Seminarbeginn.",
+    "en": null,
+    "fr": "Les réservations en lien avec les formations s’effectuent deux ans au plus tard avant la date de début de la formation.",
+    "it": "Le prenotazioni per i seminari possono essere effettuate fino a due anni prima dell'inizio del seminario."
+  },
+  "partialOffers": "yes",
+  "contractPeriod": {
+    "dateRange": [
+      "2028-01-01",
+      "2032-12-31"
+    ]
+  },
+  "projectSubType": "service",
+  "executionPeriod": {
+    "dateRange": [
+      "2028-01-01",
+      "2032-12-31"
+    ]
+  },
+  "orderDescription": {
+    "de": "<p>Hotels oder Seminarzentren in der Deutschschweiz und im Drei-Seen-Land, die vom Hauptbahnhof Bern mit dem öffentlichen Verkehr oder einem Transportdienst des Hotels/Seminarzentrums in maximal 75 Minuten (von Tür zu Tür) gemäss SBB-Fahrplan erreichbar sind.</p><p>Diese Hotels und/oder Seminarzentren dürfen sich nicht in der Agglomeration Bern befinden (<a href=\"https://www.google.com/url?sa=t&amp;rct=j&amp;q=&amp;esrc=s&amp;source=web&amp;cd=&amp;ved=2ahUKEwiEspKnxPeSAxWY2QIHHYpXGjsQFnoECBwQAQ&amp;url=https%3A%2F%2Fwww.bern.ch%2Fthemen%2Fstadt-recht-und-politik%2Fbern-in-zahlen%2Fkatost%2F00gruube%2Fdownloads%2Fg-00-00-010.pdf%2Fdownload&amp;usg=AOvVaw0VRVObUy3ShG7b_fhtQcD8&amp;opi=89978449\" rel=\"noopener noreferrer\" target=\"_blank\">Anhang 06</a>: <em>Hauptkern, Kernstadt und Hauptkern, übrige Hauptkerngemeinden</em>).</p>",
+    "en": null,
+    "fr": "<p>Hôtels ou centres de séminaire en Suisse alémanique ou dans le Pays des Trois-Lacs, accessibles depuis la gare centrale de Berne en transports publics ou avec le service de navettes assurées par l’hôtel ou le centre de séminaire en 75 minutes au maximum (porte à porte) selon l’horaire des CFF.</p><p>Ces hôtels ou centres de séminaire ne doivent pas se trouver dans l’agglomération bernoise (<a href=\"https://www.google.com/url?sa=t&amp;rct=j&amp;q=&amp;esrc=s&amp;source=web&amp;cd=&amp;ved=2ahUKEwiEspKnxPeSAxWY2QIHHYpXGjsQFnoECBwQAQ&amp;url=https%3A%2F%2Fwww.bern.ch%2Fthemen%2Fstadt-recht-und-politik%2Fbern-in-zahlen%2Fkatost%2F00gruube%2Fdownloads%2Fg-00-00-010.pdf%2Fdownload&amp;usg=AOvVaw0VRVObUy3ShG7b_fhtQcD8&amp;opi=89978449\" rel=\"noopener noreferrer\" target=\"_blank\">annexe 6</a> [en allemand uniquement]<em> </em>: <em>Hauptkern, Kernstadt und Hauptkern, übrige Hauptkerngemeinden</em>).</p>",
+    "it": "<p>Alberghi o centri per seminari ubicati nella Svizzera tedesca e nella regione dei Tre Laghi, raggiungibili dalla stazione centrale di Berna con i mezzi pubblici o con un servizio di trasporto offerto dall’albergo o dal centro per seminari. Durata massima del tragitto: 75 minuti (porta a porta), secondo l’orario delle FFS.</p><p>Tali strutture non devono trovarsi nell’agglomerato di Berna (cfr. mappa, <a href=\"https://www.google.com/url?sa=t&amp;rct=j&amp;q=&amp;esrc=s&amp;source=web&amp;cd=&amp;ved=2ahUKEwiEspKnxPeSAxWY2QIHHYpXGjsQFnoECBwQAQ&amp;url=https%3A%2F%2Fwww.bern.ch%2Fthemen%2Fstadt-recht-und-politik%2Fbern-in-zahlen%2Fkatost%2F00gruube%2Fdownloads%2Fg-00-00-010.pdf%2Fdownload&amp;usg=AOvVaw0VRVObUy3ShG7b_fhtQcD8&amp;opi=89978449\" rel=\"noopener noreferrer\" target=\"_blank\">allegato 6</a> [solo in tedesco]: <em>Hauptkern, Kernstadt und Hauptkern, übrige Hauptkerngemeinden</em>).</p>"
+  },
+  "awardCriteriaNote": {
+    "de": "Die detaillierten Zuschlagskriterien sind in den Anhängen 1 und 2 der Ausschreibungsunterlagen ersichtlich.",
+    "en": null,
+    "fr": "Les critères d'adjudication détaillés se trouvent dans les annexes 1 et 2 des documents d'appel d'offres.",
+    "it": "I criteri di aggiudicazione dettagliati si trovano negli allegati 1 e 2 dei documenti di gara."
+  },
+  "partialOffersNote": {
+    "de": "Teilangebote innerhalb eines Loses sind nicht zugelassen.",
+    "en": null,
+    "fr": "Des offres partielles pour des fractions d'un lot ne sont pas admises.",
+    "it": "Ma non all’interno di un medesimo lotto."
+  },
+  "additionalCpvCodes": [],
+  "contractDeadlineType": "date_time",
+  "canContractBeExtended": "no",
+  "executionDeadlineType": "date_time",
+  "qualificationCriteria": [
+    {
+      "id": "bc51afaa-7439-407c-a4e5-ccfac3af0e3d",
+      "title": {
+        "de": "EK 1 Wirtschaftliche/finanzielle Leistungsfähigkeit",
+        "en": null,
+        "fr": "CAp 1 Capacité économique et financière",
+        "it": "CI 1 Idoneità economica e finanziaria"
+      },
+      "description": {
+        "de": "<p>Der Anbieter verfügt über eine genügende wirtschaftliche/finanzielle Leistungsfähigkeit, um den Auftrag erfüllen zu können.</p>",
+        "en": null,
+        "fr": "<p>Le soumissionnaire dispose de la capacité économique et financière nécessaire à l’exécution du mandat.</p>",
+        "it": "<p>L’offerente è dotato di sufficiente idoneità economica e finanziaria per eseguire la commessa.</p>"
+      },
+      "verification": {
+        "de": "<p>Auszug aus dem Betreibungsregister nicht älter als 3 Monate zum Zeitpunkt der Aufforderung durch den Auftraggeber. Bei Anbietern aus dem Ausland vergleichbare aktuelle, amtliche Urkunde des Auslandes. </p><p>Hinweis: Die Vergabestelle überprüft elektronisch den Auszug aus dem Zentralen Firmenindex (<a href=\"http://www.zefix.ch/\" rel=\"noopener noreferrer\" target=\"_blank\">www.zefix.ch</a>). </p><p>Bei Anbietern aus dem Ausland Auszug aus dem Handelsregister oder eine vergleichbare, amtliche Urkunde des Auslandes.</p><p><strong>Diese Eignungsnachweise sind erst auf Aufforderung, nach Einreichung des Angebots und vor dem Zuschlag einzureichen.</strong></p>",
+        "en": null,
+        "fr": "<p>Extrait du registre des poursuites ne datant pas de plus de 3 mois au moment où l’adjudicateur le demande. Pour les soumissionnaires étrangers, document officiel étranger équivalent établi récemment. </p><p>N. B. L’adjudicateur vérifie les extraits de l’index central des raisons de commerce (<a href=\"https://www.zefix.ch/fr/search/entity/welcome\" rel=\"noopener noreferrer\" target=\"_blank\">www.zefix.ch</a>) au format électronique. </p><p>Pour les soumissionnaires étrangers, extrait du registre du commerce ou document officiel étranger équivalent.</p><p><strong>Ces justificatifs ne doivent être fournis que sur demande, après la remise de l’offre et avant l’adjudication du marché.</strong></p>",
+        "it": "<p>Estratto del registro delle esecuzioni, con data non anteriore a 3 mesi al momento della richiesta da parte del committente. Per gli offerenti esteri: documento ufficiale estero equivalente. </p><p>Nota: il servizio di aggiudicazione verifica elettronicamente l’estratto dell’indice centrale delle ditte (<a href=\"https://www.zefix.ch/it/search/entity/welcome\" rel=\"noopener noreferrer\" target=\"_blank\">www.zefix.ch</a>). </p><p>Per gli offerenti esteri: estratto del registro di commercio o documento ufficiale estero equivalente.</p><p><strong>Queste prove d’idoneità devono essere fornite solo su richiesta del committente dopo la presentazione dell’offerta e prima dell’aggiudicazione.</strong></p>"
+      }
+    },
+    {
+      "id": "6a1592a2-dd6c-49d0-bc06-01fa242a83d1",
+      "title": {
+        "de": "EK 2 Personelle Ressourcen",
+        "en": null,
+        "fr": "CAp 2 Ressources humaines",
+        "it": "CI 2 Risorse di personale"
+      },
+      "description": {
+        "de": "<p>Der Anbieter verfügt über die nötigen personellen Ressourcen, um den Auftrag wie im Pflichtenheft umschrieben, erfüllen zu können.</p>",
+        "en": null,
+        "fr": "<p>Le soumissionnaire dispose du personnel nécessaire à l’exécution du mandat décrit dans le cahier des charges.</p>",
+        "it": "<p>L’offerente dispone del personale necessario per eseguire la commessa come descritto nel capitolato d’oneri.</p>"
+      },
+      "verification": {
+        "de": "<p>Schriftliche Bestätigung im Anhang 1 mit nachvollziehbarer Dokumentation der für den Auftrag eingesetzten personellen Ressourcen.</p>",
+        "en": null,
+        "fr": "<p>Confirmation écrite dans l'annexe 1 accompagnée d’indications claires concernant le personnel mis à disposition pour l’exécution du mandat.</p>",
+        "it": "<p>Conferma scritta nell'allegato 1 con documentazione che indichi chiaramente il personale impiegato per l’esecuzione della commessa.</p>"
+      }
+    },
+    {
+      "id": "96fd2a71-e22e-4613-9c73-389b2cdee072",
+      "title": {
+        "de": "EK 3 Ansprechperson",
+        "en": null,
+        "fr": "CAp 3 Interlocuteur",
+        "it": "CI 3 Persone di contatto"
+      },
+      "description": {
+        "de": "<p>Der Anbieter verfügt über eine Ansprechperson (single point of contact, SPOC), inklusive Stellvertretung, welche bei der Eskalation von Problemen des Auftrags zuständig sind und den Entscheid herbeiführen können.</p>",
+        "en": null,
+        "fr": "<p>Le soumissionnaire met à disposition un interlocuteur (<em>single point of contact</em>, SPOC) et un suppléant chargés de traiter les problèmes en lien avec le mandat et habilités à prendre des décisions.</p>",
+        "it": "<p>L’offerente dispone di una persona di contatto («single point of contact», SPOC) e del rispettivo sostituto che sono responsabili della procedura di escalation in caso di problemi legati alla commessa e che hanno competenze decisionali.</p>"
+      },
+      "verification": {
+        "de": "<p>Schriftliche Bestätigung im Anhang 1 und ausgefülltes Dokument «Anhang 14 Ansprechperson».</p>",
+        "en": null,
+        "fr": "<p>Confirmation écrite dans l'annexe 1 et annexe 14 <em>Interlocuteur </em>dûment remplie<strong>.</strong></p>",
+        "it": "<p>Conferma scritta nell'allegato 1 e modulo «Allegato 14 – Persone di contatto».</p>"
+      }
+    },
+    {
+      "id": "01b59593-4a43-4208-8ab8-24897db5610d",
+      "title": {
+        "de": "EK 4 Akzeptanz der Allgemeinen Geschäftsbedingungen des Bundes (AGB) für",
+        "en": null,
+        "fr": "CAp 4 Acceptation des conditions générales de la Confédération (CG)",
+        "it": "CI 4 Accettazione delle condizioni generali della Confederazione (CG) per"
+      },
+      "description": {
+        "de": "<p>- Dienstleistungsaufträge (Ausgabe September 2016, Stand Januar 2024)</p><p>Für das vorliegende Geschäft gelten die oben aufgelisteten allgemeinen Bestimmungen.</p>",
+        "en": null,
+        "fr": "<p>- CG relatives à l’achat de services (édition de septembre 2016, état de janvier 2024).</p><p>Les CG susmentionnées s’appliquent au marché faisant l’objet du présent appel d’offres.</p><p><br></p>",
+        "it": "<p>- le commesse di prestazioni di servizio (edizione: settembre 2016, stato: gennaio 2024).</p><p>Alla commessa in questione si applicano le CG summenzionate.</p>"
+      },
+      "verification": {
+        "de": "<p>Schriftliche Bestätigung im Anhang 1.</p>",
+        "en": null,
+        "fr": "<p>Confirmation écrite dans l'annexe 1. </p>",
+        "it": "<p>Conferma scritta nell'allegato 1.</p>"
+      }
+    },
+    {
+      "id": "990c9ad0-5533-4019-a92c-66bd34eca109",
+      "title": {
+        "de": "EK 5 Akzeptanz des Vertragsentwurfs",
+        "en": null,
+        "fr": "CAp 5 Acceptation du projet de contrat",
+        "it": "CI 5 Accettazione della bozza di contratto"
+      },
+      "description": {
+        "de": "<p>Der Anbieter ist bereit, den Vertragsentwurf in Anhang Nr. 11 des Pflichtenhefts vorbehaltlos zu akzeptieren.</p>",
+        "en": null,
+        "fr": "<p>Le soumissionnaire s’engage à accepter sans réserve le projet de contrat figurant à l’annexe 11 du cahier des charges.</p>",
+        "it": "<p>L’offerente è disposto ad accettare senza riserve la bozza del contratto di cui all’allegato 11 del capitolato d’oneri.</p>"
+      },
+      "verification": {
+        "de": "<p>Schriftliche Bestätigung im Anhang 1.</p>",
+        "en": null,
+        "fr": "<p>Confirmation écrite dans l'annexe 1.</p>",
+        "it": "<p>Conferma scritta nell'allegato 1.</p>"
+      }
+    },
+    {
+      "id": "7d19f69a-3a40-414d-9b26-6e92001b0cf6",
+      "title": {
+        "de": "EK 6 Qualitätsmanagementsystem",
+        "en": null,
+        "fr": "CAp 6 Système de gestion de la qualité",
+        "it": "CI 6 Sistema di gestione della qualità"
+      },
+      "description": {
+        "de": "<p>Nachweis, dass der Anbieter über ein eingeführtes und regelmässig überprüftes internes Qualitätsmanagementsystem verfügt oder gleichwertig.</p>",
+        "en": null,
+        "fr": "<p>Le soumissionnaire dispose d’un système interne de gestion de la qualité régulièrement contrôlé ou d’un système équivalent.</p>",
+        "it": "<p>Prova che l’offerente ha introdotto e controlla periodicamente un sistema interno di gestione della qualità o uno standard equivalente.</p>"
+      },
+      "verification": {
+        "de": "<p>Nachvollziehbare Dokumentation oder entsprechendes Zertifikat.</p>",
+        "en": null,
+        "fr": "<p>Description claire du système de gestion de la qualité ou certificat correspondant.</p>",
+        "it": "<p>Documentazione completa o relativo certificato.</p>"
+      }
+    }
+  ],
+  "awardCriteriaSelection": "criteria_defined",
+  "orderAddressDescription": {
+    "de": "In den Räumlichkeiten des Anbieters.",
+    "en": null,
+    "fr": "Locaux du soumissionnaire.",
+    "it": "Nei locali dell’offerente."
+  },
+  "canContractBeExtendedNote": {
+    "de": null,
+    "en": null,
+    "fr": null,
+    "it": null
+  },
+  "qualificationCriteriaNote": {
+    "de": "Alle wirtschaftlich leistungsfähigen Unternehmen, welche die nachfolgenden Eignungskriterien bzw. -nachweise erfüllen, sind aufgerufen, ein Angebot in Schweizer Franken (CHF) zu unterbreiten.\nDie nachfolgend aufgeführten Eignungsnachweise müssen vollständig und ohne Einschränkungen oder Modifikation mit der Unterbreitung des Angebotes bestätigt bzw. beigelegt und erfüllt werden, ansonsten wird nicht auf die Offerte eingegangen.",
+    "en": null,
+    "fr": "Toutes les entreprises disposant de la capacité économique nécessaire qui remplissent les critères d'aptitude et peuvent apporter les justificatifs requis sont invitées à déposer une offre en francs suisses (CHF).\nLes preuves de qualification énumérées ci-après doivent être fournies dans leur intégralité et sans restriction, ni modification en même temps que l’offre, car autrement il ne sera pas entré en matière sur cette dernière.",
+    "it": "Tutte le ditte che dispongono di sufficienti competenze economica / finanziaria e tecniche e che sono in grado di presentare leseguenti prove richieste sono invitate a inoltrare un’offerta in CHF.\nI criteri di idoneità elencati devono essere adempiuti e attestati completamente e senza limitazioni o modifiche con la presentazione dell'offerta, altrimenti l'offerta non sarà ammessa."
+  },
+  "qualificationCriteriaAsPDF": false,
+  "orderAddressOnlyDescription": "yes",
+  "weightedQualificationCriteria": [],
+  "qualificationCriteriaInDocuments": "no",
+  "weightedQualificationCriteriaNote": {
+    "de": null,
+    "en": null,
+    "fr": null,
+    "it": null
+  },
+  "weightedQualificationCriteriaInDocuments": "no"
+}

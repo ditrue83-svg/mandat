@@ -1496,3 +1496,103 @@ test("A genuine v1 fixture stays byte-identical through decoding and a mixed v2 
   assert.equal(stale.signalEligible, false);
   assert.equal(stable(decoded), bytes);
 });
+
+// Operational exclusion must remain visible without inventing a professional verdict.
+for (const status of ["awarded", "closed", "cancelled"] as const) {
+  test(`A ${status} project retains its operational explanation in the final projection`, () => {
+    const i = projectInput();
+    const result = resolveProjectLotAssessment({
+      ...i,
+      publication: { ...i.publication, status },
+    });
+    assert.equal(result.signalEligible, false);
+    assert.equal(result.allDifferent, false);
+    assert.equal(result.quality, "unresolved");
+    assert.equal(result.projectAssessment?.preliminary?.requiresReview, false);
+    assert.equal(result.reason, "La pubblicazione non è un bando aperto.");
+    assert.equal(projectLotAssessmentDto(result).reason, result.reason);
+    assert.equal(result.projectAssessment?.evaluation, null);
+    assert.equal(result.projectAssessment?.automatic, null);
+  });
+}
+test("An open unassessed project still needs a professional judgment", () => {
+  const result = resolveProjectLotAssessment(projectInput());
+  assert.equal(result.signalEligible, false);
+  assert.equal(result.state, "review");
+  assert.equal(
+    result.reason,
+    "La pertinenza del progetto richiede ancora una valutazione del target o della fonte.",
+  );
+});
+test("An explicit suppression retains precedence over the project availability explanation", () => {
+  const i = projectInput();
+  const result = resolveProjectLotAssessment({
+    ...i,
+    publication: { ...i.publication, status: "awarded" },
+    suppression: { active: true, reason: "Sospensione esplicita di prova" },
+  });
+  assert.equal(result.state, "suppressed");
+  assert.equal(result.reason, "Sospensione esplicita di prova");
+});
+
+test("Local operational veto stays visible without asserting all firms' activities are different", () => {
+  const i = input();
+  const result = resolveProjectLotAssessment({
+    ...i,
+    publication: { ...i.publication, status: "awarded" },
+  });
+  assert.equal(result.signalEligible, false);
+  assert.equal(result.allDifferent, false);
+  assert.equal(result.quality, "unresolved");
+  const dto = projectLotAssessmentDto(result);
+  assert(
+    dto.targets.every(
+      (x) =>
+        x.result === null && x.origin === null && x.operationalVeto === true,
+    ),
+  );
+  assert.equal(result.reason, "La pubblicazione non è un bando aperto.");
+  assert(result.targets.every((x) => x.operationalVeto));
+});
+
+test("Operational-only DTO retains null professional result/origin plus exact veto reason and evidence", () => {
+  const i = input();
+  const result = resolveProjectLotAssessment({
+    ...i,
+    publication: { ...i.publication, status: "awarded" },
+  });
+  for (const target of projectLotAssessmentDto(result).targets) {
+    assert.equal(target.result, null);
+    assert.equal(target.origin, null);
+    assert.equal(target.operationalVeto, true);
+    assert.equal(target.reason, "La pubblicazione non è un bando aperto.");
+    assert(target.evidence.some((e) => e.quote === "awarded"));
+  }
+});
+test("An operational veto does not overwrite a current AI professional relation", () => {
+  const i = input();
+  const result = resolveProjectLotAssessment({
+    ...i,
+    publication: { ...i.publication, status: "awarded" },
+  });
+  const targets = result.targets.map((t) => ({
+    ...t,
+    automatic: {
+      relation: "direct",
+      result: "different",
+      reason: "Synthetic professional relation",
+      evidence: [],
+      companyEvidence: [],
+    } as unknown as NonNullable<typeof t.automatic>,
+  }));
+  const dto = projectLotAssessmentDto({ ...result, targets });
+  assert(
+    dto.targets.every(
+      (t) =>
+        t.result === "direct" &&
+        t.origin === "ai" &&
+        t.operationalVeto === true,
+    ),
+  );
+  assert.equal(result.signalEligible, false);
+});

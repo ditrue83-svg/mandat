@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
@@ -21,9 +22,13 @@ import {
 import type { LotSourceTarget } from "../src/lib/lot-source-context";
 import { LOT_RECONCILIATION_QUEUE } from "../src/lib/lot-reconciliation";
 
-const injected = vi.hoisted(() => ({ db: undefined as unknown }));
+const injected = vi.hoisted(() => ({
+  db: undefined as unknown,
+  viewer: undefined as unknown,
+}));
 vi.mock("@/db", () => ({ getDb: () => injected.db }));
 vi.mock("@/lib/viewer", () => ({
+  pageViewer: async () => injected.viewer,
   HttpError: class extends Error {
     constructor(
       public status: number,
@@ -33,6 +38,14 @@ vi.mock("@/lib/viewer", () => ({
     }
   },
 }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+  usePathname: () => "/bandi/test",
+  notFound: () => {
+    throw new Error("Not found");
+  },
+}));
+import Detail from "../src/app/bandi/[id]/page";
 import {
   appendLotSourceReview,
   loadLotSourceReview,
@@ -643,7 +656,14 @@ it("a pending Radar detail explains company relevance using the current profile,
     .set({ profile: { ...f.profile, exclusions: ["potatura"] } })
     .where(eq(schema.companies.id, f.companyId));
   const changed = await getOpportunity(who, f.p.id);
-  expect(changed?.reason).toContain("escluso (potatura)");
+  expect(changed?.reason).toBe(
+    "I testi del progetto contengono un’attività esclusa dal profilo.",
+  );
+  expect(changed?.lotReview?.targets[0]).toMatchObject({
+    operationalVeto: true,
+    result: null,
+    origin: null,
+  });
   expect(changed?.reason).toBe((await readCatalogEntry(who, f.p.id))?.reason);
   expect(await listOpportunities(who)).toEqual([]);
   expect(await db.select().from(schema.feedback)).toEqual([]);
@@ -1417,4 +1437,69 @@ it("unknown shape cannot revive legacy approval; returning project after a lots 
       .from(schema.matchLotReviewEvents)
       .where(eq(schema.matchLotReviewEvents.publicationId, f.p.id)),
   ).toEqual(history);
+});
+
+it.each(
+  (["closed", "cancelled", "awarded"] as const).flatMap((status) =>
+    [true, false].map((withoutLots) => ({ status, withoutLots })),
+  ),
+)(
+  "closed publication details preserve the operational exclusion ($status, withoutLots=$withoutLots)",
+  async ({ status, withoutLots }) => {
+    const f = await fixture({ withoutLots });
+    await clearLegacy(f);
+    await db
+      .update(schema.publications)
+      .set({ status, data: { ...f.p, status } })
+      .where(eq(schema.publications.id, f.p.id));
+    const who = await customer(f);
+    const detail = await getOpportunity(who, f.p.id);
+    expect(detail).toMatchObject({
+      id: f.p.id,
+      status,
+      score: 0,
+      reason: "La pubblicazione non è un bando aperto.",
+      reviewCandidate: false,
+      lotReview: { signalEligible: false },
+    });
+    expect(await listOpportunities(who)).toEqual([]);
+    for (const target of detail!.lotReview!.targets.filter(
+      (target) => target.state === "current",
+    )) {
+      expect(target).toMatchObject({
+        operationalVeto: true,
+        result: null,
+        origin: null,
+      });
+    }
+    injected.viewer = who;
+    const html = renderToStaticMarkup(
+      await Detail({ params: Promise.resolve({ id: f.p.id }) }),
+    );
+    expect(html).toContain(
+      "Escluso dalle proposte per le condizioni del bando",
+    );
+    expect(html).toContain("La pubblicazione non è un bando aperto.");
+    expect(html).not.toContain("Attività diverse da quelle della ditta");
+    expect(await db.select().from(schema.automaticMatchRuns)).toEqual([]);
+    expect(await db.select().from(schema.notifications)).toEqual([]);
+  },
+);
+
+it("an unreadable correction keeps priority over the closed publication explanation", async () => {
+  const f = await fixture({ withoutLots: true });
+  await clearLegacy(f);
+  await f.adopt(await f.observe(f.raw, true));
+  await db
+    .update(schema.publications)
+    .set({ status: "awarded", data: { ...f.p, status: "awarded" } })
+    .where(eq(schema.publications.id, f.p.id));
+  const who = await customer(f);
+  const detail = await getOpportunity(who, f.p.id);
+  expect(detail?.tenderBrief?.warning).toContain("non è leggibile");
+  expect(detail?.reason).toBe(
+    "La versione più recente della fonte non è leggibile: il confronto con la tua ditta è sospeso. Verifica la pubblicazione originale.",
+  );
+  expect(detail?.lotReview?.signalEligible).toBe(false);
+  expect(await listOpportunities(who)).toEqual([]);
 });

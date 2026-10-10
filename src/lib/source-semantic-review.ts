@@ -1,3 +1,4 @@
+import { projectOriginalClauseDetailEvidence } from "./source-clause-provenance";
 import { structuredOutputSchema } from "./structured-output-schema";
 import {
   expandOriginalClauseDetails,
@@ -7,6 +8,7 @@ import { RADAR_ACCEPTANCE_POLICY } from "./radar-acceptance-policy";
 import {
   coverageProofSchema,
   bindCoverageWitnesses,
+  titleContextReferences,
   coverageSelectionSchema,
   coverageHasWitnesses,
   projectCoverageSelection,
@@ -24,6 +26,7 @@ import {
   type SourceEvidenceReadingRecord,
 } from "./source-evidence-reading";
 import {
+  sourceClauseLiteralFamilies,
   sourceInterpretationKey,
   sourceInterpretationRecordSchema,
   validateSourceInterpretationContext,
@@ -37,11 +40,12 @@ import type {
 import { sourceEvidencePassages } from "./source-evidence-context";
 import {
   isContractScopeField,
+  sourceScopedCriterionContext,
   isProcurementLocationField,
 } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v62";
+  "documentary-source-semantic-review-v76-consolidated-complete-witness";
 export const SOURCE_REVIEW_SUPPORTED_REASON =
   "Le prove indicate sostengono il claim; coverageProof distingue fatti rappresentati e dati facoltativi.";
 const MAX_BYTES = 160_000;
@@ -58,6 +62,13 @@ const MAX_COVERAGE_ITEMS = 96;
 // Claim judgments share the allowance with provider reasoning. Keep the
 // independent reading's smaller default while leaving room for every judgment.
 const MAX_TOKENS = 16_384;
+export function sourceReviewQuotePreservesOriginalValue(
+  claim: string,
+  quote: string,
+) {
+  const value = /valore originale:\s*([^.;\n]+)[.;]?/i.exec(claim);
+  return !value || quote.includes(value[0].replace(/[.;]$/, ""));
+}
 const digest = (value: unknown) =>
   createHash("sha256").update(stableDocumentaryJson(value)).digest("hex");
 const text = (max: number) =>
@@ -107,6 +118,8 @@ type ResponseBounds = {
     readingIds: string[];
     supportedReadingIds?: string[];
     supportedSourceIds?: string[];
+    supportedPerformanceIds?: string[];
+    requiredSupportedSourceIds?: string[];
   }[];
 };
 const checkShape = z.strictObject({
@@ -208,10 +221,18 @@ function providerResponseSchema(
           ? z.union([
               schema.extend({
                 verdict: z.literal("supported"),
+                ...(format === "claim_keyed_refs_v5"
+                  ? { draftQuote: z.null() }
+                  : {}),
                 // Nearby Note/value context cannot replace the original
                 // evidence of the claim being approved.
                 ...(group.supportedSourceIds
-                  ? { sourceRefs: boundedRefs(group.supportedSourceIds) }
+                  ? {
+                      sourceRefs: boundedRefs(
+                        group.supportedSourceIds,
+                        group.requiredSupportedSourceIds?.length ?? 1,
+                      ),
+                    }
                   : {}),
                 ...(["claim_keyed_refs_v4", "claim_keyed_refs_v5"].includes(
                   format,
@@ -223,6 +244,30 @@ function providerResponseSchema(
                 ...readingSelection(
                   group.supportedReadingIds ?? group.readingIds,
                 ),
+                ...(keyedReadings && group.supportedPerformanceIds?.length
+                  ? {
+                      readingRefsById: (() => {
+                        const ids =
+                          group.supportedReadingIds ?? group.readingIds;
+                        const choices = group.supportedPerformanceIds.map(
+                          (required) =>
+                            z.strictObject(
+                              Object.fromEntries(
+                                ids.map((id) => [
+                                  id,
+                                  id === required
+                                    ? z.literal(true)
+                                    : z.boolean(),
+                                ]),
+                              ),
+                            ),
+                        );
+                        return choices.length === 1
+                          ? choices[0]
+                          : z.union(choices);
+                      })(),
+                    }
+                  : {}),
               }),
               schema.extend({
                 verdict: z.enum(["contradicted", "not_verifiable"]),
@@ -471,8 +516,7 @@ export function buildSourceSemanticReviewRequest(
 ) {
   const context = validateSourceInterpretationContext(input);
   const config = configurationSchema.parse(configuration);
-  const { legacyProviderFormatForRegression: _legacy, ...evidenceConfig } =
-    config;
+  const evidenceConfig = config;
   const evidencePlan = buildSourceEvidenceReadingRequest(
     context,
     evidenceConfig,
@@ -505,27 +549,33 @@ export function buildSourceSemanticReviewRequest(
     throw new Error("Review classification context changed");
   // Review the lossless text projection, not merely the first stored piece.
   // Paths below address this explicit draft view, bound by the original hash.
-  const draftDetails = expandOriginalClauseDetails(draft.response.details);
+  let draftDetails = expandOriginalClauseDetails(draft.response.details);
   const originalPassages = sourceEvidencePassages(context);
   const byId = new Map(originalPassages.map((item) => [item.id, item]));
   // Continuations are documentary copies, not model-authored statements.
   // Recheck against the FULL original field even if someone recomputed the
   // record hash after changing a part, reference, language or scope.
+  const literalRequest = draft.response.details.some(
+    (d) => d.originalTextContinuation,
+  )
+    ? sourceClauseLiteralFamilies(context)
+    : undefined;
   for (const detail of draft.response.details) {
     if (!detail.originalTextContinuation) continue;
-    const first = byId.get(detail.sourceRefs[0]);
-    const path = first?.rawPath.replace(/\/(de|en|fr|it|rm)$/, "");
-    const originals = originalPassages.filter(
-      (p) =>
-        p.id.startsWith("s") && // Null/scalar fields are separate facts, never literal wording.
-        p.scope === detail.scope &&
-        p.rawPath.replace(/\/(de|en|fr|it|rm)$/, "") === path,
+    const family = literalRequest!.contractDetailFamilies.find(
+      (f) =>
+        f.scope === detail.scope &&
+        stableDocumentaryJson([...f.sourceRefs].sort()) ===
+          stableDocumentaryJson([...detail.sourceRefs].sort()),
     );
-    const parts = originalClauseTextParts(originals);
+    const originals = family?.sourceRefs.map((ref) => byId.get(ref));
+    if (!originals || originals.some((p) => !p))
+      throw new Error("Review continuation lacks its complete original family");
+    const parts = originalClauseTextParts(originals.map((p) => p!));
     if (
       !parts ||
       parts.length < 2 ||
-      stableDocumentaryJson(originals.map((p) => p.id).sort()) !==
+      stableDocumentaryJson(originals.map((p) => p!.id).sort()) !==
         stableDocumentaryJson([...detail.sourceRefs].sort()) ||
       stableDocumentaryJson(parts) !==
         stableDocumentaryJson([
@@ -567,6 +617,10 @@ export function buildSourceSemanticReviewRequest(
       ...(item.code?.sourceRefs ?? []),
       ...item.labels.flatMap((label) => label.sourceRefs),
     ]);
+  draftDetails = projectOriginalClauseDetailEvidence(
+    draft.response.details,
+    originalPassages,
+  );
   const classes = new Map(classificationContext.map((item) => [item.id, item]));
   const claims: Claim[] = [];
   const add = (
@@ -638,9 +692,53 @@ ${item.meaning.statement}`,
             : required,
       );
   });
-  draftDetails.forEach((item, index) =>
-    add("detail", `/details/${index}`, item.explanation, item.sourceRefs),
-  );
+  let firstDetailIndex = 0;
+  draft.response.details.forEach((item) => {
+    const count = projectOriginalClauseDetailEvidence(
+      [item],
+      originalPassages,
+    ).length;
+    const indexes = Array.from(
+      { length: count },
+      (_, i) => firstDetailIndex + i,
+    );
+    // A very long multilingual family may exceed a single request even
+    // without other claims. Own each COMPLETE original field separately;
+    // never turn a chopped sentence into a standalone semantic judgment.
+    const fields = new Map<string, string[]>();
+    if (item.originalTextContinuation && count > 10)
+      for (const ref of item.sourceRefs) {
+        const original = byId.get(ref)!;
+        const key = original.scope + "|" + original.rawPath;
+        fields.set(key, [...(fields.get(key) ?? []), ref]);
+      }
+    if (fields.size > 1) {
+      for (const refs of fields.values()) {
+        const ownIndexes = indexes.filter((i) =>
+          draftDetails[i].sourceRefs.some((ref) => refs.includes(ref)),
+        );
+        if (!ownIndexes.length)
+          throw new Error("Complete original field lacks its literal parts");
+        add(
+          "detail",
+          `/details/${ownIndexes[0]}`,
+          `Il campo originale completo nei dettagli ${JSON.stringify(ownIndexes)} conserva tutte le proprie proposizioni, significato e ambito. Leggi integralmente tutte le parti e le prove del campo; non solo il primo frammento.`,
+          refs,
+        );
+      }
+      firstDetailIndex += count;
+      return;
+    }
+    // One semantic judgment owns the COMPLETE original condition. Every
+    // literal piece remains in draft.details; per-original-clause coverage
+    // remains separately mandatory. Do not judge chopped prose in isolation.
+    const text =
+      count === 1
+        ? item.explanation
+        : `La condizione completa nei dettagli ${JSON.stringify(indexes)} conserva integralmente contenuto, significato e ambito dei riferimenti originali citati. Leggi parti e prove integralmente, non solo la prima.`;
+    add("detail", `/details/${firstDetailIndex}`, text, item.sourceRefs);
+    firstDetailIndex += count;
+  });
   draft.response.classificationReadings.forEach((item, index) => {
     const classification = classes.get(item.classificationId);
     if (!classification)
@@ -666,10 +764,81 @@ ${item.meaning.statement}`,
   ]);
   if (mandatory.some((id) => !byId.has(id)))
     throw new Error("Review context has unknown source evidence");
+  // Lossless wire dictionary: continuation pieces keep their complete text,
+  // while repeated scope/reference metadata is stored once per exact set.
+  const detailEvidenceBindings: {
+    id: string;
+    scope: string;
+    sourceRefs: readonly string[];
+  }[] = [];
+  const detailEvidenceIds = new Map<string, string>();
+  const detailKinds = [...new Set(draftDetails.map((detail) => detail.kind))];
+  const compactDraftDetails = draftDetails.map(
+    ({ scope, sourceRefs, ...detail }, index) => {
+      const key = stableDocumentaryJson([scope, sourceRefs]);
+      let id = detailEvidenceIds.get(key);
+      if (!id) {
+        id = `de${detailEvidenceBindings.length + 1}`;
+        detailEvidenceIds.set(key, id);
+        detailEvidenceBindings.push({ id, scope, sourceRefs });
+      }
+      const { kind, ...content } = detail;
+      return { ...content, index, k: detailKinds.indexOf(kind), b: id };
+    },
+  );
+  const originalTextPieces: string[] = [];
+  const literalDetails = compactDraftDetails.map((detail) => {
+    if (!("lf" in detail) || !detail.lf) return detail;
+    const { explanation, ...rest } = detail;
+    const literalPiece = originalTextPieces.length;
+    originalTextPieces.push(explanation);
+    return { ...rest, literalPiece };
+  });
+  const literalWhole = originalTextPieces.join("");
+  const literalStarts: number[] = [];
+  let literalOffset = 0;
+  for (const piece of originalTextPieces) {
+    literalStarts.push(literalOffset);
+    literalOffset += piece.length;
+  }
+  const literalOriginal = (
+    item: Omit<(typeof originalPassages)[number], "url">,
+  ) => {
+    if (config.legacyProviderFormatForRegression || !item.text.length)
+      return item;
+    const start = literalWhole.indexOf(item.text);
+    if (start < 0) return item;
+    const end = start + item.text.length;
+    const textParts = originalTextPieces.flatMap((piece, index) => {
+      const a = Math.max(start, literalStarts[index]);
+      const b = Math.min(end, literalStarts[index] + piece.length);
+      return a < b
+        ? [
+            {
+              piece: index,
+              startUtf16: a - literalStarts[index],
+              endUtf16: b - literalStarts[index],
+            },
+          ]
+        : [];
+    });
+    const decoded = textParts
+      .map((p) => originalTextPieces[p.piece].slice(p.startUtf16, p.endUtf16))
+      .join("");
+    if (decoded !== item.text)
+      throw new Error("Lossless original text dictionary mismatch");
+    const { text: _text, ...rest } = item;
+    return { ...rest, textParts };
+  };
   const draftView = {
     hash: draftHash,
     ...draft.response,
-    details: draftDetails,
+    details: config.legacyProviderFormatForRegression
+      ? draftDetails
+      : literalDetails,
+    ...(config.legacyProviderFormatForRegression
+      ? {}
+      : { detailEvidenceBindings, detailKinds }),
     components: draft.response.components.map((item, index) => ({
       id: `u${index + 1}`,
       ...item,
@@ -677,12 +846,29 @@ ${item.meaning.statement}`,
   };
   const requiredContractClauses = [
     ...context.body.passages
-      .filter((item) => isContractScopeField(item.rawPath))
+      .filter(
+        (item) =>
+          isContractScopeField(
+            item.rawPath,
+            item.scope,
+            context.targetScope,
+            config.legacyProviderFormatForRegression,
+          ) &&
+          (!config.legacyProviderFormatForRegression ||
+            !/\/orderDescription(?:\/|$)/.test(item.rawPath)),
+      )
       .map(({ url: _url, ...item }) => item),
     ...context.body.fields
       .map((item, index) => ({ id: `f${index}`, ...item }))
       .filter(
-        (item) => item.value !== null && isContractScopeField(item.rawPath),
+        (item) =>
+          item.value !== null &&
+          isContractScopeField(
+            item.rawPath,
+            item.scope,
+            context.targetScope,
+            config.legacyProviderFormatForRegression,
+          ),
       ),
   ];
   // Completeness is an explicit, mandatory judgment for each original clause.
@@ -691,14 +877,23 @@ ${item.meaning.statement}`,
   const clauseCandidates = (clause: (typeof requiredContractClauses)[number]) =>
     draftDetails.flatMap((detail, index) =>
       detail.scope === clause.scope && detail.sourceRefs.includes(clause.id)
-        ? [{ index, explanation: detail.explanation }]
+        ? [index]
         : [],
     );
   for (const clause of requiredContractClauses)
     add(
       "contract_clause_coverage",
       `/contractClauseCoverage/${clause.id}`,
-      `Tutte le proposizioni della clausola ${clause.id} sono rappresentate nei dettagli candidati, con significato e ambito originali.\n${JSON.stringify(clauseCandidates(clause))}`,
+      `Tutte le proposizioni della clausola ${clause.id} sono rappresentate nei dettagli candidati, con significato e ambito originali. Leggi i testi completi alle posizioni indicate in draft.details, non soltanto i riferimenti.\n${JSON.stringify(clauseCandidates(clause))}${
+        config.legacyProviderFormatForRegression
+          ? "\n" +
+            ("text" in clause ? clause.text : JSON.stringify(clause.value)) +
+            "\n" +
+            clauseCandidates(clause)
+              .map((i) => draftDetails[i].explanation)
+              .join("\n")
+          : ""
+      }`,
       [clause.id],
     );
   const statedClaimCount = claims.length;
@@ -734,7 +929,15 @@ ${item.meaning.statement}`,
       ...group.claims,
       ...(scopeCoverageClaim ? [scopeCoverageClaim] : []),
     ];
+    const scopedDocumentContext = config.legacyProviderFormatForRegression
+      ? { criteria: [], authorityOriginalRefs: [] }
+      : sourceScopedCriterionContext(
+          context.body.passages,
+          assignedClaims.flatMap((c) => c.sourceRefs),
+        );
     const included = new Set([
+      ...scopedDocumentContext.criteria.flatMap((c) => c.originalRefs),
+      ...scopedDocumentContext.authorityOriginalRefs,
       ...mandatory,
       ...group.passageIds,
       ...assignedClaims.flatMap((claim) => originalFactRefs(claim, byId)),
@@ -760,7 +963,12 @@ ${item.meaning.statement}`,
     const contractClauseDraftBindings = contractClauses.map((clause) => ({
       sourceRef: clause.id,
       scope: clause.scope,
-      candidateDetails: clauseCandidates(clause),
+      candidateDetails: config.legacyProviderFormatForRegression
+        ? clauseCandidates(clause).map((index) => ({
+            index,
+            explanation: draftDetails[index].explanation,
+          }))
+        : clauseCandidates(clause),
     }));
     // Locate candidates across the full representation without repeating it.
     // These pointers assert citation ownership only, never semantic coverage.
@@ -774,6 +982,28 @@ ${item.meaning.statement}`,
         detailIndexes: draftDetails.flatMap((item, index) =>
           item.sourceRefs.includes(sourceRef) ? [index] : [],
         ),
+        // A flag and its separate Note retain distinct citation ownership.
+        // Expose related facts only as lookup context, never as coverage.
+        relatedOriginalDetailBindings: originalFactRefs(
+          {
+            kind: "scope_coverage",
+            sourceRefs: [sourceRef],
+            id: "",
+            subject: "",
+            text: "",
+          },
+          byId,
+        )
+          .filter((ref) => ref !== sourceRef)
+          .map((ref) => ({
+            sourceRef: ref,
+            detailIndexes: draftDetails.flatMap((item, index) =>
+              item.sourceRefs.includes(ref) &&
+              item.scope === byId.get(ref)?.scope
+                ? [index]
+                : [],
+            ),
+          })),
       }),
     );
     const ownedContractClauseIds = group.claims
@@ -801,7 +1031,24 @@ ${item.meaning.statement}`,
         ? {}
         : { acceptancePolicy: RADAR_ACCEPTANCE_POLICY }),
       task: "Verifica assignedClaims contro le prove originali: passages, fields e classificationContext. independentReading è una lettura AI separata, registrata prima di vedere il draft: serve a individuare prove e prestazioni, non sostituisce la fonte. Verifica la fedeltà delle affermazioni e la completezza delle prestazioni rappresentate. Non riscrivere la lettura indipendente per conformarla al draft. La mancanza di una prestazione in un altro frammento non la confuta.",
+      ...(scopedDocumentContext.criteria.length
+        ? {
+            scopedDocumentContext,
+            scopedDocumentContextRule:
+              "Originali separati per criterio e scope; leggi ogni propria verification/description e la clausola ufficiale applicabile. Disponibilità linguistica non è autorità: nessun trasferimento fra criteri, lingue, documenti o oggetti esclusi. Se un anno è solo in un altro criterio non prova questo criterio. Non cancellare versioni discordanti o attribuire precedenza dal formato. Fedeltà, identità dell'acquisto e idoneità sono distinti; il lookup non decide un verdetto o assegna coverage.",
+          }
+        : {}),
       rules: [
+        "Le date iniziali/finali del contratto e dell'esecuzione sono limiti originali distinti: durata, anni nel titolo o data di altro evento non li sostituiscono. Lingue discordanti restano testimoni separati; precedenza solo da regola ufficiale applicabile al preciso campo/documento, non da lingua/ordine/maggioranza. Leggi anche rinvii documentali e rettifiche nel loro scope.",
+        "Intera proposizione, valori ed eccezioni: nome del campo più valore originale no/false conserva un divieto, non un permesso. Quote negativo deve conservare quel valore dichiarato. Null non è no/zero/assenza universale. Una quantità principale non implica prestazione principale; gerarchia va provata nel contesto. Traduzione AI non è controprova originale.",
+        "scope_coverage controlla TUTTO draft: componenti e tutti details/provenienza del campo completo. Una prestazione distinta richiede componente propria; una specifica o condizione già conservata nei details non manca per assenza di componente. Se manca solo un qualificatore, nomina solo quel qualificatore. originalTextContinuation mantiene negazioni/soggetti/limiti nella stessa clausola, mai negli altri campi. Fonte professionale nominale resta funzione nota se attestata; affidare/acquistare è azione del committente, non ruolo del contraente.",
+        "Dati storici e ripresa eventuale sono distinti dagli acquisti attuali. Un eventuale servizio o ripresa non equivale automaticamente al flag formale options. Requisiti di capacità o referenze non acquistano nuove opere; azioni effettivamente richieste nei criteri conservano prestazioni e condizioni proprie, senza attestare capacità delle ditte. Idoneità nominativa è distinta dai limiti su chi esegue il lavoro.",
+        ...(config.legacyProviderFormatForRegression
+          ? []
+          : [
+              "Dizionario letterale senza perdita: originalTextPieces contiene copie originali già verificate byte per byte, non nuove frasi AI. draft.details.literalPiece indica la sua explanation completa nel dizionario. passages.textParts ricostruisce il testo originale concatenando, in ordine, le slice UTF-16 startUtf16:endUtf16 delle piece indicate. Path, scope, offset e ID del passaggio restano propri. Leggi tutte le parti; questo riuso testuale non trasferisce prove né approva fedeltà o completezza.",
+            ]),
+        `Usa esattamente la stessa tassonomia del produttore e delle attività dichiarate: ${contractualRoleDescription}. Giudica la funzione contrattuale attestata, non il solo nome professionale o una parola di fase. La direzione professionale non implica lavori materiali; execute può comprendere servizi esecutivi solo quando questa è la funzione concreta senza ruolo più specifico. other conserva una funzione nota non riassunta correttamente dagli altri ruoli, non una lacuna nelle prove. Nessuna classificazione automatica.`,
         ...(geographyCodeMeanings.length
           ? [
               "geographyCodeMeanings scioglie soltanto codici geografici standard nei loro campi originali: TI=Ticino, CH=Svizzera. Nome e codice sono equivalenti per quel campo, non luoghi aggiunti. Cita sempre il riferimento proprio e controlla scope/path; non geocodificare città, indirizzi del committente o codici sconosciuti né trasferire il luogo ad altri lotti. Non è un verdetto di applicabilità.",
@@ -810,9 +1057,8 @@ ${item.meaning.statement}`,
         "processingContext è un fatto del processo, non un giudizio AI né una dichiarazione del committente. originalCoverage descrive il contenuto esaminato. linkedDocumentsRead false attesta che questa lettura non ha esaminato documenti collegati; non nega che esistano o siano disponibili. Distingui 'il record fornito non contiene il loro testo' da 'i documenti non contengono testo' o 'non sono disponibili sul portale'. La prima riguarda il pacchetto effettivamente fornito: leggi anche relatedDocumentRecordContextRefs e i loro valori/null originali. Le altre richiedono una prova esterna che qui non va inventata. Nessun verdetto automatico: verifica la frase precisa, senza trasformare un limite di elaborazione in una pretesa di indisponibilità o consegna.",
         "originalFactBindings separa le Note dai relatedContractDurationContextRefs dello stesso oggetto JSON e scope. Per durata leggi contractDays/contractPeriod/contractDeadlineType, non il solo valore o Note della proroga. null indica dato non determinato in quel campo, non no, zero o assenza universale; confronta anche le eventuali date e i testi originali. I campi aggiunti sono contesto da verificare, mai approvazioni né prove trasferite da altri lotti.",
         "Le observations della lettura indipendente selezionano e classificano passaggi originali senza riscriverli. Leggi direttamente evidence e passages per stabilire lavoro, soggetto che lo richiede, operatore che lo svolge, destinatario e carattere obbligatorio o facoltativo. kind e serviceRef aiutano a trovare le prove; non sono affermazioni del committente né sostituiscono il loro significato originale.",
-        "Per ogni assignedClaim verifica il suo text e compila la sua chiave obbligatoria in checksByClaim, una sola volta. Non attribuirgli parole di altri claim o campi del draft. supported richiede sostegno reale; contradicted una controprova; not_verifiable sostegno insufficiente. Per ogni esito negativo, draftQuote deve essere un estratto esatto non vuoto del text assegnato che identifica l’affermazione problematica; supported può usare null. Spiega quel preciso difetto contro la fonte. Un problema nel summary va giudicato nel claim summary, anche se un detail distinto è corretto. Leggi insieme oggetto, classificazioni originali e relativo ambito.",
-        "Per contradicted indica affermazione e fatto originale incompatibili: diversa precisione non basta. Per component_role confronta l’azione concreta con i ruoli definiti, senza dedurla dal mestiere. Per respingere other in un incarico composito, indica un unico ruolo che copra TUTTE le azioni acquistate, non solo una parte; other resta errato per una prestazione interamente descritta da un ruolo preciso. L'AI non è fonte; sottotipi mancanti non cancellano una famiglia dichiarata e le etichette non provano azioni accessorie o un lotto.",
-        "Ruoli contrattuali: " + contractualRoleDescription,
+        "Per ogni assignedClaim verifica il suo text e compila la sua chiave obbligatoria in checksByClaim, una sola volta. Non attribuirgli parole di altri claim o campi del draft. supported richiede sostegno reale; contradicted una controprova; not_verifiable sostegno insufficiente. Per ogni esito negativo, draftQuote deve essere un estratto esatto non vuoto del text assegnato che identifica l’affermazione problematica; supported richiede draftQuote null. Spiega quel preciso difetto contro la fonte. Un problema nel summary va giudicato nel claim summary, anche se un detail distinto è corretto. Leggi insieme oggetto, classificazioni originali e relativo ambito.",
+        "Per contradicted indica affermazione e fatto originale incompatibili: diversa precisione non basta. Per component_role confronta l’azione concreta con i ruoli definiti, senza dedurla dal mestiere. Per respingere other in un incarico composito, indica un unico ruolo che copra TUTTE le azioni acquistate, non solo una parte; other resta errato per una prestazione interamente descritta da un ruolo preciso. La presenza di lavorazioni esecutive non basta a confutare other: devi verificare anche le altre azioni acquistate. Nel reason di component_role contradicted enumera le azioni originali con i propri sourceRefs, nomina il ruolo alternativo e spiega separatamente come la sua definizione copra ciascuna azione, compresa la messa a disposizione o il noleggio dei beni quando espliciti. Non assimilare noleggio, fornitura e lavorazione per la sola appartenenza a un servizio. Non imporre other a ogni incarico composito: se un ruolo preciso rappresenta integralmente tutte le azioni, motiva quel fatto; se la sola differenza è una preferenza aggregativa senza fatto originale incompatibile, non chiamarla contradicted. L'AI non è fonte; sottotipi mancanti non cancellano una famiglia dichiarata e le etichette non provano azioni accessorie o un lotto.",
         "Un valore e la sua nota esplicativa sono campi distinti: yes/no/false non dimostra che una Note sia presente, e una Note null non cancella quel valore. originalFactBindings conserva separatamente i riferimenti dichiarati dal draft e gli eventuali campi Note collegati dal loro percorso JSON e ambito esatti. Sono prove originali da leggere, non approvazioni: verifica ciascuna affermazione sul proprio campo. Per contradicted serve un fatto incompatibile sullo stesso concetto; la presenza del valore non confuta l'assenza della nota. Se la prova necessaria manca, usa not_verifiable, senza inventare una controprova.",
         "Fedeltà e completezza sono distinte: una lista vera resta supported anche se sintetica. scope_coverage riguarda SOLO assignedScopeCoverageIds, confrontati con la rappresentazione COMPLETA del draft, incluse tutte components/details; non il solo summary né l'intera fonte al posto del gruppo. Esamina tutti gli originali assegnati: se non attestano nuovi acquisti o limiti materiali, verifica questa assenza, senza pretendere una descrizione del servizio affidata ad altro gruppo. Note null o soli campi amministrativi non rendono il gruppo illeggibile. supported richiede conservazione di ogni acquisto/limite attestato qui; per not_verifiable identifica il lavoro o limite concreto mancante e cita l'affermazione di completezza. omitted_scope cita SOLO originali assegnati. Il contesto aiuta a interpretare ma ha la propria copertura altrove. Una falsa esclusione resta contradicted nel proprio claim di fedeltà, anche se altri campi sono corretti.",
         "Per la completezza collega anche le clausole comuni del summary o dei details alle componenti del loro ambito esplicito. Un ciclo contrattuale dichiarato per tutti gli impianti o sistemi può valere per le componenti corrispondenti senza essere ripetuto parola per parola in ognuna; citarlo per un solo componente senza conservarne l'ambito generale non basta. Non estendere clausole a oggetti o lotti estranei. Ogni acquisto distinto deve restare rappresentato nelle components: menzionarlo soltanto come dettaglio non sostituisce una prestazione. Una descrizione sintetica non è una clausola di esclusione. Una parafrasi può descrivere l'insieme delle azioni o degli oggetti citati senza ripeterne ogni parola: verifica se amplia davvero l'acquisto, cambia dominio, luogo, ruolo o limiti. Per contestarla identifica il fatto aggiunto o incompatibile, non la sola locuzione assente dal testo; una categoria generica non autorizza lavori ulteriori.",
@@ -831,11 +1077,66 @@ ${item.meaning.statement}`,
         "Ogni claim è affidato a una sola richiesta con tutte le sue citazioni; i passaggi aggiunti sono contesto, non una selezione che sostituisce coverage. Esamina tutti i passaggi e campi di coverage nel loro claim scope_coverage obbligatorio; nessuna prestazione può essere ignorata perché non era selezionata dal draft. Non richiedere che tutti gli acquisti siano ripetuti in ogni frammento. La fedeltà di un'affermazione del draft va giudicata soltanto nel suo assignedClaim: non creare findings unverifiable per un summary o detail affidato ad altro gruppo. Non giudicare omissioni di prestazioni fuori da assignedScopeCoverageIds. La completezza amministrativa di ciascuna requiredContractClause ha il proprio claim contract_clause_coverage obbligatorio, indicato in assignedContractClauseIds. Il summary conserva in ogni gruppo le proprie prove originali: una nota null non cancella un valore yes, no o false in un campo distinto. Nessuna autocorrezione.",
         "omitted_scope richiede una prestazione principale, accessoria o esclusa mancante, oppure un limite che cambi concretamente oggetto, azione, ruolo o applicabilità al target. In reason identifica quale lavoro risulterebbe omesso o diverso. Una condition nella lettura indipendente è una prova di contesto, non un obbligo di copiarla nel draft. Periodi contrattuali, proroghe temporali, scadenze e contatti non devono essere ripetuti quando non cambiano le prestazioni. La loro sola assenza non produce findings né not_verifiable.",
         "Una sigla o codice di progetto non sciolto non prova un lavoro aggiuntivo, anche in un titolo con più sigle. Per scope_coverage negativo identifica la citazione originale dell'azione e oggetto mancanti, oppure un limite materiale concreto non conservato. Una sigla da sola non è tale prova; se è l'unica indicazione del servizio e il mestiere non è identificabile, il dubbio resta.",
+        "classificationContext indicizza identità, lingua, ambito e refs; leggi codici/etichette integrali in passages. Componenti complete in draft.components; draftComponentsForCompleteness è indice. Indici non approvano significati.",
+        "Risolvi b in draft.detailEvidenceBindings per scope/sourceRefs propri; k indicizza draft.detailKinds. deN è metadato, non citazione. index è la posizione esplicita zero-based identica a /details/N, mai b o k. Testi integrali e indici zero-based; vietato trasferire riferimenti fra legami.",
+        "requiredContractClauses elenca ID, scope e rawPath obbligatori: leggi il testo/valore originale integrale di ciascun ID in passages o fields. Questi indici non sono prove di completezza e non sostituiscono nessuna proposizione originale.",
         "Eccezione esplicita: requiredContractClauses contiene condizioni che il draft deve riportare nei details, anche quando non cambiano le prestazioni. Nel claim contract_clause_coverage assegnato, confronta ogni proposizione originale con i testi dei dettagli candidati indicati nel claim. supported richiede che siano TUTTE rappresentate, non la sola presenza di sourceRefs o di un dettaglio sullo stesso argomento. Se una proposizione manca usa not_verifiable sul claim di completezza con un estratto della sua affermazione e nomina la proposizione assente. Non verificare omissioni amministrative fuori da assignedContractClauseIds: ogni altra clausola ha il proprio giudizio obbligatorio in un altro gruppo. Per ciascuna nota composta assegnata controlla separatamente ogni obbligo, limite, eccezione e permesso originale: una stessa citazione sN non prova che tutte le sue proposizioni siano state rappresentate. Se manca un fatto puoi inoltre registrare omitted_contract_condition SOLO per gli ID in assignedContractClauseIds con la clausola originale in sourceRefs e nomina in reason la proposizione assente; non chiamarlo omitted_scope se riguarda solo modalità amministrative. Per esempio, il limite percentuale al subappalto non sostituisce il permesso di comparire in più offerte. Cerca prima nell'intero draft e non pretendere una copia letterale, ma non considerare una citazione sufficiente senza il fatto. Le condizioni amministrative fuori da requiredContractClauses restano facoltative salvo che il draft le affermi falsamente.",
-        "Anche un titolo può specificare il luogo di esecuzione: se lo fa, collegalo al fatto conservato nel draft; la ripetizione in un altro claim non lo rende facoltativo. contractClauseDraftBindings e scopeCoverageDraftBindings localizzano candidati nell'intero draft, anche fuori dagli assignedClaims. Prima di dichiarare assente un fatto leggi i candidati E tutto il draft: quantità, punto di ritrovo o modalità documentali già scritti non sono omissioni. Gli indici sono zero-based; summary e rif. corrispondenti non approvano il significato. L'assenza di un indice non prova assenza del fatto. Non confondere l'assenza dagli assignedClaims con l'assenza dal draft.",
+        "I titoli dello stesso ambito possono avere candidati citati da un altro titolo originale: confronta le due prove, senza presumere equivalenza tra lingue o risolvere conflitti. Anche un titolo può specificare il luogo di esecuzione: se lo fa, collegalo al fatto conservato nel draft; la ripetizione in un altro claim non lo rende facoltativo. contractClauseDraftBindings e scopeCoverageDraftBindings localizzano candidati nell'intero draft, anche fuori dagli assignedClaims. Prima di dichiarare assente un fatto leggi i candidati E tutto il draft: quantità, punto di ritrovo o modalità documentali già scritti non sono omissioni. relatedOriginalDetailBindings localizza soltanto fatti originali correlati nello stesso ambito: un permesso e la sua nota possono essere in dettagli distinti. Leggi entrambi prima di dichiarare missing; non trasferire riferimenti o copertura fra fatti e non considerare un indice prova di completezza. Gli indici sono zero-based; summary e rif. corrispondenti non approvano il significato. L'assenza di un indice non prova assenza del fatto. Non confondere l'assenza dagli assignedClaims con l'assenza dal draft.",
         "Distinzione obbligatoria: omettere la data di inizio di una fornitura non omette una prestazione; omettere un servizio di installazione opzionale omette un lavoro acquistabile. Una data o condizione che il draft afferma in modo falso resta contradicted: l'assenza di un dettaglio e un'affermazione falsa sono casi diversi. Esclusioni di lavoro, obblighi accessori e limiti territoriali che cambiano l'ambito restano da controllare.",
         "coverage complete significa che hai esaminato tutto il gruppo, non che il draft debba ripeterne ogni dato o che sia approvato. Se non puoi esaminarlo usa unreadable; non dare supported a ciò che non puoi verificare. Cita soltanto gli ID originali visibili. Nessun giudizio aziendale, di idoneità o di partecipazione.",
-      ],
+      ]
+        .map((rule) => {
+          if (rule.startsWith("Le observations della lettura"))
+            return "observations sono selezioni/classificazioni AI, non fonte riscritta: leggi evidence/passages per lavoro, soggetto richiedente, operatore, destinatario e obbligatorietà. kind/serviceRef aiutano il lookup, non sostituiscono il significato originale né sono dichiarazioni del committente.";
+          if (rule.startsWith("Una categoria amministrativa"))
+            return "Nomi amministrativi e descrizioni specifiche diversi non implicano contraddizione. La categoria non esclude lavoro esplicito né compra tutte attività dell’etichetta. Mantieni classificazioni, senza correggere codici o creare servizi. Caratteristiche incompatibili/clausole opposte restano bloccanti; avvisi metadati non sanano ambiguità, omissioni o falsità.";
+          if (rule.startsWith("Ogni check cita readingRefs"))
+            return "Ogni check cita lettura indipendente e originali propri; testi in passages/fields o dizionario delle citazioni. Nome ripetuto non approva dominio incompatibile, correzione della fonte o discrepanza non presente nella lettura. classification_reading cita il cN indipendente corrispondente.";
+          if (rule.startsWith("sourceRefs e readingRefs"))
+            return "sourceRefs/readingRefs sono insiemi: solo ID pertinenti al preciso giudizio, ciascuno una sola volta. Non riempire fino al limite: è disponibilità di prove, non numero obbligatorio; duplicazioni invalidano.";
+          if (rule.startsWith("Per supported di detail"))
+            return "supported per detail/contract_clause_coverage/scope_coverage usa solo readingIds del proprio detailEvidenceBindings. Una condizione vicina non prova altro campo; se non selezionato usa il suo o-sN/o-fN, non altra osservazione. Critiche possono citare altre letture come controprova. Non inventare supporto per lo schema.";
+          if (rule.startsWith("Una componente main o not_stated"))
+            return "main/not_stated richiede performance indipendente pertinente. accessory/excluded può usare condition pertinente: distingui originale acquisto opzionale ed esclusione, non nuova prestazione dedotta da tipo/consegna/nota. Nessuna approvazione automatica per presenza della citazione; verifica azione, oggetto e applicabilità propri.";
+          if (rule.startsWith("Distinzione obbligatoria:"))
+            return "Data di inizio omessa non omette lavoro; installazione opzionale omessa sì. Una data/condizione falsa resta contradicted: omissione e falsità sono distinte. Controlla esclusioni, obblighi accessori e limiti territoriali che cambiano ambito.";
+          if (rule.startsWith("Una sigla o codice di progetto"))
+            return "Sigla/codice non sciolto non prova lavoro aggiuntivo, neppure in titolo con più sigle. Critica di scope identifica azione/oggetto mancanti o limite concreto con citazione propria. Se sola sigla rende mestiere non identificabile il dubbio resta.";
+          if (rule.startsWith("processingContext è un fatto"))
+            return "processingContext e originalCoverage sono metadati del processo, non giudizi AI o dichiarazioni del committente. linkedDocumentsRead=false significa contenuti non letti, non documenti inesistenti, vuoti o indisponibili. Distingui assenza dal pacchetto fornito da assenza sul portale; verifica relatedDocumentRecordContextRefs e valori/null. Disponibilità esterna e modalità di consegna richiedono prove proprie, mai inferite dal limite di elaborazione. Nessun automatismo: giudica la frase precisa.";
+          if (rule.startsWith("originalFactBindings separa"))
+            return "originalFactBindings separa Note e relatedContractDurationContextRefs dello stesso oggetto/scope. Durata: leggi contractDays, contractPeriod e contractDeadlineType, non il solo flag/Nota di proroga. null non equivale a no, zero o assenza universale: confronta date e testi. Il contesto non approva né trasferisce prove fra lotti.";
+          if (rule.startsWith("Per ogni assignedClaim"))
+            return "Compila ogni assignedClaim una volta in checksByClaim verificando il suo text, oggetto, classificazioni e scope. supported: sostegno reale; contradicted: controprova; not_verifiable: prova insufficiente. Esiti negativi richiedono draftQuote esatto non vuoto del claim e reason sul preciso difetto; supported richiede draftQuote null: le citazioni della fonte sono nei testimoni, non sostituiscono il claim. Non attribuire parole di altri campi/claim: errori del summary restano nel suo claim anche se un detail è corretto.";
+          if (rule.startsWith("Per contradicted indica"))
+            return "contradicted richiede fatto originale incompatibile, non sola precisione diversa. component_role: azione contrattuale, non mestiere. Per confutare other nomina un unico ruolo alternativo e spiega, enumerando azioni e sourceRefs propri, come copra TUTTE le azioni acquistate, inclusi noleggio/disponibilità di beni quando espliciti; una sola lavorazione esecutiva non basta. other è errato se un ruolo preciso copre integralmente la prestazione. Non assimilare noleggio, fornitura e lavorazione per settore; non imporre other ai compositi. Preferenza aggregativa senza fatto incompatibile non è contradicted. AI non è fonte; sottotipi ignoti non cancellano famiglia nota, etichette non provano azioni o lotti.";
+          if (rule.startsWith("Un valore e la sua nota"))
+            return "Valore e Nota sono campi distinti: yes/no/false non prova Nota presente; Nota null non cancella valore. originalFactBindings conserva riferimenti dichiarati e Note correlate per path/scope esatti. Verifica ogni asserzione sul campo proprio: valore presente non confuta Nota assente. contradicted richiede fatto incompatibile sullo stesso concetto; prova mancante è not_verifiable, non controprova inventata.";
+          if (rule.startsWith("Fedeltà e completezza"))
+            return "Fedeltà e completezza distinte: lista vera sintetica può essere supported. scope_coverage riguarda SOLO assignedScopeCoverageIds contro draft COMPLETO (tutte components/details), non solo summary o fonte globale. Leggi tutti gli assegnati, anche metadati/Note null: se non aggiungono acquisti/limiti non pretendere servizi di altri gruppi né dichiarare unreadable. supported conserva ogni lavoro/limite qui attestato nella rappresentazione COMPLETA del draft. not_verifiable nomina concreto lavoro/limite mancante e cita claim di completezza; omitted_scope solo ref assegnati. Contesto ha copertura propria altrove; falsa esclusione è contradicted nel suo claim anche con altri campi corretti.";
+          if (rule.startsWith("Per la completezza collega"))
+            return "Completezza: collega clausole comuni a componenti nello scope esplicito; ciclo generale può valere per tutte senza ripetizione, ma una sola citazione locale senza ambito generale non basta. Vietata estensione ad oggetti/lotti estranei. Ogni acquisto distinto resta nelle components, non solo nei details; sintesi non è esclusione. Parafrasi di azioni/oggetti ammesse senza parole identiche: per criticarle identifica acquisto ampliato o fatto aggiunto/incompatibile in dominio, luogo, ruolo o limiti, non sola locuzione diversa. Categoria ampia non autorizza lavori ulteriori.";
+          if (rule.startsWith("Per i claim summary, detail"))
+            return "summary/detail/contract_clause_coverage/scope_coverage possono usare originalFacts o-sN/o-fN: puntatori a testi/valori originali, non giudizi AI, utili anche per fatti non selezionati prima. Verifica testo, valore e path propri e cita lo stesso sN o fN in sourceRefs. summary richiede anche performance indipendente pertinente: soli originalFacts non provano lavoro/completezza. Non usarli per componenti/classificazioni. false diverso da null; data non selezionata non è falsa.";
+          if (rule.startsWith("Ogni claim è affidato"))
+            return "Ogni claim ha un solo proprietario e tutte le proprie citazioni. I passaggi aggiunti sono contesto, non coverage sostitutiva. In scope_coverage esamina TUTTI i passaggi e campi assegnati, anche non selezionati dal draft. Non pretendere tutte le prestazioni in ogni frammento e non giudicare summary/detail assegnati ad altro gruppo. Findings su omissioni di prestazioni solo negli assignedScopeCoverageIds; completezza amministrativa solo nei propri assignedContractClauseIds. Il summary mantiene le sue prove in ogni gruppo; null in una Nota non cancella yes/no/false in altro campo. Nessuna autocorrezione.";
+          if (rule.startsWith("Eccezione esplicita:"))
+            return "Eccezione obbligatoria: ogni requiredContractClause deve essere conservata nei details anche se amministrativa. Nel proprio contract_clause_coverage confronta TUTTE le proposizioni originali (obblighi, limiti, eccezioni, permessi) con l'intero draft e i candidati indicizzati: un tema o sourceRefs presenti non provano completezza, né una nota vicina sostituisce il fatto. supported richiede che nulla manchi. Se manca una proposizione: not_verifiable sul claim con estratto della sua affermazione e nomina il fatto assente. Puoi aggiungere omitted_contract_condition SOLO per assignedContractClauseIds, con la clausola originale nei sourceRefs e la proposizione mancante in reason; non omitted_scope per sola amministrazione. Un limite percentuale non sostituisce il permesso di partecipare a più offerte. Non verificare omissioni amministrative di altri gruppi. Fuori da requiredContractClauses le informazioni amministrative restano facoltative, salvo affermazioni false del draft.";
+          if (rule.startsWith("I titoli dello stesso ambito"))
+            return "Confronta titoli e citazioni originali dello stesso ambito senza presumere equivalenza fra lingue o risolvere conflitti. Un luogo di esecuzione esplicito nel titolo è un fatto da collegare: apparire in altro claim non lo rende facoltativo. contractClauseDraftBindings e scopeCoverageDraftBindings sono candidati zero-based nel draft COMPLETO, non approvazioni. Prima di dichiarare missing leggi candidati e tutto il draft: quantità, ritrovo o modalità già conservate non sono omissioni. relatedOriginalDetailBindings collega solo fatti correlati nello stesso scope; leggi separatamente flag e Nota anche se in dettagli distinti. Non trasferire riferimenti/copertura fra fatti. Indice assente non prova fatto assente; assignedClaims incompleti rispetto al draft non significano draft incompleto.";
+          if (rule.startsWith("independentReading.missingDetails"))
+            return "missingDetails.description è una nota AI non verificata, non una nuova affermazione originale: rileggi le sue evidence prima di usare dN-M per not_verifiable. Una supposizione non prova diverse prestazioni o quantità. Quantità dell'intero appalto senza ripartizione per edificio/lotto possono essere conservate; non attribuire al draft una ripartizione che non afferma. Ripartizioni e applicabilità effettivamente affermate richiedono prove; quantità inventate o non determinate sono non verificabili. fN è il valore JSON originale al rawPath in fields: distingui zero, false e null e non inventarne significati.";
+          return rule;
+        })
+        .filter(
+          (rule) =>
+            context.body.target.kind === "lot" ||
+            (!rule.startsWith("Per un lotto territoriale") &&
+              !rule.startsWith("target_partition è una proposta")),
+        ),
+      ...(config.legacyProviderFormatForRegression
+        ? {}
+        : { originalTextPieces }),
       chunkId: id,
       target: context.body.target,
       targetScope: context.targetScope,
@@ -846,8 +1147,24 @@ ${item.meaning.statement}`,
         externalDocumentAvailabilityAssessed: false,
       },
       ...(geographyCodeMeanings.length ? { geographyCodeMeanings } : {}),
-      classificationContext,
-      requiredContractClauses: contractClauses,
+      // Original code/labels are present exactly in mandatory passages. This
+      // dictionary preserves their identity, language, scope and ownership.
+      classificationContext: config.legacyProviderFormatForRegression
+        ? classificationContext
+        : classificationContext.map(({ code, labels, ...item }) => ({
+            ...item,
+            code: code ? { sourceRefs: code.sourceRefs } : null,
+            labels: labels.map(({ text: _text, ...label }) => label),
+          })),
+      // Exact texts/values are already present once in passages/fields.
+      // These are mandatory ownership indices, never a second copy of prose.
+      requiredContractClauses: config.legacyProviderFormatForRegression
+        ? contractClauses
+        : contractClauses.map(({ id, scope, rawPath }) => ({
+            id,
+            scope,
+            rawPath,
+          })),
       contractClauseDraftBindings,
       scopeCoverageDraftBindings,
       draft: draftView,
@@ -858,7 +1175,7 @@ ${item.meaning.statement}`,
         passageIds: group.passageIds,
         fieldIndexes: group.fieldIndexes,
       },
-      passages: passages.map(({ url: _url, ...item }) => item),
+      passages: passages.map(({ url: _url, ...item }) => literalOriginal(item)),
       fields: fieldIndexes.map((index) => ({
         id: `f${index}`,
         index,
@@ -867,9 +1184,11 @@ ${item.meaning.statement}`,
       draftComponentsForCompleteness: draft.response.components.map(
         (item, index) => ({
           index,
-          description: item.description,
-          importance: item.importance,
+          // Complete description/importance remain once in draft.components.
           sourceRefs: item.sourceRefs,
+          ...(config.legacyProviderFormatForRegression
+            ? { description: item.description, importance: item.importance }
+            : {}),
         }),
       ),
     });
@@ -896,6 +1215,15 @@ ${item.meaning.statement}`,
     group.passageIds.length + group.fieldIndexes.length + group.claims.length >
     0;
   const fits = (group: Group) =>
+    // Keep full ownership and all original text; smaller administrative
+    // batches leave output room for each complete proposition's review.
+    group.claims.filter(
+      (c) =>
+        c.kind === "contract_clause_coverage" &&
+        !c.sourceRefs.some((ref) =>
+          /\/orderDescription(?:\/|$)/.test(byId.get(ref)?.rawPath ?? ""),
+        ),
+    ).length <= 3 &&
     group.passageIds.length + group.fieldIndexes.length <= MAX_COVERAGE_ITEMS &&
     group.claims.length +
       (group.passageIds.length + group.fieldIndexes.length > 0 ? 1 : 0) <=
@@ -914,7 +1242,21 @@ ${item.meaning.statement}`,
   const flush = () => {
     if (!hasItems(current)) return;
     if (requests.length >= MAX_REQUESTS)
-      throw new Error("source_semantic_review_chunk_capacity");
+      throw new Error("source_semantic_review_chunk_capacity", {
+        cause: {
+          requests: requests.length,
+          currentClaims: current.claims.map((c) => c.id),
+          currentPassages: current.passageIds,
+          requestSizes: requests.map((r) => ({
+            bytes: Buffer.byteLength(
+              r.system + r.prompt + JSON.stringify(r.responseFormat),
+            ),
+            claims: r.assignedClaimIds.length,
+            coverage:
+              r.coverage.passageIds.length + r.coverage.fieldIndexes.length,
+          })),
+        },
+      });
     requests.push(makeRequest(current, requests.length + 1));
     current = empty();
   };
@@ -923,8 +1265,31 @@ ${item.meaning.statement}`,
     if (!fits(candidate)) {
       flush();
       candidate = change(current);
-      if (!fits(candidate))
-        throw new Error("source_semantic_review_prompt_capacity");
+      if (!fits(candidate)) {
+        const failed = makeRequest(candidate, requests.length + 1);
+        throw new Error("source_semantic_review_prompt_capacity", {
+          cause: {
+            requestBytes: Buffer.byteLength(
+              failed.system +
+                failed.prompt +
+                JSON.stringify(failed.responseFormat),
+            ),
+            maximumBaseBytes: MAX_BYTES - READING_CONTEXT_RESERVE_BYTES,
+            fullDraftBytes: Buffer.byteLength(JSON.stringify(draftView)),
+            passageIds: candidate.passageIds,
+            claimIds: candidate.claims.map((c) => c.id),
+            sectionBytes: Object.fromEntries(
+              Object.entries(JSON.parse(failed.prompt)).map(([key, value]) => [
+                key,
+                Buffer.byteLength(JSON.stringify(value)),
+              ]),
+            ),
+            responseFormatBytes: Buffer.byteLength(
+              JSON.stringify(failed.responseFormat),
+            ),
+          },
+        });
+      }
     }
     current = candidate;
   };
@@ -1002,6 +1367,52 @@ export type SourceSemanticReviewPlan = ReturnType<
   typeof buildSourceSemanticReviewRequest
 >;
 
+export function materializeSourceReviewDraft(prompt: string) {
+  const body = JSON.parse(prompt);
+  const draft = body.draft;
+  if (!draft.detailEvidenceBindings) return draft;
+  const bindings = new Map<string, { scope: string; sourceRefs: string[] }>(
+    draft.detailEvidenceBindings.map((binding: any) => [binding.id, binding]),
+  );
+  if (bindings.size !== draft.detailEvidenceBindings.length)
+    throw new Error("Duplicate review detail evidence dictionary ID");
+  return {
+    ...draft,
+    details: draft.details.map((item: any, position: number) => {
+      const { b, k, literalPiece, index, ...detail } = item;
+      if (index !== position)
+        throw new Error("Review original detail index changed");
+      if (literalPiece !== undefined) {
+        if (
+          !Number.isInteger(literalPiece) ||
+          typeof body.originalTextPieces?.[literalPiece] !== "string"
+        )
+          throw new Error("Invalid literal text dictionary index");
+        detail.explanation = body.originalTextPieces[literalPiece];
+      }
+      const binding = bindings.get(b);
+      if (
+        !binding ||
+        !["project_context", "selected_lot"].includes(binding.scope) ||
+        !Array.isArray(binding.sourceRefs) ||
+        !binding.sourceRefs.length ||
+        binding.sourceRefs.some((ref) => !/^([sf])\d+$/.test(ref))
+      )
+        throw new Error("Missing or invalid review detail evidence binding");
+      if (!Number.isInteger(k) || !draft.detailKinds?.[k])
+        throw new Error(
+          "Missing or invalid review detail kind dictionary index",
+        );
+      return {
+        ...detail,
+        kind: draft.detailKinds[k],
+        scope: binding.scope,
+        sourceRefs: [...binding.sourceRefs],
+      };
+    }),
+  };
+}
+
 export function buildGroundedSourceReviewRequests(
   plan: SourceSemanticReviewPlan,
   sourceEvidence: SourceEvidenceReadingRecord,
@@ -1027,12 +1438,22 @@ export function buildGroundedSourceReviewRequests(
     plan.requests.map((request) => {
       // Each source passage is already present in the request. Avoid repeating
       // its full text for every reading, but preserve unseen contextual quotes.
+      const originalQuotesBySource: Record<string, string> = {};
       const projectQuotes = (quotes: { sourceRef: string; text: string }[]) =>
-        quotes.map((q) =>
-          request.sourceIds.includes(q.sourceRef)
-            ? { sourceRef: q.sourceRef }
-            : q,
-        );
+        quotes.map((q) => {
+          if (request.sourceIds.includes(q.sourceRef))
+            return { sourceRef: q.sourceRef };
+          if (plan.legacyProviderFormatForRegression) return q;
+          if (
+            originalQuotesBySource[q.sourceRef] !== undefined &&
+            originalQuotesBySource[q.sourceRef] !== q.text
+          )
+            throw new Error(
+              "Independent quote dictionary cannot merge different originals",
+            );
+          originalQuotesBySource[q.sourceRef] = q.text;
+          return { sourceRef: q.sourceRef };
+        });
       // A condition's primary description ties it to the purchased work;
       // its extra references locate the condition itself. Using the common
       // primary ref to select every condition would copy all document tails
@@ -1131,6 +1552,8 @@ export function buildGroundedSourceReviewRequests(
           readingIds: string[];
           supportedReadingIds?: string[];
           supportedSourceIds?: string[];
+          supportedPerformanceIds?: string[];
+          requiredSupportedSourceIds?: string[];
         }
       >();
       for (const claim of plan.claims.filter((c) =>
@@ -1173,16 +1596,57 @@ export function buildGroundedSourceReviewRequests(
         const supportedSourceIds = plan.legacyProviderFormatForRegression
           ? undefined
           : claim.sourceRefs;
+        const component = claim.kind.startsWith("component_")
+          ? materializeSourceReviewDraft(request.prompt).components[
+              Number(claim.subject.split("/").at(-1))
+            ]
+          : null;
+        const complementary =
+          component?.importance === "accessory" ||
+          component?.importance === "excluded";
+        const supportedPerformanceIds =
+          !plan.legacyProviderFormatForRegression &&
+          (claim.kind === "summary" || claim.kind.startsWith("component_"))
+            ? observations
+                .filter(
+                  (o) =>
+                    (o.kind === "performance" ||
+                      (complementary && o.kind === "condition")) &&
+                    o.evidence.some((q) =>
+                      claim.sourceRefs.some(
+                        (ref) =>
+                          ref === q.sourceRef ||
+                          areServiceLanguageVariants(
+                            originals,
+                            q.sourceRef,
+                            ref,
+                          ),
+                      ),
+                    ),
+                )
+                .map((o) => o.id)
+            : undefined;
+        const requiredSupportedSourceIds =
+          !plan.legacyProviderFormatForRegression &&
+          ["detail", "component_scope", "component_importance"].includes(
+            claim.kind,
+          )
+            ? claim.sourceRefs
+            : undefined;
         const key = JSON.stringify([
           ownFacts,
           supportedReadingIds,
           supportedSourceIds,
+          supportedPerformanceIds,
+          requiredSupportedSourceIds,
         ]);
         const group = readingGroups.get(key) ?? {
           claimIds: [],
           readingIds: [...independentReadingIds, ...ownFacts],
           ...(supportedReadingIds ? { supportedReadingIds } : {}),
           ...(supportedSourceIds ? { supportedSourceIds } : {}),
+          ...(supportedPerformanceIds ? { supportedPerformanceIds } : {}),
+          ...(requiredSupportedSourceIds ? { requiredSupportedSourceIds } : {}),
         };
         group.claimIds.push(claim.id);
         readingGroups.set(key, group);
@@ -1212,7 +1676,10 @@ export function buildGroundedSourceReviewRequests(
                                   (p) =>
                                     claim.sourceRefs.includes(p.id) &&
                                     p.scope === plan.context.targetScope &&
-                                    isProcurementLocationField(p.rawPath),
+                                    (isProcurementLocationField(p.rawPath) ||
+                                      /^(?:\/procurement|\/lots\/\d+)\/(?:contractPeriod|executionPeriod)\/dateRange\/[01]$/.test(
+                                        p.rawPath,
+                                      )),
                                 )
                                 .map((p) => p.id),
                               ...plan.claims
@@ -1225,11 +1692,29 @@ export function buildGroundedSourceReviewRequests(
                           ],
                         }),
                   },
-                  JSON.parse(request.prompt).draft,
+                  materializeSourceReviewDraft(request.prompt),
+                  plan.legacyProviderFormatForRegression
+                    ? undefined
+                    : titleContextReferences(plan.context.body.passages),
                 ),
               ]
             : [],
         );
+      // Retained facts require an explicit witness decision; this is not a verdict.
+      if (!plan.legacyProviderFormatForRegression) {
+        for (const binding of coverageBindings) {
+          binding.requiredSourceRefs = [
+            ...new Set([
+              ...(binding.requiredSourceRefs ?? []),
+              ...binding.sourceRefs.filter(
+                (ref) =>
+                  binding.titleContextRefs?.[ref] &&
+                  binding.witnessesBySource[ref].length > 0,
+              ),
+            ]),
+          ];
+        }
+      }
       const responseFormat: AutomaticResponseFormat = {
         type: "json_schema",
         json_schema: {
@@ -1268,8 +1753,21 @@ export function buildGroundedSourceReviewRequests(
         ...(plan.legacyProviderFormatForRegression
           ? {}
           : {
+              titleCoverageCandidates: coverageBindings.flatMap((binding) =>
+                binding.sourceRefs
+                  .filter((ref) => binding.titleContextRefs?.[ref])
+                  .map((ref) => ({
+                    sourceRef: ref,
+                    relatedOriginalTitleRefs: binding.titleContextRefs![ref],
+                    candidateDraftPaths: binding.witnessesBySource[ref].map(
+                      (w) => w.draftPath,
+                    ),
+                    requiresWitnessDecision:
+                      binding.requiredSourceRefs?.includes(ref) ?? false,
+                  })),
+              ),
               coverageProofRule:
-                "coverageBySource richiede ogni sourceRef assegnato come chiave. represented seleziona draftPaths fra quelli consentiti: il codice copia il testo esatto del campo, senza aggiungere o correggere prove. Scegli soltanto campi che esprimono davvero il fatto e tutti i suoi limiti; la presenza della citazione non prova equivalenza o completezza. Le clausole obbligatorie richiedono details. not_required vale solo per dati amministrativi facoltativi o originali senza nuova prestazione/limite. Il territorio del lavoro è un limite materiale, distinto dagli indirizzi amministrativi. Divieti o permessi di subappalto e limiti organizzativi sono limiti materiali: seleziona i details che li conservano, anche quando hanno un altro claim contract_clause_coverage. Un altro claim corretto non giustifica not_required; missing indica una prestazione/condizione richiesta assente e vieta supported. Per gli altri claim coverageBySource={}. Non restituire quote o coverageProof. Non dichiarare conservata una data precisa mostrando soltanto una durata stimata.",
+                "coverageBySource richiede ogni sourceRef assegnato come chiave. Le prove della lettura rinviano al testo originale in passages/fields; se il riferimento è fuori da questi, il testo integrale è in independentReading.originalQuotesBySource con lo stesso ID. Tutte le osservazioni e i propri riferimenti restano distinti: il dizionario elimina soltanto copie identiche del testo, senza approvare alcun giudizio. contractCoverageCandidates riporta il testo ESATTO del candidato draft accanto al claimId e al draftPath zero-based: leggilo direttamente prima di dichiarare una proposizione assente. È soltanto una copia del draft, non della fonte; non approva completezza o significato e non riscrive la risposta originale. Ogni pezzo lf conserva un singolo campo originale. DE e IT sono versioni distinte: una regola IT nel proprio pezzo non modifica la regola DE. Confronta ogni testo con il suo rawPath e la sua lingua; non attribuire alla parte DE ciò che appartiene alla parte IT, né armonizzare le differenze. Il gruppo contiene al massimo quattro clausole amministrative: giudica soltanto i claim assegnati, integralmente, mantenendo ogni proposizione e la prova propria; non ripetere giudizi dei gruppi precedenti. Per i details lf, supported richiede TUTTI i frammenti candidati che intersecano quel riferimento: non lasciare fuori la continuazione di una frase. La presenza integrale del testo è prova di provenienza, non approvazione del significato; resta necessario giudicare ogni proposizione. represented seleziona draftPaths fra quelli consentiti: il codice copia il testo esatto del campo, senza aggiungere o correggere prove. Scegli soltanto campi che esprimono davvero il fatto e tutti i suoi limiti; la presenza della citazione non prova equivalenza o completezza. I titleCoverageCandidates sono solo candidati: controlla il titolo originale proprio, le prove proprie del campo candidato e tutti i limiti; lingue discordanti restano discordanti. Un titolo con candidato richiede represented o missing, mai approvazione automatica. Le clausole obbligatorie richiedono details. not_required vale solo per dati amministrativi facoltativi o originali senza nuova prestazione/limite. Il territorio del lavoro è un limite materiale, distinto dagli indirizzi amministrativi. Divieti o permessi di subappalto e limiti organizzativi sono limiti materiali: seleziona i details che li conservano, anche quando hanno un altro claim contract_clause_coverage. Un altro claim corretto non giustifica not_required; missing indica una prestazione/condizione richiesta assente e vieta supported. Per gli altri claim coverageBySource={}. Non restituire quote o coverageProof. Non dichiarare conservata una data precisa mostrando soltanto una durata stimata.",
             }),
         referenceSelectionFormat: {
           checksFormat: plan.legacyProviderFormatForRegression
@@ -1319,10 +1817,22 @@ export function buildGroundedSourceReviewRequests(
               }))
             : [],
         ),
+        // Reprint the exact assigned draft witnesses beside their claim IDs.
+        // This is an unchanged lookup projection, not copied source content,
+        // a repaired producer claim or a semantic approval.
+        contractCoverageCandidates: coverageBindings
+          .filter((binding) => binding.kind === "contract_clause_coverage")
+          .map((binding) => ({
+            claimId: binding.claimId,
+            witnessesBySource: binding.witnessesBySource,
+          })),
         independentReading: {
           observations,
           classifications: readingClassifications,
           missingDetails,
+          ...(plan.legacyProviderFormatForRegression
+            ? {}
+            : { originalQuotesBySource }),
         },
       });
       const requestBytes = Buffer.byteLength(
@@ -1556,14 +2066,26 @@ function validateResponses(
             )?.requiredSourceRefs,
             kind: claim.kind,
             verdict: check.verdict,
-            draft: JSON.parse(request.prompt).draft,
+            draft: materializeSourceReviewDraft(request.prompt),
+            requiredWitnessPaths: request.coverageBindings.find(
+              (binding) => binding.claimId === claim.id,
+            )?.requiredWitnessPaths,
+            titleContextRefs: request.coverageBindings.find(
+              (binding) => binding.claimId === claim.id,
+            )?.titleContextRefs,
           });
         else if (check.coverageProof.length)
           throw new Error("Coverage proof belongs only to a coverage claim");
       }
       if (
         (check.verdict !== "supported" && check.draftQuote === null) ||
-        (check.draftQuote !== null && !claim.text.includes(check.draftQuote))
+        (check.draftQuote !== null && !claim.text.includes(check.draftQuote)) ||
+        (check.verdict === "contradicted" &&
+          check.draftQuote !== null &&
+          !sourceReviewQuotePreservesOriginalValue(
+            claim.text,
+            check.draftQuote,
+          ))
       )
         throw new Error(
           "Source review criticism must quote its own assigned claim",
@@ -1583,6 +2105,16 @@ function validateResponses(
         throw new Error(
           "Original fact pointers require their own summary or detail claim and source evidence",
         );
+      const requiredOwn = request.claimReadingGroups.find((g) =>
+        g.claimIds.includes(claim.id),
+      )?.requiredSupportedSourceIds;
+      if (
+        check.verdict === "supported" &&
+        requiredOwn?.some((id) => !check.sourceRefs.includes(id))
+      )
+        throw new Error(
+          "Supported claim requires all its own original references",
+        );
       const independentRefs = (id: string) =>
         independent.observations
           .find((o) => o.id === id)
@@ -1598,7 +2130,7 @@ function validateResponses(
           .filter((fact) => fact.id === id)
           .map((fact) => fact.sourceRef);
       const component = claim.kind.startsWith("component_")
-        ? JSON.parse(request.prompt).draft.components[
+        ? materializeSourceReviewDraft(request.prompt).components[
             Number(claim.subject.split("/").at(-1))
           ]
         : null;
@@ -1656,9 +2188,8 @@ function validateResponses(
         );
       if (claim.kind === "classification_reading") {
         const index = Number(claim.subject.split("/").at(-1));
-        const classId = JSON.parse(request.prompt).draft.classificationReadings[
-          index
-        ].classificationId;
+        const classId = materializeSourceReviewDraft(request.prompt)
+          .classificationReadings[index].classificationId;
         if (!check.readingRefs.includes(classId))
           throw new Error(
             "Classification claim requires its independent classification reading",

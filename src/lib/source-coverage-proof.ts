@@ -30,7 +30,11 @@ export type CoverageDraft = {
     meaning: { statement: string };
     sourceRefs: readonly string[];
   }[];
-  details: readonly { explanation: string; sourceRefs: readonly string[] }[];
+  details: readonly {
+    explanation: string;
+    sourceRefs: readonly string[];
+    lf?: boolean;
+  }[];
 };
 
 // Proof of presence is separate from the reviewer's semantic judgment. A
@@ -42,6 +46,8 @@ export function validateCoverageProof(input: {
   kind: "scope_coverage" | "contract_clause_coverage";
   verdict: "supported" | "contradicted" | "not_verifiable";
   draft: CoverageDraft;
+  titleContextRefs?: Record<string, string[]>;
+  requiredWitnessPaths?: Record<string, string[]>;
 }) {
   const proof = coverageProofSchema.parse(input.proof);
   if (
@@ -51,6 +57,15 @@ export function validateCoverageProof(input: {
     throw new Error("Coverage proof requires every owned source exactly once");
   const candidates = coverageDraftFields(input.draft);
   for (const row of proof) {
+    if (
+      input.verdict === "supported" &&
+      input.requiredWitnessPaths?.[row.sourceRef]?.some(
+        (path) => !row.witnesses.some((w) => w.draftPath === path),
+      )
+    )
+      throw new Error(
+        "Complete literal coverage requires every original fragment witness",
+      );
     if (row.disposition === "represented") {
       if (!row.witnesses.length)
         throw new Error("Represented fact requires a draft witness");
@@ -59,7 +74,13 @@ export function validateCoverageProof(input: {
         if (
           !witness.quote.trim() ||
           !own?.text.includes(witness.quote) ||
-          !own.refs.includes(row.sourceRef) ||
+          !(
+            own.refs.includes(row.sourceRef) ||
+            (input.kind === "scope_coverage" &&
+              own.refs.some((ref) =>
+                input.titleContextRefs?.[row.sourceRef]?.includes(ref),
+              ))
+          ) ||
           (input.kind === "contract_clause_coverage" &&
             !witness.draftPath.startsWith("/details/"))
         )
@@ -115,7 +136,31 @@ export type CoverageBinding = {
   sourceRefs: string[];
   requiredSourceRefs?: string[];
   witnessesBySource: Record<string, { draftPath: string; quote: string }[]>;
+  titleContextRefs?: Record<string, string[]>;
+  requiredWitnessPaths?: Record<string, string[]>;
 };
+
+// Titles in the two original title sections are lookup context only.
+// Different languages may disagree: candidate presence never approves meaning.
+export function titleContextReferences(
+  passages: readonly {
+    id: string;
+    scope: string;
+    rawPath: string;
+  }[],
+): Record<string, string[]> {
+  const titles = passages.filter((p) =>
+    /^\/(?:base|project-info)\/title\/(?:de|en|fr|it)$/.test(p.rawPath),
+  );
+  return Object.fromEntries(
+    titles.map((p) => [
+      p.id,
+      titles
+        .filter((other) => other.scope === p.scope)
+        .map((other) => other.id),
+    ]),
+  );
+}
 
 // A candidate proves that a cited field exists, never that its meaning covers
 // the fact. The reviewer must select it and judge every proposition separately.
@@ -125,15 +170,31 @@ export function bindCoverageWitnesses(
     "claimId" | "kind" | "sourceRefs" | "requiredSourceRefs"
   >,
   draft: CoverageDraft,
+  titleContextRefs?: Record<string, string[]>,
 ): CoverageBinding {
   const fields = coverageDraftFields(draft);
   return {
     ...claim,
+    requiredWitnessPaths: Object.fromEntries(
+      claim.sourceRefs.flatMap((sourceRef) => {
+        const pieces = draft.details.flatMap((d, i) =>
+          d.lf && d.sourceRefs.includes(sourceRef)
+            ? [`/details/${i}/explanation`]
+            : [],
+        );
+        return pieces.length ? [[sourceRef, pieces]] : [];
+      }),
+    ),
+    ...(titleContextRefs ? { titleContextRefs } : {}),
     witnessesBySource: Object.fromEntries(
       claim.sourceRefs.map((sourceRef) => [
         sourceRef,
         [...fields].flatMap(([draftPath, field]) =>
-          field.refs.includes(sourceRef) &&
+          (field.refs.includes(sourceRef) ||
+            (claim.kind === "scope_coverage" &&
+              field.refs.some((ref) =>
+                titleContextRefs?.[sourceRef]?.includes(ref),
+              ))) &&
           field.text.trim() &&
           (claim.kind !== "contract_clause_coverage" ||
             draftPath.startsWith("/details/"))
@@ -205,9 +266,16 @@ export function coverageSelectionSchema(
               );
             return [sourceRef, absent] as const;
           }
+          const complete = supported
+            ? binding!.requiredWitnessPaths?.[sourceRef]
+            : undefined;
+          const selectedPaths = complete?.length ? complete : paths;
           const represented = z.strictObject({
             disposition: z.literal("represented"),
-            draftPaths: z.array(z.enum(paths)).min(1).max(paths.length),
+            draftPaths: z
+              .array(z.enum(selectedPaths))
+              .min(complete?.length || 1)
+              .max(selectedPaths.length),
           });
           return [
             sourceRef,
@@ -228,6 +296,15 @@ export function projectCoverageSelection(
   const parsed = coverageSelectionSchema(binding).parse(selection);
   return (binding?.sourceRefs ?? []).map((sourceRef) => {
     const row = parsed[sourceRef];
+    if (
+      row.disposition === "represented" &&
+      binding!.requiredWitnessPaths?.[sourceRef]?.some(
+        (path) => !row.draftPaths.includes(path),
+      )
+    )
+      throw new Error(
+        "Literal clause coverage requires every intersecting draft fragment",
+      );
     if (new Set(row.draftPaths).size !== row.draftPaths.length)
       throw new Error("Coverage selection repeats a draft witness");
     return {

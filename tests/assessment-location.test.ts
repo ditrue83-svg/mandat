@@ -54,7 +54,7 @@ it("does not revive an address cleared by the operational conflict check", () =>
   const input = project("Porza");
   input.operational.country = null;
   input.operational.canton = null;
-  expect(assessmentLocation(input, "project")).toBe("Non indicato");
+  expect(assessmentLocation(input, "project")).toBe("Luogo da verificare");
 });
 it("does not treat a description-only address as a structured work location", () => {
   const input = project("Porza");
@@ -90,4 +90,31 @@ it("shows the selected lot locality without using a project or buyer address", (
   expect(assessmentLocation(input, "lot")).toBe("Porza · TI");
   input.evidence = [parentAddress];
   expect(assessmentLocation(input, "lot")).toBe("TI");
+});
+
+it("shows the original description-only execution text without assigning a city or district", () => {
+  const input = project(null);
+  input.operational.country = null;
+  input.operational.canton = null;
+  input.evidence = [
+    {
+      ...input.evidence[0]!,
+      rawPath: "/procurement/orderAddressDescription",
+      value: {
+        it: "Nei locali dell’offerente",
+        de: "In den Räumlichkeiten des Anbieters",
+      },
+    },
+    {
+      ...input.evidence[0]!,
+      rawPath: "/procurement/orderAddressOnlyDescription",
+      value: "yes",
+    },
+  ];
+  const before = JSON.stringify(input);
+  expect(assessmentLocation(input, "project")).toBe(
+    "Nei locali dell’offerente / In den Räumlichkeiten des Anbieters",
+  );
+  expect(input.operational.zone).toBe(null);
+  expect(JSON.stringify(input)).toBe(before);
 });

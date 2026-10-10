@@ -122,13 +122,15 @@ export default async function Detail({
                     </summary>
                     <p>
                       {lot.state === "current"
-                        ? lot.result === "direct"
-                          ? lot.origin === "ai"
-                            ? "Interesse potenziale individuato dall’AI"
-                            : "Interesse potenziale verificato"
-                          : lot.result === "different"
-                            ? "Attività diverse da quelle della ditta"
-                            : "Pertinenza da verificare"
+                        ? lot.operationalVeto
+                          ? "Escluso dalle proposte per le condizioni del bando"
+                          : lot.result === "direct"
+                            ? lot.origin === "ai"
+                              ? "Interesse potenziale individuato dall’AI"
+                              : "Interesse potenziale verificato"
+                            : lot.result === "different"
+                              ? "Attività diverse da quelle della ditta"
+                              : "Pertinenza da verificare"
                         : "Valutazione da aggiornare"}
                     </p>
                     {lot.reason && <p>{lot.reason}</p>}

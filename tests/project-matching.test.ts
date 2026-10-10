@@ -332,7 +332,7 @@ test("An explicit absence of a visit retains evidence and clears only the visit 
 test("A real without project gets its own attributable CPV/place/deadline, with exact source evidence", () => {
   const raw = detail(),
     result = filter(raw);
-  assert.equal(PROJECT_PREFILTER_VERSION, "project-operational-prefilter-v5");
+  assert.equal(PROJECT_PREFILTER_VERSION, "project-operational-prefilter-v8");
   assert.equal(result.eligible, true);
   assert.equal(result.requiresReview, false);
   assert.equal(result.operational.deadline, "2030-12-01T11:00:00.000Z");
@@ -661,5 +661,59 @@ test("Hashes bind actual operational inputs/profile/provenance, not AI summary, 
   assert.throws(
     () => preliminaryProjectMatch({ ...p, profile, now: new Date("invalid") }),
     /clock/,
+  );
+});
+
+import { allExactTicinoHospitalExecutionSites } from "../src/lib/ticino-hospital-execution-sites";
+test("Hospital execution descriptions preserve exact institutions and conflicting fields", () => {
+  const sites =
+    "Ospedale Regionale di Mendrisio\nOspedale Regionale di Locarno";
+  assert(allExactTicinoHospitalExecutionSites({ it: sites }));
+  assert.equal(
+    allExactTicinoHospitalExecutionSites({
+      it: sites + "\nAltra sede in Svizzera",
+    }),
+    false,
+  );
+  assert.equal(
+    allExactTicinoHospitalExecutionSites({ it: sites, fr: "Autres sites" }),
+    false,
+  );
+  const raw = detail();
+  raw.procurement.orderAddressOnlyDescription = "yes";
+  raw.procurement.orderAddressDescription = { it: sites };
+  raw.procurement.orderAddress = {
+    countryId: "CH",
+    cantonId: null,
+    city: { it: null },
+  } as any;
+  const result = filter(raw, {}, { canton: "TI", zone: null });
+  assert.equal(result.operational.canton, "TI");
+  assert.equal(result.operational.zone, null);
+  assert(
+    filter(
+      raw,
+      { zones: ["Luganese"] },
+      { canton: "TI", zone: null },
+    ).automaticReviewReasons.some((x) => x.includes("zone")),
+  );
+  (raw.procurement.orderAddress as Record<string, unknown>).cantonId = "VD";
+  const conflict = filter(raw, {}, { canton: "TI", zone: null });
+  assert.equal(conflict.operational.canton, null);
+  assert(
+    conflict.automaticReviewReasons.some((x) => x.includes("discordanti")),
+  );
+});
+
+test("Unknown editorial canton and district do not contradict an exact own execution city", () => {
+  const result = filter(
+    detail(),
+    {},
+    { canton: null as unknown as string, zone: null },
+  );
+  assert.equal(result.operational.canton, "TI");
+  assert.equal(result.operational.zone, "Luganese");
+  assert(
+    !result.automaticReviewReasons.some((x) => x.includes("riconciliare")),
   );
 });

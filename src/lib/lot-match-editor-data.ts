@@ -25,6 +25,7 @@ export type LotMatchEditorData = {
     state: string;
     result: LotAssessmentResult | null;
     reason: string | null;
+    operationalVeto?: boolean;
   }[];
   selected: null | {
     target: SelectedTarget["target"];
@@ -145,13 +146,21 @@ export function lotMatchEditorData(
       id: lot.target.lotId,
       number: lot.number,
       state: lot.state,
+      ...(lot.operationalVeto ? { operationalVeto: true } : {}),
       result:
         lot.state === "current"
-          ? (lot.evaluation?.result ?? lot.automatic?.result ?? null)
+          ? (lot.evaluation?.result ??
+            (lot.automatic
+              ? lot.operationalVeto
+                ? lot.automatic.relation
+                : lot.automatic.result
+              : null))
           : null,
       reason:
         lot.state === "current"
-          ? (lot.evaluation?.reason ?? lot.automatic?.reason ?? null)
+          ? (lot.evaluation?.reason ??
+            lot.automatic?.reason ??
+            (lot.operationalVeto ? (lot.preliminary?.reason ?? null) : null))
           : null,
     })),
     selected: selected
@@ -160,7 +169,9 @@ export function lotMatchEditorData(
           automatic: automatic
             ? {
                 reason: automatic.reason,
-                result: automatic.result,
+                result: !selected.preliminary.eligible
+                  ? automatic.relation
+                  : automatic.result,
                 quotes: [
                   ...new Set(
                     automatic.evidence.map((item) => plainText(item.text)),

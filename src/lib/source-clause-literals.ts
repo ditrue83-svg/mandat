@@ -1,7 +1,19 @@
+export function originalClauseFieldLabel(
+  path: string,
+  paths: readonly string[],
+) {
+  const base = (value: string) => value.replace(/\/(?:de|en|fr|it|rm)$/, "");
+  const language = path.match(/\/(de|en|fr|it|rm)$/)?.[1];
+  return language && new Set(paths.map(base)).size === 1
+    ? language.toUpperCase()
+    : path;
+}
+
 type ClausePassage = {
   rawPath: string;
   scope: string;
   text?: string;
+  value?: unknown;
   startUtf16?: number;
   endUtf16?: number;
 };
@@ -14,7 +26,11 @@ export function originalClauseTextParts(originals: readonly ClausePassage[]) {
     !originals.length ||
     originals.some(
       (p) =>
-        typeof p.text !== "string" || !/\/(de|en|fr|it|rm)$/.test(p.rawPath),
+        typeof p.text !== "string" &&
+        !(
+          "value" in p &&
+          ["string", "number", "boolean"].includes(typeof p.value)
+        ),
     )
   )
     return undefined;
@@ -24,6 +40,23 @@ export function originalClauseTextParts(originals: readonly ClausePassage[]) {
   for (const p of originals)
     fields.set(p.rawPath, [...(fields.get(p.rawPath) ?? []), p]);
   const texts = [...fields].map(([path, passages]) => {
+    const label = originalClauseFieldLabel(path, [...fields.keys()]);
+    if (passages.some((p) => typeof p.text !== "string")) {
+      if (passages.length !== 1 || typeof passages[0].text === "string")
+        throw new Error("Original scalar field must retain one value");
+      const value = passages[0].value;
+      if (typeof value === "number" && !Number.isFinite(value))
+        throw new Error("Original scalar field is not finite");
+      const unit =
+        /\/(?:offerValidityDeadlineDays|contractDays|executionDays)$/.test(
+          path,
+        ) && typeof value === "number"
+          ? value === 1
+            ? " giorno"
+            : " giorni"
+          : "";
+      return `${label}: ${JSON.stringify(value)}${unit}`;
+    }
     const ordered = [...passages].sort((a, b) => a.startUtf16! - b.startUtf16!);
     let end = 0;
     for (const p of ordered) {
@@ -37,9 +70,15 @@ export function originalClauseTextParts(originals: readonly ClausePassage[]) {
         );
       end = p.endUtf16;
     }
-    const text = ordered.map((p) => p.text).join("");
-    return fields.size > 1
-      ? `${path.split("/").at(-1)!.toUpperCase()}: ${text}`
+    const originalText = ordered.map((p) => p.text).join("");
+    const text =
+      /\/(?:offerValidityDeadlineDays|contractDays|executionDays)$/.test(
+        path,
+      ) && /^\d+(?:\.\d+)?$/.test(originalText)
+        ? `${originalText}${Number(originalText) === 1 ? " giorno" : " giorni"}`
+        : originalText;
+    return fields.size > 1 || !/\/(de|en|fr|it|rm)$/.test(path)
+      ? `${label}: ${text}`
       : text;
   });
   let remainder = texts.join("\n");

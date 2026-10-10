@@ -373,6 +373,7 @@ export type LotAssessmentInput = {
   shapeState: AssessmentShapeHistory;
   evaluationSet: LotEvaluationSet | null;
   automaticComparisons?: readonly unknown[];
+  operationalReadings?: readonly unknown[];
   evidenceSnapshots?: readonly LotSourceSnapshot[];
   now?: Date;
 };
@@ -473,6 +474,7 @@ export function preliminaryAssessmentMatch(input: {
   publication: Publication;
   profile: CompanyProfile;
   context: LotSourceContext;
+  operationalReadings?: readonly unknown[];
   now?: Date;
 }): PreliminaryTargetMatch {
   return input.context.target.kind === "project"
@@ -522,6 +524,7 @@ export function createHumanTargetAssessment(
     publication: input.publication,
     profile: input.profile,
     context,
+    operationalReadings: input.operationalReadings,
     now: input.now,
   });
   const previousEntry =
@@ -739,6 +742,7 @@ export type ResolvedTargetAssessment = DeepReadonly<{
   issue: string | null;
   evaluation: LotEvaluation | null;
   automatic?: ResolvedAutomaticComparison | null;
+  operationalVeto?: boolean;
   context: LotSourceContext | null;
   preliminary: PreliminaryTargetMatch | null;
   signalEligible: boolean;
@@ -824,6 +828,7 @@ export function resolveProjectLotAssessment(
         publication: input.publication,
         profile: input.profile,
         context,
+        operationalReadings: input.operationalReadings,
         now: input.now,
       });
       const evaluation =
@@ -884,11 +889,12 @@ export function resolveProjectLotAssessment(
             { ...input, target, preliminary },
             input.automaticComparisons ?? [],
           );
+      const operationalVeto = !preliminary.eligible;
       const state = evaluation
         ? issue
           ? ("stale" as const)
           : ("current" as const)
-        : automatic.comparison
+        : automatic.comparison || operationalVeto
           ? ("current" as const)
           : ("missing" as const);
       return {
@@ -897,10 +903,13 @@ export function resolveProjectLotAssessment(
         state,
         issue: evaluation
           ? issue
-          : (automatic.issue ??
-            (automatic.comparison ? null : "assessment_missing")),
+          : operationalVeto
+            ? null
+            : (automatic.issue ??
+              (automatic.comparison ? null : "assessment_missing")),
         evaluation,
         automatic: automatic.comparison,
+        operationalVeto,
         context,
         preliminary,
         signalEligible:
@@ -952,8 +961,13 @@ export function resolveProjectLotAssessment(
         ((item.evaluation?.result === "different" &&
           !!item.context &&
           sourceAllowsCertainty(item.context)) ||
-          item.automatic?.result === "different"),
+          // An operational veto can change result, not the professional relation.
+          item.automatic?.relation === "different"),
     );
+  const allLocallyExcluded =
+    targets.length > 0 &&
+    currentTargets.length === targets.length &&
+    currentTargets.every((item) => item.preliminary?.eligible === false);
   const relevant = currentTargets.filter((item) => item.signalEligible);
   const manualRelevant = relevant.filter((item) => !!item.evaluation);
   const automaticBindings = currentTargets.flatMap((item) =>
@@ -1009,23 +1023,37 @@ export function resolveProjectLotAssessment(
           : allDifferent
             ? ("different" as const)
             : ("review" as const);
+  // A project availability veto already excludes delivery; missing professional
+  // assessments must not replace its concrete explanation with a review request.
+  const projectOperationalVeto = currentTargets.find(
+    (item) =>
+      item.target.kind === "project" && item.preliminary?.eligible === false,
+  )?.preliminary?.reason;
   const reason = suppressed
     ? suppression!.reason
     : feedback.dismissed
       ? "Progetto non segnalato perché segnato come non interessante."
       : state === "input_refused"
         ? "Fonte corrente non utilizzabile: i giudizi precedenti restano storici."
-        : relevant.length
-          ? relevant.some((item) => item.target.kind === "project")
-            ? "Interesse potenziale per il progetto intero; non attesta l’idoneità a partecipare."
-            : `Interesse potenziale per ${relevant.map((lot) => `il lotto ${lot.number ?? (lot.target.kind === "lot" ? lot.target.lotId : "")}`).join(", ")}; non attesta l’idoneità a partecipare. Gli altri lotti mantengono la propria valutazione.`
-          : allDifferent
-            ? input.shapeState.shape.kind === "project"
-              ? "Il progetto è stato giudicato diverso dalle attività dichiarate dalla ditta."
-              : "Tutti i lotti correnti noti sono stati giudicati diversi dalle attività della ditta."
-            : input.shapeState.shape.kind === "unresolved"
-              ? "La struttura della pubblicazione richiede verifica: non è ancora disponibile un target aziendale valutabile."
-              : "La pertinenza del progetto richiede ancora una valutazione del target o della fonte.";
+        : projectOperationalVeto
+          ? projectOperationalVeto
+          : allLocallyExcluded
+            ? [
+                ...new Set(
+                  currentTargets.map((item) => item.preliminary!.reason),
+                ),
+              ].join(" ")
+            : relevant.length
+              ? relevant.some((item) => item.target.kind === "project")
+                ? "Interesse potenziale per il progetto intero; non attesta l’idoneità a partecipare."
+                : `Interesse potenziale per ${relevant.map((lot) => `il lotto ${lot.number ?? (lot.target.kind === "lot" ? lot.target.lotId : "")}`).join(", ")}; non attesta l’idoneità a partecipare. Gli altri lotti mantengono la propria valutazione.`
+              : allDifferent
+                ? input.shapeState.shape.kind === "project"
+                  ? "Il progetto è stato giudicato diverso dalle attività dichiarate dalla ditta."
+                  : "Tutti i lotti correnti noti sono stati giudicati diversi dalle attività della ditta."
+                : input.shapeState.shape.kind === "unresolved"
+                  ? "La struttura della pubblicazione richiede verifica: non è ancora disponibile un target aziendale valutabile."
+                  : "La pertinenza del progetto richiede ancora una valutazione del target o della fonte.";
   const lots = targets.filter(
     (item): item is ResolvedLotAssessment => item.target.kind === "lot",
   );
@@ -1071,6 +1099,7 @@ export function projectLotAssessmentDto(value: ProjectLotAssessment) {
     number: item.number,
     state: item.state,
     issue: item.issue,
+    operationalVeto: item.operationalVeto ?? false,
     origin:
       item.state === "current"
         ? item.evaluation
@@ -1081,11 +1110,18 @@ export function projectLotAssessmentDto(value: ProjectLotAssessment) {
         : null,
     result:
       item.state === "current"
-        ? (item.evaluation?.result ?? item.automatic?.result ?? null)
+        ? (item.evaluation?.result ??
+          (item.automatic
+            ? item.operationalVeto
+              ? item.automatic.relation
+              : item.automatic.result
+            : null))
         : null,
     reason:
       item.state === "current"
-        ? (item.evaluation?.reason ?? item.automatic?.reason ?? null)
+        ? (item.evaluation?.reason ??
+          item.automatic?.reason ??
+          (item.operationalVeto ? (item.preliminary?.reason ?? null) : null))
         : null,
     evidence:
       item.state === "current"
@@ -1095,20 +1131,45 @@ export function projectLotAssessmentDto(value: ProjectLotAssessment) {
               url: proof.origin.url,
               page: proof.origin.page,
             }))
-          : (item.automatic?.evidence ?? []).map((proof) => ({
-              quote: proof.text,
-              url: proof.url,
-              page: null,
-            }))
+          : item.operationalVeto
+            ? (item.preliminary?.evidence ?? [])
+                .filter(
+                  (proof) =>
+                    proof.presence !== "absent" &&
+                    [
+                      "location",
+                      "availability",
+                      "deadline",
+                      "exclusion",
+                    ].includes(proof.purpose),
+                )
+                .map((proof) => ({
+                  quote:
+                    typeof proof.value === "string"
+                      ? proof.value
+                      : (JSON.stringify(proof.value) ?? "null"),
+                  url: proof.url,
+                  page: null,
+                }))
+            : (item.automatic?.evidence ?? []).map((proof) => ({
+                quote: proof.text,
+                url: proof.url,
+                page: null,
+              }))
         : [],
     companyEvidence:
       item.state === "current"
         ? (item.automatic?.companyEvidence ?? []).map((proof) => proof.text)
         : [],
     reviewReasons: [
-      ...(item.automatic?.reviewReasons ??
-        item.preliminary?.reviewReasons ??
-        []),
+      ...new Set([
+        ...(item.automatic?.reviewReasons ??
+          item.preliminary?.reviewReasons ??
+          []),
+        ...(item.preliminary && "informationalReviewReasons" in item.preliminary
+          ? (item.preliminary.informationalReviewReasons ?? [])
+          : []),
+      ]),
     ],
     operational: item.preliminary
       ? {

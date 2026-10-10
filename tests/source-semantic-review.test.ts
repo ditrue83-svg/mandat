@@ -350,7 +350,11 @@ function draft(input = context()) {
           scope: "project_context",
         },
         ...input.body.passages
-          .filter((p) => p.rawPath === "/procurement/options/it")
+          .filter(
+            (p) =>
+              p.rawPath === "/procurement/options/it" ||
+              p.rawPath.startsWith("/procurement/contractPeriod/dateRange/"),
+          )
           .map((p) => ({
             kind: "execution_condition" as const,
             explanation: p.text,
@@ -489,7 +493,7 @@ test("Summary dates absent from the independent work selection keep their own or
         {
           ...base.body.passages[3],
           id: "s5",
-          rawPath: "/procurement/contractPeriod/dateRange/0",
+          rawPath: "/base/publicationDate",
           text: date,
           endUtf16: date.length,
         },
@@ -499,9 +503,10 @@ test("Summary dates absent from the independent work selection keep their own or
   const source = recordSourceInterpretation(
     {
       ...draft(input).response,
-      summary: "Fornitura di articoli inventati dal 1 gennaio 2030.",
+      summary:
+        "Fornitura di articoli inventati, bando pubblicato il 1 gennaio 2030.",
       summarySourceRefs: ["s1", "s5"],
-      details: [],
+      details: draft(input).response.details,
     },
     buildSourceInterpretationRequest(input),
     { ...metadata, model: input.binding.model },
@@ -596,7 +601,7 @@ test("Summary dates absent from the independent work selection keep their own or
   assert.throws(() => store(unrelated), /own summary or detail/);
   const negative = altered((c) => {
     c.verdict = "not_verifiable";
-    c.draftQuote = "dal 1 gennaio 2030";
+    c.draftQuote = "pubblicato il 1 gennaio 2030";
   });
   assert.equal(
     readSourceSemanticReview(store(negative), plan)?.accepted,
@@ -4595,6 +4600,93 @@ test("Mandatory clauses cannot become optional in scope coverage while unrelated
     },
     buildSourceInterpretationRequest(input),
     { ...metadata, model: input.binding.model },
+  );
+  const before = JSON.stringify({ input, original });
+  const plan = buildCurrentSourceSemanticReviewRequest(input, original, config);
+  const parts = inventedGroundedReviewRequests(plan);
+  const binding = parts
+    .flatMap((p) => p.coverageBindings)
+    .find((b) => b.kind === "scope_coverage" && b.sourceRefs.includes("s5"))!;
+  assert(binding);
+  assert(binding.requiredSourceRefs?.includes("s5"));
+  assert(!binding.requiredSourceRefs?.includes("s2"));
+  const selection = Object.fromEntries(
+    binding.sourceRefs.map((id) => [
+      id,
+      { disposition: "not_required", draftPaths: [] },
+    ]),
+  );
+  assert.throws(() => coverageSelectionSchema(binding).parse(selection));
+  selection.s5 = { disposition: "missing", draftPaths: [] };
+  coverageSelectionSchema(binding).parse(selection);
+  const proof = projectCoverageSelection(selection, binding);
+  const payload = JSON.parse(
+    parts.find((p) => p.coverageBindings.includes(binding))!.prompt,
+  );
+  assert.throws(() =>
+    validateCoverageProof({
+      proof,
+      ownedSourceRefs: binding.sourceRefs,
+      requiredSourceRefs: binding.requiredSourceRefs,
+      kind: binding.kind,
+      verdict: "supported",
+      draft: payload.draft,
+    }),
+  );
+  validateCoverageProof({
+    proof,
+    ownedSourceRefs: binding.sourceRefs,
+    requiredSourceRefs: binding.requiredSourceRefs,
+    kind: binding.kind,
+    verdict: "not_verifiable",
+    draft: payload.draft,
+  });
+  assert.equal(JSON.stringify({ input, original }), before);
+});
+
+test("Gessatore: original qualification reference condition cannot become optional", () => {
+  const base = context();
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        {
+          ...base.body.passages[3],
+          id: "s5",
+          rawPath: "/criteria/qualificationCriteriaNote/it",
+          text: "Per il criterio dell’esperienza/referenza dell’offerente fa stato un’opera realizzata e collaudata negli utlimi 5 anni (riferiti alla data d’inoltro dell’offerta) con importo uguale o superiore a CHF 400’000.- (importo d’appalto escluso IVA, sconti e ribassi definiti in sede di liquidazione).",
+          endUtf16: 293,
+        },
+      ],
+    },
+  };
+  const original = recordSourceInterpretation(
+    {
+      ...draft(base).response,
+      details: [
+        ...draft(base).response.details,
+        {
+          kind: "execution_condition",
+          scope: "project_context",
+          sourceRefs: ["s5"],
+          explanation:
+            "Per il criterio dell’esperienza/referenza dell’offerente fa stato un’opera realizzata e collaudata negli utlimi 5 anni (riferiti alla data d’inoltro dell’offerta) con importo uguale o superiore a CHF 400’000.- (importo d’appalto escluso IVA, sconti e ribassi definiti in sede di liquidazione).",
+        },
+      ],
+    },
+    buildSourceInterpretationRequest(input),
+    { ...metadata, model: input.binding.model },
+  );
+  assert.throws(
+    () =>
+      recordSourceInterpretation(
+        draft(base).response,
+        buildSourceInterpretationRequest(input),
+        { ...metadata, model: input.binding.model },
+      ),
+    /Incomplete source interpretation contract clauses/,
   );
   const before = JSON.stringify({ input, original });
   const plan = buildCurrentSourceSemanticReviewRequest(input, original, config);

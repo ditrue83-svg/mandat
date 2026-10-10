@@ -1068,3 +1068,20 @@ it("an unknown empty structure shows the unresolved notice and no certainty form
   expect(html).not.toContain('value="different"');
   expect(html).not.toContain("Salva valutazione");
 });
+
+it("renders a local operational veto separately from professional mismatch", () => {
+  const data = dto();
+  data.selected = null;
+  data.lots = [
+    {
+      ...data.lots[0]!,
+      state: "current",
+      result: null,
+      operationalVeto: true,
+      reason: "Termine scaduto.",
+    },
+  ];
+  const html = renderToStaticMarkup(createElement(LotMatchEditor, { data }));
+  expect(html).toContain("Escluso per condizioni operative");
+  expect(html).not.toContain("Non pertinente per territorio");
+});

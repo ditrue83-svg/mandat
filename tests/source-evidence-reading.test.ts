@@ -764,6 +764,20 @@ test("A flat lot extension deadline rejects an omitted condition and reaches sem
     ],
     issues: [],
   };
+  // This native producer fixture also preserves each newly mandatory full
+  // work-description field; the intentionally incomplete extension stays first.
+  for (const passage of input.body.passages.filter(
+    (p) =>
+      request.requiredContractClauseIds.includes(p.id) &&
+      /\/orderDescription(?:\/|$)/.test(p.rawPath),
+  )) {
+    answer.details.push({
+      kind: "execution_condition",
+      scope: passage.scope,
+      sourceRefs: [passage.id],
+      explanation: passage.text,
+    });
+  }
   const before = JSON.stringify(answer);
   assert.throws(
     () =>
@@ -2033,28 +2047,28 @@ test("Lot facts and shared facts remain separate in the provider schema and stor
   );
   const unanchored = structuredClone(valid);
   unanchored[0].observations[0].evidence = [{ sourceRef: "s1" }];
-  assert.equal(validate(unanchored[0]), true); // Cross-field scope is checked locally.
+  assert.equal(validate(unanchored[0]), false); // Cross-field scope is checked locally.
   assert.throws(
     () => recordSourceEvidenceReading(unanchored, plan, metadata),
     /scope mismatch/,
   );
   const mislabelled = structuredClone(valid);
   mislabelled[0].observations[0].serviceRef = "s1";
-  assert.equal(validate(mislabelled[0]), true);
+  assert.equal(validate(mislabelled[0]), false);
   assert.throws(
     () => recordSourceEvidenceReading(mislabelled, plan, metadata),
     /scope mismatch/,
   );
   const mixed = structuredClone(valid);
   mixed[0].observations[0].evidence.push({ sourceRef: "s1" });
-  assert.equal(validate(mixed[0]), true);
+  assert.equal(validate(mixed[0]), false);
   assert.throws(
     () => recordSourceEvidenceReading(mixed, plan, metadata),
     /scope mismatch/,
   );
   const mixedDetail = structuredClone(valid);
   mixedDetail[0].missingDetails[0].evidence.push({ sourceRef: "f0" });
-  assert.equal(validate(mixedDetail[0]), true);
+  assert.equal(validate(mixedDetail[0]), false);
   assert.throws(
     () => recordSourceEvidenceReading(mixedDetail, plan, metadata),
     /scope mismatch/,
@@ -2124,7 +2138,7 @@ test("A territorial partition identifies the lot only with a separately grounded
     (o: any) => o.kind === "performance",
   );
   project.kind = "target_partition";
-  assert.equal(validate(wrongScope[0]), true);
+  assert.equal(validate(wrongScope[0]), false);
   assert.throws(
     () => recordSourceEvidenceReading(wrongScope, plan, metadata),
     /partition must belong/,

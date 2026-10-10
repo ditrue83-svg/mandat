@@ -1137,6 +1137,12 @@ test("Component evidence keeps its explicitly selected territory and period with
       scope: "project_context",
     },
   ] as any;
+  (answer.details as any[]).push({
+    kind: "execution_condition",
+    explanation: additions[1].text,
+    sourceRefs: ["s6"],
+    scope: "project_context",
+  } as any);
   const result = validateSourceInterpretation(
     {
       ...answer,
@@ -1366,6 +1372,12 @@ test("A summary keeps its own date evidence and rejects missing, foreign or clas
     summary: "Fornitura di prodotti inventati dal 1 gennaio 2030.",
     summarySourceRefs: ["s1", "s5"],
   };
+  (answer.details as any[]).push({
+    kind: "execution_condition",
+    explanation: date,
+    sourceRefs: ["s5"],
+    scope: "project_context",
+  } as any);
   const value = validateSourceInterpretation(answer, request);
   assert.deepEqual(value.summarySourceRefs, ["s1", "s5"]);
   assert.equal(value.evidence.find((p) => p.id === "s5")!.text, date);
@@ -1646,7 +1658,12 @@ test("Standalone extension and delegation flags must be explained in details", (
   assert.deepEqual(prompt.requiredContractClauseIds, ["s5", "s6"]);
   assert.match(prompt.rules.join(" "), /canContractBeExtended yes\/true/);
   assert.match(prompt.rules.join(" "), /senza inventare durata/);
-  assert.equal(prompt.requiredContractClauses[0].text, "yes");
+  assert.equal(
+    prompt.passages.find(
+      (p: any) => p.id === prompt.requiredContractClauses[0].id,
+    ).text,
+    "yes",
+  );
   const omitted = response(input);
   omitted.summarySourceRefs.push("s5", "s6");
   assert.throws(
@@ -1717,7 +1734,12 @@ test.each([false, true, 0, null])(
       );
       return;
     }
-    assert.equal(prompt.requiredContractClauses[0].value, value);
+    assert.equal(
+      prompt.fields.find(
+        (f: any) => f.id === prompt.requiredContractClauses[0].id,
+      ).value,
+      value,
+    );
     assert.throws(
       () => validateSourceInterpretation(response(input), request),
       /Incomplete.*contract clauses/,
@@ -1934,7 +1956,12 @@ test("A compound subcontracting note is presented as multiple required facts", (
   };
   const request = buildSourceInterpretationRequest(input);
   const prompt = JSON.parse(request.prompt);
-  assert.equal(prompt.requiredContractClauses[0].text, note);
+  assert.equal(
+    prompt.passages.find(
+      (p: any) => p.id === prompt.requiredContractClauses[0].id,
+    ).text,
+    note,
+  );
   assert.match(
     prompt.rules.join(" "),
     /ogni proposizione autonoma.*candidature multiple in più offerte/,
@@ -1988,7 +2015,12 @@ test.each(["\n", "\r\n"])(
       assert.equal(block.rawPath, "/procurement/executionNote/it");
     }
     assert.equal(
-      prompt.requiredContractClauses.map((p: any) => p.text).join(""),
+      prompt.requiredContractClauses
+        .map(
+          (p: any) =>
+            prompt.passages.find((original: any) => original.id === p.id).text,
+        )
+        .join(""),
       note,
     );
     assert.match(
@@ -4124,7 +4156,7 @@ test("Provider context is bounded with schema bytes included, never silently tru
   );
 });
 
-test("Compact source JSON preserves every long-source value and reference within the byte limit", () => {
+test("An oversized synthetic source is rejected at the unchanged byte limit", () => {
   const input = context();
   const base = buildSourceInterpretationRequest(input);
   const tail = "ULTIMA CLAUSOLA: trasporto escluso, pulizia accessoria 🌳";
@@ -4133,6 +4165,63 @@ test("Compact source JSON preserves every long-source value and reference within
     ...Array.from({ length: 380 }, (_, index) => {
       const text =
         index === 379
+          ? tail
+          : `Prestazione inventata numero ${index}: `.padEnd(220, "x");
+      return {
+        id: `s${index + 5}`,
+        scope: "project_context" as const,
+        role: "context" as const,
+        rawPath: `/terms/clauses/${index}/it`,
+        startUtf16: 0,
+        endUtf16: text.length,
+        text,
+        url: "https://example.invalid/source",
+      };
+    }),
+  ];
+  const large: SourceInterpretationContext = {
+    ...input,
+    coverage: {
+      ...input.coverage,
+      sourceUtf16: passages.reduce(
+        (total, passage) => total + passage.text.length,
+        0,
+      ),
+      fields: passages.length + 3,
+      chunks: 19,
+    },
+    body: {
+      ...input.body,
+      passages,
+      fields: [
+        ...input.body.fields,
+        { scope: "project_context", rawPath: "/terms/optional", value: false },
+        { scope: "project_context", rawPath: "/terms/quantity", value: 0 },
+      ],
+    },
+    readings: Array.from({ length: 19 }, (_, index) => ({
+      chunkId: `chunk${index + 1}`,
+      status: "complete" as const,
+      sourceRefs: passages
+        .slice(index * 21, (index + 1) * 21)
+        .map((passage) => passage.id),
+    })),
+  };
+  assert.throws(
+    () => buildSourceInterpretationRequest(large),
+    /source_interpretation_prompt_capacity/,
+  );
+});
+
+test("Compact source JSON preserves every long-source value and reference within the byte limit", () => {
+  const input = context();
+  const base = buildSourceInterpretationRequest(input);
+  const tail = "ULTIMA CLAUSOLA: trasporto escluso, pulizia accessoria 🌳";
+  const passages = [
+    ...input.body.passages,
+    ...Array.from({ length: 370 }, (_, index) => {
+      const text =
+        index === 369
           ? tail
           : `Prestazione inventata numero ${index}: `.padEnd(220, "x");
       return {
@@ -5129,4 +5218,84 @@ test("Provider schema forbids shared-project details on project targets while pr
     validateSourceInterpretation(linked, project).status,
     "resolved",
   );
+});
+
+test("HR product availability and bidder qualifications require separate complete own clauses", () => {
+  const base = context();
+  const product =
+    "La soluzione informatica proposta, al netto degli adattamenti circoscritti a quanto richiesto dal committente, deve essere esistente e già disponibile sul mercato; essere attualmente in uso presso almeno 2 clienti con sede in Svizzera, ciascuno dei quali gestisce almeno 500 collaboratori.";
+  const bidder =
+    "È richiesta l'iscrizione al Registro di Commercio nel ramo informatico da almeno 3 anni.";
+  const input: SourceInterpretationContext = {
+    ...base,
+    body: {
+      ...base.body,
+      passages: [
+        ...base.body.passages,
+        ...[
+          ["s5", "/criteria/qualificationCriteria/2/description/it", product],
+          ["s6", "/criteria/qualificationCriteria/0/description/it", bidder],
+        ].map(([id, rawPath, text]) => ({
+          ...base.body.passages[0],
+          id,
+          rawPath,
+          text,
+          role: "context" as const,
+          endUtf16: text.length,
+        })),
+      ],
+    },
+  };
+  const before = JSON.stringify(input);
+  const request = buildSourceInterpretationRequest(input);
+  assert.deepEqual(request.requiredContractClauseIds, ["s5", "s6"]);
+  const value = {
+    ...response(input),
+    details: [
+      {
+        kind: "execution_condition",
+        explanation: product,
+        scope: "project_context",
+        sourceRefs: ["s5"],
+      },
+      {
+        kind: "execution_condition",
+        explanation: bidder,
+        scope: "project_context",
+        sourceRefs: ["s6"],
+      },
+    ],
+  };
+  const wire = wireResponse(value, request);
+  const accepts = new Ajv2020({ strict: false }).compile(
+    request.responseFormat.json_schema.schema,
+  );
+  assert.equal(accepts(wire), true);
+  const record = recordSourceInterpretation(wire, request, metadata);
+  assert(
+    record.response.details.some(
+      (d) =>
+        d.sourceRefs.includes("s5") &&
+        d.explanation.includes("già disponibile sul mercato"),
+    ),
+  );
+  assert(
+    record.response.details.some(
+      (d) =>
+        d.sourceRefs.includes("s6") && d.explanation.includes("almeno 3 anni"),
+    ),
+  );
+  for (const id of ["s5", "s6"]) {
+    const omitted = structuredClone(wire);
+    delete omitted.contractClauseDetails[clauseKey(request, id)];
+    assert.equal(accepts(omitted), false);
+    assert.throws(() => recordSourceInterpretation(omitted, request, metadata));
+  }
+  const wrong = structuredClone(wire);
+  wrong.contractClauseDetails[clauseKey(request, "s5")] = structuredClone(
+    wire.contractClauseDetails[clauseKey(request, "s6")],
+  );
+  assert.equal(accepts(wrong), false);
+  assert.throws(() => recordSourceInterpretation(wrong, request, metadata));
+  assert.equal(JSON.stringify(input), before);
 });

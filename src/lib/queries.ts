@@ -451,9 +451,19 @@ export async function getOpportunity(
             ? `Lotto ${target.number ?? "senza numero"}: `
             : "") + target.reason,
       ) ?? [];
+  const closedTargetPreliminary = row.loaded?.project.targets.find(
+    (target) =>
+      target.state !== "removed-or-unresolved" &&
+      target.preliminary?.eligible === false,
+  )?.preliminary;
   if (item.tenderBrief?.warning)
     item.reason =
       "La versione più recente della fonte non è leggibile: il confronto con la tua ditta è sospeso. Verifica la pubblicazione originale.";
+  else if (
+    closedTargetPreliminary?.eligible === false &&
+    ["closed", "cancelled", "awarded"].includes(row.publication.status)
+  )
+    item.reason = closedTargetPreliminary.reason;
   else if (currentReasons.length)
     item.reason = [...new Set(currentReasons)].join(" ");
   else if (["unreviewed", "uncertain", "preliminary"].includes(item.assessment))

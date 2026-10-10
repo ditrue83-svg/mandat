@@ -100,3 +100,32 @@ test.each([
     assert.equal(explicitlyUnscheduledIndividualVisit(notes), false);
   },
 );
+
+import { explicitlyNoVisitWithAssumedKnowledge } from "../src/lib/site-visit-notes";
+const knowledge = {
+  it: "Nessun sopralluogo previsto. Si assume che gli offerenti conoscano bene il luogo di intervento, le condizioni ambientali e quelle di lavoro valide per la presente commessa.",
+  fr: "Aucune visite des lieux n'est prévue. On part du principe que les soumissionnaires connaissent bien le lieu d'intervention, ainsi que les conditions environnementales et de travail applicables au présent marché.",
+};
+test("No organized visit with a knowledge presumption retains source conditions but resolves attendance", () => {
+  assert(explicitlyNoVisitWithAssumedKnowledge(knowledge));
+  assert.equal(explicitlyNoSiteVisit(knowledge), false);
+  assert.equal(
+    explicitlyNoVisitWithAssumedKnowledge({
+      ...knowledge,
+      it: knowledge.it + " Partecipazione obbligatoria il 4 maggio.",
+    }),
+    false,
+  );
+  assert.equal(
+    explicitlyNoVisitWithAssumedKnowledge({
+      ...knowledge,
+      fr: "Visite obligatoire.",
+    }),
+    false,
+  );
+  assert.equal(
+    explicitlyNoVisitWithAssumedKnowledge({ xx: knowledge.it }),
+    false,
+  );
+  assert.equal(explicitlyNoVisitWithAssumedKnowledge(knowledge.it), false);
+});

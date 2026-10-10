@@ -1,3 +1,93 @@
+import { buildSourceLiteralCatalogue } from "../../src/lib/source-literal-catalogue";
+import { resolveSourceTextSelection } from "../../src/lib/source-selection";
+import { componentEvidenceGroups } from "../../src/lib/source-interpretation";
+import {
+  sourceClauseLiteralFamilies,
+  type SourceInterpretationContext,
+} from "../../src/lib/source-interpretation";
+// Encode declared choices in newly invented fixtures only, never live output.
+export function encodeInventedSourceSelections(
+  input: SourceInterpretationContext,
+  value: any,
+) {
+  const groups = componentEvidenceGroups(input.body.passages),
+    catalogue = buildSourceLiteralCatalogue(input.body.passages, groups);
+  const choose = (selection: any) => {
+    const original = resolveSourceTextSelection(
+      selection,
+      input.body.passages,
+      groups,
+    );
+    const picked = catalogue.selections.find(
+      (p) =>
+        (p.sourceRef === selection.sourceRef ||
+          groups.some(
+            (g) =>
+              g.id === p.sourceRef &&
+              g.sourceRefs.includes(selection.sourceRef),
+          )) &&
+        catalogue.literals
+          .find((f) => f.sourceRef === p.sourceRef)!
+          .parts.find((part) => part[0] === p.id)![1]
+          .includes(original.text),
+    );
+    if (!picked)
+      throw new Error(
+        "Invented fixture selection has no whole original catalogue part",
+      );
+    return { literalSelectionId: picked.id };
+  };
+  value.evidenceFormat = "source_selections_v19";
+  for (const c of value.components) {
+    c.roleEvidence.actionSelection = choose(c.roleEvidence.actionSelection);
+    c.meaning.objectSelection = choose(c.meaning.objectSelection);
+  }
+  value.contractClauseDetails ??= {};
+  for (const family of sourceClauseLiteralFamilies(input)
+    .contractDetailFamilies) {
+    if (value.contractClauseDetails[family.id]) continue;
+    const parts = family.originalMultilingualExplanation
+      ? [family.originalMultilingualExplanation]
+      : family.originalTextParts;
+    value.contractClauseDetails[family.id] = [
+      {
+        kind: "execution_condition",
+        scope: family.scope,
+        sourceRefs: family.sourceRefs,
+        ...(parts
+          ? { originalText: true }
+          : { explanation: family.originalScalarExplanation }),
+      },
+    ];
+  }
+  for (const family of sourceClauseLiteralFamilies(input).contractDetailFamilies
+    .length > 16
+    ? sourceClauseLiteralFamilies(input).contractDetailFamilies
+    : []) {
+    const rows = value.contractClauseDetails[family.id];
+    if (
+      rows?.length === 1 &&
+      (family.originalScalarExplanation ||
+        family.originalMultilingualExplanation ||
+        family.originalTextParts)
+    ) {
+      const row = rows[0];
+      if (
+        JSON.stringify([...row.sourceRefs].sort()) !==
+          JSON.stringify([...family.sourceRefs].sort()) ||
+        row.scope !== family.scope
+      )
+        throw new Error(
+          "Invented family fixture does not declare all its own originals",
+        );
+      value.contractClauseDetails[family.id] = {
+        kind: row.kind,
+        originalFamily: true,
+      };
+    }
+  }
+  return value;
+}
 // Explicitly invented favorable responses for contract/queue tests only.
 // These helpers are not a semantic benchmark or an AI quality judgment.
 import {
@@ -223,12 +313,41 @@ export function inventedReadingRefs(
 }
 
 // Mechanical witnesses for invented fixtures only, never provider repairs.
-export function inventedCoverageProof(draft: any, claim: any, verdict: string) {
+export function inventedCoverageProof(
+  draft: any,
+  claim: any,
+  verdict: string,
+  body?: any,
+) {
+  // Decode only explicitly invented fixtures. Recorded provider responses are
+  // never passed here; dictionary indices retain exact text and citations.
+  if (draft.detailEvidenceBindings)
+    draft = {
+      ...draft,
+      details: draft.details.map((item: any) => {
+        const binding = draft.detailEvidenceBindings.find(
+          (b: any) => b.id === item.b,
+        );
+        if (!binding)
+          throw Error("Invented fixture has missing dictionary binding");
+        const explanation =
+          item.explanation ?? body?.originalTextPieces?.[item.literalPiece];
+        if (typeof explanation !== "string")
+          throw Error("Invented fixture has missing literal text");
+        return {
+          ...item,
+          scope: binding.scope,
+          sourceRefs: binding.sourceRefs,
+          explanation,
+        };
+      }),
+    };
   if (!claim.kind?.endsWith("coverage")) return [];
   return claim.sourceRefs.map((sourceRef: string) => {
-    const index = draft.details.findIndex((d: any) =>
-      d.sourceRefs.includes(sourceRef),
+    const indices = draft.details.flatMap((d: any, index: number) =>
+      d.sourceRefs.includes(sourceRef) ? [index] : [],
     );
+    const index = indices[0] ?? -1;
     const witness =
       index >= 0
         ? {
@@ -239,7 +358,17 @@ export function inventedCoverageProof(draft: any, claim: any, verdict: string) {
           ? { draftPath: "/summary", quote: draft.summary }
           : null;
     if (witness)
-      return { sourceRef, disposition: "represented", witnesses: [witness] };
+      return {
+        sourceRef,
+        disposition: "represented",
+        witnesses:
+          index >= 0 && draft.details[index].lf
+            ? indices.map((i: number) => ({
+                draftPath: `/details/${i}/explanation`,
+                quote: draft.details[i].explanation,
+              }))
+            : [witness],
+      };
     if (claim.kind === "contract_clause_coverage" && verdict === "supported")
       throw new Error("Invented mandatory fixture needs a real draft witness");
     return {

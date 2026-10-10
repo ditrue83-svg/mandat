@@ -9,7 +9,7 @@ export const contractualRoleTaxonomy = Object.freeze({
   operate: "Gestione continuativa",
   advise: "Consulenza",
   other:
-    "Azione nota non classificabile, anche incarichi compositi; mai al posto di execute per servizi esecutivi",
+    "Azione nota fuori dagli altri ruoli; più fasi non bastano. Mai al posto di execute per servizi esecutivi",
 });
 
 export const contractualRoleDescription = Object.entries(

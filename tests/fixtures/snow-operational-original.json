@@ -1,0 +1,735 @@
+{
+  "case": {
+    "id": "manutenzioni-neve-storica",
+    "sector": "manutenzioni",
+    "profileId": "manutenzioni-invernale",
+    "sourceId": "inventory-173",
+    "target": {
+      "kind": "project",
+      "publicationId": "simap-dc257c3d-d8a0-431e-b82f-55e0a217b445"
+    },
+    "expected": "pertinente",
+    "reason": "Servizio invernale stradale esplicito nel settore E32 in Ticino, coerente con mezzi e servizi dichiarati; confronto prima della scadenza.",
+    "references": [
+      {
+        "url": "https://www.simap.ch/api/publications/v1/project/dc257c3d-d8a0-431e-b82f-55e0a217b445/publication-details/01e093f9-415f-4103-9f2b-8cd521cf3df6",
+        "rawPath": "/procurement/orderDescription/it",
+        "quote": "<p>Il presente concorso ha per oggetto le prestazioni di servizio invernale per lo sgombero della neve per il periodo 2026-2030 sulla rete viaria di proprietà del Cantone Ticino, nel settore E32 (Terrazze alta Leventina) di competenza del Centro di manutenzione Alpino (CMAlp).</p>",
+        "startUtf16": 0,
+        "endUtf16": 281
+      },
+      {
+        "url": "https://www.simap.ch/api/publications/v1/project/dc257c3d-d8a0-431e-b82f-55e0a217b445/publication-details/01e093f9-415f-4103-9f2b-8cd521cf3df6",
+        "rawPath": "/project-info/title/it",
+        "quote": "SISN-SC 2026-2030 - Servizio invernale di sgombero neve sulle strade cantonali - Lotto E32 (Terrazze alta Leventina) - Periodo 2026-2030 - Prestazioni di servizio",
+        "startUtf16": 0,
+        "endUtf16": 162
+      },
+      {
+        "url": "https://www.simap.ch/api/publications/v1/project/dc257c3d-d8a0-431e-b82f-55e0a217b445/publication-details/01e093f9-415f-4103-9f2b-8cd521cf3df6",
+        "rawPath": "/procurement/orderAddressDescription/it",
+        "quote": "Settore E32 (Terrazze alta Leventina) di competenza del Centro di manutenzione Alpino (CMAlp).",
+        "startUtf16": 0,
+        "endUtf16": 94
+      },
+      {
+        "url": "https://www.simap.ch/api/publications/v1/project/dc257c3d-d8a0-431e-b82f-55e0a217b445/publication-details/01e093f9-415f-4103-9f2b-8cd521cf3df6",
+        "rawPath": "/dates/offerDeadline",
+        "quote": "2026-08-21T11:00:00+02:00",
+        "startUtf16": 0,
+        "endUtf16": 25
+      },
+      {
+        "url": "https://www.simap.ch/api/publications/v1/project/dc257c3d-d8a0-431e-b82f-55e0a217b445/publication-details/01e093f9-415f-4103-9f2b-8cd521cf3df6",
+        "rawPath": "/terms/walkThroughNotes/it",
+        "quote": "Nessun sopralluogo previsto. Si assume che gli offerenti conoscano bene il luogo di intervento, le condizioni ambientali e quelle di lavoro valide per la presente commessa.",
+        "startUtf16": 0,
+        "endUtf16": 172
+      },
+      {
+        "url": "https://www.simap.ch/api/publications/v1/project/dc257c3d-d8a0-431e-b82f-55e0a217b445/publication-details/01e093f9-415f-4103-9f2b-8cd521cf3df6",
+        "rawPath": "/base/type",
+        "quote": "tender",
+        "startUtf16": 0,
+        "endUtf16": 6
+      }
+    ],
+    "missingInformation": [
+      "Idoneità effettiva della ditta inventata e prove documentali non attestate; il giudizio riguarda interesse potenziale.",
+      "Importo contrattuale in CHF non presente nella proiezione archiviata."
+    ],
+    "effectiveAt": "2026-08-14T09:00:00Z",
+    "historicalReplay": true,
+    "coverageTags": [
+      "specializzazione",
+      "territorio_testuale"
+    ],
+    "newPair": true,
+    "sourcePartition": "development_source_new_pair",
+    "referenceAuthor": "assistant_internal_not_client",
+    "admissionBeforeManualJudgmentRequired": true,
+    "sourceReviewForm": "defined_service",
+    "clockLimit": "Replay della fonte archiviata al 17 settembre con orologio prima del termine; non prova della versione effettivamente disponibile a tale data."
+  },
+  "source": {
+    "publication": {
+      "id": "simap-dc257c3d-d8a0-431e-b82f-55e0a217b445",
+      "cpv": [
+        "90620000"
+      ],
+      "zone": null,
+      "buyer": "Ufficio delle commesse pubbliche e della programmazione",
+      "title": "SISN-SC 2026-2030 - Servizio invernale di sgombero neve sulle strade cantonali - Lotto E32 (Terrazze alta Leventina) - Periodo 2026-2030 - Prestazioni di servizio",
+      "canton": "",
+      "source": "simap",
+      "status": "open",
+      "sectors": [
+        "manutenzioni"
+      ],
+      "deadline": "2026-08-21T09:00:00.000Z",
+      "evidence": [
+        {
+          "url": "https://www.simap.ch/it/project-detail/dc257c3d-d8a0-431e-b82f-55e0a217b445",
+          "field": "Oggetto",
+          "quote": "Il presente concorso ha per oggetto le prestazioni di servizio invernale per lo sgombero della neve per il periodo 2026-2030 sulla rete viaria di proprietà del Cantone Ticino, nel settore E32 (Terrazze alta Leventina) di competenza del Centro di manutenzione Alpino (CMAlp)."
+        },
+        {
+          "url": "https://www.simap.ch/it/project-detail/dc257c3d-d8a0-431e-b82f-55e0a217b445",
+          "field": "Scadenza",
+          "quote": "2026-08-21T11:00:00+02:00"
+        },
+        {
+          "url": "https://www.simap.ch/it/project-detail/dc257c3d-d8a0-431e-b82f-55e0a217b445",
+          "field": "oggetto",
+          "quote": "SISN-SC 2026-2030 - Servizio invernale di sgombero neve sulle strade cantonali - Lotto E32 (Terrazze alta Leventina) - Periodo 2026-2030 - Prestazioni di servizio\n\nIl presente concorso ha per oggetto le prestazioni di servizio invernale per lo sgombero della neve per il periodo 2026-2030 sulla rete viaria di proprietà del Cantone Ticino, nel settore E32 (Terrazze alta Leventina) di competenza del Centro di manutenzione Alpino (CMAlp)."
+        },
+        {
+          "url": "https://www.simap.ch/it/project-detail/dc257c3d-d8a0-431e-b82f-55e0a217b445",
+          "field": "prestazioni",
+          "quote": "SISN-SC 2026-2030 - Servizio invernale di sgombero neve sulle strade cantonali - Lotto E32 (Terrazze alta Leventina) - Periodo 2026-2030 - Prestazioni di servizio\n\nIl presente concorso ha per oggetto le prestazioni di servizio invernale per lo sgombero della neve per il periodo 2026-2030 sulla rete viaria di proprietà del Cantone Ticino, nel settore E32 (Terrazze alta Leventina) di competenza del Centro di manutenzione Alpino (CMAlp)."
+        }
+      ],
+      "location": "Settore E32 (Terrazze alta Leventina) di competenza del Centro di manutenzione Alpino (CMAlp).",
+      "revision": "019bc46b54c5150c4056881a5c482ebacedada76b604191b97c975b5d2e18307",
+      "valueChf": null,
+      "documents": [
+        {
+          "url": "https://www.simap.ch/it/project-detail/dc257c3d-d8a0-431e-b82f-55e0a217b445",
+          "title": "Documenti di gara su simap",
+          "requiresLogin": true
+        }
+      ],
+      "procedure": "Concorso pubblico",
+      "projectId": "dc257c3d-d8a0-431e-b82f-55e0a217b445",
+      "sourceUrl": "https://www.simap.ch/it/project-detail/dc257c3d-d8a0-431e-b82f-55e0a217b445",
+      "updatedAt": "2026-07-05T22:00:00.000Z",
+      "visibleAt": "2026-07-06T06:00:00.000Z",
+      "externalId": "dc257c3d-d8a0-431e-b82f-55e0a217b445",
+      "sourceUrls": [
+        "https://www.simap.ch/it/project-detail/dc257c3d-d8a0-431e-b82f-55e0a217b445"
+      ],
+      "publishedAt": "2026-07-05T22:00:00.000Z",
+      "canonicalKey": "simap:40382",
+      "originalText": "SISN-SC 2026-2030 - Servizio invernale di sgombero neve sulle strade cantonali - Lotto E32 (Terrazze alta Leventina) - Periodo 2026-2030 - Prestazioni di servizio\n\nIl presente concorso ha per oggetto le prestazioni di servizio invernale per lo sgombero della neve per il periodo 2026-2030 sulla rete viaria di proprietà del Cantone Ticino, nel settore E32 (Terrazze alta Leventina) di competenza del Centro di manutenzione Alpino (CMAlp).",
+      "reviewReasons": [],
+      "reviewRequired": false
+    },
+    "raw": {
+      "id": "01e093f9-415f-4103-9f2b-8cd521cf3df6",
+      "ted": null,
+      "base": {
+        "id": "01e093f9-415f-4103-9f2b-8cd521cf3df6",
+        "type": "tender",
+        "title": {
+          "de": null,
+          "en": null,
+          "fr": "SISN-SC 2026-2030 - Service hivernal de déneigement des routes cantonales - Lot E32 (Terrazze alta Leventina) - Période 2026-2030 - Prestations de service",
+          "it": "SISN-SC 2026-2030 - Servizio invernale di sgombero neve sulle strade cantonali - Lotto E32 (Terrazze alta Leventina) - Periodo 2026-2030 - Prestazioni di servizio"
+        },
+        "cpcCode": null,
+        "cpvCode": {
+          "code": "90620000",
+          "label": {
+            "de": "Schneeräumung",
+            "en": "Snow-clearing services",
+            "fr": "Services de déneigement",
+            "it": "Servizi di sgombero neve"
+          }
+        },
+        "lotsType": "without",
+        "corrected": false,
+        "orderType": "service",
+        "projectId": "dc257c3d-d8a0-431e-b82f-55e0a217b445",
+        "publishers": [
+          "b969a386-80e7-4b09-9d30-3794cf397bd7"
+        ],
+        "processType": "open",
+        "projectType": "tender",
+        "procOfficeId": "395724a1-72d7-4878-b0bb-c16d692c34f5",
+        "projectNumber": "40382",
+        "correctedPubId": null,
+        "publicationTed": false,
+        "publicationDate": "2026-07-06",
+        "creationLanguage": "it",
+        "referencingPubId": null,
+        "publicationNumber": "40382-01",
+        "stateContractArea": true,
+        "translationLanguages": [
+          {
+            "type": "complete",
+            "language": "fr"
+          }
+        ],
+        "initialPublicationDate": null,
+        "participantLotsLimitation": null,
+        "participantLotsLimitationNote": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "lots": []
+      },
+      "type": "tender",
+      "dates": {
+        "qnas": [
+          {
+            "id": "48418c1a-b1ee-4b75-ba10-0ff9d01c22fb",
+            "date": "2026-08-01",
+            "note": {
+              "de": null,
+              "en": null,
+              "fr": "Les demandes doivent être envoyées par écrit, en italien, via la rubrique prévue à cet effet sur le site www.simap.ch. Les demandes reçues sous une autre forme ou à d'autres adresses ne seront pas prises en compte.",
+              "it": "Le domande dovranno pervenire per iscritto, in lingua italiana, nell'apposita sezione sul sito www.simap.ch. Non verranno prese in considerazione domande pervenute in altra forma o ad altri indirizzi."
+            },
+            "externalLink": null
+          }
+        ],
+        "orderType": "service",
+        "processType": "open",
+        "offerOpening": {
+          "dateTime": "2026-08-21T14:00:00+02:00",
+          "ignoreTime": false
+        },
+        "offerDeadline": "2026-08-21T11:00:00+02:00",
+        "publicationDate": "2026-07-06",
+        "offerOpeningCity": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "offerOpeningNotes": {
+          "de": null,
+          "en": null,
+          "fr": "Les offres seront ouvertes au bâtiment administratif n° 3, situé Via Franco Zorzi 13 à Bellinzone. Les soumissionnaires souhaitant assister à l'ouverture sont invités à se manifester à l'adresse dt-dc.commesse@ti.ch au plus tard 10 jours avant la date limite de l'appel d'offres. Le procès-verbal d'ouverture sera publié sur le site www.simap.ch, dans la rubrique dédiée aux documents à télécharger.",
+          "it": "Le offerte saranno aperte presso lo Stabile Amministrativo 3 in Via Franco Zorzi 13 a Bellinzona. I concorrenti interessati a presenziare all'apertura sono invitati ad annunciarsi all'indirizzo dt-dc.commesse@ti.ch entro 10 giorni prima della scadenza del concorso. Il verbale di apertura verrà pubblicato sul sito www.simap.ch nell'apposita sezione dedicata ai documenti da scaricare."
+        },
+        "otherAppointments": [],
+        "documentsAvailable": null,
+        "offerValidityNotes": {
+          "de": null,
+          "en": null,
+          "fr": "Les offres sont valables 6 mois à compter de la date de soumission de l'offre.",
+          "it": "Le offerte sono valide 6 mesi a decorrere dalla data d'inoltro delle offerta."
+        },
+        "publicOfferOpening": "yes",
+        "qnaRoundSourceType": "simap",
+        "initialPublicationDate": null,
+        "offerOpeningPostalCode": null,
+        "publicationDateForecast": null,
+        "expressionOfInterestUntil": null,
+        "offerValidityDeadlineDate": "2027-02-21",
+        "offerValidityDeadlineDays": null,
+        "offerValidityDeadlineType": "date_time",
+        "reductionMinimumOfferDeadline": false,
+        "specificDeadlinesAndFormalRequirements": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        }
+      },
+      "terms": {
+        "orderType": "service",
+        "termsNote": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "termsType": "in_documents",
+        "processType": "open",
+        "includedCosts": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "termsCriteria": [],
+        "consortiumNote": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "remediesNotice": {
+          "de": null,
+          "en": null,
+          "fr": "L'appel d'offres est soumis au Concordat intercantonal sur les marchés publics (CIAP) du 15 mars 2001 et à ses dispositions complémentaires ultérieures, ainsi qu'au Règlement d'application de la loi cantonale sur les marchés publics et du Concordat intercantonal sur les marchés publics du 12 septembre 2006 (RLCPubb/CIAP) et à ses dispositions complémentaires ultérieures. Un recours contre le présent avis et les documents d'appel d'offres peut être formé devant le Tribunal administratif cantonal dans un délai de 10 jours. Le recours n'a pas d'effet suspensif.",
+          "it": "La gara è assoggettata al Concordato intercantonale sugli appalti pubblici (CIAP) del 15 marzo 2001 e successive norme integrative ed al Regolamento di applicazione della Legge cantonale sulle commesse pubbliche e del Concordato intercantonale sugli appalti pubblici del 12 settembre 2006 (RLCPubb/ CIAP) e successive norme integrative. Contro il presente bando e i documenti di gara è data facoltà di ricorso al Tribunale Cantonale Amministrativo nel termine di 10 giorni. Il ricorso non ha effetto sospensivo."
+        },
+        "termsOfPayment": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "termsOfBusiness": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "securityDeposits": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "walkThroughNotes": {
+          "de": null,
+          "en": null,
+          "fr": "Aucune visite des lieux n'est prévue. On part du principe que les soumissionnaires connaissent bien le lieu d'intervention, ainsi que les conditions environnementales et de travail applicables au présent marché.",
+          "it": "Nessun sopralluogo previsto. Si assume che gli offerenti conoscano bene il luogo di intervento, le condizioni ambientali e quelle di lavoro valide per la presente commessa."
+        },
+        "consortiumAllowed": "yes",
+        "otherRequirements": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "preInvolvedVendor": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "subContractorNote": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "nonWTORequirements": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "termsCriteriaAsPDF": false,
+        "subContractorAllowed": "no",
+        "consortiumMultiApplicationAllowed": "no",
+        "subContractorMultiApplicationAllowed": "no"
+      },
+      "criteria": {
+        "orderType": "service",
+        "processType": "open",
+        "awardCriteria": [
+          {
+            "id": "cf37f435-04d9-4146-a434-c1e0388d4905",
+            "title": {
+              "de": null,
+              "en": null,
+              "fr": "1.",
+              "it": "1."
+            },
+            "maxPoints": null,
+            "weighting": 50,
+            "description": {
+              "de": null,
+              "en": null,
+              "fr": "<p>Prix</p>",
+              "it": "<p>Prezzo</p>"
+            },
+            "verification": null,
+            "isPriceCriterion": true
+          },
+          {
+            "id": "16e75826-c636-434e-add0-3f5c5754e293",
+            "title": {
+              "de": null,
+              "en": null,
+              "fr": "2.",
+              "it": "2."
+            },
+            "maxPoints": null,
+            "weighting": 40,
+            "description": {
+              "de": null,
+              "en": null,
+              "fr": "<p>Écologie des véhicules utilisés</p>",
+              "it": "<p>Ecologia dei veicoli impiegati</p>"
+            },
+            "verification": null,
+            "isPriceCriterion": false
+          },
+          {
+            "id": "3aeca924-4d4f-4f6f-92db-474d9cc8be7e",
+            "title": {
+              "de": null,
+              "en": null,
+              "fr": "3.",
+              "it": "3."
+            },
+            "maxPoints": null,
+            "weighting": 10,
+            "description": {
+              "de": null,
+              "en": null,
+              "fr": "<p>Qualité des lames de déneigement</p>",
+              "it": "<p>Qualità delle lame spartineve</p>"
+            },
+            "verification": null,
+            "isPriceCriterion": false
+          }
+        ],
+        "awardCriteriaNote": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "qualificationCriteria": [],
+        "awardCriteriaSelection": "criteria_defined",
+        "qualificationCriteriaNote": {
+          "de": null,
+          "en": null,
+          "fr": "De plus amples informations concernant les critères d'éligibilité requis et les autres conditions de participation figurent dans la documentation publiée en ligne.",
+          "it": "Ulteriori informazioni relative ai criteri di idoneità richiesti e altre condizioni di partecipazione sono elencate nella documentazione pubblicata in rete."
+        },
+        "qualificationCriteriaAsPDF": false,
+        "qualificationCriteriaInDocuments": "yes"
+      },
+      "correction": null,
+      "publishers": [
+        {
+          "id": "b969a386-80e7-4b09-9d30-3794cf397bd7",
+          "name": "Foglio ufficiale del Cantone Ticino"
+        }
+      ],
+      "procurement": {
+        "cpcCode": null,
+        "cpvCode": {
+          "code": "90620000",
+          "label": {
+            "de": "Schneeräumung",
+            "en": "Snow-clearing services",
+            "fr": "Services de déneigement",
+            "it": "Servizi di sgombero neve"
+          }
+        },
+        "options": "no",
+        "bkpCodes": [],
+        "npkCodes": [],
+        "variants": "no",
+        "orderType": "service",
+        "ebkphCodes": [],
+        "ebkptCodes": [],
+        "optionsNote": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "processType": "open",
+        "contractDays": null,
+        "orderAddress": {
+          "city": {
+            "de": null,
+            "en": null,
+            "fr": null,
+            "it": null
+          },
+          "cantonId": null,
+          "countryId": "CH",
+          "postalCode": null
+        },
+        "variantsNote": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "executionDays": null,
+        "executionNote": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "partialOffers": "no",
+        "contractPeriod": {
+          "dateRange": [
+            "2026-10-01",
+            "2030-05-31"
+          ]
+        },
+        "executionPeriod": {
+          "dateRange": [
+            "2026-10-01",
+            "2030-05-31"
+          ]
+        },
+        "orderDescription": {
+          "de": null,
+          "en": null,
+          "fr": "<p>Le présent appel d'offres porte sur les prestations de service hivernal relatives au déneigement pour la période 2026-2030 sur le réseau routier appartenant au canton du Tessin, dans le secteur E32 (Terrazze alta Leventina) relevant de la compétence du Centre d'entretien alpin (CMAlp).</p>",
+          "it": "<p>Il presente concorso ha per oggetto le prestazioni di servizio invernale per lo sgombero della neve per il periodo 2026-2030 sulla rete viaria di proprietà del Cantone Ticino, nel settore E32 (Terrazze alta Leventina) di competenza del Centro di manutenzione Alpino (CMAlp).</p>"
+        },
+        "partialOffersNote": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "additionalCpvCodes": [],
+        "contractDeadlineType": "date_time",
+        "canContractBeExtended": "no",
+        "executionDeadlineType": "date_time",
+        "orderAddressDescription": {
+          "de": null,
+          "en": null,
+          "fr": "Secteur E32 (Terrasses de la haute Leventina) relevant de la compétence du Centre d'entretien alpin (CMAlp).",
+          "it": "Settore E32 (Terrazze alta Leventina) di competenza del Centro di manutenzione Alpino (CMAlp)."
+        },
+        "canContractBeExtendedNote": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "orderAddressOnlyDescription": "yes"
+      },
+      "projectType": "tender",
+      "project-info": {
+        "title": {
+          "de": null,
+          "en": null,
+          "fr": "SISN-SC 2026-2030 - Service hivernal de déneigement des routes cantonales - Lot E32 (Terrazze alta Leventina) - Période 2026-2030 - Prestations de service",
+          "it": "SISN-SC 2026-2030 - Servizio invernale di sgombero neve sulle strade cantonali - Lotto E32 (Terrazze alta Leventina) - Periodo 2026-2030 - Prestazioni di servizio"
+        },
+        "dialog": "no",
+        "orderType": "service",
+        "dialogNote": null,
+        "offerTypes": [
+          "offer_external",
+          "offer_specific"
+        ],
+        "processType": "open",
+        "offerAddress": {
+          "id": "e99bf84b-e484-4bcd-82fc-42110a747e1e",
+          "url": {
+            "de": null,
+            "en": null,
+            "fr": null,
+            "it": null
+          },
+          "city": {
+            "de": null,
+            "en": null,
+            "fr": "Bellinzona",
+            "it": "Bellinzona"
+          },
+          "name": {
+            "de": null,
+            "en": null,
+            "fr": "Ufficio delle commesse pubbliche e della programmazione",
+            "it": "Cancelleria dello Stato"
+          },
+          "email": null,
+          "phone": null,
+          "street": {
+            "de": null,
+            "en": null,
+            "fr": "Via Franco Zorzi 13",
+            "it": "Piazza Governo 6"
+          },
+          "cantonId": null,
+          "countryId": "CH",
+          "reference": null,
+          "postalCode": "6501",
+          "contactPerson": {
+            "de": null,
+            "en": null,
+            "fr": "Palazzo delle Orsoline",
+            "it": "Palazzo delle Orsoline"
+          }
+        },
+        "documentsCosts": {
+          "price": null,
+          "currency": null
+        },
+        "offerLanguages": [
+          "it"
+        ],
+        "publicationTed": false,
+        "offerSpecificNote": {
+          "de": null,
+          "en": null,
+          "fr": "<p>Les offres doivent être soumises dans une enveloppe scellée et collée (ou tout autre emballage) portant l'étiquette rouge appropriée. Cette étiquette est fournie avec le dossier d'appel d'offres et peut être téléchargée sur le site web www.simap.ch.</p>",
+          "it": "<p>Le offerte dovranno pervenire in busta (o altro involucro) chiusa ed incollata, con applicata esternamente l'apposita etichetta rossa messa a disposizione con gli atti d'appalto scaricabili dal sito www.simap.ch.</p>"
+        },
+        "procOfficeAddress": {
+          "id": "44884f20-aaec-408a-ae3a-223a657c7a6f",
+          "url": {
+            "de": null,
+            "en": null,
+            "fr": "https://www4.ti.ch/dt/dc/asco/ucp/temi/commesse-pubbliche/tema/tema/",
+            "it": "https://www4.ti.ch/dt/dc/asco/ucp/temi/commesse-pubbliche/tema/tema/"
+          },
+          "city": {
+            "de": null,
+            "en": null,
+            "fr": "Bellinzona",
+            "it": "Bellinzona"
+          },
+          "name": {
+            "de": null,
+            "en": null,
+            "fr": "Ufficio delle commesse pubbliche e della programmazione",
+            "it": "Ufficio delle commesse pubbliche e della programmazione"
+          },
+          "email": "dt-dc.commesse@ti.ch",
+          "phone": "+41918142777",
+          "street": {
+            "de": null,
+            "en": null,
+            "fr": "Via Franco Zorzi 13",
+            "it": "Via Franco Zorzi 13"
+          },
+          "cantonId": "TI",
+          "countryId": "CH",
+          "reference": null,
+          "postalCode": "6501",
+          "contactPerson": {
+            "de": null,
+            "en": null,
+            "fr": "Sarah Pagnoni",
+            "it": "Sarah Pagnoni"
+          }
+        },
+        "stateContractArea": true,
+        "documentsCostsNote": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "documentsLanguages": [
+          "it"
+        ],
+        "documentsSourceUrl": null,
+        "documentsWithCosts": "no",
+        "documentsSourceNote": {
+          "de": null,
+          "en": null,
+          "fr": "Aucun document papier n'est envoyé ; les documents d'appel d'offres peuvent être consultés et téléchargés par les soumissionnaires sur le site web www.simap.ch.",
+          "it": "Non viene inviata la documentazione cartacea, gli atti d'appalto sono visionabili e scaricabili dai concorrenti sul sito www.simap.ch."
+        },
+        "documentsSourceType": "documents_source_simap",
+        "documentsSourceEmail": null,
+        "publicationLanguages": [
+          "it"
+        ],
+        "documentsLanguagesNote": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "documentsSourceAddress": null,
+        "participantLotsLimitation": null,
+        "procurementRecipientAddress": {
+          "id": "b1e9d71c-c7ad-4f58-9b54-61c240653bd1",
+          "url": {
+            "de": null,
+            "en": null,
+            "fr": "https://www4.ti.ch/dt/dc/asco/ucp/temi/commesse-pubbliche/tema/tema/",
+            "it": "https://www4.ti.ch/dt/dc/asco/ucp/temi/commesse-pubbliche/tema/tema/"
+          },
+          "city": {
+            "de": null,
+            "en": null,
+            "fr": "Bellinzona",
+            "it": "Bellinzona"
+          },
+          "name": {
+            "de": null,
+            "en": null,
+            "fr": "Ufficio delle commesse pubbliche e della programmazione",
+            "it": "Ufficio delle commesse pubbliche e della programmazione"
+          },
+          "email": "dt-dc.commesse@ti.ch",
+          "phone": "+41918142777",
+          "street": {
+            "de": null,
+            "en": null,
+            "fr": "Via Franco Zorzi 13",
+            "it": "Via Franco Zorzi 13"
+          },
+          "cantonId": "TI",
+          "countryId": "CH",
+          "reference": null,
+          "postalCode": "6501",
+          "contactPerson": {
+            "de": null,
+            "en": null,
+            "fr": "Sarah Pagnoni",
+            "it": "Sarah Pagnoni"
+          }
+        },
+        "publicationLanguagesComment": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "participantLotsLimitationNote": {
+          "de": null,
+          "en": null,
+          "fr": null,
+          "it": null
+        },
+        "offerDigitalExternalPlatformUrl": null
+      },
+      "invitedVendors": null,
+      "referencingPub": null,
+      "hasProjectDocuments": true,
+      "lots": []
+    },
+    "identity": {
+      "detailUrl": "https://www.simap.ch/api/publications/v1/project/dc257c3d-d8a0-431e-b82f-55e0a217b445/publication-details/01e093f9-415f-4103-9f2b-8cd521cf3df6",
+      "projectId": "dc257c3d-d8a0-431e-b82f-55e0a217b445",
+      "publicationId": "01e093f9-415f-4103-9f2b-8cd521cf3df6"
+    }
+  },
+  "profile": {
+    "name": "TEST INVENTATO manutenzioni invernale",
+    "activities": "Sgombero neve e servizio invernale su strade cantonali in Ticino con mezzi e personale dedicati.",
+    "employees": 5,
+    "sectors": [
+      "manutenzioni"
+    ],
+    "zones": [
+      "Tutto il Ticino"
+    ],
+    "keywords": [],
+    "exclusions": [],
+    "minValue": null,
+    "maxValue": null,
+    "emailEnabled": false
+  },
+  "observationId": "d9409159-dbde-481c-9709-e6992e5b324d"
+}

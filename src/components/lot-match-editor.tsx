@@ -325,11 +325,13 @@ export function LotMatchEditor({ data }: { data: LotMatchEditorData }) {
           {data.lots.map((lot) => (
             <li key={lot.id}>
               Lotto {lot.number ?? lot.id}:{" "}
-              {lot.result
-                ? results[lot.result]
-                : lot.state === "stale"
-                  ? "Giudizio precedente da aggiornare"
-                  : "Valutazione da completare"}
+              {lot.operationalVeto
+                ? "Escluso per condizioni operative"
+                : lot.result
+                  ? results[lot.result]
+                  : lot.state === "stale"
+                    ? "Giudizio precedente da aggiornare"
+                    : "Valutazione da completare"}
               {lot.reason ? ` — ${lot.reason}` : ""}
             </li>
           ))}
