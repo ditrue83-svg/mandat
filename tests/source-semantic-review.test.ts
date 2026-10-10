@@ -425,7 +425,7 @@ test("Document record metadata stays scoped and unaltered without approving clai
           kind: "execution_condition",
           scope: "project_context",
           sourceRefs: ["s5"],
-          explanation: "Fonte documentale indicata: SIMAP.",
+          explanation: "Tipo di fonte dei documenti: documents_source_simap.",
         },
       ],
     },
