@@ -6,7 +6,7 @@ import {
   UNCLASSIFIED_SECTOR_FILTER,
 } from "@/lib/sectors";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useId, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -16,6 +16,7 @@ import {
   Clock3,
   Radar,
   Search,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { Shell } from "./shell";
@@ -70,6 +71,8 @@ export function Dashboard({
   };
 }) {
   const router = useRouter();
+  const filterPanelId = useId();
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const pathname = savedOnly ? "/salvati" : "/";
   const [refreshing, startRefresh] = useTransition();
   const [demoItems, setDemoItems] = useState(opportunities);
@@ -419,6 +422,8 @@ export function Dashboard({
                     }
                     value={query}
                     maxLength={200}
+                    type="search"
+                    enterKeyHint="search"
                     onChange={(event) => setQuery(event.target.value)}
                     aria-label={
                       savedOnly
@@ -427,39 +432,61 @@ export function Dashboard({
                     }
                   />
                 </label>
-                <label className="select-wrap">
-                  <span className="sr-only">Settore</span>
-                  <select
-                    aria-label="Filtra per settore"
-                    value={sector}
-                    onChange={(event) => setSector(event.target.value)}
-                  >
-                    <option value="all">Tutti i settori</option>
-                    {SECTORS.map((entry) => (
-                      <option key={entry.id} value={entry.id}>
-                        {entry.label}
+                <button
+                  type="button"
+                  className="button secondary collection-filter-toggle"
+                  aria-label={filtersExpanded ? "Chiudi filtri" : "Apri filtri"}
+                  aria-expanded={filtersExpanded}
+                  aria-controls={filterPanelId}
+                  onClick={() => setFiltersExpanded(!filtersExpanded)}
+                >
+                  <SlidersHorizontal size={18} aria-hidden="true" />
+                  Filtri
+                  {(sector !== "all" || sort !== "relevance") && (
+                    <span className="filter-count">
+                      {Number(sector !== "all") + Number(sort !== "relevance")}
+                    </span>
+                  )}
+                </button>
+                <div
+                  className="collection-selects"
+                  id={filterPanelId}
+                  data-expanded={filtersExpanded}
+                >
+                  <label className="select-wrap">
+                    <span className="sr-only">Settore</span>
+                    <select
+                      aria-label="Filtra per settore"
+                      value={sector}
+                      onChange={(event) => setSector(event.target.value)}
+                    >
+                      <option value="all">Tutti i settori</option>
+                      {SECTORS.map((entry) => (
+                        <option key={entry.id} value={entry.id}>
+                          {entry.label}
+                        </option>
+                      ))}
+                      <option value={UNCLASSIFIED_SECTOR_FILTER}>
+                        Da classificare
                       </option>
-                    ))}
-                    <option value={UNCLASSIFIED_SECTOR_FILTER}>
-                      Da classificare
-                    </option>
-                  </select>
-                  <ChevronDown size={15} aria-hidden="true" />
-                </label>
-                <label className="select-wrap">
-                  <span className="sr-only">Ordinamento</span>
-                  <select
-                    aria-label="Ordina bandi"
-                    value={sort}
-                    onChange={(event) => setSort(event.target.value)}
-                  >
-                    <option value="relevance">
-                      {savedOnly ? "Ordine di pertinenza" : "Più pertinenti"}
-                    </option>
-                    <option value="deadline">Scadenza più vicina</option>
-                  </select>
-                  <ChevronDown size={15} aria-hidden="true" />
-                </label>
+                    </select>
+                    <ChevronDown size={15} aria-hidden="true" />
+                  </label>
+                  <label className="select-wrap">
+                    <span className="sr-only">Ordinamento</span>
+                    <select
+                      aria-label="Ordina bandi"
+                      value={sort}
+                      onChange={(event) => setSort(event.target.value)}
+                    >
+                      <option value="relevance">
+                        {savedOnly ? "Ordine di pertinenza" : "Più pertinenti"}
+                      </option>
+                      <option value="deadline">Scadenza più vicina</option>
+                    </select>
+                    <ChevronDown size={15} aria-hidden="true" />
+                  </label>
+                </div>
               </div>
             )}
             {collection.length > 0 && (

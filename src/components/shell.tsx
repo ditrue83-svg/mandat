@@ -123,7 +123,10 @@ export function Shell({
       </aside>
       <div className="main-shell">
         <header className="topbar">
-          <span>Mandat · Radar appalti</span>
+          <span className="topbar-title">
+            <strong>Mandat</strong>
+            <span> · Radar appalti</span>
+          </span>
           <div>
             {viewer?.admin && (
               <Link
@@ -140,14 +143,14 @@ export function Shell({
             <Link
               href="/notifiche"
               aria-label="Impostazioni notifiche"
-              className="icon-button"
+              className="icon-button topbar-notifications"
             >
               <Bell size={19} />
             </Link>
             <Link
               href="/profilo"
               aria-label="Il tuo profilo"
-              className="avatar small"
+              className="avatar small topbar-profile"
             >
               {viewer ? (
                 viewer.name.slice(0, 1)
@@ -167,6 +170,7 @@ export function Shell({
                 title="Esci dall’account"
               >
                 <LogOut size={19} aria-hidden="true" />
+                <span>Esci</span>
               </button>
             )}
           </div>

@@ -178,10 +178,18 @@ export function ProfileForm({
             </div>
           </div>
         )}
+        {!onboarding && (
+          <nav className="profile-section-nav" aria-label="Sezioni del profilo">
+            <a href="#profile-company">Ditta</a>
+            <a href="#profile-sectors-heading">Settori</a>
+            <a href="#profile-zones-heading">Zone</a>
+            <a href="#profile-preferences">Preferenze</a>
+          </nav>
+        )}
         <form ref={formRef} onSubmit={save} className="profile-form">
           {(!onboarding || step === 1) && (
             <section className="panel">
-              <h2>La ditta e le attività</h2>
+              <h2 id="profile-company">La ditta e le attività</h2>
               <label className="field">
                 Come si chiama la tua ditta?
                 <input
@@ -241,6 +249,7 @@ export function ProfileForm({
                   Cerca un settore
                   <input
                     type="search"
+                    enterKeyHint="search"
                     placeholder="Es. informatica, edilizia, assicurazioni…"
                     value={sectorQuery}
                     onChange={(e) => setSectorQuery(e.target.value)}
@@ -365,7 +374,7 @@ export function ProfileForm({
           )}
           {(!onboarding || step === 3) && (
             <section className="panel">
-              <h2>Preferenze facoltative</h2>
+              <h2 id="profile-preferences">Preferenze facoltative</h2>
               <p>
                 Questi dettagli sono facoltativi. Puoi cambiarli quando vuoi.
               </p>
@@ -403,6 +412,7 @@ export function ProfileForm({
                     <input
                       name="minValue"
                       type="number"
+                      inputMode="decimal"
                       min="0"
                       placeholder="Nessun minimo"
                       value={form.minValue ?? ""}
@@ -419,6 +429,7 @@ export function ProfileForm({
                     <input
                       name="maxValue"
                       type="number"
+                      inputMode="decimal"
                       min="0"
                       placeholder="Nessun massimo"
                       value={form.maxValue ?? ""}
@@ -481,7 +492,7 @@ export function ProfileForm({
               </div>
             )}
           </div>
-          <div className="form-actions profile-save-bar">
+          <div className="form-actions profile-save-bar" data-dirty={dirty}>
             {onboarding && step > 1 ? (
               <button
                 type="button"

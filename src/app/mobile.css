@@ -1,0 +1,393 @@
+/* Mobile layout is kept together so desktop rules do not override touch sizing. */
+.profile-section-nav,
+.collection-filter-toggle {
+  display: none;
+}
+.collection-selects {
+  display: contents;
+}
+.topbar-title strong {
+  font-weight: inherit;
+}
+.password-input {
+  position: relative;
+}
+.login-form .password-input input {
+  padding-right: 56px;
+}
+.password-toggle {
+  position: absolute;
+  inset: 2px 2px 2px auto;
+  width: 48px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: var(--green);
+  background: transparent;
+}
+.password-toggle:hover {
+  background: var(--mint);
+}
+
+@media (max-width: 900px) {
+  :root {
+    --mobile-nav-height: calc(68px + env(safe-area-inset-bottom, 0px));
+  }
+  html {
+    scroll-padding-block: 20px calc(var(--mobile-nav-height) + 24px);
+  }
+  html:has(.profile-page) {
+    scroll-padding-bottom: calc(var(--mobile-nav-height) + 112px);
+  }
+  .main-shell {
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .topbar {
+    min-height: 60px;
+    padding: env(safe-area-inset-top, 0px)
+      max(16px, env(safe-area-inset-right, 0px)) 0
+      max(16px, env(safe-area-inset-left, 0px));
+  }
+  .topbar > .topbar-title {
+    max-width: none;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .topbar-title strong {
+    font: 800 20px var(--font-heading);
+    letter-spacing: -0.7px;
+    color: var(--green);
+  }
+  .topbar > div {
+    gap: 4px;
+  }
+  .topbar .topbar-notifications,
+  .topbar .topbar-profile {
+    display: none;
+  }
+  .topbar .icon-button {
+    min-width: 44px;
+    min-height: 44px;
+    border-radius: 10px;
+  }
+  .topbar .mobile-logout {
+    gap: 6px;
+    padding-inline: 8px;
+    font-size: 13px;
+  }
+  main {
+    flex: 1;
+    min-width: 0;
+    padding: 22px max(16px, env(safe-area-inset-right, 0px)) 32px
+      max(16px, env(safe-area-inset-left, 0px));
+  }
+  .page-heading h1,
+  .bandi-title-row h1 {
+    font-size: clamp(26px, 7.2vw, 32px);
+  }
+  .page-heading p,
+  .bandi-title-row > div > p {
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  .panel {
+    padding: 20px 16px;
+    overflow-wrap: anywhere;
+  }
+  .panel h2 {
+    font-size: 20px;
+  }
+  .panel p {
+    font-size: 15px;
+    line-height: 1.65;
+  }
+  .button {
+    min-height: 48px;
+    max-width: 100%;
+    white-space: normal;
+  }
+  .app-shell input:not([type="checkbox"]):not([type="radio"]),
+  .app-shell textarea,
+  .app-shell select {
+    font-size: 16px;
+  }
+  .app-shell select {
+    min-height: 48px;
+  }
+  .field input,
+  .field textarea {
+    scroll-margin-block: 24px 120px;
+  }
+  .back-link,
+  .source-link,
+  .source-summary-line summary,
+  .selected-sectors summary,
+  .brief-review summary,
+  .original-publication summary,
+  .secondary-publication-data > summary {
+    min-height: 44px;
+    padding-block: 12px;
+  }
+  .collection-tabs {
+    display: grid;
+    grid-template-columns: 1.25fr 1.15fr 0.8fr;
+    gap: 0;
+  }
+  .collection-tabs a {
+    padding: 10px 4px;
+    justify-content: center;
+    text-align: center;
+    min-width: 0;
+    font-size: 13px;
+  }
+  .collection-views {
+    display: grid;
+    grid-template-columns: 1fr 1.2fr 0.8fr;
+    gap: 6px;
+  }
+  .collection-views .button {
+    padding: 10px 4px;
+    font-size: 13px;
+  }
+  .collection-controls {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .collection-controls .search-input {
+    grid-column: 1;
+  }
+  .collection-filter-toggle {
+    display: inline-flex;
+    padding-inline: 12px;
+  }
+  .collection-filter-toggle[aria-expanded="true"] {
+    background: var(--mint);
+    border-color: #88ab9a;
+  }
+  .collection-selects {
+    display: none;
+  }
+  .collection-selects[data-expanded="true"] {
+    display: grid;
+    grid-column: 1 / -1;
+    gap: 10px;
+  }
+  .catalog-search-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .catalog-filter-fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    padding: 16px;
+  }
+  .catalog-filter-fields select {
+    width: 100%;
+    max-width: 100%;
+  }
+  .filter-panel-actions {
+    margin: 0;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .filter-toggle[aria-expanded="true"] {
+    background: var(--mint);
+    border-color: #88ab9a;
+  }
+  .applied-filters {
+    overflow-wrap: anywhere;
+  }
+  .tender-list-card {
+    padding: 18px 16px;
+    gap: 12px;
+  }
+  .tender-list-card h2 {
+    font-size: 19px;
+    line-height: 1.4;
+  }
+  .tender-card-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .tender-card-facts dd {
+    font-size: 15px;
+  }
+  .tender-card-actions .button {
+    min-height: 48px;
+  }
+  .tender-detail-header h1 {
+    font-size: clamp(24px, 6.6vw, 30px);
+    line-height: 1.35;
+  }
+  .tender-section-links,
+  .profile-section-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  .tender-section-links a,
+  .profile-section-nav a {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: #fff;
+    color: var(--green);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none;
+  }
+  .profile-section-nav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+  }
+  .profile-section-nav a {
+    padding-inline: 3px;
+    font-size: 12px;
+  }
+  .profile-page h2[id] {
+    scroll-margin-top: 20px;
+  }
+  .profile-save-bar {
+    bottom: calc(var(--mobile-nav-height) + 8px);
+    padding: 8px;
+    gap: 6px;
+    border-radius: 12px;
+    box-shadow: 0 4px 24px #173c2f18;
+  }
+  .profile-save-bar[data-dirty="false"] > small {
+    display: none;
+  }
+  .profile-save-bar > small {
+    padding-inline: 4px;
+  }
+  .profile-save-bar > .button {
+    min-width: 0;
+  }
+  .check-label {
+    padding: 12px;
+    align-items: center;
+    min-height: 48px;
+  }
+  .switch-row {
+    gap: 16px;
+  }
+  .switch-row > div {
+    min-width: 0;
+  }
+  .switch-row input {
+    flex-shrink: 0;
+  }
+  .pagination {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .pagination > span:not(:empty) {
+    flex-basis: 100%;
+    order: -1;
+    text-align: center;
+  }
+  .pagination .button {
+    flex: 1;
+    font-size: 14px;
+  }
+  .mobile-nav {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    min-height: var(--mobile-nav-height);
+    padding: 6px max(10px, env(safe-area-inset-right, 0px))
+      calc(6px + env(safe-area-inset-bottom, 0px))
+      max(10px, env(safe-area-inset-left, 0px));
+    gap: 6px;
+    box-shadow: 0 -4px 20px #173c2f08;
+  }
+  .mobile-nav a {
+    min-width: 0;
+    min-height: 56px;
+    padding: 6px 4px;
+    gap: 3px;
+    border-radius: 12px;
+    font-size: 11px;
+    justify-content: center;
+  }
+  .mobile-nav a.active {
+    background: var(--mint);
+    color: var(--green);
+  }
+  .footer {
+    padding: 0 max(16px, env(safe-area-inset-right, 0px))
+      calc(var(--mobile-nav-height) + 24px)
+      max(16px, env(safe-area-inset-left, 0px));
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 12px;
+  }
+  .footer > span:last-child {
+    max-width: none;
+    text-align: left;
+  }
+  .toast,
+  .logout-error {
+    bottom: calc(var(--mobile-nav-height) + 12px);
+  }
+  .login-page {
+    min-height: 100svh;
+  }
+  .login-brand {
+    min-height: auto;
+    padding: calc(22px + env(safe-area-inset-top, 0px)) 24px 22px;
+  }
+  .login-brand h1 {
+    margin-top: 22px;
+    font-size: 26px;
+    line-height: 1.25;
+  }
+  .login-brand h1 br {
+    display: none;
+  }
+  .login-form {
+    padding: 28px max(24px, env(safe-area-inset-right, 0px))
+      calc(32px + env(safe-area-inset-bottom, 0px))
+      max(24px, env(safe-area-inset-left, 0px));
+  }
+  .login-form h2 {
+    font-size: 25px;
+  }
+  .login-form p {
+    color: var(--muted);
+    margin-bottom: 20px;
+  }
+  .login-form .field {
+    margin-block: 0 18px;
+  }
+}
+
+@media (max-width: 900px) and (max-height: 500px) {
+  :root {
+    --mobile-nav-height: calc(56px + env(safe-area-inset-bottom, 0px));
+  }
+  .mobile-nav a {
+    flex-direction: row;
+    min-height: 44px;
+    gap: 6px;
+  }
+  .profile-save-bar {
+    position: static;
+  }
+  .login-brand h1 {
+    display: none;
+  }
+}
+
+@media (max-width: 380px) {
+  .topbar-title > span {
+    display: none;
+  }
+}

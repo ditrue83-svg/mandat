@@ -468,7 +468,7 @@ svg {
   align-items: center;
   gap: inherit;
 }
-@media (min-width: 761px) {
+@media (min-width: 901px) {
   .sidebar,
   .login-page .login-brand {
     background: #11403b;
@@ -2225,7 +2225,7 @@ h1 {
     padding: 35px;
   }
 }
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .sidebar {
     display: none;
   }
@@ -3062,7 +3062,7 @@ h1 {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .bandi-header {
     margin-bottom: 12px;
   }
@@ -3353,7 +3353,7 @@ h1 {
     font-size: 12px;
   }
 }
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .mobile-nav a {
     font-size: 11px;
   }

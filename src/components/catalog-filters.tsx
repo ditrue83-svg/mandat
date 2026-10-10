@@ -34,6 +34,7 @@ export function CatalogFilters({
               aria-label="Cerca tra tutti i bandi raccolti"
               placeholder="Titolo, ente o luogo…"
               maxLength={200}
+              enterKeyHint="search"
             />
           </label>
           <button
@@ -47,6 +48,7 @@ export function CatalogFilters({
             className="button secondary filter-toggle"
             aria-expanded={expanded}
             aria-controls={panelId}
+            aria-label={expanded ? "Chiudi filtri" : "Apri filtri"}
             onClick={() => setExpanded(!expanded)}
           >
             <SlidersHorizontal size={17} aria-hidden="true" /> Filtri

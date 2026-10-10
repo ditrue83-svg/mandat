@@ -1,11 +1,12 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Eye, EyeOff } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
 export function LoginForm({ demo }: { demo: boolean }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function submit(e: React.FormEvent) {
@@ -39,10 +40,8 @@ export function LoginForm({ demo }: { demo: boolean }) {
         <BrandLogo />
         <div>
           <h1>
-            Il prossimo incarico
-            <br />
-            potrebbe essere
-            <br />
+            Il prossimo incarico <br />
+            potrebbe essere <br />
             il tuo.
           </h1>
           <p>
@@ -69,6 +68,7 @@ export function LoginForm({ demo }: { demo: boolean }) {
               <input
                 required
                 autoComplete="username"
+                enterKeyHint="next"
                 autoCapitalize="none"
                 spellCheck={false}
                 maxLength={30}
@@ -77,16 +77,35 @@ export function LoginForm({ demo }: { demo: boolean }) {
                 onChange={(e) => setUsername(e.target.value)}
               />
             </label>
-            <label className="field">
-              Password
-              <input
-                required
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </label>
+            <div className="field">
+              <label htmlFor="login-password">Password</label>
+              <div className="password-input">
+                <input
+                  id="login-password"
+                  required
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  enterKeyHint="go"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="password-toggle"
+                  aria-label={
+                    showPassword ? "Nascondi password" : "Mostra password"
+                  }
+                  aria-pressed={showPassword}
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? (
+                    <EyeOff size={20} aria-hidden="true" />
+                  ) : (
+                    <Eye size={20} aria-hidden="true" />
+                  )}
+                </button>
+              </div>
+            </div>
             {error && (
               <div className="notice error" role="alert">
                 {error}
