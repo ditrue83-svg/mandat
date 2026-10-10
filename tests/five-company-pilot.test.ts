@@ -190,7 +190,7 @@ function inviteRequest(body: unknown) {
 }
 async function login(email: string, ip: string, wrongPassword = false) {
   context.headers = new Headers({ "x-real-ip": ip });
-  const username = email.split("@")[0];
+  const username = email.split("@")[0].replaceAll("-", "_");
   const password = "isolated-pilot-password";
   await setLoginCredentials({
     email,
