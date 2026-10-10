@@ -4,7 +4,7 @@ import { z } from "zod";
 export class OperationalFieldReferenceError extends Error {}
 export const isFieldBoundRejection = (e) =>
   e instanceof OperationalFieldReferenceError;
-export const PROTOCOL_VERSION = "operational-field-bound-v5-explicit-deadline-roles";
+export const PROTOCOL_VERSION = "operational-field-bound-v6-own-proof-coverage";
 const stable = (v) =>
   Array.isArray(v)
     ? `[${v.map(stable).join(",")}]`
@@ -276,11 +276,23 @@ export function createFieldBoundProtocol(native, request) {
   function reviewTask(raw) {
     const answer = decodeReading(raw),
       t = native.buildOperationalReviewTask(request, answer);
+    // Resolve every own proof by its complete original identity, never by quote
+    // alone. This list exposes the existing coverage contract; it supplies no
+    // review verdict or response evidence and decodeReview remains unchanged.
+    const reviewProofCoverage = Object.fromEntries(facts.map((key) => [key, {
+      ownProofIds: answer[`${key}Evidence`].map((proof) => {
+        const row = snapshot.find((p) =>
+          p.scope === proof.scope && p.path === proof.path && p.quote === proof.quote);
+        if (!row) throw Error("Operational review own proof identity absent");
+        return row.fieldId;
+      }),
+      completeCoverageRequired: answer[key] !== null,
+    }]));
     return {
       system:
         providerContextSystem(t.system) +
-        " Seleziona soltanto proofId fN dalla propria riga del catalogo corrente; text_N non è una prova e non può diventare fN; verifica indipendentemente ogni prova della lettura.",
-      prompt: JSON.stringify(payload(t)),
+        " Seleziona soltanto proofId fN dalla propria riga del catalogo corrente; text_N non è una prova e non può diventare fN; verifica indipendentemente ogni prova della lettura. reviewProofCoverage espone per ciascun fatto le identità proprie già citate: non è una verifica. Per un fatto non-null, supported richiede tutte queste identità in checks[fatto].evidence, ciascuna verificata indipendentemente; testi uguali con scope o path diversi restano prove distinte e una non sostituisce l’altra. Se una prova non è verificabile o contraddice il fatto, conserva not_verifiable o contradicted e la motivazione, senza aggiungere prove per ottenere supported. Un fatto null non richiede supported né citazioni inventate; verifica l’assenza dagli originali. Il decoder non completa evidence mancanti.",
+      prompt: JSON.stringify({...payload(t), reviewProofCoverage}),
       maxTokens: t.maxTokens,
       responseFormat: format(reviewSchema, "operational_field_bound_review"),
     };

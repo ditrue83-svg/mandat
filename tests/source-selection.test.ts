@@ -122,6 +122,20 @@ const span = (sourceRef: string, startUtf16: number, endUtf16: number) => ({
   endUtf16,
 });
 
+test("word boundaries compare astral code points instead of UTF-16 surrogate halves", () => {
+  const reject = (text: string, startUtf16: number, endUtf16: number) =>
+    assert.throws(() => resolveSourceSelection(span("s1", startUtf16, endUtf16), [passage("s1", text)]));
+  reject("A𝒜B", 1, 3);
+  reject("a𝟠b", 1, 3);
+  reject("AéB", 1, 2);
+  reject("a3b", 1, 2);
+  reject("e\u0301", 0, 1);
+  reject("e\u0301", 1, 2);
+  reject("𝒜", 0, 1);
+  assert.equal(resolveSourceSelection(span("s1", 1, 3), [passage("s1", " 𝒜 ")]).text, "𝒜");
+  assert.equal(resolveSourceSelection(span("s1", 1, 2), [passage("s1", "a-b")]).text, "-");
+});
+
 test("literal anchors copy HTML and whitespace without asking the model to recreate them", () => {
   const text = "<p>Smontaggio \r\n</p><p>e recupero delle ringhiere.</p>";
   const original = passage("s1", text);

@@ -108,12 +108,24 @@ export function resolveSourceSelection(
   const text = original.slice(start, end);
   if (!text.trim() || !text.isWellFormed() || text.includes("\u0000"))
     throw new Error("Source selection is empty or splits a character");
+  // UTF16 offsets select storage; word boundaries compare complete code points.
+  const nextPoint = (value: string, offset: number) =>
+    String.fromCodePoint(value.codePointAt(offset)!);
+  const previousPoint = (value: string, offset: number) => {
+    const last = value.charCodeAt(offset - 1);
+    const first = value.charCodeAt(offset - 2);
+    return value.slice(
+      offset >= 2 && last >= 0xdc00 && last <= 0xdfff &&
+        first >= 0xd800 && first <= 0xdbff ? offset - 2 : offset - 1,
+      offset,
+    );
+  };
   const word = /[\p{L}\p{M}\p{N}]/u;
   if (
-    (start > 0 && word.test(original[start - 1]) && word.test(text[0])) ||
+    (start > 0 && word.test(previousPoint(original, start)) && word.test(nextPoint(text, 0))) ||
     (end < original.length &&
-      word.test(text.at(-1)!) &&
-      word.test(original[end]))
+      word.test(previousPoint(text, text.length)) &&
+      word.test(nextPoint(original, end)))
   )
     throw new Error("Source selection splits an original word or number");
   let offset = 0;

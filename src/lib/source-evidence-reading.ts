@@ -519,13 +519,14 @@ export function buildSourceEvidenceReadingRequest(
           : []),
         "originalCoverage descrive soltanto il materiale fornito qui. linkedDocumentsRead false o hasProjectDocuments false non provano indisponibilità esterna: conserva email/portali e condizioni di richiesta presenti. Non negare un documento perché non è archiviato o non è stato letto.",
         "Le observations sono selezioni di prove originali, non un riassunto. Scegli kind, serviceRef ed evidence per individuare tutte le prestazioni e condizioni rilevanti; non produrre parafrasi, traduzioni o un campo statement. Il codice conserva i passaggi integrali. Oggetto, azione, soggetto contrattuale, destinatario, permessi e obblighi rimangono nel testo originale selezionato, che il revisore dovrà leggere direttamente. La sola selezione di un riferimento non dimostra un significato né l'applicabilità al target.",
+        "IDENTITÀ OBSERVATION, da verificare prima del JSON: nello stesso chunk ogni riga è identificata da (kind, serviceRef, scope originale di serviceRef, insieme dei riferimenti originali {serviceRef} unito a evidence). L'ordine delle prove e scrivere o omettere serviceRef in evidence non cambiano l'identità. Emetti al massimo una riga per identità; non ripeterla per una lingua, classificazione o più requiredClauseIds, che possono citare la stessa collection. Conserva righe separate quando kind, ancora/scope o prove originali rilevanti sono distinti. Non aggiungere prove estranee, cambiare kind/ancora o omettere fatti per rendere unica una riga. Non unire prestazioni o condizioni diverse: ogni selezione conserva il testo originale integrale, incluse le diverse azioni nello stesso passaggio. Non emettere un nuovo campo id o scope.",
         "requiredClausePassages e requiredClauseFields elencano note e valori originali su subappalto, opzioni o esecuzione assegnati a questa parte. Per coverage complete conserva ogni riferimento, incluse tutte le lingue e i segmenti, in observations o issues secondo il suo significato; missingDetails può solo aggiungere dubbi sui dettagli assenti, non sostituire fatti noti. Leggi i valori strutturati insieme al percorso originale: il divieto di subappalto espresso da subContractorAllowed no o false delimita il lavoro delegabile anche senza una nota testuale. null significa non indicato, non divieto; non inventare il significato di valori sconosciuti. Una clausola che delimita ruoli, parti delegabili, obblighi od opzioni va in condition con una descrizione del lavoro dello stesso ambito. Un rinvio privo dei dettagli necessari va in missingDetails; un impedimento materiale in issues. Se non riesci a coprirle usa unreadable. Il nome del campo da solo non prova prestazioni, restrizioni, capacità o idoneità non dichiarate dal valore o testo originale.",
         "Le etichette classificatorie dichiarano il contesto originale. Una denominazione generica o polisemica non dimostra che la classificazione sia sbagliata: non inventare una discrepanza né un sottotipo. Una classificazione ampia non aggiunge tutte le attività della sua etichetta.",
         "Per ciascuna assignedClassificationIds restituisci una relazione con la descrizione. Non restituire label: il codice conserva codice ed etichette originali. In evidence scegli le prove della relazione; i riferimenti della classificazione sono aggiunti dal codice. consistent o broad_context conserva la famiglia compatibile; not_decisive non determina da sola la prestazione locale. metadata_discrepancy richiede caratteristiche originali concretamente disallineate, non solo diversa etichetta o silenzio su una funzione: identifica nella spiegazione entrambe le caratteristiche e cita le loro prove proprie. La descrizione originale role service dello stesso ambito deve essere selezionata come serviceRef o prova propria di una performance esplicita; conserva codice ed etichette senza correggerli. Le categorie compatibili più ampie richiedono consistent o broad_context, non un avviso di anomalia. Non risolve oggetti ambigui, fonti incomplete o clausole opposte. conflicting richiede caratteristiche o affermazioni realmente incompatibili, con controprova originale esterna alla classificazione.",
         "Classifications: restituisci classificationId, evidence e assessment. assessment contiene una sola chiave, che è la tua scelta: consistent, broad_context o not_decisive con valore null; metadata_discrepancy o conflicting con una spiegazione sostenuta dalla propria evidence. Scegli prima il significato della relazione, non il ramo che permette di scrivere una spiegazione. Un testo che conclude che le prestazioni sono compatibili non può accompagnare conflicting. Per le relazioni compatibili il codice nomina soltanto la scelta e conserva le prove integrali, senza riscrivere oggetti o azioni. La scelta resta da verificare semanticamente. La spiegazione delle anomalie non eredita prove da observations o da altre classificazioni.",
         "Le osservazioni performance descrivono acquisti e azioni: fornitura di beni, esecuzione, gestione, installazione, manutenzione, progettazione o consulenza. Manutenzione conserva o ripristina un bene: luogo, destinatario o settore non la dimostrano. Metadati e classificazioni non sono prestazioni autonome.",
         "Prima di confrontare le classificazioni, identifica il ruolo contrattuale nella frase completa: chi è incaricato e quale prestazione deve svolgere. Le fasi del progetto non sono azioni attribuite automaticamente all'incaricato. Prestazioni di un ingegnere nelle fasi di appalto o realizzazione, direzione o supervisione dei lavori restano servizi professionali, salvo un distinto obbligo esplicito di eseguire materialmente le opere. Non isolare realizzazione, esecuzione o un codice di fase dal soggetto e dal lavoro cui si riferiscono. Conserva invece fornitura e posa quando entrambe sono effettivamente richieste allo stesso operatore.",
-        "Prima di scegliere conflicting, indica due contenuti originali che non possono valere insieme per la stessa prestazione e lo stesso ruolo. Una classificazione progettuale o ingegneristica e un incarico professionale durante appalto o realizzazione non sono opposti per la sola differenza delle parole. La fonte non chiarisce il rapporto con la categoria o mancano dettagli non sono controprove di incompatibilità. Se il servizio è identificato, conserva il contesto compatibile o la discrepanza nominale e segnala soltanto i dettagli realmente mancanti; non inventare un conflitto. Clausole realmente opposte restano bloccanti.",
+        "Prima di scegliere conflicting, indica due contenuti originali che non possono valere insieme per la stessa prestazione e lo stesso ruolo. Una classificazione progettuale o ingegneristica e un incarico professionale durante appalto o realizzazione non sono opposti per la sola differenza delle parole. La fonte non chiarisce il rapporto con la categoria o mancano dettagli non sono controprove di incompatibilità. Se il servizio è identificato, conserva il contesto compatibile o la discrepanza concreta provata nelle caratteristiche originali e segnala soltanto i dettagli realmente mancanti; non inventare un conflitto. Clausole realmente opposte restano bloccanti.",
         "Conserva il ciclo della commessa attuale anche quando precisato in criteri o tempi: montaggio e collaudo attuali sono azioni, con prove originali e ambito propri. Referenze passate, qualifiche, prezzi e permessi non sono nuovi acquisti. Un titolo che chiede un'offerta non identifica da solo l'azione professionale.",
         "Una sola osservazione per ciascuna prestazione distinta, con oggetto e azione insieme. Quando titolo e descrizione attestano la stessa prestazione, seleziona entrambi nella sua evidence: un riferimento alternativo non prova il contenuto di quello omesso. Mantieni separati ambiti diversi e segnala le contraddizioni; non unire titoli o descrizioni riferiti a prestazioni diverse. Non creare una seconda performance per ripetere orderType, supplyType o un altro campo amministrativo. Ogni performance e target_partition deve citare almeno una descrizione originale role service dello stesso ambito. Non aggiungere una citazione irrilevante solo per rispettare lo schema.",
         "missingDetails registra soltanto una lacuna dichiarata o un rinvio con basisEvidence proprie; non registra una categoria assente per mancata menzione. verificationAspects nomina le verifiche relative a quelle prove, non assenze globali: sottotipo, composizione, quantità, modelli o condizioni rinviate ai documenti. Non proporre possibili sottotipi. Queste lacune non diventano issues se famiglia dell'oggetto e azione contrattuale sono identificabili. Per esempio: fornitura di arredi con «dimensioni nel capitolato» -> prestazione identificata e document_referral con la propria citazione; la semplice mancata menzione delle dimensioni non autorizza una nota; solo 'incarico Delta' senza descrizione né famiglia -> object_uncertain. Non trasferire azioni generali o di altri lotti al target.",
@@ -1046,6 +1047,29 @@ export const sourceEvidenceReadingRecordSchema = z.strictObject({
 export type SourceEvidenceReadingRecord = z.infer<
   typeof sourceEvidenceReadingRecordSchema
 >;
+// Check exact duplicate representations only after every original response and record integrity check.
+function validateDistinctObservations(responses: z.infer<typeof responseSchema>[]) {
+  for (const response of responses) {
+    const keys = new Set<string>();
+    for (const observation of response.observations) {
+      const key = JSON.stringify([
+        observation.kind,
+        observation.serviceRef,
+        observation.scope,
+        observation.evidence.map((quote) => quote.sourceRef).sort(),
+      ]);
+      if (keys.has(key))
+        throw new Error("Repeated independent source observation selection");
+      keys.add(key);
+    }
+  }
+}
+function validateSourceEvidenceMetadata(metadata: { id: string; at: string; model: string }) {
+  const result = sourceEvidenceReadingRecordSchema
+    .pick({ id: true, at: true, model: true })
+    .safeParse({ id: metadata.id, at: metadata.at, model: metadata.model });
+  if (!result.success) throw new Error("Invalid source evidence metadata");
+}
 export function recordSourceEvidenceReading(
   values: unknown[],
   plan: SourceEvidenceReadingPlan,
@@ -1063,12 +1087,13 @@ export function recordSourceEvidenceReading(
     ...(plan.maxTokens === MAX_TOKENS ? {} : { maxTokens: plan.maxTokens }),
     responses,
   };
-  return freeze(
-    sourceEvidenceReadingRecordSchema.parse({
-      ...unsigned,
-      hash: digest(unsigned),
-    }),
-  );
+  validateSourceEvidenceMetadata(metadata);
+  const record = sourceEvidenceReadingRecordSchema.parse({
+    ...unsigned,
+    hash: digest(unsigned),
+  });
+  validateDistinctObservations(record.responses);
+  return freeze(record);
 }
 export function readSourceEvidenceReading(
   value: unknown,
@@ -1095,11 +1120,13 @@ export function readSourceEvidenceReading(
       (plan.maxTokens === MAX_TOKENS ? undefined : plan.maxTokens)
   )
     return null;
+  validateSourceEvidenceMetadata(value as { id: string; at: string; model: string });
   const record = sourceEvidenceReadingRecordSchema.parse(value);
   const { hash: recordedHash, ...unsigned } = record;
   if (digest(unsigned) !== recordedHash)
     throw new Error("Altered independent source evidence");
   const responses = validate(record.responses, plan);
+  validateDistinctObservations(responses);
   const findings = responses.flatMap((r) => [
     ...r.issues.map((i) => ({
       kind: i.kind,
