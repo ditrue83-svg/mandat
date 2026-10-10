@@ -4,7 +4,7 @@ import { z } from "zod";
 export class OperationalFieldReferenceError extends Error {}
 export const isFieldBoundRejection = (e) =>
   e instanceof OperationalFieldReferenceError;
-export const PROTOCOL_VERSION = "operational-field-bound-v4-distinct-text-identities";
+export const PROTOCOL_VERSION = "operational-field-bound-v5-explicit-deadline-roles";
 const stable = (v) =>
   Array.isArray(v)
     ? `[${v.map(stable).join(",")}]`
@@ -267,7 +267,7 @@ export function createFieldBoundProtocol(native, request) {
     return {
       system:
         providerContextSystem(task.system) +
-        " Protocollo distinto: seleziona soltanto proofId fN dalla propria riga originalProofCatalog [proofId,scope,path,textReference]; text_N identifica una stringa e NON è una prova: non convertirne il suffisso in fN; non emettere percorso o citazione. Per deadline dichiara separatamente data, istruzioni di presentazione e prova dell’applicabilità al lotto; una clausola selezionata non diventa automaticamente prova sufficiente. Se non dimostrabile, value null e motivazione.",
+        " Protocollo distinto: seleziona soltanto proofId fN dalla propria riga originalProofCatalog [proofId,scope,path,textReference]; text_N identifica una stringa e NON è una prova: non convertirne il suffisso in fN; non emettere percorso o citazione. Per deadline: dateFieldId richiede /offerDeadline; submissionFieldIds richiede project_context /project-info/offerSpecificNote/{it,fr,de,en}; lotApplicabilityFieldIds richiede project_context /{base,project-info}/participantLotsLimitationNote/{it,fr,de,en} oppure /project-info/offerSpecificNote/{it,fr,de,en}. Sono vincoli di ruolo, non attestazioni automatiche. Le note partialOffersNote del lotto e correction/remarks possono essere solo otherEvidenceFieldIds: non sostituiscono prove di presentazione o applicabilità. I controlli nativi verificano identità, percorsi, ambito e conflitti codificati; la revisione semantica obbligatoria valuta le istruzioni e le contraddizioni testuali. Se non dimostrabile, value null e motivazione.",
       prompt: JSON.stringify(payload(task)),
       maxTokens: task.maxTokens,
       responseFormat: format(readingSchema, "operational_field_bound_reading"),
