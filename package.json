@@ -20,7 +20,8 @@
     "setup:supabase": "node --import tsx scripts/setup-supabase.ts",
     "setup:database-password": "node --import tsx scripts/setup-database-password.ts",
     "setup:smtp-password": "node --import tsx scripts/setup-smtp-password.ts",
-    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.ts\" \"tests/**/*.ts\""
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.ts\" \"tests/**/*.ts\"",
+    "auth:credentials": "tsx --env-file-if-exists=.env.local scripts/set-login-credentials.ts"
   },
   "engines": {
     "node": ">=22.12"

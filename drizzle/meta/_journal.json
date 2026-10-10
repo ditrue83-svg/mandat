@@ -92,6 +92,13 @@
       "when": 1791621509391,
       "tag": "0012_operational_readings",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791660259337,
+      "tag": "0013_username_login",
+      "breakpoints": true
     }
   ]
 }

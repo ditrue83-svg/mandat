@@ -1,12 +1,11 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { emailOTP } from "better-auth/plugins";
+import { username } from "better-auth/plugins";
 import { APIError } from "better-auth/api";
-import { and, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { appUrl, isDemo } from "./config";
-import { emailLayout, sendMail } from "./mail";
 export function invitationAllowsLogin(
   invite:
     | { revokedAt: Date | null; acceptedAt: Date | null; expiresAt: Date }
@@ -46,7 +45,7 @@ function createAuth() {
     secret: process.env.BETTER_AUTH_SECRET,
     database: drizzleAdapter(getDb(), { provider: "pg", schema }),
     trustedOrigins: [appUrl()],
-    emailAndPassword: { enabled: false },
+    emailAndPassword: { enabled: true, disableSignUp: true },
     session: {
       expiresIn: 60 * 60 * 24 * 7,
       updateAge: 60 * 60 * 24,
@@ -63,8 +62,7 @@ function createAuth() {
       window: 60,
       max: 30,
       customRules: {
-        "/email-otp/send-verification-otp": { window: 60, max: 3 },
-        "/sign-in/email-otp": { window: 60, max: 5 },
+        "/sign-in/username": { window: 60, max: 5 },
       },
     },
     databaseHooks: {
@@ -80,32 +78,7 @@ function createAuth() {
         },
       },
     },
-    plugins: [
-      emailOTP({
-        otpLength: 6,
-        expiresIn: 600,
-        allowedAttempts: 3,
-        storeOTP: "hashed",
-        disableSignUp: true,
-        sendVerificationOTP: async ({ email, otp, type }) => {
-          if (type !== "sign-in") return;
-          const [u] = await getDb()
-            .select()
-            .from(schema.user)
-            .where(eq(schema.user.email, email.toLowerCase()))
-            .limit(1);
-          if (!u || !(await allowedUser(u.id))) return;
-          await sendMail({
-            to: email,
-            subject: "Il tuo codice per accedere a Mandat",
-            text: `Il tuo codice Mandat è ${otp}. Scade tra 10 minuti. Se non hai richiesto l’accesso, ignora questa email.`,
-            html: emailLayout(
-              `<h2>Il tuo codice di accesso</h2><p style="font-size:32px;letter-spacing:8px">${otp}</p><p>Scade tra 10 minuti. Se non hai richiesto l’accesso, ignora questa email.</p>`,
-            ),
-          });
-        },
-      }),
-    ],
+    plugins: [username({ displayUsername: false, immutableUsername: true })],
   });
 }
 let instance: ReturnType<typeof createAuth> | undefined;

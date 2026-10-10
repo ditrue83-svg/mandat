@@ -1,3 +1,4 @@
+import { setLoginCredentials } from "../src/lib/login-credentials";
 import { BETA_PRIORITY_SECTORS } from "../src/lib/sectors";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
@@ -187,34 +188,34 @@ function request(path: string, body: unknown, method = "POST") {
 function inviteRequest(body: unknown) {
   return request("/api/admin", body);
 }
-async function login(email: string, ip: string, wrongCode = false) {
+async function login(email: string, ip: string, wrongPassword = false) {
   context.headers = new Headers({ "x-real-ip": ip });
+  const username = email.split("@")[0];
+  const password = "isolated-pilot-password";
+  await setLoginCredentials({
+    email,
+    username,
+    password,
+    replaceExisting: true,
+  });
   const before = vi.mocked(sendMail).mock.calls.length;
-  const sent = await authPost(
-    request("/api/auth/email-otp/send-verification-otp", {
-      email,
-      type: "sign-in",
-    }),
-  );
-  expect(sent.status, await sent.clone().text()).toBe(200);
-  expect(sendMail).toHaveBeenCalledTimes(before + 1);
-  const message = vi.mocked(sendMail).mock.calls.at(-1)![0];
-  expect(message.to).toBe(email);
-  const otp = message.text.match(/\b\d{6}\b/)![0];
-  if (wrongCode) {
-    const invalid = String((Number(otp) + 1) % 1_000_000).padStart(6, "0");
+  if (wrongPassword) {
     expect(
       (
         await authPost(
-          request("/api/auth/sign-in/email-otp", { email, otp: invalid }),
+          request("/api/auth/sign-in/username", {
+            username,
+            password: "incorrect-password",
+          }),
         )
       ).status,
-    ).toBe(400);
+    ).toBe(401);
     expect(await currentViewer()).toBeNull();
   }
   const signed = await authPost(
-    request("/api/auth/sign-in/email-otp", { email, otp }),
+    request("/api/auth/sign-in/username", { username, password }),
   );
+  expect(sendMail).toHaveBeenCalledTimes(before);
   expect(signed.status, await signed.clone().text()).toBe(200);
   expect(signed.headers.get("set-cookie")).toContain("HttpOnly");
   const cookies = signed.headers

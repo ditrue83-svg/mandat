@@ -1,6 +1,6 @@
 # Mandat Radar
 
-Beta per micro e piccole ditte ticinesi: Next.js/TypeScript, PostgreSQL/Drizzle, Better Auth con OTP email, worker pg-boss e AI Infomaniak.
+Beta per micro e piccole ditte ticinesi: Next.js/TypeScript, PostgreSQL/Drizzle, Better Auth con nome utente e password, worker pg-boss e AI Infomaniak.
 
 ## Anteprima locale
 
@@ -69,7 +69,7 @@ npm test
 npm run build
 ```
 
-I test di integrazione usano PGlite, PostgreSQL incorporato, applicando le migrazioni reali. Verificano OTP/scadenza/revoca, isolamento fra ditte, feedback, versioni, approvazioni e outbox email. Non sostituiscono il collaudo sui servizi effettivi.
+I test di integrazione usano PGlite, PostgreSQL incorporato, applicando le migrazioni reali. Verificano password/sessioni/revoca, isolamento fra ditte, feedback, versioni, approvazioni e outbox email. Non sostituiscono il collaudo sui servizi effettivi.
 
 Il test della coda riapre anche il database salvato su disco e verifica che il lavoro rimanga eseguibile. I controlli Supabase verificano TLS, pool, regione, RLS e revoca dei privilegi client. GitHub Actions esegue TypeScript, test e build senza credenziali di produzione.
 
@@ -95,3 +95,9 @@ The existing comparison queue first performs an owner/source/config-bound operat
 `resumeUnsentOperationalReading(job, authenticatedAdministrator)` is an explicit server-side recovery API for a budget-blocked phase only if it has no reservation receipts, responses or result, with the existing three-attempt ceiling preserved. It serializes on source/company/match and run locks, records the recovery actor/event and sends a durable job. Sent, uncertain or semantically rejected work is not recoverable through this API. At the attempt ceiling, an operator must review the held case; there is no automated counter reset or budget bypass.
 
 The native operational task uses `original-dictionary-v1`: reconstruct the complete original structures and strings with `decodeOperationalTaskPrompt`. This is lossless wire deduplication; original field paths, scopes, empty structures, null and false remain available. Operational record version v4 invalidates earlier fingerprints. Review reuses the same dictionary for the fully validated reading; no quoted originals are truncated.
+
+### Credenziali di accesso
+
+La pagina `/accedi` usa nome utente e password; gli endpoint OTP, accesso email, registrazione e reset pubblico sono disabilitati. Inviti, revoche, ruoli e isolamento delle ditte restano attivi. Le email di notifica dei bandi sono indipendenti dal login.
+
+Per assegnare credenziali a un account già invitato, configurare `LOGIN_EMAIL` e `LOGIN_USERNAME` ed eseguire `npm run auth:credentials` passando la password su stdin da un canale protetto. Senza `LOGIN_EMAIL` viene selezionato `FOUNDER_EMAIL` e viene verificato che sia già amministratore. Il comando non crea utenti né promuove ditte. Una sostituzione richiede `LOGIN_REPLACE=1` e revoca le vecchie sessioni. Non salvare password nel repository, nei log o negli argomenti di comando. Le altre ditte richiedono credenziali proprie, comunicate separatamente.

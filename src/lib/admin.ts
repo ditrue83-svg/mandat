@@ -121,9 +121,9 @@ export async function notifyInvitation(email: string, name: string) {
   return sendMail({
     to: email,
     subject: "La tua ditta è invitata a provare Mandat",
-    text: `Ciao ${name}, la tua ditta è invitata alla beta gratuita di Mandat per quattro settimane. Accedi con questa email entro 14 giorni: ${appUrl()}/accedi. Prima di configurare la ditta troverai le condizioni di partecipazione e l’informativa sull’invio email tramite Aruba in Italia. Mandat segnala interessi potenziali; la pubblicazione ufficiale resta determinante.`,
+    text: `Ciao ${name}, la tua ditta è invitata alla beta gratuita di Mandat per quattro settimane. Accedi con il nome utente e la password forniti separatamente dal fondatore entro 14 giorni: ${appUrl()}/accedi. Prima di configurare la ditta troverai le condizioni di partecipazione e l’informativa sull’invio email tramite Aruba in Italia. Mandat segnala interessi potenziali; la pubblicazione ufficiale resta determinante.`,
     html: emailLayout(
-      `<h2>Benvenuto nella beta Radar</h2><p>Ciao ${escapeHtml(name)}, la tua ditta è invitata a provare Mandat gratuitamente per quattro settimane.</p><p><a href="${appUrl()}/accedi">Accedi al tuo Radar</a></p><p>Usa questo indirizzo email entro 14 giorni. Prima di configurare la ditta troverai le condizioni di partecipazione e l’informativa sull’invio email tramite Aruba in Italia. Non serve una carta di credito.</p><p>Mandat segnala interessi potenziali; la pubblicazione ufficiale resta determinante.</p>`,
+      `<h2>Benvenuto nella beta Radar</h2><p>Ciao ${escapeHtml(name)}, la tua ditta è invitata a provare Mandat gratuitamente per quattro settimane.</p><p><a href="${appUrl()}/accedi">Accedi al tuo Radar</a></p><p>Usa il nome utente e la password forniti separatamente dal fondatore entro 14 giorni. Prima di configurare la ditta troverai le condizioni di partecipazione e l’informativa sull’invio email tramite Aruba in Italia. Non serve una carta di credito.</p><p>Mandat segnala interessi potenziali; la pubblicazione ufficiale resta determinante.</p>`,
     ),
   });
 }

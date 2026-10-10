@@ -35,6 +35,7 @@ vi.mock("@/lib/mail", () => ({
 }));
 import { provisionInvite } from "../src/lib/admin";
 import { getAuth } from "../src/lib/auth";
+import { setLoginCredentials } from "../src/lib/login-credentials";
 import { listOpportunities, getOpportunity } from "../src/lib/queries";
 import { storePublication, enrichAndMatch } from "../src/worker/pipeline";
 import { legacySimapRevision, normalizeSimap } from "../src/sources/simap";
@@ -1099,103 +1100,64 @@ describe("Database, inviti e isolamento delle ditte", () => {
       .where(eq(schema.matches.id, "ma"));
     expect(m.approved).toBeNull();
   });
-  it("non crea account per email non invitate", async () => {
-    const before = await db.select().from(schema.user);
-    const r = await getAuth().handler(
-      new Request(
-        "http://localhost:3456/api/auth/email-otp/send-verification-otp",
-        {
+  it("accede con password hash senza email e rifiuta utenti sconosciuti", async () => {
+    await setLoginCredentials({
+      email: a.email,
+      username: "ditta_a",
+      password: "test-password-a",
+    });
+    const before = (await db.select().from(schema.user)).length;
+    const mails = testContext.mail.length;
+    const request = (username: string, password: string) =>
+      getAuth().handler(
+        new Request("http://localhost:3456/api/auth/sign-in/username", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             origin: "http://localhost:3456",
-            "x-real-ip": "192.0.2.1",
+            "x-real-ip": "192.0.2.2",
           },
-          body: JSON.stringify({
-            email: "unknown@example.invalid",
-            type: "sign-in",
-          }),
-        },
-      ),
-    );
-    expect(r.status).toBeLessThan(500);
-    expect((await db.select().from(schema.user)).length).toBe(before.length);
-    expect(
-      testContext.mail.some((m) => m.to === "unknown@example.invalid"),
-    ).toBe(false);
-  });
-  it("genera OTP hash, rifiuta codici scaduti e crea sessione solo con codice valido", async () => {
-    const auth = getAuth();
-    const request = (path: string, body: unknown, ip = "192.0.2.2") =>
-      auth.handler(
-        new Request(`http://localhost:3456/api/auth${path}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            origin: "http://localhost:3456",
-            "x-real-ip": ip,
-          },
-          body: JSON.stringify(body),
+          body: JSON.stringify({ username, password }),
         }),
       );
-    await request("/email-otp/send-verification-otp", {
-      email: a.email,
-      type: "sign-in",
-    });
-    const code = testContext.mail.at(-1)!.text.match(/\b\d{6}\b/)![0];
-    const [v] = await db
+    const [credential] = await db
       .select()
-      .from(schema.verification)
-      .where(sql`${schema.verification.identifier} like ${`%${a.email}%`}`);
-    expect(v.value).not.toContain(code);
-    await db
-      .update(schema.verification)
-      .set({ expiresAt: new Date(Date.now() - 1000) })
-      .where(eq(schema.verification.id, v.id));
-    expect(
-      (await request("/sign-in/email-otp", { email: a.email, otp: code }))
-        .status,
-    ).toBe(400);
-    await request(
-      "/email-otp/send-verification-otp",
-      { email: a.email, type: "sign-in" },
-      "192.0.2.3",
-    );
-    const fresh = testContext.mail.at(-1)!.text.match(/\b\d{6}\b/)![0];
-    const success = await request(
-      "/sign-in/email-otp",
-      { email: a.email, otp: fresh },
-      "192.0.2.3",
-    );
+      .from(schema.account)
+      .where(eq(schema.account.userId, a.userId));
+    expect(credential.password).not.toContain("test-password-a");
+    expect((await request("sconosciuto", "test-password-a")).status).toBe(401);
+    expect((await request("ditta_a", "errata")).status).toBe(401);
+    const success = await request("DITTA_A", "test-password-a");
     expect(success.status, await success.clone().text()).toBe(200);
     expect(success.headers.get("set-cookie")).toContain("HttpOnly");
+    expect((await db.select().from(schema.user)).length).toBe(before);
+    expect(testContext.mail.length).toBe(mails);
   });
-  it("la revoca blocca nuove sessioni anche con OTP già ricevuto", async () => {
-    const auth = getAuth();
-    const call = (path: string, body: unknown) =>
-      auth.handler(
-        new Request(`http://localhost:3456/api/auth${path}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            origin: "http://localhost:3456",
-            "x-real-ip": "192.0.2.4",
-          },
-          body: JSON.stringify(body),
-        }),
-      );
-    await call("/email-otp/send-verification-otp", {
+  it("la revoca blocca nuove sessioni anche con password corretta", async () => {
+    await setLoginCredentials({
       email: b.email,
-      type: "sign-in",
+      username: "ditta_b",
+      password: "test-password-b",
     });
-    const code = testContext.mail.at(-1)!.text.match(/\b\d{6}\b/)![0];
     await db
       .update(schema.invitations)
       .set({ revokedAt: new Date() })
       .where(eq(schema.invitations.email, b.email));
-    expect(
-      (await call("/sign-in/email-otp", { email: b.email, otp: code })).status,
-    ).not.toBe(200);
+    const response = await getAuth().handler(
+      new Request("http://localhost:3456/api/auth/sign-in/username", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          origin: "http://localhost:3456",
+          "x-real-ip": "192.0.2.4",
+        },
+        body: JSON.stringify({
+          username: "ditta_b",
+          password: "test-password-b",
+        }),
+      }),
+    );
+    expect(response.status).toBe(403);
   });
 });
 describe("Outbox email", () => {

@@ -27,7 +27,9 @@ async function main() {
       process.env.FOUNDER_NAME || "Fondatore Mandat",
       true,
     );
-    console.info("Account fondatore creato. Accesso con codice email.");
+    console.info(
+      "Account fondatore creato. Configurare nome utente e password con auth:credentials.",
+    );
   }
   await closeDb();
 }
