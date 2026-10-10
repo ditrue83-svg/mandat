@@ -139,6 +139,8 @@ beforeAll(async () => {
 }, 20000);
 beforeEach(async () => {
   vi.stubEnv("DOCUMENTARY_COMPARISON_ENABLED", "false");
+  vi.stubEnv("DOCUMENTARY_OPERATIONAL_READING_ENABLED", "false");
+  vi.stubEnv("AI_MONTHLY_BUDGET_CHF", "10");
   vi.stubEnv("LLM_PROVIDER", "openai");
   vi.stubEnv("DOCUMENTARY_LLM_PROVIDER", "");
   vi.stubEnv("OPENAI_API_BASE_URL", "https://api.openai.com/v1");
@@ -2645,4 +2647,493 @@ it("A current AI result is visible without a human evaluation, and remains outsi
   } finally {
     vi.useRealTimers();
   }
+});
+
+// Operational runtime tests use the real infer budget/usage ledger and injected
+// transport, while the existing professional fixture calls remain mocked.
+async function operationalFixture() {
+  vi.stubEnv("DOCUMENTARY_COMPARISON_ENABLED", "true");
+  vi.stubEnv("DOCUMENTARY_OPERATIONAL_READING_ENABLED", "true");
+  vi.stubEnv("DOCUMENTARY_LLM_REASONING_EFFORT", "high");
+  vi.stubEnv("OPENAI_API_KEY", "test-only-not-a-provider-key");
+  vi.stubEnv("LLM_INPUT_CHF_PER_MILLION", "0.15");
+  vi.stubEnv("LLM_OUTPUT_CHF_PER_MILLION", "0.75");
+  const f = await fixture({
+    sourceText: "Potatura e cura degli alberi in Ticino.",
+  });
+  f.raw.lots[0].orderAddressOnlyDescription = "yes";
+  f.raw.lots[0].orderAddress = {
+    countryId: "CH",
+    cantonId: null,
+    city: { it: null },
+  };
+  f.raw.lots[0].orderAddressDescription = { it: "Nei locali dell’offerente" };
+  f.raw.lots[0].offerDeadline = "2031-02-01T12:00:00+01:00";
+  const observation = await f.observation(f.raw);
+  await f.adopt(observation.id);
+  const companyId = await company();
+  await matchAdoptedPublication({ publicationId: f.p.id, now });
+  const [run] = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(eq(schema.automaticMatchRuns.publicationId, f.p.id));
+  return {
+    f,
+    companyId,
+    job: { runId: run.id, publicationId: f.p.id, companyId },
+  };
+}
+function operationalAnswer(prompt: string) {
+  const data = decodeOperationalTaskPrompt(prompt),
+    source = data.source,
+    lot = source.selectedLot as any,
+    path = source.selectedPath;
+  const proof = (suffix: string, quote: string) => ({
+    scope: "selected_lot",
+    path: path + suffix,
+    quote,
+  });
+  if (data.reading) {
+    const reading = data.reading as any;
+    return {
+      checks: Object.fromEntries(
+        ["country", "canton", "city", "deadline"].map((k) => [
+          k,
+          {
+            verdict: reading[k] === null ? "not_verifiable" : "supported",
+            evidence: reading[k + "Evidence"],
+            rationale: "Invented independent proof check",
+          },
+        ]),
+      ),
+      issues: [],
+    };
+  }
+  return {
+    country: "CH",
+    countryEvidence: [
+      proof("/orderAddress/countryId", lot.orderAddress.countryId),
+    ],
+    canton: "TI",
+    cantonEvidence: [proof("/orderDescription/it", lot.orderDescription.it)],
+    city: null,
+    cityEvidence: [],
+    deadline: lot.offerDeadline,
+    deadlineAppliesToTarget: true,
+    deadlineEvidence: [proof("/offerDeadline", lot.offerDeadline)],
+    rationale: "Invented operational reading",
+    issues: [],
+  };
+}
+async function useOperationalTransport(
+  transform?: (
+    answer: any,
+    purpose: string,
+    prompt: string,
+  ) => Promise<any> | any,
+) {
+  const real =
+    await vi.importActual<typeof import("../src/worker/ai")>(
+      "../src/worker/ai",
+    );
+  vi.mocked(infer).mockImplementation(
+    async (pub, purpose, prompt, max, unused, system, format, options) => {
+      if (!purpose.startsWith("documentary-operational-"))
+        return inventedAnswer(prompt);
+      return real.infer(
+        pub,
+        purpose,
+        prompt,
+        max,
+        {
+          complete: async () => {
+            let answer = operationalAnswer(prompt);
+            if (transform) answer = await transform(answer, purpose, prompt);
+            return {
+              text: JSON.stringify(answer),
+              inputTokens: 100,
+              outputTokens: 50,
+            };
+          },
+        },
+        system,
+        format,
+        options,
+      );
+    },
+  );
+}
+async function nextOperationalProfessionalJob(
+  companyId: string,
+  publicationId: string,
+  oldId: string,
+) {
+  const jobs = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(
+      and(
+        eq(schema.automaticMatchRuns.companyId, companyId),
+        eq(schema.automaticMatchRuns.publicationId, publicationId),
+        eq(schema.automaticMatchRuns.status, "queued"),
+      ),
+    );
+  const next = jobs.find((j) => j.id !== oldId);
+  expect(next).toBeDefined();
+  return { runId: next!.id, publicationId, companyId };
+}
+it("Operational reading/review persist exact receipts, load into native assessment and enqueue the new professional binding once", async () => {
+  const { f, companyId, job } = await operationalFixture();
+  await useOperationalTransport();
+  await runAutomaticComparison(job, { now: () => now });
+  const [op] = await db
+    .select()
+    .from(schema.operationalReadingRuns)
+    .where(eq(schema.operationalReadingRuns.companyId, companyId));
+  expect(op.status).toBe("completed");
+  expect(op.receiptIds).toHaveLength(2);
+  const ledger = await db
+    .select()
+    .from(schema.aiUsage)
+    .where(eq(schema.aiUsage.publicationId, f.p.id));
+  expect(ledger).toHaveLength(2);
+  expect(
+    ledger.every((r) => r.status === "completed" && r.costChf === "0.000056"),
+  ).toBe(true);
+  expect(new Set(ledger.map((r) => r.id))).toEqual(new Set(op.receiptIds));
+  const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
+  expect(loaded.input.operationalReadings).toHaveLength(1);
+  expect(
+    loaded.project.targets[0].preliminary?.automaticReviewReasons,
+  ).not.toContain("Luogo di esecuzione del lotto da verificare.");
+  const next = await nextOperationalProfessionalJob(
+    companyId,
+    f.p.id,
+    job.runId,
+  );
+  await runAutomaticComparison(next, { now: () => now });
+  const final = await loadLotMatchReview(companyId, f.p.id, viewer);
+  expect(final.project.signalEligible).toBe(true);
+  const { presentLotOpportunity, lotOpportunityVisible } =
+    await import("../src/lib/lot-readers");
+  expect(presentLotOpportunity(final, true).assessment).toBe("ai");
+  expect(lotOpportunityVisible(final, false, now)).toBe(true);
+  const { readCurrentLotMatch } = await import("../src/lib/lot-readers");
+  const expired = await readCurrentLotMatch(
+    companyId,
+    f.p.id,
+    new Date("2031-02-01T11:00:00Z"),
+  );
+  expect(expired).not.toBeNull();
+  expect(
+    lotOpportunityVisible(expired!, false, new Date("2031-02-01T11:00:00Z")),
+  ).toBe(false);
+  expect(final.project.targets[0].preliminary?.operational.deadline).toBe(
+    "2031-02-01T12:00:00+01:00",
+  );
+  const paid = vi
+    .mocked(infer)
+    .mock.calls.filter((x) => x[1].startsWith("documentary-operational-"));
+  expect(paid).toHaveLength(2);
+  await matchAdoptedPublication({ publicationId: f.p.id, now });
+  await runAutomaticComparison(job, { now: () => now });
+  expect(
+    vi
+      .mocked(infer)
+      .mock.calls.filter((x) => x[1].startsWith("documentary-operational-")),
+  ).toHaveLength(2);
+  vi.stubEnv("DOCUMENTARY_OPERATIONAL_READING_ENABLED", "false");
+  expect(
+    (await loadLotMatchReview(companyId, f.p.id, viewer)).input
+      .operationalReadings,
+  ).toHaveLength(0);
+});
+it("Rejected operational facts remain review and still permit independent professional work without semantic replay", async () => {
+  const { f, companyId, job } = await operationalFixture();
+  await useOperationalTransport((answer, purpose) =>
+    purpose.includes("reading:")
+      ? {
+          ...answer,
+          countryEvidence: [
+            { ...answer.countryEvidence[0], quote: "invented incorrect quote" },
+          ],
+        }
+      : answer,
+  );
+  await runAutomaticComparison(job, { now: () => now });
+  const [op] = await db
+    .select()
+    .from(schema.operationalReadingRuns)
+    .where(eq(schema.operationalReadingRuns.companyId, companyId));
+  expect(op.status).toBe("rejected");
+  expect(op.receiptIds).toHaveLength(1);
+  expect(op.reading).not.toBeNull();
+  const next = await nextOperationalProfessionalJob(
+    companyId,
+    f.p.id,
+    job.runId,
+  );
+  await runAutomaticComparison(next, { now: () => now });
+  const final = await loadLotMatchReview(companyId, f.p.id, viewer);
+  expect(final.input.operationalReadings).toHaveLength(0);
+  expect(final.project.signalEligible).toBe(false);
+  expect(final.project.targets[0].automatic?.serviceRelation).toBe("direct");
+  await matchAdoptedPublication({ publicationId: f.p.id, now });
+  expect(
+    vi
+      .mocked(infer)
+      .mock.calls.filter((x) => x[1].startsWith("documentary-operational-")),
+  ).toHaveLength(1);
+});
+it("Revocation during reading prevents review, commit and cache consumption", async () => {
+  const { f, companyId, job } = await operationalFixture();
+  await useOperationalTransport(async (answer, purpose) => {
+    if (purpose.includes("reading:"))
+      await db
+        .update(schema.aiProcessingReceipts)
+        .set({ revokedAt: new Date() })
+        .where(eq(schema.aiProcessingReceipts.companyId, companyId));
+    return answer;
+  });
+  await runAutomaticComparison(job, { now: () => now });
+  const [op] = await db
+    .select()
+    .from(schema.operationalReadingRuns)
+    .where(eq(schema.operationalReadingRuns.companyId, companyId));
+  expect(op.status).toBe("superseded");
+  expect(op.result).toBeNull();
+  expect(
+    (await loadLotMatchReview(companyId, f.p.id, viewer)).input
+      .operationalReadings,
+  ).toHaveLength(0);
+  expect(
+    vi
+      .mocked(infer)
+      .mock.calls.filter((x) => x[1].startsWith("documentary-operational-")),
+  ).toHaveLength(1);
+});
+it("Ordinary production budget blocks before any operational provider call and does not inherit unlimited test authorization", async () => {
+  const { f, companyId, job } = await operationalFixture();
+  vi.stubEnv("AI_MONTHLY_BUDGET_CHF", "0");
+  let dispatched = 0;
+  await useOperationalTransport((answer) => {
+    dispatched++;
+    return answer;
+  });
+  await runAutomaticComparison(job, { now: () => now });
+  expect(dispatched).toBe(0);
+  const [op] = await db
+    .select()
+    .from(schema.operationalReadingRuns)
+    .where(eq(schema.operationalReadingRuns.companyId, companyId));
+  expect(op.status).toBe("blocked");
+  expect(op.receiptIds).toHaveLength(0);
+  expect(
+    await db
+      .select()
+      .from(schema.aiUsage)
+      .where(eq(schema.aiUsage.publicationId, f.p.id)),
+  ).toHaveLength(0);
+});
+it("Source/config changes invalidate a previously completed operational cache", async () => {
+  const { f, companyId, job } = await operationalFixture();
+  await useOperationalTransport();
+  await runAutomaticComparison(job, { now: () => now });
+  expect(
+    (await loadLotMatchReview(companyId, f.p.id, viewer)).input
+      .operationalReadings,
+  ).toHaveLength(1);
+  vi.stubEnv("DOCUMENTARY_LLM_REASONING_EFFORT", "none");
+  expect(
+    (await loadLotMatchReview(companyId, f.p.id, viewer)).input
+      .operationalReadings,
+  ).toHaveLength(0);
+  vi.stubEnv("DOCUMENTARY_LLM_REASONING_EFFORT", "high");
+  f.raw.lots[0].orderDescription.it += " Fonte rettificata.";
+  const obs = await f.observation(f.raw);
+  await f.adopt(obs.id);
+  expect(
+    (await loadLotMatchReview(companyId, f.p.id, viewer)).input
+      .operationalReadings,
+  ).toHaveLength(0);
+});
+
+import { decodeOperationalTaskPrompt } from "../src/lib/lot-operational-evidence";
+
+import { resumeUnsentOperationalReading } from "../src/worker/automatic-matching";
+it("An administrator can serially resume proven zero-POST budget blockage after budget restoration", async () => {
+  const { f, companyId, job } = await operationalFixture();
+  vi.stubEnv("AI_MONTHLY_BUDGET_CHF", "0");
+  let calls = 0;
+  await useOperationalTransport((answer) => {
+    calls++;
+    return answer;
+  });
+  await runAutomaticComparison(job, { now: () => now });
+  expect(calls).toBe(0);
+  const [blocked] = await db
+    .select()
+    .from(schema.operationalReadingRuns)
+    .where(eq(schema.operationalReadingRuns.companyId, companyId));
+  expect(blocked.status).toBe("blocked");
+  expect(blocked.receiptIds).toHaveLength(0);
+  vi.stubEnv("AI_MONTHLY_BUDGET_CHF", "10");
+  await expect(
+    resumeUnsentOperationalReading(job, { ...viewer, admin: false }, now),
+  ).rejects.toThrow("administrator");
+  expect(await resumeUnsentOperationalReading(job, viewer, now)).toBe(true);
+  expect(await resumeUnsentOperationalReading(job, viewer, now)).toBe(false);
+  await runAutomaticComparison(job, { now: () => now });
+  expect(calls).toBe(2);
+  const [op] = await db
+    .select()
+    .from(schema.operationalReadingRuns)
+    .where(eq(schema.operationalReadingRuns.companyId, companyId));
+  expect(op.id).toBe(blocked.id);
+  expect(op.status).toBe("completed");
+  expect(op.recoveryLog).toHaveLength(1);
+  expect(op.receiptIds).toHaveLength(2);
+  expect(
+    (await loadLotMatchReview(companyId, f.p.id, viewer)).input
+      .operationalReadings,
+  ).toHaveLength(1);
+  expect(await resumeUnsentOperationalReading(job, viewer, now)).toBe(false);
+});
+
+it("An original native territorial veto produces no operational run or provider work", async () => {
+  vi.stubEnv("DOCUMENTARY_COMPARISON_ENABLED", "true");
+  vi.stubEnv("DOCUMENTARY_OPERATIONAL_READING_ENABLED", "true");
+  const f = await fixture();
+  f.raw.lots[0].orderAddress = {
+    countryId: "CH",
+    cantonId: "VD",
+    city: { fr: "Lausanne" },
+  };
+  const obs = await f.observation(f.raw);
+  await f.adopt(obs.id);
+  await company();
+  await matchAdoptedPublication({ publicationId: f.p.id, now });
+  expect(
+    await db
+      .select()
+      .from(schema.automaticMatchRuns)
+      .where(eq(schema.automaticMatchRuns.publicationId, f.p.id)),
+  ).toHaveLength(0);
+  expect(
+    await db
+      .select()
+      .from(schema.operationalReadingRuns)
+      .where(eq(schema.operationalReadingRuns.publicationId, f.p.id)),
+  ).toHaveLength(0);
+  expect(infer).not.toHaveBeenCalled();
+});
+it("Concurrent deliveries do not duplicate operational reading, review or receipts", async () => {
+  const { f, companyId, job } = await operationalFixture();
+  let release!: () => void, entered!: () => void;
+  const gate = new Promise<void>((r) => (release = r)),
+    started = new Promise<void>((r) => (entered = r));
+  await useOperationalTransport(async (answer, purpose) => {
+    if (purpose.includes("reading:")) {
+      entered();
+      await gate;
+    }
+    return answer;
+  });
+  const first = runAutomaticComparison(job, { now: () => now });
+  await started;
+  await expect(runAutomaticComparison(job, { now: () => now })).rejects.toThrow(
+    "già in elaborazione",
+  );
+  expect(await resumeUnsentOperationalReading(job, viewer, now)).toBe(false);
+  release();
+  await first;
+  expect(
+    vi
+      .mocked(infer)
+      .mock.calls.filter((c) => c[1].startsWith("documentary-operational-")),
+  ).toHaveLength(2);
+  expect(
+    await db
+      .select()
+      .from(schema.operationalReadingRuns)
+      .where(eq(schema.operationalReadingRuns.companyId, companyId)),
+  ).toHaveLength(1);
+});
+it("Null operational facts persist as held, yet professional work proceeds without a repeated reading", async () => {
+  const { f, companyId, job } = await operationalFixture();
+  await useOperationalTransport((answer, purpose) =>
+    purpose.includes("reading:")
+      ? { ...answer, canton: null, cantonEvidence: [] }
+      : answer,
+  );
+  await runAutomaticComparison(job, { now: () => now });
+  const next = await nextOperationalProfessionalJob(
+    companyId,
+    f.p.id,
+    job.runId,
+  );
+  await runAutomaticComparison(next, { now: () => now });
+  const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
+  expect(loaded.input.operationalReadings).toHaveLength(1);
+  expect(loaded.project.targets[0].automatic?.serviceRelation).toBe("direct");
+  expect(loaded.project.signalEligible).toBe(false);
+  expect(loaded.project.targets[0].preliminary?.operational.canton).toBeNull();
+  expect(
+    vi
+      .mocked(infer)
+      .mock.calls.filter((c) => c[1].startsWith("documentary-operational-")),
+  ).toHaveLength(2);
+});
+it("A source change between the final guard and atomic commit discards the verified operational answer", async () => {
+  const { f, companyId, job } = await operationalFixture();
+  let afterReview = false,
+    transactions = 0;
+  await useOperationalTransport(async (answer, purpose) => {
+    if (purpose.includes("review:")) {
+      afterReview = true;
+      injected.db = new Proxy(db, {
+        get(target, prop) {
+          if (prop === "transaction")
+            return async (callback: Parameters<typeof db.transaction>[0]) => {
+              if (afterReview && ++transactions === 3) {
+                injected.db = db;
+                f.raw.lots[0].orderDescription.it +=
+                  " Fonte cambiata prima del commit.";
+                const obs = await f.observation(f.raw);
+                await f.adopt(obs.id);
+              }
+              return db.transaction(callback);
+            };
+          const value = Reflect.get(target, prop);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    }
+    return answer;
+  });
+  await runAutomaticComparison(job, { now: () => now });
+  injected.db = db;
+  const [op] = await db
+    .select()
+    .from(schema.operationalReadingRuns)
+    .where(eq(schema.operationalReadingRuns.companyId, companyId));
+  expect(transactions).toBe(3);
+  expect(op.status).toBe("superseded");
+  expect(op.result).toBeNull();
+  expect(op.receiptIds).toHaveLength(2);
+  expect(
+    (await loadLotMatchReview(companyId, f.p.id, viewer)).input
+      .operationalReadings,
+  ).toHaveLength(0);
+  const [run] = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(eq(schema.automaticMatchRuns.id, job.runId));
+  expect(run.status).toBe("superseded");
+  expect(run.leaseUntil).toBeNull();
+});
+
+it("Abandoned operational work stays quarantined, exposes no facts and allows only independent professional work",async()=>{
+ const {f,companyId,job}=await operationalFixture();await useOperationalTransport();await runAutomaticComparison(job,{now:()=>now});const [op]=await db.select().from(schema.operationalReadingRuns).where(eq(schema.operationalReadingRuns.companyId,companyId));await db.update(schema.operationalReadingRuns).set({status:"running",result:null,updatedAt:new Date(0)}).where(eq(schema.operationalReadingRuns.id,op.id));
+ const loaded=await loadLotMatchReview(companyId,f.p.id,viewer);expect(loaded.input.operationalReadings).toHaveLength(0);expect(loaded.input.operationalAttemptKeys).toHaveLength(1);await matchAdoptedPublication({publicationId:f.p.id,now});expect(vi.mocked(infer).mock.calls.filter(c=>c[1].startsWith("documentary-operational-"))).toHaveLength(2);expect(await resumeUnsentOperationalReading(job,viewer,now)).toBe(false);
 });

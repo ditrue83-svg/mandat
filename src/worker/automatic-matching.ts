@@ -1,6 +1,24 @@
+import { PgBoss, fromDrizzle } from "pg-boss";
+import type { SourceReviewViewer } from "@/lib/source-reviews";
+import { AUTOMATIC_COMPARISON_QUEUE } from "@/lib/automatic-comparison-queue";
+import { ensureOperationalReading, OperationalInputsChanged } from "./operational-reading";
+import {
+  buildOperationalRuntimePlan,
+  needsOperationalReading,
+  operationalBootstrapHash,
+} from "@/lib/operational-reading-runtime";
+import { enqueueAutomaticComparisons } from "@/lib/automatic-comparison-queue";
 import { and, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { automaticMatchRuns, companies, matches, issues } from "@/db/schema";
+import {
+  aiUsage,
+  administrators,
+  operationalReadingRuns,
+  automaticMatchRuns,
+  companies,
+  matches,
+  issues,
+} from "@/db/schema";
 import { lockCanonicalPublications } from "@/lib/canonical-lock";
 import { readLotMatchReview } from "@/lib/lot-match-reviews";
 import { companyAllowsPilotProcessingSql } from "@/lib/pilot-processing";
@@ -163,7 +181,7 @@ async function current(tx: Tx, job: AutomaticComparisonJob, now: Date) {
     loaded.project.suppressed ||
     loaded.project.dismissed
   )
-    return { run, input: null };
+    return { run, loaded, rawInput: null, input: null };
   const input = {
     ...loaded.input,
     target: run.target,
@@ -171,12 +189,21 @@ async function current(tx: Tx, job: AutomaticComparisonJob, now: Date) {
   };
   try {
     const request = buildAutomaticComparisonRequest(input);
-    if (request.sourceBlocked || request.inputHash !== run.inputHash)
-      return { run, input: null };
+    const bootstrap =
+      !!loaded.operationalGrantId &&
+      needsOperationalReading(loaded.input, run.target);
+    const expected = bootstrap
+      ? operationalBootstrapHash(
+          request.inputHash,
+          buildOperationalRuntimePlan(loaded.input, run.target),
+        )
+      : request.inputHash;
+    if (request.sourceBlocked || expected !== run.inputHash)
+      return { run, loaded, rawInput: input, input: null };
   } catch {
-    return { run, input: null };
+    return { run, loaded, rawInput: null, input: null };
   }
-  return { run, input };
+  return { run, loaded, rawInput: input, input };
 }
 
 // pg-boss cannot retry a job after its final delivery is interrupted. Reconcile
@@ -253,7 +280,12 @@ export async function runAutomaticComparison(
         updatedAt: clock(),
       })
       .where(eq(automaticMatchRuns.id, job.runId));
-    return { input: loaded.input, attempt };
+    return {
+      input: loaded.input,
+      grantId: loaded.loaded.operationalGrantId,
+      matchId: loaded.run.matchId,
+      attempt,
+    };
   });
   if (!claimed) return { status: "skipped" as const };
   const owned = () =>
@@ -265,6 +297,102 @@ export async function runAutomaticComparison(
       eq(automaticMatchRuns.status, "running"),
     );
   try {
+    if (
+      claimed.grantId &&
+      needsOperationalReading(claimed.input, claimed.input.target)
+    ) {
+      const plan = buildOperationalRuntimePlan(
+        claimed.input,
+        claimed.input.target,
+      );
+      await ensureOperationalReading(
+        claimed.input,
+        claimed.input.target,
+        claimed.matchId,
+        claimed.grantId,
+        {
+          transport: options.transport,
+          now: clock,
+          commitRecord: async (id, result) => {
+            await getDb().transaction(async (tx) => {
+              const latest = await current(tx, job, clock());
+              if (
+                !latest?.rawInput ||
+                latest.loaded.operationalGrantId !== claimed.grantId ||
+                latest.run.status !== "running" ||
+                latest.run.attempts !== claimed.attempt ||
+                buildOperationalRuntimePlan(
+                  latest.rawInput,
+                  latest.rawInput.target,
+                ).inputHash !== plan.inputHash
+              )
+                throw new ComparisonInputsChanged();
+              const committed = await tx
+                .update(operationalReadingRuns)
+                .set({
+                  status: "completed",
+                  result,
+                  issue: null,
+                  updatedAt: clock(),
+                })
+                .where(
+                  and(
+                    eq(operationalReadingRuns.id, id),
+                    eq(operationalReadingRuns.companyId, job.companyId),
+                    eq(operationalReadingRuns.inputHash, plan.inputHash),
+                    eq(operationalReadingRuns.status, "running"),
+                  ),
+                )
+                .returning({ id: operationalReadingRuns.id });
+              if (committed.length !== 1) throw new ComparisonInputsChanged();
+            });
+          },
+          beforeRequest: async () => {
+            options.signal?.throwIfAborted();
+            await getDb().transaction(async (tx) => {
+              const latest = await current(tx, job, clock());
+              if (
+                !latest?.rawInput ||
+                !latest.loaded.operationalGrantId ||
+                latest.loaded.operationalGrantId !== claimed.grantId ||
+                latest.run.status !== "running" ||
+                latest.run.attempts !== claimed.attempt ||
+                buildOperationalRuntimePlan(
+                  latest.rawInput,
+                  latest.rawInput.target,
+                ).inputHash !== plan.inputHash
+              )
+                throw new ComparisonInputsChanged();
+              await tx
+                .update(automaticMatchRuns)
+                .set({
+                  leaseUntil: new Date(clock().getTime() + 5 * 60_000),
+                  updatedAt: clock(),
+                })
+                .where(owned());
+            });
+          },
+        },
+      );
+      return await getDb().transaction(async (tx) => {
+        const latest = await current(tx, job, clock());
+        await tx
+          .update(automaticMatchRuns)
+          .set({
+            status: latest?.loaded.operationalGrantId
+              ? "completed"
+              : "superseded",
+            result: null,
+            issue: "operational_phase_finished",
+            leaseUntil: null,
+            updatedAt: clock(),
+          })
+          .where(owned());
+        if (latest?.loaded.operationalGrantId)
+          await enqueueAutomaticComparisons(tx, latest.loaded);
+        return { status: "superseded" as const };
+      });
+    }
     const result = await compareDocumentaryTarget(
       claimed.input,
       options.transport,
@@ -393,8 +521,19 @@ export async function runAutomaticComparison(
       };
     });
   } catch (error) {
-    if (error instanceof ComparisonInputsChanged)
+    if (error instanceof ComparisonInputsChanged || error instanceof OperationalInputsChanged) {
+      await getDb()
+        .update(automaticMatchRuns)
+        .set({
+          status: "superseded",
+          result: null,
+          issue: "inputs_changed",
+          leaseUntil: null,
+          updatedAt: clock(),
+        })
+        .where(owned());
       return { status: "superseded" as const };
+    }
     const changed = await getDb()
       .update(automaticMatchRuns)
       .set({
@@ -411,4 +550,103 @@ export async function runAutomaticComparison(
     // never copied into product diagnostics; actual/uncertain spend is ledgered.
     throw error;
   }
+}
+
+// Explicit operator recovery only for a proven unsent phase. No receipt,
+// response or rejected semantic artifact can ever pass this gate.
+export async function resumeUnsentOperationalReading(
+  job: AutomaticComparisonJob,
+  viewer: SourceReviewViewer,
+  now = new Date(),
+) {
+  if (!viewer.admin || viewer.demo || !viewer.userId)
+    throw new Error("Authenticated administrator required");
+  return getDb().transaction(async (tx) => {
+    const [admin] = await tx
+      .select()
+      .from(administrators)
+      .where(eq(administrators.userId, viewer.userId));
+    if (!admin) throw new Error("Authenticated administrator required");
+    const latest = await current(tx, job, now);
+    if (
+      !latest?.rawInput ||
+      !latest.loaded.operationalGrantId ||
+      latest.run.status !== "completed" ||
+      latest.run.issue !== "operational_phase_finished" ||
+      latest.run.attempts >= 3
+    )
+      return false;
+    const plan = buildOperationalRuntimePlan(
+      latest.rawInput,
+      latest.rawInput.target,
+    );
+    const [row] = await tx
+      .select()
+      .from(operationalReadingRuns)
+      .where(
+        and(
+          eq(operationalReadingRuns.matchId, latest.run.matchId),
+          eq(operationalReadingRuns.inputHash, plan.inputHash),
+          eq(operationalReadingRuns.status, "blocked"),
+        ),
+      )
+      .for("update");
+    if (
+      !row ||
+      row.receiptIds.length ||
+      row.reading !== null ||
+      row.review !== null ||
+      row.result !== null
+    )
+      return false;
+    const receipts = await tx
+      .select({ id: aiUsage.id })
+      .from(aiUsage)
+      .where(
+        and(
+          eq(aiUsage.publicationId, job.publicationId),
+          inArray(aiUsage.purpose, [
+            `documentary-operational-reading:${row.id}`,
+            `documentary-operational-review:${row.id}`,
+          ]),
+        ),
+      );
+    if (receipts.length) return false;
+    await tx
+      .update(operationalReadingRuns)
+      .set({
+        status: "ready",
+        issue: "operator_resumed_unsent",
+        recoveryLog: [
+          ...row.recoveryLog,
+          {
+            at: now.toISOString(),
+            actorId: viewer.userId,
+            reason: "confirmed_no_reservation_or_post",
+          },
+        ],
+        updatedAt: now,
+      })
+      .where(eq(operationalReadingRuns.id, row.id));
+    await tx
+      .update(automaticMatchRuns)
+      .set({
+        status: "queued",
+        leaseUntil: null,
+        issue: "operator_resumed_unsent",
+        updatedAt: now,
+      })
+      .where(eq(automaticMatchRuns.id, job.runId));
+    const producer = new PgBoss({
+      db: fromDrizzle(tx, sql),
+      schema: "pgboss",
+      schedule: false,
+      supervise: false,
+      migrate: false,
+      createSchema: false,
+    });
+    const sent = await producer.send(AUTOMATIC_COMPARISON_QUEUE, job);
+    if (!sent) throw new Error("Unsent operational recovery not queued");
+    return true;
+  });
 }

@@ -1,3 +1,4 @@
+import { structuredOutputSchema } from "./structured-output-schema";
 import { createHash } from "node:crypto";
 import { contractualRoleTaxonomy } from "./contractual-role";
 import { z } from "zod";
@@ -571,10 +572,23 @@ export function buildAutomaticComparisonRequest(
         group.flatMap((item) => ("passage" in item ? [item.passage] : [])),
         targetScope,
       );
-      const readingFormat = structuredFormat(
-        "document_source_reading",
-        buildSourceMapSelectionSchema({ id, passageIds, requiredPassageIds }),
-      );
+      // Final chunks may contain only structured fields. Their empty
+      // strict selections object still needs explicit required: [] on wire;
+      // the decoder's closed domain and every constraint stay unchanged.
+      const readingFormat: AutomaticResponseFormat = {
+        type: "json_schema",
+        json_schema: {
+          name: "document_source_reading",
+          strict: true,
+          schema: structuredOutputSchema(
+            buildSourceMapSelectionSchema({
+              id,
+              passageIds,
+              requiredPassageIds,
+            }),
+          ),
+        },
+      };
       const prompt = JSON.stringify(
         {
           task: "Leggi tutti gli items di questo segmento. Seleziona gli id dei passaggi che definiscono, limitano, ampliano o contraddicono la prestazione affidata al target. Conserva anche eventuali vincoli che cambiano l'oggetto acquistato. Questa è soltanto una raccolta di riferimenti, NON un confronto con una ditta.",

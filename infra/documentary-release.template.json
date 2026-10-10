@@ -1,0 +1,61 @@
+{
+  "version": "documentary-release-attestation-v1",
+  "releaseId": "UNVERIFIED",
+  "verifiedAt": "REPLACE_AFTER_VERIFICATION",
+  "evidenceId": "REPLACE_WITH_REAL_DRAIN_AND_IMAGE_EVIDENCE",
+  "previousProcessesDrained": false,
+  "consumers": {
+    "source_reviews": {
+      "capability": "documentary-consumers-v2",
+      "buildId": "REPLACE_WITH_APPROVED_FINAL_SHA"
+    },
+    "lot_assessments": {
+      "capability": "documentary-consumers-v2",
+      "buildId": "REPLACE_WITH_APPROVED_FINAL_SHA"
+    },
+    "radar": {
+      "capability": "documentary-consumers-v2",
+      "buildId": "REPLACE_WITH_APPROVED_FINAL_SHA"
+    },
+    "detail": {
+      "capability": "documentary-consumers-v2",
+      "buildId": "REPLACE_WITH_APPROVED_FINAL_SHA"
+    },
+    "project_quality": {
+      "capability": "documentary-consumers-v2",
+      "buildId": "REPLACE_WITH_APPROVED_FINAL_SHA"
+    },
+    "admin_reviews": {
+      "capability": "documentary-consumers-v2",
+      "buildId": "REPLACE_WITH_APPROVED_FINAL_SHA"
+    },
+    "worker": {
+      "capability": "documentary-consumers-v2",
+      "buildId": "REPLACE_WITH_APPROVED_FINAL_SHA"
+    },
+    "publication_import": {
+      "capability": "documentary-consumers-v2",
+      "buildId": "REPLACE_WITH_APPROVED_FINAL_SHA"
+    },
+    "profile_updates": {
+      "capability": "documentary-consumers-v2",
+      "buildId": "REPLACE_WITH_APPROVED_FINAL_SHA"
+    },
+    "feedback": {
+      "capability": "documentary-consumers-v2",
+      "buildId": "REPLACE_WITH_APPROVED_FINAL_SHA"
+    },
+    "notification_prepare": {
+      "capability": "documentary-consumers-v2",
+      "buildId": "REPLACE_WITH_APPROVED_FINAL_SHA"
+    },
+    "notification_recovery": {
+      "capability": "documentary-consumers-v2",
+      "buildId": "REPLACE_WITH_APPROVED_FINAL_SHA"
+    },
+    "notification_claim": {
+      "capability": "documentary-consumers-v2",
+      "buildId": "REPLACE_WITH_APPROVED_FINAL_SHA"
+    }
+  }
+}

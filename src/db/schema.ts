@@ -357,6 +357,63 @@ export const automaticMatchRuns = pgTable(
     ),
   ],
 ).enableRLS();
+export const operationalReadingRuns = pgTable(
+  "operational_reading_runs",
+  {
+    id: text("id").primaryKey(),
+    matchId: text("match_id").notNull(),
+    companyId: text("company_id").notNull(),
+    publicationId: text("publication_id").notNull(),
+    target: jsonb("target").$type<AssessmentTarget>().notNull(),
+    targetKey: text("target_key").notNull(),
+    inputHash: text("input_hash").notNull(),
+    requestHash: text("request_hash").notNull(),
+    configHash: text("config_hash").notNull(),
+    grantId: text("grant_id").notNull(),
+    status: text("status").notNull(),
+    reading: jsonb("reading").$type<unknown>(),
+    review: jsonb("review").$type<unknown>(),
+    result: jsonb("result").$type<unknown>(),
+    recoveryLog: jsonb("recovery_log")
+      .$type<{ at: string; actorId: string; reason: string }[]>()
+      .notNull()
+      .default([]),
+    receiptIds: jsonb("receipt_ids").$type<string[]>().notNull().default([]),
+    issue: text("issue"),
+    createdAt: time("created_at").notNull().defaultNow(),
+    updatedAt: time("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("operational_reading_input_idx").on(
+      t.matchId,
+      t.targetKey,
+      t.inputHash,
+    ),
+    index("operational_reading_reader_idx").on(
+      t.companyId,
+      t.matchId,
+      t.status,
+    ),
+    index("operational_reading_request_idx").on(
+      t.matchId,
+      t.targetKey,
+      t.requestHash,
+    ),
+    foreignKey({
+      columns: [t.matchId, t.companyId, t.publicationId],
+      foreignColumns: [matches.id, matches.companyId, matches.publicationId],
+      name: "operational_reading_owner_fk",
+    }).onDelete("cascade"),
+    check(
+      "operational_reading_state_check",
+      sql`${t.status} in ('ready','running','completed','rejected','failed','blocked','superseded','uncertain')`,
+    ),
+    check(
+      "operational_reading_binding_check",
+      sql`${t.inputHash} ~ '^[a-f0-9]{64}$' and ${t.target}->>'publicationId'=${t.publicationId} and (${t.result} is null or ${t.result}->>'inputHash'=${t.inputHash})`,
+    ),
+  ],
+).enableRLS();
 export const matchLotReviewEvents = pgTable(
   "match_lot_review_events",
   {

@@ -1,3 +1,7 @@
+import {
+  readOperationalGrant,
+  loadOperationalState,
+} from "./operational-reading-runtime";
 import { createHash, randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -448,6 +452,15 @@ export async function readLotMatchReview(
     ).flatMap((row) => (row.result ? [row.result] : [])),
     now,
   };
+  const operationalGrantId = await readOperationalGrant(tx, company.id);
+  const operationalState = await loadOperationalState(
+    tx,
+    input,
+    match.id,
+    operationalGrantId,
+  );
+  input.operationalReadings = operationalState.records;
+  input.operationalAttemptKeys = operationalState.attemptedKeys;
   const project = resolveProjectLotAssessment({
     ...input,
     suppression: group.suppression,
@@ -457,6 +470,7 @@ export async function readLotMatchReview(
     },
   });
   return {
+    operationalGrantId,
     match,
     company,
     publication,

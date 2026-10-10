@@ -1,3 +1,8 @@
+import {
+  needsOperationalReading,
+  buildOperationalRuntimePlan,
+  operationalBootstrapHash,
+} from "./operational-reading-runtime";
 import { randomUUID } from "node:crypto";
 import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import { PgBoss, fromDrizzle } from "pg-boss";
@@ -51,7 +56,8 @@ export async function enqueueAutomaticComparisons(
   for (const target of loaded.project.targets) {
     if (
       target.evaluation ||
-      target.automatic ||
+      (target.automatic &&
+        !needsOperationalReading(loaded.input, target.target)) ||
       !target.preliminary?.eligible ||
       target.state === "removed-or-unresolved"
     )
@@ -63,6 +69,15 @@ export async function enqueueAutomaticComparisons(
         preliminary: target.preliminary,
       });
       if (request.sourceBlocked) continue;
+      const bootstrap =
+        !!loaded.operationalGrantId &&
+        needsOperationalReading(loaded.input, target.target);
+      const inputHash = bootstrap
+        ? operationalBootstrapHash(
+            request.inputHash,
+            buildOperationalRuntimePlan(loaded.input, target.target),
+          )
+        : request.inputHash;
       const [run] = await tx
         .insert(automaticMatchRuns)
         .values({
@@ -72,7 +87,7 @@ export async function enqueueAutomaticComparisons(
           publicationId: loaded.publication.id,
           target: target.target,
           targetKey: assessmentTargetKey(target.target),
-          inputHash: request.inputHash,
+          inputHash,
         })
         .onConflictDoUpdate({
           target: [

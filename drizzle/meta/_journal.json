@@ -85,6 +85,13 @@
       "when": 1790623372433,
       "tag": "0011_ai_processing_permission",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791621509391,
+      "tag": "0012_operational_readings",
+      "breakpoints": true
     }
   ]
 }

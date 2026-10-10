@@ -1,0 +1,42 @@
+# Copy to release checkout root. Merge with exactly one existing base file.
+# Required host variables: MANDAT_RELEASE_BUILD_ID and MANDAT_RELEASE_ATTESTATION_PATH.
+# The attestation must be outside the Docker context, protected and read-only.
+services:
+  migrate:
+    image: mandat-luna-worker:${MANDAT_RELEASE_BUILD_ID:?Approved final commit required}
+    build:
+      args:
+        MANDAT_BUILD_ID: ${MANDAT_RELEASE_BUILD_ID:?Approved final commit required}
+  web:
+    image: mandat-luna-web:${MANDAT_RELEASE_BUILD_ID:?Approved final commit required}
+    build:
+      args:
+        MANDAT_BUILD_ID: ${MANDAT_RELEASE_BUILD_ID:?Approved final commit required}
+    env_file:
+      - .env
+      - luna-release.env
+    volumes:
+      - type: bind
+        source: ${MANDAT_RELEASE_ATTESTATION_PATH:?Verified attestation required}
+        target: /run/mandat/documentary-release.json
+        read_only: true
+  worker:
+    image: mandat-luna-worker:${MANDAT_RELEASE_BUILD_ID:?Approved final commit required}
+    build:
+      args:
+        MANDAT_BUILD_ID: ${MANDAT_RELEASE_BUILD_ID:?Approved final commit required}
+    env_file:
+      - .env
+      - luna-release.env
+    volumes:
+      - type: bind
+        source: ${MANDAT_RELEASE_ATTESTATION_PATH:?Verified attestation required}
+        target: /run/mandat/documentary-release.json
+        read_only: true
+    command:
+      - sh
+      - -c
+      - >-
+        node --import tsx scripts/documentary-release-preflight.ts
+        ${MANDAT_RELEASE_BUILD_ID:?Approved final commit required}
+        && exec npm run worker

@@ -84,3 +84,14 @@ node --env-file=.env.production.local --import tsx scripts/migrate.ts
 ```
 
 `infra/backup.sh` e `infra/restore-check.sh` richiedono Docker, Restic e le variabili di produzione esportate nel processo. La variante Supabase salva gli schemi Mandat `public`, `drizzle` e `pgboss`; il ripristino di prova usa un container isolato e riapplica `infra/restore-access.sql` per verificare RLS e revoche ai ruoli client. Impostando `RESTORE_CHECK_WORKER_IMAGE` all'immagine candidata già presente sul server, il collaudo applica anche le migrazioni al solo database temporaneo, senza credenziali o connessioni di produzione. `DATABASE_CLIENT_IMAGE` deve usare una versione PostgreSQL almeno pari a quella del server. Prima dell’uso con ditte reali occorrono un collaudo dei servizi, un ripristino completo, verifica del recapito email e revisione della qualità degli alert.
+
+
+### Operational readings
+
+After additive migration `0012_operational_readings`, enable `DOCUMENTARY_OPERATIONAL_READING_ENABLED=true` together with `DOCUMENTARY_COMPARISON_ENABLED=true`. Documentary provider/model, reasoning effort and rates are inherited; the normal `AI_MONTHLY_BUDGET_CHF` reservation/settlement path remains mandatory. An active current company processing receipt and pilot participation are required.
+
+The existing comparison queue first performs an owner/source/config-bound operational reading and independent review. Valid records are persisted, consumed by `readLotMatchReview`, and passed in `LotAssessmentInput.operationalReadings`. Native veti avoid unnecessary calls. Null, conflicting, revoked or stale data stay in review. A terminal operational attempt does not prevent independent professional work and is not automatically replayed. No automatic retry repairs an invalid semantic response.
+
+`resumeUnsentOperationalReading(job, authenticatedAdministrator)` is an explicit server-side recovery API for a budget-blocked phase only if it has no reservation receipts, responses or result, with the existing three-attempt ceiling preserved. It serializes on source/company/match and run locks, records the recovery actor/event and sends a durable job. Sent, uncertain or semantically rejected work is not recoverable through this API. At the attempt ceiling, an operator must review the held case; there is no automated counter reset or budget bypass.
+
+The native operational task uses `original-dictionary-v1`: reconstruct the complete original structures and strings with `decodeOperationalTaskPrompt`. This is lossless wire deduplication; original field paths, scopes, empty structures, null and false remain available. Operational record version v4 invalidates earlier fingerprints. Review reuses the same dictionary for the fully validated reading; no quoted originals are truncated.

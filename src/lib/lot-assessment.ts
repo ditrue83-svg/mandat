@@ -374,6 +374,7 @@ export type LotAssessmentInput = {
   evaluationSet: LotEvaluationSet | null;
   automaticComparisons?: readonly unknown[];
   operationalReadings?: readonly unknown[];
+  operationalAttemptKeys?: readonly string[];
   evidenceSnapshots?: readonly LotSourceSnapshot[];
   now?: Date;
 };

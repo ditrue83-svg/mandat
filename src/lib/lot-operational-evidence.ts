@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { LotSourceContext } from "./lot-source-context";
 
-export const LOT_OPERATIONAL_EVIDENCE_VERSION = "lot-operational-evidence-v3";
+export const LOT_OPERATIONAL_EVIDENCE_VERSION = "lot-operational-evidence-v4";
 const stable = (v: unknown): string =>
   Array.isArray(v)
     ? `[${v.map(stable).join(",")}]`
@@ -197,9 +197,9 @@ function sharedApplicability(
   ] as Record<string, unknown> | undefined;
   const participant = notes?.participantLotsLimitationNote;
   const grammar: Record<string, RegExp> = {
-    it: /^gli offerenti possono candidarsi per un solo lotto o per più lotti\. la valutazione avviene separatamente per ogni lotto\.$/u,
-    de: /^die anbieter können sich auf eines oder mehrere lose bewerben\. die bewertung erfolgt separat pro los\.$/u,
-    fr: /^les soumissionnaires peuvent présenter une offre pour un ou plusieurs lots\. l'évaluation se fera par lot\.$/u,
+    it: /^(?:gli offerenti possono candidarsi per un solo lotto o per più lotti\. la valutazione avviene separatamente per ogni lotto\.|l'offerente ha il diritto di presentare un'offerta per più lotti\.)$/u,
+    de: /^(?:die anbieter können sich auf eines oder mehrere lose bewerben\. die bewertung erfolgt separat pro los\.|ein anbieter hat das recht, auf mehrere lose ein angebot einzureichen\.)$/u,
+    fr: /^(?:les soumissionnaires peuvent présenter une offre pour un ou plusieurs lots\. l'évaluation se fera par lot\.|les soumissionnaires peuvent présenter une offre pour plusieurs lots\.)$/u,
     en: /^tenderers may submit an offer for one or more lots\. evaluation is carried out separately for each lot\.$/u,
   };
   const entries =
@@ -282,6 +282,23 @@ function validateAnswer(request: OperationalRequest, value: unknown) {
       throw new Error(
         "Shared deadline lacks submission applicability evidence",
       );
+    const lot = request.data.selectedLot as Record<string, unknown>;
+    const localDates = [
+      lot.offerDeadline,
+      (lot.dates as Record<string, unknown> | undefined)?.offerDeadline,
+    ].filter((v) => v !== undefined && v !== null && v !== "");
+    if (
+      answer.deadlineEvidence.some(
+        (p) => p.scope === "project_context" && /\/offerDeadline$/.test(p.path),
+      ) &&
+      localDates.some(
+        (v) =>
+          typeof v !== "string" ||
+          explicitOperationalDeadline(v) === null ||
+          Date.parse(v) !== Date.parse(answer.deadline!),
+      )
+    )
+      throw new Error("Shared deadline conflicts with selected-lot deadline");
     const sharedDate = answer.deadlineEvidence.some(
       (p) => p.scope === "project_context" && /\/offerDeadline$/.test(p.path),
     );
@@ -445,21 +462,126 @@ function responseFormat(request: OperationalRequest, review = false) {
     type: "json_schema" as const,
     json_schema: {
       name: review ? "lot_operational_review" : "lot_operational_reading",
-      strict: true,
+      strict: true as const,
       schema,
     },
   };
 }
+type DictionaryNode =
+  | null
+  | boolean
+  | number
+  | ["s", number]
+  | ["a", DictionaryNode[]]
+  | ["o", [string, DictionaryNode][]]
+  | ["u"];
+function dictionarySource(
+  request: OperationalRequest,
+  answer?: OperationalAnswer,
+) {
+  const strings: string[] = [],
+    indexes = new Map<string, number>();
+  const stringId = (value: string) => {
+    let id = indexes.get(value);
+    if (id === undefined) {
+      id = strings.length;
+      strings.push(value);
+      indexes.set(value, id);
+    }
+    return id;
+  };
+  const encode = (value: unknown): DictionaryNode => {
+    if (typeof value === "string") return ["s", stringId(value)];
+    if (value === undefined) return ["u"];
+    if (
+      value === null ||
+      typeof value === "boolean" ||
+      typeof value === "number"
+    )
+      return value;
+    if (Array.isArray(value)) return ["a", value.map(encode)];
+    return [
+      "o",
+      Object.entries(value as Record<string, unknown>).map(([key, v]) => [
+        key,
+        encode(v),
+      ]),
+    ];
+  };
+  const { selectedLot, projectSections, ...binding } = request.data;
+  const source = {
+    encoding: "original-dictionary-v1" as const,
+    binding,
+    selectedLot: encode(selectedLot),
+    projectSections: encode(projectSections),
+    strings,
+  };
+  const catalog = pathCatalog(request).map(
+    (p) => [p.scope, p.path, stringId(p.quote)] as const,
+  );
+  const reading = answer ? encode(answer) : undefined;
+  return {
+    source,
+    originalProofCatalog: catalog,
+    ...(reading ? { reading } : {}),
+  };
+}
+// Lossless decoding utility for the collaudo runner and capacity regressions.
+// Decoding is not validation/approval: native evidence validators still own that.
+export function decodeOperationalTaskPrompt(prompt: string) {
+  const data = JSON.parse(prompt),
+    dictionary = data.source;
+  if (
+    dictionary.encoding !== "original-dictionary-v1" ||
+    !Array.isArray(dictionary.strings)
+  )
+    throw new Error("Unsupported original source encoding");
+  const decode = (node: DictionaryNode): unknown => {
+    if (!Array.isArray(node)) return node;
+    if (node[0] === "s") {
+      const value = dictionary.strings[node[1] as number];
+      if (typeof value !== "string")
+        throw new Error("Original string reference invalid");
+      return value;
+    }
+    if (node[0] === "u") return undefined;
+    if (node[0] === "a") return (node[1] as DictionaryNode[]).map(decode);
+    if (node[0] === "o")
+      return Object.fromEntries(
+        (node[1] as [string, DictionaryNode][]).map(([key, value]) => [
+          key,
+          decode(value),
+        ]),
+      );
+    throw new Error("Original source node invalid");
+  };
+  return {
+    source: {
+      ...dictionary.binding,
+      selectedLot: decode(dictionary.selectedLot),
+      projectSections: decode(dictionary.projectSections),
+    } as OperationalRequest["data"],
+    originalProofCatalog: (
+      data.originalProofCatalog as [string, string, number][]
+    ).map(([scope, path, id]) => ({
+      scope,
+      path,
+      quote: dictionary.strings[id],
+    })),
+    ...(data.reading
+      ? { reading: decode(data.reading) as OperationalAnswer }
+      : {}),
+  };
+}
 const pathInstructions =
-  " I percorsi sono quelli di originalProofCatalog, non quelli della struttura JSON della richiesta. Non prefissare /projectSections o /selectedLot. Cita esclusivamente una voce del catalogo con scope, path e quote interi identici; non inventare un percorso alias. Tutto il contesto originale è disponibile per verificare applicabilità e conflitti.";
+  " I dati originali sono losslessly codificati una volta nel dizionario source.strings. Ricostruisci i nodi: ['s',indice] è la stringa originale INTERA a quell'indice; ['a',lista] è un array; ['o',coppie chiave/nodo] è un oggetto; ['u'] è undefined; null, false, true e numeri sono valori originali. source.binding conserva target e dipendenze; selectedLot e projectSections conservano tutta la struttura. originalProofCatalog contiene tuple [scope,percorso originale,indice stringa]: cita il valore originale INTERO del dizionario, mai indice o codice. La reading della review usa lo stesso dizionario, senza duplicare citazioni. Non prefissare /projectSections o /selectedLot e non inventare percorsi. Non sono riassunti, tutti gli originali inclusi null e false sono presenti.";
 export function buildOperationalReadingTask(request: OperationalRequest) {
   assertCurrent(request);
   return {
     system: instructions + pathInstructions,
     prompt: JSON.stringify({
       task: "Lettura operativa con prove proprie, completa e verificabile",
-      source: request.data,
-      originalProofCatalog: pathCatalog(request),
+      ...dictionarySource(request),
     }),
     maxTokens: 16384,
     responseFormat: responseFormat(request),
@@ -474,18 +596,15 @@ export function buildOperationalReviewTask(
     system:
       instructions +
       pathInstructions +
-      " Verifica indipendentemente ciascun fatto della lettura contro gli originali, inclusi i null; non ereditare le conclusioni. supported richiede prove proprie complete; dubbi operativi concreti restano not_verifiable o contradicted. Controlla che la data condivisa sia applicabile al lotto selezionato senza ribattezzarla come campo locale.",
+      " Verifica indipendentemente ciascun fatto contro gli originali, inclusi i null. supported richiede prove proprie complete; contraddizioni concrete restano contradicted e dubbi not_verifiable. La data condivisa conserva project_context e deve riguardare il lotto.",
     prompt: JSON.stringify({
       task: "Revisione semantica della lettura operativa",
-      source: request.data,
-      originalProofCatalog: pathCatalog(request),
-      reading: checked.answer,
+      ...dictionarySource(request, checked.answer),
     }),
     maxTokens: 16384,
     responseFormat: responseFormat(request, true),
   };
 }
-
 export function explicitOperationalDeadline(value: unknown): string | null {
   if (typeof value !== "string") return null;
   try {

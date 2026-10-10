@@ -1,3 +1,4 @@
+import { openaiResponseBody } from "../src/lib/openai-responses";
 import {
   inventedSourceEvidence,
   inventedCoverageProof,
@@ -3777,3 +3778,140 @@ test.each(["direct", "different", "review"] as const)(
     );
   },
 );
+
+test("Real source-map generation encodes empty final domains as strict native wire objects without adding choices", () => {
+  const base = raw();
+  const detail = {
+    ...base,
+    procurement: {
+      ...base.procurement,
+      orderDescription: {
+        it: "Prestazione inventata da conservare. ".repeat(1000),
+      },
+    },
+    terms: {
+      ...base.terms,
+      inventedStructuredFacts: Object.fromEntries(
+        Array.from({ length: 600 }, (_, i) => ["fact" + i, false]),
+      ),
+    },
+  };
+  const original = JSON.stringify(detail),
+    input = fixture(detail),
+    profile = JSON.stringify(input.profile),
+    target = JSON.stringify(input.target);
+  const request = buildAutomaticComparisonRequest(input);
+  assert(request.readingRequests.length <= AUTOMATIC_COMPARISON_LIMITS.chunks);
+  const empty = request.readingRequests.filter(
+    (chunk) => chunk.passageIds.length === 0,
+  );
+  assert(
+    empty.length > 0,
+    "The reproduction must include field-only final maps",
+  );
+  const ajv = new Ajv2020({ strict: false });
+  for (const chunk of empty) {
+    const schema: any = chunk.responseFormat.json_schema.schema;
+    assert.deepEqual(schema.properties.selections.properties, {});
+    assert.deepEqual(schema.properties.selections.required, []);
+    assert.equal(schema.properties.selections.additionalProperties, false);
+    const wire = openaiResponseBody(
+      "gpt-6-luna",
+      chunk.system,
+      chunk.prompt,
+      2400,
+      chunk.responseFormat,
+      "none",
+    );
+    assert(Buffer.byteLength(JSON.stringify(wire)) <= 200000);
+    const accepts = ajv.compile(wire.text!.format.schema);
+    for (const status of ["complete", "unreadable"]) {
+      const valid = {
+        chunkId: chunk.id,
+        status,
+        referenceFormat: "explicit_optional_selection_v2",
+        selections: {},
+      };
+      assert(accepts(valid), JSON.stringify(accepts.errors));
+      assert.deepEqual(
+        normalizeAutomaticSourceReading(valid, request, chunk.id),
+        { chunkId: chunk.id, status, sourceRefs: [] },
+      );
+      for (const bad of [
+        { ...valid, selections: { s999: true } },
+        { ...valid, selections: null },
+        { ...valid, extra: true },
+        { chunkId: chunk.id, status, sourceRefs: [] },
+      ]) {
+        assert.equal(accepts(bad), false);
+        assert.throws(() =>
+          normalizeAutomaticSourceReading(bad, request, chunk.id),
+        );
+      }
+    }
+    assert(JSON.parse(chunk.prompt).items.every((item: any) => item.field));
+  }
+  assert.equal(JSON.stringify(detail), original);
+  assert.equal(JSON.stringify(input.profile), profile);
+  assert.equal(JSON.stringify(input.target), target);
+});
+
+test("Native source-map nonempty domains retain exact ownership and reject missing required evidence", () => {
+  const detail = raw();
+  detail.procurement.orderDescription.it =
+    "Prestazione inventata da conservare. ".repeat(1000);
+  const request = buildAutomaticComparisonRequest(fixture(detail)),
+    ajv = new Ajv2020({ strict: false });
+  assert(request.readingRequests.some((chunk) => chunk.passageIds.length > 0));
+  for (const chunk of request.readingRequests) {
+    assert(chunk.passageIds.length <= 64);
+    const required = chunk.requiredPassageIds ?? [],
+      optional = chunk.passageIds.filter((id) => !required.includes(id));
+    const valid = required.length
+      ? {
+          chunkId: chunk.id,
+          status: "complete",
+          referenceFormat: "explicit_required_originals_v2",
+          requiredSourceRefs: Object.fromEntries(
+            required.map((id) => [id, id]),
+          ),
+          sourceRefs: optional,
+        }
+      : {
+          chunkId: chunk.id,
+          status: "complete",
+          referenceFormat: "explicit_optional_selection_v2",
+          selections: Object.fromEntries(optional.map((id) => [id, true])),
+        };
+    const wire = openaiResponseBody(
+        "gpt-6-luna",
+        chunk.system,
+        chunk.prompt,
+        2400,
+        chunk.responseFormat,
+        "none",
+      ),
+      accepts = ajv.compile(wire.text!.format.schema);
+    assert(accepts(valid), JSON.stringify(accepts.errors));
+    assert.deepEqual(
+      normalizeAutomaticSourceReading(valid, request, chunk.id).sourceRefs,
+      [...required, ...optional],
+    );
+    const missing: any = structuredClone(valid);
+    if (required.length) delete missing.requiredSourceRefs[required[0]];
+    else delete missing.selections[optional[0]];
+    if (chunk.passageIds.length) {
+      assert.equal(accepts(missing), false);
+      assert.throws(() =>
+        normalizeAutomaticSourceReading(missing, request, chunk.id),
+      );
+    }
+    const bad: any = structuredClone(valid);
+    if (required.length) bad.requiredSourceRefs[required[0]] = "s999999";
+    else bad.selections.s999999 = true;
+    assert.equal(accepts(bad), false);
+    assert.throws(() =>
+      normalizeAutomaticSourceReading(bad, request, chunk.id),
+    );
+  }
+});
