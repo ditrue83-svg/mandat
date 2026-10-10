@@ -14,7 +14,7 @@ import {
 import { expandOriginalClauseDetails } from "../src/lib/source-clause-literals";
 import { isProcurementLocationField } from "../src/lib/source-contract-clauses";
 import {
-  buildSourceInterpretationRequest,
+  buildSourceInterpretationRequest as buildOwnedSourceInterpretationRequest,
   recordSourceInterpretation,
   validateSourceInterpretation,
   type SourceInterpretationContext,
@@ -22,6 +22,7 @@ import {
 import {
   buildSourceSemanticReviewRequest,
   buildGroundedSourceReviewRequests,
+  materializeSourceReviewDraft,
   recordSourceSemanticReview,
 } from "../src/lib/source-semantic-review";
 import {
@@ -30,6 +31,8 @@ import {
   inventedReadingRefs,
 } from "./helpers/source-evidence-fixture";
 import { openaiResponseBody } from "../src/lib/openai-responses";
+
+const buildSourceInterpretationRequest=(input:SourceInterpretationContext)=>buildOwnedSourceInterpretationRequest(input,{legacyEvidenceSelectionProtocolForRegression:true});
 
 // Invented minimal reproductions of the five recorded failure mechanisms.
 // These are protocol regressions, not re-scoring any archived model answer.
@@ -711,13 +714,20 @@ test("Long parallel clauses retain every original part without truncation", () =
       binding.candidateDetails.every((index: any) => Number.isInteger(index)),
     );
   const body = JSON.parse(reviews[0].prompt);
-  const rendered = body.draft.details
-    .filter((d: any) =>
-      body.draft.detailEvidenceBindings
-        .find((b: any) => b.id === d.b)
-        .sourceRefs.some((ref: string) => ["s4", "s5"].includes(ref)),
-    )
-    .map((d: any) => d.explanation ?? body.originalTextPieces[d.literalPiece])
+  const owned = new Map<number, string>();
+  for (const review of reviews)
+    materializeSourceReviewDraft(review.prompt).details.forEach(
+      (d: any, index: number) => {
+        if (
+          d.sourceRefs.some((ref: string) => ["s4", "s5"].includes(ref)) &&
+          typeof d.explanation === "string"
+        )
+          owned.set(index, d.explanation);
+      },
+    );
+  const rendered = [...owned]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, text]) => text)
     .join("");
   assert.equal(rendered, parts.join(""));
   assert.equal(JSON.stringify(input), before);
@@ -999,7 +1009,9 @@ test("Additional details cannot append a document-source enum or a visit consequ
     {
       kind: "execution_condition",
       scope: "project_context",
-      explanation: requestDocs.contractDetailFamilies.find(f=>f.sourceRefs.includes("s5"))!.originalScalarExplanation!,
+      explanation: requestDocs.contractDetailFamilies.find((f) =>
+        f.sourceRefs.includes("s5"),
+      )!.originalScalarExplanation!,
       sourceRefs: ["s5"],
     },
   ];
@@ -1304,7 +1316,7 @@ test("Production review V5 requires explicit coverage proof and cannot emit the 
       sourceEvidenceHash: body.sourceEvidenceHash,
       coverage: "complete",
       findings: [],
-      checksFormat: "claim_keyed_refs_v5",
+      checksFormat: "claim_keyed_refs_v6",
       checksByClaim: Object.fromEntries(
         r.assignedClaimIds.map((id) => {
           const claim = plan.claims.find((c) => c.id === id)!;
@@ -1350,12 +1362,14 @@ test("Production review V5 requires explicit coverage proof and cannot emit the 
               reason:
                 "Le prove indicate sostengono il claim; coverageProof distingue fatti rappresentati e dati facoltativi.",
               sourceRefs: claim.sourceRefs,
-              readingRefsById: Object.fromEntries(
-                (group.supportedReadingIds ?? group.readingIds).map((ref) => [
-                  ref,
-                  readings.includes(ref),
-                ]),
-              ),
+              readingRefs: readings,
+              ...(group.supportedPerformanceIds?.length
+                ? {
+                    performanceRef: readings.find((ref) =>
+                      group.supportedPerformanceIds!.includes(ref),
+                    ),
+                  }
+                : {}),
               coverageBySource: Object.fromEntries(
                 proof.map((row) => [
                   row.sourceRef,
@@ -1429,11 +1443,11 @@ test("Production review V5 requires explicit coverage proof and cannot emit the 
       negative.draftQuote = own.text;
       negative.reason =
         "Controprova inventata, non un giudizio sul bando reale.";
-      negative.readingRefsById = Object.fromEntries(
-        group.readingIds.map((ref) => [
-          ref,
-          negative.readingRefsById[ref] ?? false,
-        ]),
+      delete negative.performanceRef;
+      assert(
+        negative.readingRefs.every((ref: string) =>
+          group.readingIds.includes(ref),
+        ),
       );
       assert(accepts(missingOwn), JSON.stringify(accepts.errors));
     }

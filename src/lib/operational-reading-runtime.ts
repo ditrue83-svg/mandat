@@ -22,13 +22,15 @@ import {
 import type { LotSourceTarget } from "./lot-source-context";
 import {
   buildOperationalEvidenceRequest,
-  buildOperationalReadingTask,
   readOperationalEvidence,
   type OperationalEvidenceRecord,
 } from "./lot-operational-evidence";
 import { stableDocumentaryJson } from "./documentary-observation";
 import type { SourceReviewExecutor } from "./source-reviews";
-export const OPERATIONAL_RUNTIME_VERSION = "operational-reading-runtime-v1";
+import * as operationalNative from "./lot-operational-evidence";
+import { createFieldBoundProtocol, PROTOCOL_VERSION } from "./field-bound-protocol.mjs";
+export { isFieldBoundRejection } from "./field-bound-protocol.mjs";
+export const OPERATIONAL_RUNTIME_VERSION = "operational-reading-runtime-v4-direct-date";
 export const operationalReadingEnabled = () =>
   process.env.DOCUMENTARY_OPERATIONAL_READING_ENABLED === "true" &&
   process.env.DOCUMENTARY_COMPARISON_ENABLED === "true";
@@ -53,11 +55,13 @@ export function buildOperationalRuntimePlan(
   );
   const request = buildOperationalEvidenceRequest(context),
     configuration = operationalRuntimeConfiguration(),
-    task = buildOperationalReadingTask(request);
+    protocol = createFieldBoundProtocol(operationalNative, request),
+    task = protocol.readingTask();
   const configHash = digest(configuration),
     requestHash = digest({
       version: OPERATIONAL_RUNTIME_VERSION,
       request: request.inputHash,
+      proofProtocol: { version: protocol.version, binding: protocol.binding },
       task,
       provider: configuration.provider,
       model: configuration.model,
@@ -67,6 +71,7 @@ export function buildOperationalRuntimePlan(
   return {
     context,
     request,
+    protocol,
     task,
     configuration,
     configHash,
@@ -83,6 +88,7 @@ export type StoredOperationalReading = {
   configHash: string;
   requestHash: string;
   record: OperationalEvidenceRecord;
+  proofProtocol: { version: typeof PROTOCOL_VERSION; binding: string; reading: unknown; review: unknown; hash: string };
 };
 export function readOperationalRuntimeRecord(
   value: unknown,
@@ -98,6 +104,10 @@ export function readOperationalRuntimeRecord(
       v.record.model !== plan.configuration.model
     )
       return null;
+    const { hash: storedHash, ...raw } = v.proofProtocol;
+    if (raw.version !== plan.protocol.version || raw.binding !== plan.protocol.binding || digest(raw) !== storedHash) return null;
+    const decoded = plan.protocol.record(raw.reading, raw.review, { id:v.record.id, at:v.record.at, model:v.record.model });
+    if (decoded.hash !== v.record.hash) return null;
     return readOperationalEvidence([v.record], plan.context);
   } catch {
     return null;
@@ -106,13 +116,18 @@ export function readOperationalRuntimeRecord(
 export function wrapOperationalRecord(
   record: OperationalEvidenceRecord,
   plan: OperationalRuntimePlan,
+  raw: { reading: unknown; review: unknown },
 ): StoredOperationalReading {
   if (
     record.model !== plan.configuration.model ||
     !readOperationalEvidence([record], plan.context)
   )
     throw new Error("Operational record not current");
+  const decoded = plan.protocol.record(raw.reading, raw.review, {id:record.id,at:record.at,model:record.model});
+  if (decoded.hash !== record.hash) throw new Error("Operational protocol record mismatch");
+  const proof = {version:plan.protocol.version,binding:plan.protocol.binding,reading:raw.reading,review:raw.review};
   return {
+    proofProtocol: {...proof,hash:digest(proof)},
     version: OPERATIONAL_RUNTIME_VERSION,
     inputHash: plan.inputHash,
     configHash: plan.configHash,

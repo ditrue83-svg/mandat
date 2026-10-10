@@ -25,6 +25,7 @@ const buildSourceInterpretationRequest = (input: SourceInterpretationContext) =>
   });
 import {
   SOURCE_SEMANTIC_REVIEW_VERSION,
+  materializeSourceReviewOriginals,
   buildGroundedSourceReviewRequests,
   buildSourceSemanticReviewRequest as buildCurrentSourceSemanticReviewRequest,
   recordSourceSemanticReview as productionRecordSourceSemanticReview,
@@ -3956,7 +3957,9 @@ test("Grounded review keeps numeric evidence and missing details without letting
     evidence: [{ sourceRef: "f0" }],
   });
   wire[0].missingDetails.push({
-    missingAspects: ["brands"],
+    verificationAspects: ["brands"],
+    basis: "explicit_gap",
+    basisEvidence: [{ sourceRef: "s1" }],
     serviceRef: "s1",
     evidence: [{ sourceRef: "s1" }],
   });
@@ -4033,10 +4036,13 @@ test("An AI uncertainty note cannot replace the original allocation of aggregate
   const wire: any[] = plan.evidencePlan.requests.map((request) =>
     inventedSourceEvidenceAnswer(JSON.parse(request.prompt)),
   );
-  const speculation = "Non precisati nel materiale fornito: quantità.";
+  const speculation =
+    "Da verificare (lacuna dichiarata; giudizio AI non verificato): quantità. Nessuna assenza globale dedotta dalla parte.";
   wire[0].missingDetails.push({
     serviceRef: "s1",
-    missingAspects: ["quantities"],
+    verificationAspects: ["quantities"],
+    basis: "explicit_gap",
+    basisEvidence: [{ sourceRef: "s1" }],
     evidence: [{ sourceRef: "s1" }],
   });
   const evidence = recordSourceEvidenceReading(wire, plan.evidencePlan, {
@@ -4059,6 +4065,55 @@ test("An AI uncertainty note cannot replace the original allocation of aggregate
   );
   assert.equal(body.sourceEvidenceHash, evidence.hash);
   assert.equal(stableDocumentaryJson(evidence), before);
+});
+
+test("A semantic review relying on a detail note must cite that note's separate original basis", () => {
+  const input = context(),
+    plan = buildSourceSemanticReviewRequest(input, draft(input), config);
+  const wire: any[] = plan.evidencePlan.requests.map((r) =>
+    inventedSourceEvidenceAnswer(JSON.parse(r.prompt)),
+  );
+  wire[0].missingDetails.push({
+    serviceRef: "s1",
+    evidence: [],
+    verificationAspects: ["quantities"],
+    basis: "explicit_gap",
+    basisEvidence: [{ sourceRef: "s4" }],
+  });
+  const sourceEvidence = recordSourceEvidenceReading(wire, plan.evidencePlan, {
+    ...metadata,
+    model: plan.model,
+  });
+  const grounded = buildGroundedSourceReviewRequests(plan, sourceEvidence);
+  const response: any[] = answers(plan);
+  response.forEach((r) => {
+    r.sourceEvidenceHash = sourceEvidence.hash;
+  });
+  const index = grounded.findIndex((r) =>
+    JSON.parse(r.prompt).independentReading.missingDetails.some(
+      (d: any) => d.id === "d1-1",
+    ),
+  );
+  assert(index >= 0);
+  const body = JSON.parse(grounded[index].prompt),
+    note = body.independentReading.missingDetails.find(
+      (d: any) => d.id === "d1-1",
+    );
+  assert.equal(note.authority, "unverified_ai_note");
+  assert.deepEqual(note.basisEvidence, [{ sourceRef: "s4" }]);
+  const check = response[index].checks[0];
+  check.verdict = "not_verifiable";
+  check.reason = "Invented criticism relying on an explicit-detail note.";
+  check.readingRefs = ["d1-1"];
+  check.sourceRefs = ["s1"];
+  assert.throws(
+    () =>
+      productionRecordSourceSemanticReview(response, plan, {
+        ...metadata,
+        sourceEvidence,
+      }),
+    /own original basis references/,
+  );
 });
 
 test("Earlier approvals cannot be reused with the bounded review-reference contract", () => {
@@ -4509,7 +4564,9 @@ test("Dense null and scalar originals fit grounded review with exact ownership a
     );
     const body = JSON.parse(request.prompt);
     for (const index of request.coverage.fieldIndexes) {
-      const field = body.fields.find((f: any) => f.id === `f${index}`);
+      const field = materializeSourceReviewOriginals(
+        request.prompt,
+      ).fields.find((f: any) => f.id === `f${index}`);
       assert.equal(field.value, input.body.fields[index].value);
       assert.equal(field.rawPath, input.body.fields[index].rawPath);
       assert(request.scopeCoverageClaim!.sourceRefs.includes(`f${index}`));

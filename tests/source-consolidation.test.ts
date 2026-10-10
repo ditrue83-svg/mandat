@@ -134,7 +134,7 @@ test("Full-source literal families retain descriptions, titles, exact date endpo
   assert.equal(JSON.stringify(input), before);
   assert(
     buildSourceInterpretationRequest(input).providerFormat ===
-      "source_selections_v19",
+      "source_selections_v21_owned",
   );
 });
 test("Scope filtering retains the foreign context but does not impose its timing or work as this target conditions", () => {

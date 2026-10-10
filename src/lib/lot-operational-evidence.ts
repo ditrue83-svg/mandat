@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { LotSourceContext } from "./lot-source-context";
 
-export const LOT_OPERATIONAL_EVIDENCE_VERSION = "lot-operational-evidence-v4";
+export const LOT_OPERATIONAL_EVIDENCE_VERSION = "lot-operational-evidence-v6-direct-date-bound";
+export class OperationalDeadlineConflict extends Error {
+  constructor() { super("Operational deadline conflicts with selected-lot deadline or cited offer deadline"); }
+}
+export const isOperationalDeadlineConflict = (value: unknown): value is OperationalDeadlineConflict => value instanceof OperationalDeadlineConflict;
 const stable = (v: unknown): string =>
   Array.isArray(v)
     ? `[${v.map(stable).join(",")}]`
@@ -195,34 +199,28 @@ function sharedApplicability(
   const notes = (request.data.projectSections as Record<string, unknown>)[
     "project-info"
   ] as Record<string, unknown> | undefined;
-  const participant = notes?.participantLotsLimitationNote;
+  const base = (request.data.projectSections as Record<string, unknown>).base as Record<string, unknown> | undefined;
+  // Both supported original containers remain at their own paths. Neither
+  // precedence nor a duplicate elsewhere can replace a cited own field.
+  const participants = [
+    { prefix: "/project-info", value: notes?.participantLotsLimitationNote },
+    { prefix: "/base", value: base?.participantLotsLimitationNote },
+  ];
   const grammar: Record<string, RegExp> = {
     it: /^(?:gli offerenti possono candidarsi per un solo lotto o per più lotti\. la valutazione avviene separatamente per ogni lotto\.|l'offerente ha il diritto di presentare un'offerta per più lotti\.)$/u,
     de: /^(?:die anbieter können sich auf eines oder mehrere lose bewerben\. die bewertung erfolgt separat pro los\.|ein anbieter hat das recht, auf mehrere lose ein angebot einzureichen\.)$/u,
     fr: /^(?:les soumissionnaires peuvent présenter une offre pour un ou plusieurs lots\. l'évaluation se fera par lot\.|les soumissionnaires peuvent présenter une offre pour plusieurs lots\.)$/u,
     en: /^tenderers may submit an offer for one or more lots\. evaluation is carried out separately for each lot\.$/u,
   };
-  const entries =
-    participant &&
-    typeof participant === "object" &&
-    !Array.isArray(participant)
-      ? Object.entries(participant).filter(([, v]) => v !== null && v !== "")
-      : [];
-  if (
-    entries.length &&
-    entries.every(
-      ([language, value]) =>
-        typeof value === "string" && grammar[language]?.test(normalize(value)),
-    ) &&
-    evidence.some(
-      (p) =>
-        p.scope === "project_context" &&
-        /^\/project-info\/participantLotsLimitationNote\/(it|fr|de|en)$/.test(
-          p.path,
-        ),
-    )
-  )
-    return true;
+  const present = participants.filter(({ value }) => value !== undefined && value !== null && value !== "");
+  // An unsupported/contradictory container must also veto the all-lots fallback:
+  // selecting the other container cannot silently override an original limit.
+  if (present.some(({ value }) => typeof value !== "object" || Array.isArray(value))) return false;
+  const originals = present.flatMap(({ prefix, value }) => Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== null && v !== "")
+    .map(([language, text]) => ({ path: `${prefix}/participantLotsLimitationNote/${language}`, language, text })));
+  if (originals.some(({ language, text }) => typeof text !== "string" || !grammar[language]?.test(normalize(text)))) return false;
+  if (originals.length && evidence.some(p => p.scope === "project_context" && originals.some(o => o.path === p.path))) return true;
   // Explicit, unqualified all-lots submission instruction. Any additional scope
   // exception, numbered subset or unknown clause remains unresolved.
   const allIt =
@@ -288,9 +286,6 @@ function validateAnswer(request: OperationalRequest, value: unknown) {
       (lot.dates as Record<string, unknown> | undefined)?.offerDeadline,
     ].filter((v) => v !== undefined && v !== null && v !== "");
     if (
-      answer.deadlineEvidence.some(
-        (p) => p.scope === "project_context" && /\/offerDeadline$/.test(p.path),
-      ) &&
       localDates.some(
         (v) =>
           typeof v !== "string" ||
@@ -298,7 +293,12 @@ function validateAnswer(request: OperationalRequest, value: unknown) {
           Date.parse(v) !== Date.parse(answer.deadline!),
       )
     )
-      throw new Error("Shared deadline conflicts with selected-lot deadline");
+      throw new OperationalDeadlineConflict();
+    // Every cited explicit offer deadline must support the same instant. A
+    // selected-lot citation cannot conceal a conflicting cited shared date.
+    // Uncited project dates do not acquire applicability through this check.
+    if (answer.deadlineEvidence.some(p => /\/offerDeadline$/.test(p.path) && (explicitOperationalDeadline(p.quote) === null || Date.parse(p.quote) !== Date.parse(answer.deadline!))))
+      throw new OperationalDeadlineConflict();
     const sharedDate = answer.deadlineEvidence.some(
       (p) => p.scope === "project_context" && /\/offerDeadline$/.test(p.path),
     );
@@ -326,6 +326,8 @@ export function recordOperationalEvidence(
   for (const key of ["country", "canton", "city", "deadline"] as const) {
     const check = review.checks[key];
     validateProofs(request, check.evidence);
+    if (key === "deadline" && answer.deadline !== null && check.evidence.some(p => /\/offerDeadline$/.test(p.path) && (explicitOperationalDeadline(p.quote) === null || Date.parse(p.quote) !== Date.parse(answer.deadline!))))
+      throw new OperationalDeadlineConflict();
     if (check.verdict === "contradicted")
       throw new Error("Operational review contradicts reading");
     if (

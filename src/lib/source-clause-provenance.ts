@@ -60,6 +60,22 @@ export function projectOriginalClauseDetailEvidence<
       const rendered = prefix + raw + unit;
       if (whole.slice(cursor, cursor + rendered.length) !== rendered)
         throw Error("Literal field order or text changed");
+      // Rendered path labels and separators retain the identity of their own
+      // field. They are metadata, never evidence of another criterion's facts.
+      // A length split can otherwise leave a label/newline-only piece with no
+      // owner, despite lossless reconstruction of the complete original block.
+      if (prefix.length)
+        spans.push({
+          id: ordered[0].id,
+          start: cursor,
+          end: cursor + prefix.length,
+        });
+      if (cursor + rendered.length < whole.length)
+        spans.push({
+          id: ordered.at(-1)!.id,
+          start: cursor + rendered.length,
+          end: cursor + rendered.length + 1,
+        });
       for (const p of ordered)
         spans.push({
           id: p.id,

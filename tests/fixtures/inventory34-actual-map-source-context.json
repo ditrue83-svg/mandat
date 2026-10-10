@@ -1,0 +1,3823 @@
+{
+  "binding": {
+    "target": {
+      "kind": "lot",
+      "publicationId": "simap-2396c3a8-6955-400f-8bda-41f115de2b53",
+      "sourceProjectId": "2396c3a8-6955-400f-8bda-41f115de2b53",
+      "lotId": "a8ce7146-9e9d-477e-aa02-9a93940e5661"
+    },
+    "source": {
+      "version": "human-lot-source-context-v2",
+      "publicationId": "simap-2396c3a8-6955-400f-8bda-41f115de2b53",
+      "target": {
+        "kind": "lot",
+        "lotId": "a8ce7146-9e9d-477e-aa02-9a93940e5661",
+        "publicationId": "simap-2396c3a8-6955-400f-8bda-41f115de2b53",
+        "sourceProjectId": "2396c3a8-6955-400f-8bda-41f115de2b53"
+      },
+      "sharedHash": "5baf4c5fce157189fb7bdf28f1a330f6e61d2cbcd1d48696a1f7acff965aefa5",
+      "selectionHash": "578d038948559e2cb238f81a313525c72f551f9a3fe7bd2843a72bd439798a09",
+      "inputRefusalHash": null,
+      "reviewEventId": null,
+      "reviewEventHash": null,
+      "projectBarrierHash": "80280a0974bcb4f4451bd58e3bda21c1782194c568c7e25ddeb5d3127b9b4414"
+    },
+    "fieldsHash": "75fa76838f2afb03f16eabf1afa719da52b9dbfb87c3cb2b204f9e0e9c360a92",
+    "shapeEpochToken": "04526f21e6bb95e6d567afb779d1d8bec7e4e2edcf1524be892003151de6d8c1",
+    "model": "gpt-6-luna",
+    "reasoningEffort": "medium",
+    "maxTokens": 16384
+  },
+  "targetScope": "selected_lot",
+  "coverage": {
+    "completeProvidedSource": true,
+    "linkedDocumentsRead": false,
+    "sourceUtf16": 76479,
+    "fields": 654,
+    "chunks": 19
+  },
+  "body": {
+    "target": {
+      "kind": "lot",
+      "lot": {
+        "id": "a8ce7146-9e9d-477e-aa02-9a93940e5661",
+        "path": "/lots/1",
+        "headerPath": "/base/lots/1"
+      }
+    },
+    "classifications": [
+      {
+        "scope": "project_context",
+        "appliesTo": "shared_project_context",
+        "rawPath": "/base/cpvCode",
+        "code": {
+          "text": "79952000",
+          "sourceRefs": [
+            "s2"
+          ]
+        },
+        "labels": [
+          {
+            "text": "Event-Organisation",
+            "sourceRefs": [
+              "s3"
+            ],
+            "language": "de"
+          },
+          {
+            "text": "Event services",
+            "sourceRefs": [
+              "s4"
+            ],
+            "language": "en"
+          },
+          {
+            "text": "Services d'organisation d'événements",
+            "sourceRefs": [
+              "s5"
+            ],
+            "language": "fr"
+          },
+          {
+            "text": "Servizi di organizzazione di eventi",
+            "sourceRefs": [
+              "s6"
+            ],
+            "language": "it"
+          }
+        ]
+      },
+      {
+        "scope": "project_context",
+        "appliesTo": "shared_project_context",
+        "rawPath": "/procurement/cpvCode",
+        "code": {
+          "text": "79952000",
+          "sourceRefs": [
+            "s63"
+          ]
+        },
+        "labels": [
+          {
+            "text": "Event-Organisation",
+            "sourceRefs": [
+              "s64"
+            ],
+            "language": "de"
+          },
+          {
+            "text": "Event services",
+            "sourceRefs": [
+              "s65"
+            ],
+            "language": "en"
+          },
+          {
+            "text": "Services d'organisation d'événements",
+            "sourceRefs": [
+              "s66"
+            ],
+            "language": "fr"
+          },
+          {
+            "text": "Servizi di organizzazione di eventi",
+            "sourceRefs": [
+              "s67"
+            ],
+            "language": "it"
+          }
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "scope": "project_context",
+        "rawPath": "/base/corrected",
+        "value": true
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/base/cpcCode",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/base/participantLotsLimitation",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/base/participantLotsLimitationNote/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/base/publicationTed",
+        "value": false
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/base/referencingPubId",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/base/stateContractArea",
+        "value": true
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/base/title/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/correction/remarks/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/criteria",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/documentsAvailable",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/expressionOfInterestUntil",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/offerOpening",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/offerOpeningCity/de",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/offerOpeningCity/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/offerOpeningCity/fr",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/offerOpeningCity/it",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/offerOpeningNotes/de",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/offerOpeningNotes/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/offerOpeningNotes/fr",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/offerOpeningNotes/it",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/offerOpeningPostalCode",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/offerValidityDeadlineDate",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/offerValidityDeadlineDays",
+        "value": 180
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/offerValidityNotes/de",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/offerValidityNotes/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/offerValidityNotes/fr",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/offerValidityNotes/it",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/otherAppointments",
+        "value": []
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/publicationDateForecast",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/qnas/0/externalLink",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/qnas/0/note/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/reductionMinimumOfferDeadline",
+        "value": false
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/specificDeadlinesAndFormalRequirements/de",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/specificDeadlinesAndFormalRequirements/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/specificDeadlinesAndFormalRequirements/fr",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/dates/specificDeadlinesAndFormalRequirements/it",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/hasProjectDocuments",
+        "value": false
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/invitedVendors",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/additionalCpvCodes",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/bkpCodes",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/canContractBeExtended",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/canContractBeExtendedNote",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/contractDays",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/contractDeadlineType",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/contractPeriod",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/cpcCode",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/ebkphCodes",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/ebkptCodes",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/executionDays",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/executionDeadlineType",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/executionNote",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/executionPeriod",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/npkCodes",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/options",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/optionsNote",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/orderAddress",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/orderAddressDescription",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/orderAddressOnlyDescription",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/orderDescription/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/partialOffers",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/partialOffersNote",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/variants",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/procurement/variantsNote",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/dialogNote",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/documentsCosts/currency",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/documentsCosts/price",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/documentsCostsNote/de",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/documentsCostsNote/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/documentsCostsNote/fr",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/documentsCostsNote/it",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/documentsLanguagesNote/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/documentsSourceAddress",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/documentsSourceEmail",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/documentsSourceNote/de",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/documentsSourceNote/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/documentsSourceNote/fr",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/documentsSourceNote/it",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/documentsSourceUrl",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/offerAddress",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/offerDigitalExternalPlatformUrl",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/offerSpecificNote/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/participantLotsLimitation",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/participantLotsLimitationNote/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procOfficeAddress/city/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procOfficeAddress/contactPerson/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procOfficeAddress/name/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procOfficeAddress/reference",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procOfficeAddress/street/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procOfficeAddress/url/de",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procOfficeAddress/url/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procOfficeAddress/url/fr",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procOfficeAddress/url/it",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/cantonId",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/city/de",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/city/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/city/fr",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/city/it",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/contactPerson/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/countryId",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/email",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/name/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/phone",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/postalCode",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/reference",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/street/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/url/de",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/url/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/url/fr",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/procurementRecipientAddress/url/it",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/publicationLanguagesComment/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/publicationTed",
+        "value": false
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/stateContractArea",
+        "value": true
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/project-info/title/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/referencingPub/corrected",
+        "value": false
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/ted",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/consortiumNote/de",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/consortiumNote/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/consortiumNote/fr",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/consortiumNote/it",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/includedCosts/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/nonWTORequirements/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/otherRequirements/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/preInvolvedVendor/de",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/preInvolvedVendor/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/preInvolvedVendor/fr",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/preInvolvedVendor/it",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/remediesNotice/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/securityDeposits/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/subContractorNote/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/termsCriteria",
+        "value": []
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/termsCriteriaAsPDF",
+        "value": false
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/termsNote/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/termsOfBusiness/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/termsOfPayment/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/walkThroughNotes/de",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/walkThroughNotes/en",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/walkThroughNotes/fr",
+        "value": null
+      },
+      {
+        "scope": "project_context",
+        "rawPath": "/terms/walkThroughNotes/it",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/additionalCpvCodes",
+        "value": []
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/0/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/0/isPriceCriterion",
+        "value": true
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/0/maxPoints",
+        "value": 120
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/0/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/0/verification",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/0/weighting",
+        "value": 30
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/1/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/1/isPriceCriterion",
+        "value": false
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/1/maxPoints",
+        "value": 80
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/1/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/1/verification",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/1/weighting",
+        "value": 20
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/2/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/2/isPriceCriterion",
+        "value": false
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/2/maxPoints",
+        "value": 40
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/2/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/2/verification",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/2/weighting",
+        "value": 10
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/3/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/3/isPriceCriterion",
+        "value": false
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/3/maxPoints",
+        "value": 80
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/3/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/3/verification",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/3/weighting",
+        "value": 20
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/4/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/4/isPriceCriterion",
+        "value": false
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/4/maxPoints",
+        "value": 80
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/4/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/4/verification",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteria/4/weighting",
+        "value": 20
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/awardCriteriaNote/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/bkpCodes",
+        "value": []
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/canContractBeExtendedNote/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/contractDays",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/ebkphCodes",
+        "value": []
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/ebkptCodes",
+        "value": []
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/executionDays",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/executionNote/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/lotNumber",
+        "value": 2
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/npkCodes",
+        "value": []
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/optionsNote/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/orderAddress/cantonId",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/orderAddress/city/de",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/orderAddress/city/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/orderAddress/city/fr",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/orderAddress/city/it",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/orderAddress/postalCode",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/orderAddressDescription/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/orderDescription/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/partialOffersNote/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/0/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/0/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/0/verification/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/1/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/1/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/1/verification/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/2/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/2/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/2/verification/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/3/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/3/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/3/verification/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/4/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/4/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/4/verification/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/5/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/5/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/5/verification/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/6/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/6/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/6/verification/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/7/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/7/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/7/verification/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/8/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/8/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/8/verification/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/9/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/9/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/9/verification/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/10/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/10/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/10/verification/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/11/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/11/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/11/verification/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/12/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/12/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/12/verification/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/13/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/13/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/13/verification/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/14/description/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/14/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteria/14/verification/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteriaAsPDF",
+        "value": false
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/qualificationCriteriaNote/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/title/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/variantsNote/de",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/variantsNote/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/variantsNote/fr",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/variantsNote/it",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/weightedQualificationCriteria",
+        "value": []
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/weightedQualificationCriteriaNote/de",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/weightedQualificationCriteriaNote/en",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/weightedQualificationCriteriaNote/fr",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/lots/1/weightedQualificationCriteriaNote/it",
+        "value": null
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/base/lots/1/lotNumber",
+        "value": 2
+      },
+      {
+        "scope": "selected_lot",
+        "rawPath": "/base/lots/1/title/en",
+        "value": null
+      }
+    ],
+    "passages": [
+      {
+        "id": "s2",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/base/cpvCode/code",
+        "startUtf16": 0,
+        "endUtf16": 8,
+        "text": "79952000",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s3",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/base/cpvCode/label/de",
+        "startUtf16": 0,
+        "endUtf16": 18,
+        "text": "Event-Organisation",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s4",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/base/cpvCode/label/en",
+        "startUtf16": 0,
+        "endUtf16": 14,
+        "text": "Event services",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s5",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/base/cpvCode/label/fr",
+        "startUtf16": 0,
+        "endUtf16": 36,
+        "text": "Services d'organisation d'événements",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s6",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/base/cpvCode/label/it",
+        "startUtf16": 0,
+        "endUtf16": 35,
+        "text": "Servizi di organizzazione di eventi",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s23",
+        "scope": "project_context",
+        "role": "service",
+        "rawPath": "/base/title/de",
+        "startUtf16": 0,
+        "endUtf16": 35,
+        "text": "(b26023) Rahmenvertrag Eventtechnik",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s24",
+        "scope": "project_context",
+        "role": "service",
+        "rawPath": "/base/title/fr",
+        "startUtf16": 0,
+        "endUtf16": 55,
+        "text": "(b26023) Contrat-cadre pour la technique événementielle",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s25",
+        "scope": "project_context",
+        "role": "service",
+        "rawPath": "/base/title/it",
+        "startUtf16": 0,
+        "endUtf16": 72,
+        "text": "(b26023) Contratto quadro per servizi di allestimento tecnico per eventi",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s41",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/correction/remarks/de",
+        "startUtf16": 0,
+        "endUtf16": 1200,
+        "text": "Im Rahmen der Fragerunde wurden mehrere Unstimmigkeiten in den publizierten Ausschreibungsunterlagen festgestellt. Die betroffenen Dokumente wurden entsprechend überprüft und berichtigt.\n\n1. Anhang B.1 Angebotsformulare (alle Lose)\n● EK 9 «Spesen»: Ergänzung einer Differenzierung nach Veranstaltungskategorie. Bei den mehrtägigen Veranstaltungen (House of Switzerland am WEF sowie grosse Konferenzen) sind Verpflegung, Reise und Übernachtung vollständig in der Tagespauschale bzw. im Stundenansatz einzurechnen. Bei den eintägigen Veranstaltungen (Pressekonferenzen, kleine Konferenzen) sowie in der Tabelle «Materialliste Dienstleistungen» sind Verpflegung und Reise, jedoch keine Übernachtungskosten einzurechnen.\n\n● EK 10 «Materialmiete»: Anpassung des Wortlauts betreffend Angabe von Marke und Spezifikationen. Wo in der Materialliste keine spezifischen Produktangaben gemacht wurden, bestätigt der Anbieter neu, dass die von ihm angebotenen Produkte den beschriebenen Spezifikationen entsprechen bzw. gleichwertig sind. Marke und detaillierte technische Spezifikationen der tatsächlich eingesetzten Produkte sind dem Auftraggeber im Rahmen des jeweiligen Einzelauftrags (Abrufverfahren) mitzute",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s42",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/correction/remarks/de",
+        "startUtf16": 1200,
+        "endUtf16": 2309,
+        "text": "ilen.\n\n2. Pflichtenheft\n● Ziff. 3.2.2 «Spesen»: Entsprechende Ergänzung der Kategorien-Differenzierung analog zu EK 9 oben.\n\n3. Anhang B.2 Preiseingabe (Lose 1–4)\n● Reiter «Pressekonferenzen», Pos. 01.04.0010: Referenzort «Bern» korrigiert auf Zürich (Los 1), Lugano (Los 2) bzw. Lausanne (Los 3).\n● Reiter «Kleine Konferenz»: Position «Videotechniker (Tagespauschale)» – fehlerhafte Menge (8) korrigiert auf 1.\n● Reiter «Materialliste Dienstleistungen»: Übersetzungsfehler bei den französischen und italienischen Bezeichnungen der «Stundenansatz»-Positionen korrigiert.\n● Reiter «Grosse Konferenz», Pos. 01.05.0020: Beschreibungstext der Simultanübersetzungsanlage korrigiert (sechs statt zwei Sprachkanäle).\n● Ergänzung: Bisher fehlende Position «Rigging-Techniker» in den Reitern «Materialliste Dienstleistungen» und «Grosse Konferenz» ergänzt.\n\n4. Fragen- und Antwortenkatalog\n● Ergänzungen und Präzisierungen bei mehreren Antworten entsprechend den oben genannten Korrekturen.\n\nFür die Angebotsabgabe sind die aktualisierten Dokumente massgebend.\n\nNeue Frist für die Einreichung des Angebotes: 17.08.2026",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s43",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/correction/remarks/fr",
+        "startUtf16": 0,
+        "endUtf16": 1200,
+        "text": "Dans le cadre du tour de questions, plusieurs incohérences ont été constatées dans les documents d'appel d'offres publiés. Les documents concernés ont été vérifiés et rectifiés en conséquence.\n\n1. Annexe B.1 Formulaires d'offre (tous les lots)\n● CAp 9 « Frais » : ajout d'une différenciation selon la catégorie de manifestation. Pour les manifestations de plusieurs jours (House of Switzerland au WEF ainsi que les grandes conférences), les repas, les déplacements et l'hébergement doivent être entièrement inclus dans le forfait journalier ou le tarif horaire. Pour les manifestations d'un jour (conférences de presse, petites conférences) ainsi que dans le tableau « Liste du matériel - Services », seuls les repas et les déplacements doivent être inclus, à l'exclusion des frais d'hébergement.\n\n● CAp 10 « Location de matériel » : adaptation du libellé concernant l'indication de la marque et des spécifications. Lorsque la liste de matériel ne contient pas d'indications spécifiques sur les produits, le soumissionnaire confirme désormais que les produits qu'il propose correspondent aux spécifications décrites, respectivement qu'ils sont équivalents. La marque et les spécifications techniques ",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s44",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/correction/remarks/fr",
+        "startUtf16": 1200,
+        "endUtf16": 2400,
+        "text": "détaillées des produits effectivement utilisés doivent être communiquées au mandant dans le cadre de la commande individuelle respective (procédure d'appel de prestations).\n\n2. Cahier des charges\n● Ch. 3.2.2 « Frais » : ajout correspondant de la différenciation par catégorie, analogue au CAp 9 ci-dessus.\n\n3. Annexe B.2 Feuille des prix (lots 1 à 4)\n● Onglet « Pressekonferenzen », pos. 01.04.0010 : lieu de référence « Berne » corrigé en Zurich (lot 1), Lugano (lot 2), respectivement Lausanne (lot 3).\n● Onglet « Kleine Konferenz » : position « Technicien vidéo (forfait journalier) » – quantité erronée (8) corrigée à 1.\n● Onglet « Liste du matériel - Services » : erreur de traduction dans les désignations françaises et italiennes des positions « taux horaire » corrigée.\n● Onglet « Grosse Konferenz », pos. 01.05.0020 : texte descriptif de l'installation de traduction simultanée corrigé (six canaux linguistiques au lieu de deux).\n● Ajout : position, jusqu'ici manquante, « Technicien rigging » ajoutée dans les onglets « Liste du matériel - Services » et « Grosse Konferenz ».\n\n4. Catalogue des questions-réponses\n● Compléments et précisions apportés à plusieurs réponses conformément aux co",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s45",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/correction/remarks/fr",
+        "startUtf16": 2400,
+        "endUtf16": 2546,
+        "text": "rrections mentionnées ci-dessus.\n\nLes documents actualisés font foi pour le dépôt de l'offre.\n\nNouveau délai pour le dépôt de l'offre : 17.08.2026",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s46",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/correction/remarks/it",
+        "startUtf16": 0,
+        "endUtf16": 1200,
+        "text": "Nell'ambito del turno di domande sono state riscontrate diverse incongruenze nei documenti di gara pubblicati. I documenti interessati sono stati verificati e rettificati di conseguenza.\n\n1. Allegato B.1 Moduli relativi all'offerta (tutti i lotti)\n● CI 9 «Spese»: aggiunta di una differenziazione secondo la categoria di manifestazione. Per le manifestazioni di più giorni (House of Switzerland al WEF nonché le grandi conferenze), i pasti, gli spostamenti e il pernottamento devono essere interamente inclusi nel forfait giornaliero o nella tariffa oraria. Per le manifestazioni di un giorno (conferenze stampa, piccole conferenze) nonché nella tabella «Elenco dei materiali - Servizi», devono essere inclusi solo i pasti e gli spostamenti, escluse le spese di pernottamento.\n\n● CI 10 «Noleggio di materiale»: adeguamento della formulazione relativa all'indicazione di marca e specifiche. Laddove nell'elenco del materiale non vengono fornite indicazioni specifiche sui prodotti, l'offerente conferma ora che i prodotti da esso proposti corrispondono alle specifiche descritte, rispettivamente che sono equivalenti. La marca e le specifiche tecniche dettagliate dei prodotti effettivamente utilizzat",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s47",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/correction/remarks/it",
+        "startUtf16": 1200,
+        "endUtf16": 2400,
+        "text": "i devono essere comunicate al committente nell'ambito del rispettivo ordine singolo (procedura di richiamo).\n\n2. Capitolato d'oneri\n● N. 3.2.2 «Spese»: aggiunta corrispondente della differenziazione per categoria, analogamente al CI 9 sopra.\n\n3. Allegato B.2 Listino prezzi (lotti 1–4)\n● Scheda «Pressekonferenzen», pos. 01.04.0010: luogo di riferimento «Berna» corretto in Zurigo (lotto 1), Lugano (lotto 2), rispettivamente Losanna (lotto 3).\n● Scheda «Kleine Konferenz»: posizione «Tecnico video (tariffa giornaliera)» – quantità errata (8) corretta a 1.\n● Scheda «Elenco dei materiali - Servizi»: errore di traduzione nelle designazioni francesi e italiane delle posizioni «tariffa oraria» corretto.\n● Scheda «Grosse Konferenz», pos. 01.05.0020: testo descrittivo dell'impianto di traduzione simultanea corretto (sei canali linguistici anziché due).\n● Aggiunta: posizione finora mancante «Tecnico rigging» aggiunta nelle schede «Elenco dei materiali - Servizi» e «Grosse Konferenz».\n\n4. Catalogo delle domande e risposte\n● Integrazioni e precisazioni apportate a diverse risposte conformemente alle correzioni sopra menzionate.\n\nPer la presentazione dell'offerta fanno stato i documenti aggiornat",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s48",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/correction/remarks/it",
+        "startUtf16": 2400,
+        "endUtf16": 2463,
+        "text": "i.\n\nNuovo termine per la presentazione dell'offerta: 17.08.2026",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s50",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/dates/offerDeadline",
+        "startUtf16": 0,
+        "endUtf16": 25,
+        "text": "2026-08-17T23:59:00+02:00",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s51",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/dates/offerValidityDeadlineType",
+        "startUtf16": 0,
+        "endUtf16": 10,
+        "text": "days_after",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s57",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/dates/qnas/0/date",
+        "startUtf16": 0,
+        "endUtf16": 10,
+        "text": "2026-07-14",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s59",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/dates/qnas/0/note/de",
+        "startUtf16": 0,
+        "endUtf16": 290,
+        "text": "Falls sich beim Erstellen des Angebotes Fragen ergeben, können Sie diese anonymisiert ins Frageforum auf www.simap.ch stellen.\nZu spät eingereichte Fragen können nicht mehr beantwortet werden.\nDie Anbieter werden per E-Mail informiert, sobald die Antworten auf www.simap.ch publiziert sind.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s60",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/dates/qnas/0/note/fr",
+        "startUtf16": 0,
+        "endUtf16": 313,
+        "text": "Si des questions surviennent lors de la création de l'offre, vous pouvez les poser de manière anonyme dans le forum de questions sur www.simap.ch.\nLes questions soumises trop tard ne peuvent plus recevoir de réponse.\nLes soumissionnaires seront informés par email dès la publication des réponses sur www.simap.ch.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s61",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/dates/qnas/0/note/it",
+        "startUtf16": 0,
+        "endUtf16": 325,
+        "text": "In caso di domande durante la compilazione dell'offerta, è possibile porle in forma anonima nel forum per le domande all'indirizzo www.simap.ch.\nLe domande pervenute oltre il termine indicato non potranno ottenere risposta.\nGli offerenti saranno informati via e-mail non appena saranno pubblicate le risposte su www.simap.ch.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s63",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/procurement/cpvCode/code",
+        "startUtf16": 0,
+        "endUtf16": 8,
+        "text": "79952000",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s64",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/procurement/cpvCode/label/de",
+        "startUtf16": 0,
+        "endUtf16": 18,
+        "text": "Event-Organisation",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s65",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/procurement/cpvCode/label/en",
+        "startUtf16": 0,
+        "endUtf16": 14,
+        "text": "Event services",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s66",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/procurement/cpvCode/label/fr",
+        "startUtf16": 0,
+        "endUtf16": 36,
+        "text": "Services d'organisation d'événements",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s67",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/procurement/cpvCode/label/it",
+        "startUtf16": 0,
+        "endUtf16": 35,
+        "text": "Servizi di organizzazione di eventi",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s68",
+        "scope": "project_context",
+        "role": "service",
+        "rawPath": "/procurement/orderDescription/de",
+        "startUtf16": 0,
+        "endUtf16": 805,
+        "text": "<p>Das Bundesamt für Bauten und Logistik (BBL), insbesondere das Ressort Anlässe (RANL), ist für die Planung, Organisation und Koordination der technischen Infrastruktur bei Veranstaltungen verantwortlich. Für diese Aufgaben sucht das Ressort einen externen Anbieter.</p><p>Dabei handelt es sich beispielsweise um Pressekonferenzen, Videokonferenzen und Live-Streaming des Bundesrates, Staatsbesuche, Konferenzen oder vergleichbare Anlässe. Die Veranstaltungen finden in den repräsentativen Liegenschaften des Bundes, wie beispielsweise dem Bundeshaus, dem Beatrice-von-Wattenwyl-Haus, dem Landsitz Lohn auf dem Bundesplatz in Bern oder in Veranstaltungsorten innerhalb der Schweiz, statt. Der Umfang der jeweiligen Projekte kann je nach Lokalität, Teilnehmerzahl und Mehrsprachigkeit stark variieren.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s69",
+        "scope": "project_context",
+        "role": "service",
+        "rawPath": "/procurement/orderDescription/fr",
+        "startUtf16": 0,
+        "endUtf16": 865,
+        "text": "<p>L'Office fédéral des constructions et de la logistique (OFCL), et plus particulièrement le service Événements (RANL), est chargé de la planification, de l'organisation et de la coordination de l'infrastructure technique lors d'événements. Pour ces tâches, le service recherche un prestataire externe.</p><p>Il s'agit par exemple de conférences de presse, de vidéoconférences et de retransmissions en direct du Conseil fédéral, de visites d'État, de conférences ou d'événements similaires. Les manifestations ont lieu dans les bâtiments représentatifs de la Confédération, tels que le Palais fédéral, la Maison Beatrice von Wattenwyl, la résidence de Lohn sur la Place fédérale à Berne, ou dans des lieux de manifestation situés en Suisse. L’ampleur des projets peut varier considérablement en fonction du lieu, du nombre de participants et du multilinguisme.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s70",
+        "scope": "project_context",
+        "role": "service",
+        "rawPath": "/procurement/orderDescription/it",
+        "startUtf16": 0,
+        "endUtf16": 834,
+        "text": "<p>L’Ufficio federale delle costruzioni e della logistica (UFCL), in particolare il settore Eventi (RANL), è responsabile della pianificazione, dell’organizzazione e del coordinamento dell’infrastruttura tecnica in occasione di eventi. Per questi compiti, il settore è alla ricerca di un fornitore esterno.</p><p>Si tratta, ad esempio, di conferenze stampa, videoconferenze e dirette streaming del Consiglio federale, visite di Stato, conferenze o eventi simili. Gli eventi si svolgono negli immobili di rappresentanza della Confederazione, come ad esempio il Palazzo federale, la Casa Beatrice von Wattenwyl, la tenuta di Lohn sulla Piazza federale a Berna o in altre sedi in Svizzera. La portata dei singoli progetti può variare notevolmente a seconda della località, del numero di partecipanti e del numero di lingue coinvolte.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s77",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/project-info/documentsLanguagesNote/de",
+        "startUtf16": 0,
+        "endUtf16": 173,
+        "text": "Ausschreibungsunterlagen sind in deutscher, französischer und italienischer Sprache erhältlich. Bei Widersprüchen zwischen den Fassungen ist die deutsche Version massgebend.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s78",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/project-info/documentsLanguagesNote/fr",
+        "startUtf16": 0,
+        "endUtf16": 160,
+        "text": "Les documents d’appel d’offres sont disponibles en français, en allemand et en italien. En cas de divergences entre les versions, la version allemande fait foi.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s79",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/project-info/documentsLanguagesNote/it",
+        "startUtf16": 0,
+        "endUtf16": 154,
+        "text": "La documentazione del bando è disponibile in tedesco, francese e italiano. In caso di contraddizioni tra le diverse versioni fa stato la versione tedesca.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s80",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/project-info/documentsSourceType",
+        "startUtf16": 0,
+        "endUtf16": 22,
+        "text": "documents_source_simap",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s85",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/project-info/offerSpecificNote/de",
+        "startUtf16": 0,
+        "endUtf16": 1119,
+        "text": "<p>Zu spät eingereichte Angebote können nicht berücksichtigt werden.</p><p><br></p><p>Das vollständige Angebot (vgl. Vorgaben unter Ziffer 7.2 im Pflichtenheft) ist bis spätestens am <strong>17.08.2026</strong> elektronisch via simap-Plattform einzureichen.</p><p>&nbsp;</p><p><strong>Hinweise:</strong></p><ul><li>Bitte laden Sie keine einzelnen Dokumente hoch, sondern fügen Sie vor dem Hochladen alle Angebotsbestandteile in einem ZIP-Ordner zusammen.</li><li>Stellen Sie sicher, dass Sie die Übermittlung des Angebots mittels der Schaltfläche «Angebot einreichen» abschliessen <strong>und der Status auf «Angebot eingereicht» in grüner Farbe wechselt</strong>, da ansonsten Ihr Angebot nicht als eingereicht gilt. <strong>Sie erhalten eine von der simap-Plattform automatisch generierte Bestätigung via E-Mail.</strong></li></ul><p><br></p><p>Der Anbieter hat in jedem Fall den Beweis für die Rechtzeitigkeit der Angebotseinreichung sicherzustellen.</p><p>&nbsp;</p><p><strong>Zudem ist Folgendes zu beachten:</strong></p><p>Das Angebot ist durch die zeichnungsberechtigte(n) Person(en) gültig zu unterzeichnen.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s86",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/project-info/offerSpecificNote/fr",
+        "startUtf16": 0,
+        "endUtf16": 1105,
+        "text": "<p>Les offres remises en retard ne seront pas prises en considération.</p><p>&nbsp;</p><p>L'offre complète (voir exigences au ch. 7.2 du cahier des charges) doit être remise au plus tard le <strong>17.08.2026</strong> sous forme électronique sur la plateforme simap.</p><p>&nbsp;</p><p><strong>Remarques :</strong></p><ul><li>Veuillez enregistrer tous les documents relatifs à l’offre dans un dossier au format ZIP et ne pas charger séparément chaque document sur la plateforme.</li><li>Assurez-vous d’avoir bien validé l’envoi de l’offre en cliquant sur le bouton « Soumettre offre » et que <strong>le statut passe à « Offre soumise » en vert</strong>, sinon votre offre ne sera pas considérée comme soumise. <strong>Vous recevrez automatiquement un courriel de confirmation de la plateforme simap.</strong></li></ul><p><br></p><p>Le soumissionnaire doit s'assurer dans tous les cas qu'il possède une preuve du fait qu'il a remis son offre dans les délais.</p><p>&nbsp;</p><p><strong>À noter en outre que :</strong></p><p>La (les) personne(s) habilitée(s) à signer doivent signer valablement l’offre.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s87",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/project-info/offerSpecificNote/it",
+        "startUtf16": 0,
+        "endUtf16": 1127,
+        "text": "<p>Le offerte pervenute oltre il termine indicato non sono prese in considerazione.</p><p><br></p><p>L’offerta completa (cfr. i requisiti al n. 7.2 del capitolato d'oneri) deve essere inviata entro il <strong>17.08.2026</strong> in forma elettronica tramite la piattaforma simap.</p><p>&nbsp;</p><p><strong>Avvertenze:</strong></p><ul><li>Si prega di non caricare singoli documenti, ma di riunire tutti gli elementi dell’offerta in un unico file ZIP prima dell’invio tramite la piattaforma.</li><li>Assicuratevi di completare l’invio dell’offerta cliccando sul pulsante «Presentare offerta» <strong>e che lo stato passi a «Offerta presentata» in colore verde</strong>, altrimenti la vostra offerta non sarà considerata inviata. <strong>Riceverete una conferma generata automaticamente dalla piattaforma simap via e-mail.</strong></li></ul><p>&nbsp;</p><p>L’offerente deve in ogni caso dimostrare l’inoltro tempestivo dell’offerta.</p><p>&nbsp;</p><p><strong>Inoltre, occorre osservare quanto segue:</strong></p><p>La(e) persona(e) avente(i) diritto di firma deve(ono) firmare l’offerta apponendo apponendo una firma valida.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s126",
+        "scope": "project_context",
+        "role": "service",
+        "rawPath": "/project-info/title/de",
+        "startUtf16": 0,
+        "endUtf16": 35,
+        "text": "(b26023) Rahmenvertrag Eventtechnik",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s127",
+        "scope": "project_context",
+        "role": "service",
+        "rawPath": "/project-info/title/fr",
+        "startUtf16": 0,
+        "endUtf16": 55,
+        "text": "(b26023) Contrat-cadre pour la technique événementielle",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s128",
+        "scope": "project_context",
+        "role": "service",
+        "rawPath": "/project-info/title/it",
+        "startUtf16": 0,
+        "endUtf16": 72,
+        "text": "(b26023) Contratto quadro per servizi di allestimento tecnico per eventi",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s140",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/consortiumAllowed",
+        "startUtf16": 0,
+        "endUtf16": 2,
+        "text": "no",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s141",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/consortiumMultiApplicationAllowed",
+        "startUtf16": 0,
+        "endUtf16": 2,
+        "text": "no",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s142",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/includedCosts/de",
+        "startUtf16": 0,
+        "endUtf16": 165,
+        "text": "Alle Preisangaben sind in Schweizer Franken (CHF) und exkl. MwSt. auszuweisen. Der Preis exkl. MwSt. beinhaltet insbesondere Versicherung, Spesen, Sozialabgaben etc.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s143",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/includedCosts/fr",
+        "startUtf16": 0,
+        "endUtf16": 155,
+        "text": "Tous les prix doivent être indiqués en francs suisses (CHF), hors TVA. Les prix hors TVA incluent les assurances, les frais, les cotisations sociales, etc.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s144",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/includedCosts/it",
+        "startUtf16": 0,
+        "endUtf16": 146,
+        "text": "Tutti i prezzi devono essere indicati in franchi svizzeri (CHF), IVA esclusa. Questo prezzo è comprensivo di assicurazione, spese e oneri sociali.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s149",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/otherRequirements/de",
+        "startUtf16": 0,
+        "endUtf16": 387,
+        "text": "Kreditvorbehalt: Vorbehalten bleiben die jährlichen Kreditanträge und -beschlüsse der zuständigen Organe des Bundes zu Voranschlag und Finanzplan.\n\nDer Auftraggeber behält sich vor, zugeschlagene Leistungen auch zugunsten weiterer Bedarfsstellen innerhalb der Bundesverwaltung erbringen zu lassen sowie, die als Optionen definierten Leistungen ganz, teilweise oder gar nicht zu beziehen.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s150",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/otherRequirements/fr",
+        "startUtf16": 0,
+        "endUtf16": 495,
+        "text": "Réserve d’approbation du crédit : les demandes et décisions annuelles relatives aux crédits des organes compétents de la Confédération en matière de budget et de plan financier demeurent réservés.\n\nL'adjudicateur se réserve le droit de faire exécuter les prestations faisant l'objet du présent appel d'offres au profit d'autres services demandeurs de l'administration fédérale et de commander tout ou partie des prestations faisant l'objet des options ou de renoncer entièrement à ces dernières.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s151",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/otherRequirements/it",
+        "startUtf16": 0,
+        "endUtf16": 487,
+        "text": "Riserva della disponibilità creditizia: sono fatte salve le domande di credito e i decreti di stanziamento annuali degli organi competenti della Confederazione in materia di preventivo e di piano finanziario.\n\nIl committente si riserva il diritto di far fornire le prestazioni oggetto dell’aggiudicazione anche a favore di altri servizi richiedenti dell’Amministrazione federale, nonché di acquistare, interamente o parzialmente, o di non acquistare le prestazioni definite come opzioni.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s156",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/securityDeposits/de",
+        "startUtf16": 0,
+        "endUtf16": 6,
+        "text": "Keine.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s157",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/securityDeposits/fr",
+        "startUtf16": 0,
+        "endUtf16": 7,
+        "text": "Aucune.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s158",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/securityDeposits/it",
+        "startUtf16": 0,
+        "endUtf16": 8,
+        "text": "Nessuna.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s159",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/subContractorAllowed",
+        "startUtf16": 0,
+        "endUtf16": 3,
+        "text": "yes",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s160",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/subContractorMultiApplicationAllowed",
+        "startUtf16": 0,
+        "endUtf16": 13,
+        "text": "not_specified",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s161",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/subContractorNote/de",
+        "startUtf16": 0,
+        "endUtf16": 255,
+        "text": "Zieht der Anbieter zur Leistungserfüllung Subunternehmer bei, übernimmt er die Gesamtverantwortung. Er führt alle beteiligten Subunternehmer mit den ihnen zugewiesenen Rollen auf.\nDie charakteristische Leistung ist grundsätzlich vom Anbieter zu erbringen.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s162",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/subContractorNote/fr",
+        "startUtf16": 0,
+        "endUtf16": 280,
+        "text": "Si le soumissionnaire fait appel à des sous-traitants pour l’exécution des prestations, il assume la responsabilité générale du projet. Il indique les noms et les rôles de tous ses sous-traitants.\nLa prestation caractéristique doit en principe être fournie par le soumissionnaire.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s163",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/subContractorNote/it",
+        "startUtf16": 0,
+        "endUtf16": 264,
+        "text": "Se per l’esecuzione delle prestazioni ricorre a subappaltatori, l’offerente si assume la responsabilità generale. Deve elencare tutti i subappaltatori coinvolti e i loro ruoli.\nIn linea di principio la prestazione caratteristica deve essere fornita dall’offerente.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s170",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/termsOfPayment/de",
+        "startUtf16": 0,
+        "endUtf16": 273,
+        "text": "30 Tage nach Erhalt der Rechnung, netto in CHF, zuzüglich MwSt. Korrekte Rechnungsstellung mittels E-Rechnung vorausgesetzt.\nInformationen der Bundesverwaltung zur E-Rechnung finden Sie auf folgender Webseite: https://www.efv.admin.ch/efv/de/home/efv/erechnung/aktuell.html",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s171",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/termsOfPayment/fr",
+        "startUtf16": 0,
+        "endUtf16": 382,
+        "text": "Le montant net de la facture électronique établie en bonne et due forme, en francs suisses et augmenté de la TVA, est payé dans un délai de 30 jours à compter de la réception de la facture.\nDes renseignements sur la facturation électronique sont disponibles sur la page Internet suivante de l'administration fédérale : https://www.efv.admin.ch/efv/fr/home/efv/erechnung/aktuell.html",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s172",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/termsOfPayment/it",
+        "startUtf16": 0,
+        "endUtf16": 319,
+        "text": "30 giorni dal ricevimento della fattura, al netto in CHF più IVA, se la fattura è stata correttamente emessa mediante il sistema di fatturazione elettronica.\nLe informazioni dell’Amministrazione federale sulla fattura elettronica si trovano all’indirizzo: https://www.efv.admin.ch/efv/it/home/efv/erechnung/aktuell.html",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s173",
+        "scope": "project_context",
+        "role": "context",
+        "rawPath": "/terms/termsType",
+        "startUtf16": 0,
+        "endUtf16": 12,
+        "text": "in_documents",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s214",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/canContractBeExtended",
+        "startUtf16": 0,
+        "endUtf16": 3,
+        "text": "yes",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s215",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/canContractBeExtendedNote/de",
+        "startUtf16": 0,
+        "endUtf16": 296,
+        "text": "Auftragsbestätigungen werden grundsätzlich für jeden Auftrag bzw. für jede Bestellung neu abgeschlossen. Dies bedeutet, dass eine Auftragsbestätigung über die Dauer des Rahmenvertrages hinaus vereinbart werden könnte. Die diesbezüglichen Bestimmungen ergeben sich aus Ziff. 3 des Rahmenvertrages.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s216",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/canContractBeExtendedNote/fr",
+        "startUtf16": 0,
+        "endUtf16": 275,
+        "text": "Les confirmations de commande sont en principe établies pour chaque commande ou chaque achat. Cela signifie qu'une confirmation de commande peut être conclue au-delà de la durée du contrat-cadre. Les dispositions applicables à cet égard découlent du point 3 du contrat-cadre.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s217",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/canContractBeExtendedNote/it",
+        "startUtf16": 0,
+        "endUtf16": 268,
+        "text": "Le conferme d’ordine vengono redatte, di norma, per ogni singolo ordine o commessa. Ciò significa che è possibile concordare una conferma d’ordine che vada oltre la durata del contratto quadro. Le disposizioni in materia sono contenute al punto 3 del contratto quadro.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s218",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/contractDeadlineType",
+        "startUtf16": 0,
+        "endUtf16": 9,
+        "text": "date_time",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s219",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/contractPeriod/dateRange/0",
+        "startUtf16": 0,
+        "endUtf16": 10,
+        "text": "2027-01-01",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s220",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/contractPeriod/dateRange/1",
+        "startUtf16": 0,
+        "endUtf16": 10,
+        "text": "2031-12-31",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s221",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/executionDeadlineType",
+        "startUtf16": 0,
+        "endUtf16": 9,
+        "text": "date_time",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s222",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/executionNote/de",
+        "startUtf16": 0,
+        "endUtf16": 148,
+        "text": "01.01.2027 – 31.12.2030 für das optionale Beschaffungsvolumen während 4 Jahren\n01.01.2031 – 31.12.2031 für die optionale Verlängerung während 1 Jahr",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s223",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/executionNote/fr",
+        "startUtf16": 0,
+        "endUtf16": 152,
+        "text": "Du 01.01.2027 au 31.12.2030 pour le volume d’acquisition optionnel sur quatre ans \nDu 01.01.2031 au 31.12.2031 pour l’option de prolongation d’une année",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s224",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/executionNote/it",
+        "startUtf16": 0,
+        "endUtf16": 128,
+        "text": "01.01.2027 – 31.12.2030 per il volume di acquisto opzionale di 4 anni\n01.01.2031 – 31.12.2031 per la proroga opzionale di 1 anno",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s225",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/executionPeriod/dateRange/0",
+        "startUtf16": 0,
+        "endUtf16": 10,
+        "text": "2027-01-01",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s226",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/executionPeriod/dateRange/1",
+        "startUtf16": 0,
+        "endUtf16": 10,
+        "text": "2031-12-31",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s227",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/id",
+        "startUtf16": 0,
+        "endUtf16": 36,
+        "text": "a8ce7146-9e9d-477e-aa02-9a93940e5661",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s228",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/options",
+        "startUtf16": 0,
+        "endUtf16": 3,
+        "text": "yes",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s229",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/optionsNote/de",
+        "startUtf16": 0,
+        "endUtf16": 148,
+        "text": "01.01.2027 – 31.12.2030 für das optionale Beschaffungsvolumen während 4 Jahren\n01.01.2031 – 31.12.2031 für die optionale Verlängerung während 1 Jahr",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s230",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/optionsNote/fr",
+        "startUtf16": 0,
+        "endUtf16": 152,
+        "text": "Du 01.01.2027 au 31.12.2030 pour le volume d’acquisition optionnel sur quatre ans \nDu 01.01.2031 au 31.12.2031 pour l’option de prolongation d’une année",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s231",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/optionsNote/it",
+        "startUtf16": 0,
+        "endUtf16": 128,
+        "text": "01.01.2027 – 31.12.2030 per il volume di acquisto opzionale di 4 anni\n01.01.2031 – 31.12.2031 per la proroga opzionale di 1 anno",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s232",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/orderAddress/countryId",
+        "startUtf16": 0,
+        "endUtf16": 2,
+        "text": "CH",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s233",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/orderAddressDescription/de",
+        "startUtf16": 0,
+        "endUtf16": 7,
+        "text": "Schweiz",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s234",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/orderAddressDescription/fr",
+        "startUtf16": 0,
+        "endUtf16": 6,
+        "text": "Suisse",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s235",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/orderAddressDescription/it",
+        "startUtf16": 0,
+        "endUtf16": 8,
+        "text": "Svizzera",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s236",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/orderAddressOnlyDescription",
+        "startUtf16": 0,
+        "endUtf16": 3,
+        "text": "yes",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s237",
+        "scope": "selected_lot",
+        "role": "service",
+        "rawPath": "/lots/1/orderDescription/de",
+        "startUtf16": 0,
+        "endUtf16": 177,
+        "text": "<p>Gegenstand und Umfang dieses Loses entsprechen der Beschreibung unter „Gegenstand und Umfang des Auftrags“. Die betroffene Region ist dem Titel dieses Loses zu entnehmen.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s238",
+        "scope": "selected_lot",
+        "role": "service",
+        "rawPath": "/lots/1/orderDescription/fr",
+        "startUtf16": 0,
+        "endUtf16": 176,
+        "text": "<p>L'objet et l'étendue du présent lot correspondent à la description figurant sous « Objet et étendue du marché ». La région concernée figure dans le titre du présent lot.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s239",
+        "scope": "selected_lot",
+        "role": "service",
+        "rawPath": "/lots/1/orderDescription/it",
+        "startUtf16": 0,
+        "endUtf16": 196,
+        "text": "<p>L'oggetto e la portata del presente lotto corrispondono alla descrizione riportata sotto «Oggetto e portata della commessa». La regione interessata è indicata nel titolo del presente lotto.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s240",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/orderType",
+        "startUtf16": 0,
+        "endUtf16": 7,
+        "text": "service",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s241",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/partialOffers",
+        "startUtf16": 0,
+        "endUtf16": 3,
+        "text": "yes",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s242",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/partialOffersNote/de",
+        "startUtf16": 0,
+        "endUtf16": 130,
+        "text": "Teilangebote bzw. Angebote nur auf einzelne Lose sind zugelassen. Teilangebote innerhalb eines Loses sind jedoch NICHT zugelassen.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s243",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/partialOffersNote/fr",
+        "startUtf16": 0,
+        "endUtf16": 165,
+        "text": "Les offres partielles ou les offres portant uniquement sur certains lots sont autorisées. Toutefois, les offres partielles ne sont pas admises au sein d’un même lot.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s244",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/partialOffersNote/it",
+        "startUtf16": 0,
+        "endUtf16": 148,
+        "text": "Sono ammesse offerte parziali e offerte che riguardano singoli lotti. Tuttavia, le offerte parziali all’interno del medesimo lotto NON sono ammesse.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s245",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/processType",
+        "startUtf16": 0,
+        "endUtf16": 4,
+        "text": "open",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s246",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/projectSubType",
+        "startUtf16": 0,
+        "endUtf16": 7,
+        "text": "service",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s247",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/0/description/de",
+        "startUtf16": 0,
+        "endUtf16": 186,
+        "text": "<p>Der Anbieter bestätigt, dass er über einen Ansprechpartner (SPOC) verfügt, welcher bei der Eskalation von Problemen des Auftrags zuständig ist und den Entscheid herbeiführen kann.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s248",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/0/description/fr",
+        "startUtf16": 0,
+        "endUtf16": 158,
+        "text": "<p>Le soumissionnaire confirme qu’il dispose d’un interlocuteur (SPOC) compétent en cas d’escalade de problèmes liés au marché et qui prend les décisions.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s249",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/0/description/it",
+        "startUtf16": 0,
+        "endUtf16": 189,
+        "text": "<p>L’offerente conferma di disporre di un interlocutore (SPOC) responsabile della procedura di escalation in caso di problemi legati alla commessa e che possiede competenze decisionali.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s250",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/0/id",
+        "startUtf16": 0,
+        "endUtf16": 36,
+        "text": "0fda95f2-330e-4db1-8a9d-82aa7133ba7a",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s251",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/0/title/de",
+        "startUtf16": 0,
+        "endUtf16": 20,
+        "text": "EK 1 Ansprechpartner",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s252",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/0/title/fr",
+        "startUtf16": 0,
+        "endUtf16": 19,
+        "text": "CAp 1 Interlocuteur",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s253",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/0/title/it",
+        "startUtf16": 0,
+        "endUtf16": 18,
+        "text": "CI 1 Interlocutore",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s254",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/0/verification/de",
+        "startUtf16": 0,
+        "endUtf16": 66,
+        "text": "<p>Schriftliche Bestätigung im Anhang B.1 \"Angebotsformulare\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s255",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/0/verification/fr",
+        "startUtf16": 0,
+        "endUtf16": 67,
+        "text": "<p>Confirmation écrite dans l'annexe B.1 \"Formulaires d'offre\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s256",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/0/verification/it",
+        "startUtf16": 0,
+        "endUtf16": 72,
+        "text": "<p>Conferma scritta nell'allegato B.1 \"Moduli relativi all'offerta\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s257",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/1/description/de",
+        "startUtf16": 0,
+        "endUtf16": 995,
+        "text": "<p>Der Anbieter verfügt über eine genügende wirtschaftliche und finanzielle Leistungsfähigkeit, um den Auftrag erfüllen zu können.</p><p>&nbsp;</p><p>Der Auftraggeberin ist zusammen mit dem Angebot ein aktueller <strong>Betreibungsregisterauszug</strong> (nicht älter als 3 Monate seit Publikation der Ausschreibung) zu unterbreiten. Bei Anbietern aus dem Ausland ist ein Auszug aus dem Handelsregister und eine mit dem schweizerischen Betreibungsregisterauszug vergleichbare amtliche Urkunde des Auslandes beizulegen. Vorliegende Betreibungen sind schriftlich zu begründen.</p><p><br></p><p>Hinweis: Die Vergabestelle überprüft elektronisch den Auszug aus dem Zentralen Firmenindex (www.zefix.ch).</p><p>&nbsp;</p><p>Ein vorhandener Nachweis einer <strong>Betriebshaftpflichtversicherung</strong> mit Gültigkeit für die anbietende Gesellschaft, welche mind. folgende Deckungssummen pro Fall enthält:</p><ul><li>Für Personenschäden: CHF 5'000'000</li><li>Für Sachschäden: CHF 5'000'000</li></ul>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s258",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/1/description/fr",
+        "startUtf16": 0,
+        "endUtf16": 1031,
+        "text": "<p>Le soumissionnaire dispose des capacités économique et financière nécessaire à l’exécution du mandat.</p><p>&nbsp;</p><p>Le mandant doit recevoir avec l’offre un extrait à jour du <strong>registre de l’office des poursuites</strong> (ne datant pas de plus de 3 mois après la publication de l’appel d’offres). Pour les soumissionnaires étrangers, il est impératif de joindre un extrait du registre du commerce et un document officiel étranger équivalent à l’extrait du registre des poursuites en Suisse. Les poursuites existantes doivent être justifiées par écrit.</p><p>&nbsp;</p><p>N. B. L’adjudicateur vérifie l’extrait dans l’index central des raisons de commerce (www.zefix.ch) au format électronique.</p><p>&nbsp;</p><p>Le soumissionnaire dispose d’une <strong>attestation d’assurance responsabilité civile</strong> professionnelle valable pour sa société et comprenant au moins les montants de couverture suivants par cas :</p><ul><li>dommages corporels : CHF 5 000 000</li><li>dommages matériels : CHF 5 000 000</li></ul>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s259",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/1/description/it",
+        "startUtf16": 0,
+        "endUtf16": 1004,
+        "text": "<p>L’offerente è dotato di sufficiente idoneità economica e finanziaria per poter eseguire la commessa.</p><p>&nbsp;</p><p>Insieme all’offerta deve essere presentato al committente un <strong>estratto attuale del registro delle esecuzioni </strong>(non più vecchio di 3 mesi dalla pubblicazione del bando di concorso). Per gli offerenti esteri: allegare un estratto del registro di commercio e un documento ufficiale estero equivalente all’estratto del registro delle esecuzioni svizzero. Le esecuzioni ivi presenti sono da motivare per iscritto.</p><p>&nbsp;</p><p>Nota: il servizio di aggiudicazione verifica elettronicamente l’estratto dell’indice centrale delle ditte (www.zefix.ch).</p><p>&nbsp;</p><p>Prova disponibile di un’<strong>assicurazione di responsabilità civile aziendale</strong> valida per la società offerente, contenente almeno i seguenti importi massimi della copertura per evento:</p><ul><li>per danni alle persone: CHF 5 000 000</li><li>per danni materiali: CHF 5 000 000</li></ul>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s264",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/1/verification/de",
+        "startUtf16": 0,
+        "endUtf16": 369,
+        "text": "<ul><li>Betreibungsregisterauszug oder vergleichbare Urkunde aus dem Ausland</li><li>Schriftliche Begründung von vorliegenden Betreibungen</li><li>Versicherungsnachweis</li></ul><p>Bei Anbietern aus dem Ausland ist ein Auszug aus dem Handelsregister und eine mit dem schweizerischen Betreibungsregisterauszug vergleichbare amtliche Urkunde des Auslandes beizulegen.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s265",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/1/verification/fr",
+        "startUtf16": 0,
+        "endUtf16": 397,
+        "text": "<ul><li>Extrait du registre de l’office des poursuites ou document officiel comparable de l’étranger</li><li>Justification écrite des poursuites existantes</li><li>Attestation d’assurance</li></ul><p>Pour les soumissionnaires étrangers, il est impératif de joindre un extrait du registre du commerce et un document officiel étranger équivalent à l’extrait du registre des poursuites en Suisse.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s266",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/1/verification/it",
+        "startUtf16": 0,
+        "endUtf16": 352,
+        "text": "<ul><li>Estratto del registro delle esecuzioni o documento estero equivalente</li><li>Motivazione scritta delle esecuzioni presenti</li><li>Attestato di assicurazione</li></ul><p>Per gli offerenti esteri: allegare un estratto del registro di commercio e un documento ufficiale estero equivalente all’estratto del registro delle esecuzioni svizzero.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s267",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/2/description/de",
+        "startUtf16": 0,
+        "endUtf16": 879,
+        "text": "<p>Der Anbieter bestätigt, dass er bereit ist, die zum Einsatz vorgesehenen Personen auf erstes Verlangen bekannt zu geben und nach Abschluss des Beschaffungsvertrages bei Bedarf einer Personensicherheitsprüfung gemäss Verordnung über die Personensicherheitsprüfungen (VPSP, SR 128.31) zu unterziehen.</p><p><br></p><p>Der Anbieter bestätigt, Personensicherheitsprüfungen zu unterstützen und nach Anleitung der Fachstelle notwendige Dokumente, inkl. Übersetzungen in eine Amtssprache sowie Beglaubigungen und Überbeglaubigungen selbst auf eigene Kosten beizubringen.</p><p><br></p><p>Erläuterungen zur Personensicherheitsprüfung sind auf der <a href=\"https://www.sepos.admin.ch/de/personensicherheitspruefung-information-pruefung-dritte-auslandaufenthalt\" rel=\"noopener noreferrer\" target=\"_blank\">Website des Staatssekretariats für Sicherheitspolitik (SEPOS)</a> erhältlich.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s268",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/2/description/fr",
+        "startUtf16": 0,
+        "endUtf16": 1028,
+        "text": "<p>Le soumissionnaire confirme qu’il communiquera à l’adjudicateur, à première demande, les noms des personnes prévues pour l’exécution des prestations et que, après la conclusion du marché, ces personnes se soumettront à un contrôle de sécurité au sens de l’ordonnance sur les contrôles de sécurité relatifs aux personnes (OCSP ; RS <em>128.31</em>) si cela s’avère nécessaire.</p><p>&nbsp;</p><p>Le soumissionnaire s’engage à contribuer aux contrôles de sécurité relatifs aux personnes et à fournir à ses frais les documents requis conformément aux directives du service spécialisé, y compris leur traduction dans une langue officielle ainsi que leur légalisation et surlégalisation.</p><p>&nbsp;</p><p>Des explications concernant le contrôle de sécurité relatif aux personnes sont disponibles sur le <a href=\"https://www.sepos.admin.ch/fr/controle-personnes-informations-controle-tiers-sejours-etranger\" rel=\"noopener noreferrer\" target=\"_blank\">site Internet du Secrétariat d’État à la politique de sécurité (SEPOS)</a>.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s269",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/2/description/it",
+        "startUtf16": 0,
+        "endUtf16": 901,
+        "text": "<p>L’offerente conferma di essere disposto, alla prima richiesta del committente, a indicare il nome delle persone previste per l’impiego e, una volta concluso il contratto e se ritenuto necessario, a sottoporle a un controllo di sicurezza specifico conformemente all’OCSP.</p><p>&nbsp;</p><p>L’offerente conferma di sostenere tali controlli e di presentare a proprie spese i necessari documenti ufficiali in base alle istruzioni del servizio specializzato, compresa la traduzione in una lingua ufficiale, nonché legalizzazioni e legalizzazioni supplementari.</p><p>&nbsp;</p><p>Ulteriori informazioni sul controllo di sicurezza relativo alle persone sono pubblicate sul <a href=\"https://www.sepos.admin.ch/it/controllo-persone-informazioni-controllo-terzi-soggiorni-estero\" rel=\"noopener noreferrer\" target=\"_blank\">sito Internet della Segreteria di Stato della politica di sicurezza (SEPOS)</a>.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s274",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/2/verification/de",
+        "startUtf16": 0,
+        "endUtf16": 66,
+        "text": "<p>Schriftliche Bestätigung im Anhang B.1 \"Angebotsformulare\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s275",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/2/verification/fr",
+        "startUtf16": 0,
+        "endUtf16": 67,
+        "text": "<p>Confirmation écrite dans l'annexe B.1 \"Formulaires d'offre\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s276",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/2/verification/it",
+        "startUtf16": 0,
+        "endUtf16": 72,
+        "text": "<p>Conferma scritta nell'allegato B.1 \"Moduli relativi all'offerta\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s277",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/3/description/de",
+        "startUtf16": 0,
+        "endUtf16": 981,
+        "text": "<p>Der Anbieter bestätigt, die Allgemeinen Geschäftsbedingungen des Bundes für:</p><ul><li><a href=\"https://www.bkb.admin.ch/de/agb-des-bundes\" rel=\"noopener noreferrer\" target=\"_blank\">Dienstleistungsaufträge (Ausgabe September 2016, Stand Januar 2024)</a></li><li><a href=\"https://www.bkb.admin.ch/de/agb-des-bundes\" rel=\"noopener noreferrer\" target=\"_blank\">Die Beschaffung von Gütern (Ausgabe September 2016, Stand Januar 2024)</a></li></ul><p><br></p><p>ergänzt durch die Standardbestimmungen zur Informationssicherheit ohne Bezug zu Informatikmitteln des Bundes ohne Abgabe von Bundesgeräten (H2).</p><p>Das Dokument «H2» liegt den Ausschreibungsunterlagen bei.</p><p><br></p><p>zur Kenntnis genommen zu haben und akzeptiert diese vorbehaltlos.</p><p><br></p><p>Für das vorliegende Geschäft gelten die oben aufgelisteten AGB auf <a href=\"https://www.bkb.admin.ch/de/agb-des-bundes\" rel=\"noopener noreferrer\" target=\"_blank\">https://www.bkb.admin.ch/de/agb-des-bundes</a>.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s278",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/3/description/fr",
+        "startUtf16": 0,
+        "endUtf16": 1141,
+        "text": "<p>Le soumissionnaire confirme qu’il accepte sans réserve les conditions générales (CG) de la Confédération suivantes :</p><ul><li><a href=\"https://www.bkb.admin.ch/fr/conditions-generales-cg-de-la-confederation\" rel=\"noopener noreferrer\" target=\"_blank\">CG relatives à l’achat de services (édition de septembre 2016, état de janvier 2024)</a></li><li><a href=\"https://www.bkb.admin.ch/fr/conditions-generales-cg-de-la-confederation\" rel=\"noopener noreferrer\" target=\"_blank\">CG relatives à l’achat de biens (édition de septembre 2016, état de janvier 2024)</a></li></ul><p><br></p><p>complétées par les dispositions standard relatives à la sécurité de l'information qui ne font pas référence aux moyens informatiques de la Confédération sans remise d'appareils fédéraux (H2).</p><p>Le document « H2 » est joint au dossier d'appel d'offres.</p><p><br></p><p>Les CG susmentionnées, disponibles à l’adresse <a href=\"https://www.bkb.admin.ch/fr/conditions-generales-cg-de-la-confederation\" rel=\"noopener noreferrer\" target=\"_blank\">https://www.bkb.admin.ch/fr/conditions-generales-cg-de-la-confederation</a>, s’appliquent au présent marché.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s279",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/3/description/it",
+        "startUtf16": 0,
+        "endUtf16": 1164,
+        "text": "<p>L’offerente conferma di aver preso atto delle CG della Confederazione</p><ul><li><a href=\"https://www.bkb.admin.ch/it/condizioni-generali-di-contratto-della-confederazione\" rel=\"noopener noreferrer\" target=\"_blank\">per le commesse di prestazioni di servizio (edizione: settembre 2016, stato: gennaio 2024)</a></li><li><a href=\"https://www.bkb.admin.ch/it/condizioni-generali-di-contratto-della-confederazione\" rel=\"noopener noreferrer\" target=\"_blank\">per l’acquisto di beni (edizione: settembre 2016, stato: gennaio 2024)</a></li></ul><p><br></p><p>completato dalle disposizioni standard sulla sicurezza delle informazioni senza riferimento alle risorse informatiche della Confederazione senza consegna di apparecchiature della Confederazione (H2).</p><p>Il documento «H2» è allegato al capitolato d'appalto.</p><p><br></p><p>e di accettarle senza riserve.</p><p>&nbsp;</p><p>Nella presente procedura si applicano le CG pubblicate qui: <a href=\"https://www.bkb.admin.ch/it/condizioni-generali-di-contratto-della-confederazione\" rel=\"noopener noreferrer\" target=\"_blank\">https://www.bkb.admin.ch/it/condizioni-generali-di-contratto-della-confederazione</a>.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s284",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/3/verification/de",
+        "startUtf16": 0,
+        "endUtf16": 66,
+        "text": "<p>Schriftliche Bestätigung im Anhang B.1 \"Angebotsformulare\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s285",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/3/verification/fr",
+        "startUtf16": 0,
+        "endUtf16": 67,
+        "text": "<p>Confirmation écrite dans l'annexe B.1 \"Formulaires d'offre\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s286",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/3/verification/it",
+        "startUtf16": 0,
+        "endUtf16": 72,
+        "text": "<p>Conferma scritta nell'allegato B.1 \"Moduli relativi all'offerta\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s287",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/4/description/de",
+        "startUtf16": 0,
+        "endUtf16": 196,
+        "text": "<p>Der Anbieter bestätigt, den im Teil A enthalten Vertragsentwurf (aka Musterrahmenvertrag) inkl. seiner Anhänge und Beilagen zur Kenntnis genommen zu haben und anerkennt diesen vorbehaltlos.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s288",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/4/description/fr",
+        "startUtf16": 0,
+        "endUtf16": 199,
+        "text": "<p>Le fournisseur confirme qu’il a pris connaissance du projet de contrat contenu dans la partie A (modèle de contrat-cadre), annexes et pièces jointes comprises, et qu’il l’accepte sans réserve.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s289",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/4/description/it",
+        "startUtf16": 0,
+        "endUtf16": 213,
+        "text": "<p>L’offerente conferma di aver preso atto della bozza di contratto (ovvero del modello di contratto quadro) contenuta nella parte A, compresi tutti gli allegati e i supplementi, e di accettarla senza riserve.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s294",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/4/verification/de",
+        "startUtf16": 0,
+        "endUtf16": 66,
+        "text": "<p>Schriftliche Bestätigung im Anhang B.1 \"Angebotsformulare\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s295",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/4/verification/fr",
+        "startUtf16": 0,
+        "endUtf16": 67,
+        "text": "<p>Confirmation écrite dans l'annexe B.1 \"Formulaires d'offre\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s296",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/4/verification/it",
+        "startUtf16": 0,
+        "endUtf16": 72,
+        "text": "<p>Conferma scritta nell'allegato B.1 \"Moduli relativi all'offerta\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s297",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/5/description/de",
+        "startUtf16": 0,
+        "endUtf16": 1200,
+        "text": "<p>Der Anbieter verfügt über genügend Erfahrung in Projekten, die mit dem vorliegenden Auftrag hinsichtlich Umfangs und Komplexität vergleichbar sind. Er weist diese Erfahrung anhand von <strong>4 Referenzen</strong> in den letzten 4 Jahren (nicht älter als 2022) nach. Die Referenz muss die nachfolgenden Kriterien zwingend erfüllen:</p><ul><li>Selbstständige Planung und Realisation von vergleichbaren Events mit Gesamtverantwortung. Als vergleichbar gelten bspw. Firmenevents und Konferenzen.</li><li>Die Planung und Realisation müssen beim Referenzprojekt überwiegend in Eigenleistung durch den Anbieter erbracht worden sein. Für kleinere Leistungen dürfen Subunternehmer beigezogen worden sein.</li><li>Der Anbieter hat ähnliche Leistungen als Eventtechnik-Spezialist erbracht. Als ähnliche Leistungen gelten namentlich das Beraten von Kunden, die Planung des Anlasses und der Ressourcen, die Leitung des Eventteams und das Abschliessen eines Events inkl. der Erstellung einer Projektschlussrechnung.</li><li>Der Anbieter hat im Rahmen der Planung und Realisation von Events Erfahrung in der Führung von Profilen in folgenden Rollen:</li><li>- Projektleitung</li><li>- Audiotechnik</li><li>-&nbs",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s298",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/5/description/de",
+        "startUtf16": 1200,
+        "endUtf16": 2300,
+        "text": "p;Videotechnik</li><li>- Lichttechnik</li><li>-&nbsp;Rigging</li><li>- Kameraführung</li><li>- Transport</li><li>Mit der Referenz ist nachvollziehbar aufzuzeigen, welche Relevanz dieselbe für den vorliegenden Ausschreibungsgegenstand besitzt und welche Faktoren zum Erfolg im Referenzprojekt geführt haben.</li><li>Referenzanlässe müssen ab dem Jahr 2022 oder später erbracht worden sein.</li><li>Eine der vier Referenzen muss ein Volumen von mind. 400'000 exkl. MwSt. aufweisen</li></ul><p><br></p><p>Für die Referenz muss eine Kontaktperson inklusive Stellvertretung angegeben sein, welche die Auftraggeberin kontaktieren darf. Die Auftraggeberin behält sich vor, die angegebenen Kontaktpersonen zu kontaktieren. Die genannte Kontaktperson muss erreichbar sein (Ferienabwesenheiten und entsprechende Stellvertreter sind zu nennen).</p><p><br></p><p>In Bezug auf Bundesreferenzen ist zu beachten, dass Referenzauskünfte über vom Anbieter für den Bund realisierte Projekte nur zugelassen werden, wenn die aufgeführten Referenzpersonen jeweils ihre Zustimmung zur Auskunftserteilung gegeben haben.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s299",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/5/description/fr",
+        "startUtf16": 0,
+        "endUtf16": 1200,
+        "text": "<p>Le soumissionnaire a suffisamment d’expérience dans la réalisation de projets comparables au présent mandat du point de vue de l’étendue et de la complexité des prestations. Il atteste cette expérience en fournissant <strong>quatre références </strong>relatives à des mandats exécutés au cours des quatre dernières années (pas avant 2022). La référence doit obligatoirement répondre aux critères suivants :</p><p><br></p><ul><li>Planification et réalisation autonome de manifestations comparables avec responsabilité globale. Par comparables, on entend, par exemple, les événements d’entreprise et les conférences.</li><li>Dans le projet de référence, la planification et la réalisation doivent avoir été fournies principalement par le soumissionnaire lui-même. Des entreprises sous-traitantes ont pu être engagées pour les petites prestations.</li><li>Le soumissionnaire a fourni des prestations similaires en tant que spécialiste en technique événementielle. Par prestations similaires, on entend notamment le conseil aux clients, la planification de l’événement et des ressources, la direction de l’équipe chargée de l’événement et de la clôture de celui-ci, y compris l’établissement de la fac",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s300",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/5/description/fr",
+        "startUtf16": 1200,
+        "endUtf16": 2400,
+        "text": "ture finale pour le projet.</li><li>Dans le cadre de la planification et de la réalisation d’événements, le soumissionnaire a de l’expérience dans la direction des profils professionnels suivants :</li><li>- chef de projet ;</li><li>- technicien du son ;</li><li>- technicien audiovisuel ;</li><li>-&nbsp;éclairagiste ;</li><li>-&nbsp;rigger ;</li><li>-&nbsp;directeur vidéo ;</li><li>-&nbsp;spécialiste en transport.</li><li>La référence doit indiquer de manière transparente la pertinence qu’elle présente pour le présent objet de l’appel d’offres et les facteurs qui ont contribué au succès dans le projet de référence.</li><li>Les événements doivent avoir eu lieu en 2022 au plus tard.</li><li>Une des quatre références doit représenter un volume d’au moins 400 000 francs hors TVA.</li></ul><p><br></p><p>Dans ce cadre, il faut indiquer une personne de contact, y compris son suppléant, que l’adjudicateur peut contacter. Celui-ci se réserve le droit de prendre contact avec les interlocuteurs indiqués. Ces personnes doivent être joignables (indication des absences dues aux vacances et du nom des suppléants correspondants).</p><p><br></p><p>À noter que les références relatives à des projets ",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s301",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/5/description/fr",
+        "startUtf16": 2400,
+        "endUtf16": 2551,
+        "text": "réalisés pour la Confédération ne sont admises que si les personnes de référence indiquées acceptent de fournir des renseignements sur ces projets.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s302",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/5/description/it",
+        "startUtf16": 0,
+        "endUtf16": 1200,
+        "text": "<p>L’offerente ha acquisito sufficiente esperienza nella realizzazione di progetti equivalenti alla presente commessa dal punto di vista dell’entità e della complessità. Egli dimostra questa esperienza sulla base di <strong>4 referenze</strong> risalenti agli ultimi 4 anni (dal 2022 in poi). La referenza deve soddisfare obbligatoriamente i criteri descritti di seguito.</p><p><br></p><ul><li>Pianificazione e realizzazione in autonomia di eventi equivalenti, inclusa la responsabilità generale. Sono considerati tali gli eventi aziendali e le conferenze.</li><li>La pianificazione e la realizzazione devono essere fornite per il progetto della referenza prevalentemente come prestazione propria da parte dell’offerente. Per prestazioni di minore entità è ammessa la partecipazione di subappaltatori.</li><li>L’offerente ha fornito prestazioni analoghe in qualità di specialista nella tecnica per eventi. Nel concreto, sono considerate tali la consulenza fornita a clienti, la pianificazione di eventi e risorse, la direzione di team preposti all’organizzazione e allo svolgimento di eventi, compresa la stesura della fattura finale.</li><li>Nel quadro della pianificazione e della realizzazione di ",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s303",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/5/description/it",
+        "startUtf16": 1200,
+        "endUtf16": 2400,
+        "text": "eventi, l’offerente ha maturato esperienza nella gestione dei seguenti profili professionali / ruoli:</li><li>- capoprogetto dell’evento;</li><li>- tecnico del suono APF o profilo professionale equivalente;</li><li>- tecnico dell’audiovisivo APF o profilo professionale equivalente;</li><li>- addetto alle luci;</li><li>- rigger;</li><li>- cameraman;</li><li>- addetto ai trasporti nel settore della tecnica per eventi.</li><li>Dalla referenza si deve desumere chiaramente quale rilevanza ha la stessa rispetto al presente oggetto del bando e quali fattori hanno portato al buon esito del progetto indicato come referenza.</li><li>Gli eventi oggetto della referenza devono essere stati realizzati dal 2022 in poi.</li><li>1 delle 4 referenze fornite deve avere un volume di almeno CHF 400 000, IVA esclusa.</li></ul><p><br></p><p>Per la referenza è necessario indicare una persona di contatto e il relativo sostituto che il committente può contattare. Il committente si riserva il diritto di contattare le persone indicate. La persona di contatto menzionata deve essere raggiungibile (segnalare le assenze per vacanze e il relativo sostituto).</p><p><br></p><p>Per quanto riguarda le referenze concer",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s304",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/5/description/it",
+        "startUtf16": 2400,
+        "endUtf16": 2606,
+        "text": "nenti oggetti della Confederazione, le informazioni sui progetti realizzati dall’offerente per conto della Confederazione sono ammesse solo se le persone indicate hanno dato il loro consenso a fornirle.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s309",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/5/verification/de",
+        "startUtf16": 0,
+        "endUtf16": 250,
+        "text": "<p>Schriftliche Bestätigung im Anhang B.1 \"Angebotsformulare\".</p><ul><li>Das Formular ist mit einem geeigneten Referenzprojekt auszufüllen.</li><li>Pro Referenz sind die oben genannten Kriterien nachvollziehbar und vollständig beschrieben.</li></ul>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s310",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/5/verification/fr",
+        "startUtf16": 0,
+        "endUtf16": 291,
+        "text": "<p>Confirmation écrite dans l'annexe B.1 \"Formulaires d'offre\".</p><ul><li>Remplir le formulaire avec la description d’un projet de référence adéquat.</li><li>Les critères applicables à la référence et décrits ci-dessus doivent être détaillés de manière complète et compréhensible.</li></ul>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s311",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/5/verification/it",
+        "startUtf16": 0,
+        "endUtf16": 279,
+        "text": "<p>Conferma scritta nell'allegato B.1 \"Moduli relativi all'offerta\".</p><ul><li>Il modulo alla pagina seguente deve essere compilato con un progetto di referenza idoneo.</li><li>Per ogni referenza i criteri summenzionati sono descritti in modo comprensibile e completo.</li></ul>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s312",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/6/description/de",
+        "startUtf16": 0,
+        "endUtf16": 1200,
+        "text": "<p>Der Anbieter bestätigt, dass er zum Zeitpunkt des Auftragsstarts über die erforderlichen personellen Ressourcen verfügt und <strong>mindestens die im Pflichtenheft, Kapitel 3.2.2 „Grundleistung“, definierten Profile inkl. Mindestanforderungen sowie die dort geforderte Anzahl an FTE</strong> bereitstellen kann, um sämtliche Leistungsbereiche gemäss Leistungsbeschreibung zu erbringen.</p><p><br></p><p>Der Anbieter bestätigt ebenfalls, dass er bereit ist, Schlüsselpersonen einzusetzen, die über die geforderten Sprachkenntnisse verfügen und die Projektergebnisse in den geforderten Sprachen erstellen und abliefern können.</p><p><br></p><p>Der Anbieter ist bereit, Projektleitung/SPOC einzusetzen, die in deutscher Sprache (mindestens auf Niveau B2 GER*) kommunizieren und die Projektergebnisse und Dokumentationen in deutscher Sprache erstellen und abliefern können.</p><p>Sowie für die <strong>Lose 2-3</strong> in folgender Sprache (mind. auf Niveau A2 GER*) kommunizieren und die Projektergebnisse und Dokumentationen erstellen und abliefern können: </p><p><strong>Los 2</strong>, Tessin: Italienisch</p><p><strong>Los 3</strong>, Romandie: Französisch</p><p><br></p><p>*GER = Gemeinsamer Eu",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s313",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/6/description/de",
+        "startUtf16": 1200,
+        "endUtf16": 1242,
+        "text": "ropäischer Referenzrahmen für Sprachen</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s314",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/6/description/fr",
+        "startUtf16": 0,
+        "endUtf16": 1200,
+        "text": "<p>Le soumissionnaire confirme qu’il dispose des ressources humaines nécessaires au début du mandat et <strong>qu’il est en mesure de fournir au moins les profils définis dans le cahier des charges, chapitre 3.2.2 « Mandat de base », exigences minimales comprises, ainsi que le nombre d’EPT suffisant</strong> à l’exécution des groupes de prestations décrits dans le cahier des charges.</p><p>&nbsp;</p><p>Le soumissionnaire confirme également qu’il est disposé à employer des personnes clés qui possèdent les compétences linguistiques requises et qui sont en mesure de fournir les résultats du projet dans les langues demandées.</p><p>&nbsp;</p><p>Le soumissionnaire s’engage à faire appel à un chef de projet/SPOC qui maîtrise l’allemand (au moins au niveau B2 CECR*) et qui est en mesure d’établir et de livrer les résultats du projet et les documentations en allemand.</p><p>Pour les <strong>lots 2 et 3</strong>, les chefs de projet maîtrisent les langues suivantes (au moins au niveau A2 CECR*) et sont en mesure d’établir et de livrer les résultats du projet et les documentations dans ces langues : </p><p><strong>Lot 2</strong>, Tessin : italien</p><p><strong>Lot 3</strong>, Suisse romande ",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s315",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/6/description/fr",
+        "startUtf16": 1200,
+        "endUtf16": 1291,
+        "text": ": français</p><p><br></p><p>*CECR = Cadre européen commun de référence pour les langues</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s316",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/6/description/it",
+        "startUtf16": 0,
+        "endUtf16": 1200,
+        "text": "<p>L’offerente conferma di disporre, alla data in cui inizia l’esecuzione della commessa, delle risorse di personale necessarie e di essere in grado di predisporre <strong>almeno i profili professionali, inclusi i requisiti minimi, definiti al numero 3.2.2. «Commessa di base» del capitolato d’oneri, come pure il numero di FTE ivi richiesti</strong>, al fine di fornire l’intera gamma di prestazioni di servizi conformemente alla descrizione delle prestazioni.</p><p>&nbsp;</p><p>L’offerente conferma altresì di essere disposto a impiegare persone chiave con le conoscenze linguistiche richieste e in grado di elaborare e fornire i risultati del progetto nelle lingue richieste.</p><p>&nbsp;</p><p>L’offerente è disposto a impiegare un capoprogetto e un interlocutore (SPOC) che siano in grado di comunicare in tedesco (almeno al livello B2 QCER*), nonché di elaborare e fornire i risultati del progetto e la relativa documentazione in tedesco.</p><p>Per i <strong>lotti 2 e 3</strong>, l’offerente è in grado di comunicare nelle lingue elencate di seguito (almeno al livello A2 QCER*), nonché di elaborare e fornire i risultati del progetto e la relativa documentazione. </p><p><strong>Lotto 2</str",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s317",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/6/description/it",
+        "startUtf16": 1200,
+        "endUtf16": 1403,
+        "text": "ong>, Cantone Ticino: italiano.</p><p><strong>Lotto 3</strong>, Cantoni della Svizzera francese: francese.</p><p><br></p><p>*QCER = Quadro comune europeo di riferimento per la conoscenza delle lingue</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s319",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/6/title/de",
+        "startUtf16": 0,
+        "endUtf16": 63,
+        "text": "EK 7 Personelle Ressourcen & Sprachkenntnisse Schlüsselpersonen",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s320",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/6/title/fr",
+        "startUtf16": 0,
+        "endUtf16": 75,
+        "text": "CAp 7 Ressources humaines et connaissances linguistiques des personnes clés",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s321",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/6/title/it",
+        "startUtf16": 0,
+        "endUtf16": 72,
+        "text": "CI 7 Risorse di personale e conoscenze linguistiche delle persone chiave",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s322",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/6/verification/de",
+        "startUtf16": 0,
+        "endUtf16": 606,
+        "text": "<p>a) Nachvollziehbare Dokumentation der für den Auftrag eingesetzten Projektleitung/SPOC und Stv. SPOC. Angaben mittels Formulars im Anhang B.1 \"Angebotsformulare\".</p><p>b) Nachvollziehbare Dokumentation der Sprachkenntnisse der Projektleitung/SPOC und Stv. SPOC. Das geforderte Sprachniveau kann durch Zertifikate von Sprachschulen, Erfahrung (z.B. Muttersprache, bilingual aufgewachsen) oder Beschreibung der sprachlichen Ausbildung z.B. Fremdsprachenaufenthalte, schulische Sprachausbildung Niveau gem. GER, usw. belegt werden.<em> </em>Angaben mittels Formulars im Anhang B.1 \"Angebotsformulare\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s323",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/6/verification/fr",
+        "startUtf16": 0,
+        "endUtf16": 674,
+        "text": "<p>a) Documentation claire portant sur les personnes engagées en tant que chef de projet/SPOC et suppléant. Indications au moyen du formulaire dans l'annexe B.1 \"Formulaires d'offre\".</p><p>b) Documentation claire relative aux connaissances linguistiques du chef de projet/SPOC et suppléant. Le niveau de langue requis peut être attesté au moyen de certificats d’écoles de langues, par l’expérience (par ex. langue maternelle, avoir grandi dans un environnement bilingue) ou par la description de la formation linguistique (par ex. séjours linguistiques, formation scolaire, niveau CECR, etc.). Indications au moyen du formulaire dans l'annexe B.1 \"Formulaires d'offre\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s324",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/6/verification/it",
+        "startUtf16": 0,
+        "endUtf16": 835,
+        "text": "<p>a) Documentazione che indichi chiaramente il capoprogetto, l’interlocutore (SPOC) e il rispettivo sostituto impiegati nella commessa. Le informazioni vanno indicate nel modulo riportato nell'allegato B.1 \"Moduli relativi all'offerta\".</p><p>b) Documentazione che indichi chiaramente le conoscenze linguistiche del capoprogetto, dell’interlocutore (SPOC) e del rispettivo sostituto. Il livello linguistico richiesto può essere comprovato mediante certificati di scuole di lingue oppure descrivendo la propria esperienza (ad es. persona bilingue dalla nascita) o la propria formazione linguistica (ad es. soggiorni all’estero per l’apprendimento della lingua o formazione linguistica scolastica con indicazione del livello QCER). Le informazioni vanno indicate nel modulo riportato nell'allegato B.1 \"Moduli relativi all'offerta\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s325",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/7/description/de",
+        "startUtf16": 0,
+        "endUtf16": 1011,
+        "text": "<p>Der Anbieter bestätigt, dass er bereit ist, eingesetzte Mitarbeitende bei Vorliegen wichtiger Gründe wie folgt zu ersetzen:</p><p>Die Leistung und der Einsatz der vom Anbieter zur Verfügung gestellten Personen werden durch den Auftraggeber beurteilt. Wird dabei eine Diskrepanz zu den Anforderungen und Kriterien gemäss Pflichtenheft und Anhängen festgestellt, hat der Anbieter diesbezüglich Stellung zu nehmen. Während der Veranstaltung entscheidet der Auftraggeber, ob der Anbieter verpflichtet wird, die betreffenden Personen innert 1 Tag durch Personal zu ersetzen, welches den Anforderungen genügen.</p><p>Im Rahmen des Veranstaltungszeitraums können auch andere wichtige Gründe für den Ersatz von Personal auftreten wie negative Personensicherheitsprüfung des Bundes, Kündigung, längerer Urlaub, Unfall, Krankheit etc. Der Anbieter ist für den Ersatz durch eine gleich qualifizierte Person verantwortlich. Das Engagement in anderen Projekten des Auftragnehmers gilt dabei nicht als wichtiger Grund.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s326",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/7/description/fr",
+        "startUtf16": 0,
+        "endUtf16": 1053,
+        "text": "<p>Le soumissionnaire s’engage à remplacer les collaborateurs mis à disposition si de justes motifs l’exigent.</p><p>L’adjudicateur évalue les prestations des personnes mises à disposition par le soumissionnaire. Si celles-ci ne satisfont pas aux exigences fixées dans le cahier des charges et ses annexes, le soumissionnaire est tenu de s’en expliquer. Pendant la manifestation, l’adjudicateur décide si le soumissionnaire est tenu de remplacer dans un délai d’un jour les personnes concernées par du personnel répondant aux exigences.</p><p>Pendant la manifestation, il peut se produire d’autres faits constituant de justes motifs de remplacement du personnel (résultat défavorable du contrôle de sécurité relatif aux personnes, résiliation du contrat de travail, congé de longue durée, accident, maladie, etc.). Dans un tel cas, le soumissionnaire est tenu de remplacer le collaborateur concerné par une personne possédant des qualifications équivalentes. L’engagement dans d’autres projets du mandataire n’est pas considéré comme un juste motif.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s327",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/7/description/it",
+        "startUtf16": 0,
+        "endUtf16": 1089,
+        "text": "<p>L’offerente conferma che è disposto, in presenza di motivi gravi, a sostituire i collaboratori impiegati come segue.</p><p>La prestazione e l’impiego delle persone messe a disposizione dall’offerente vengono valutati dal committente. Se si riscontrano discrepanze rispetto ai requisiti e ai criteri definiti nel capitolato d’oneri e negli allegati, l’offerente deve prendere posizione al riguardo. Durante l’evento il committente decide se l’offerente è tenuto a sostituire entro 1 giorno le persone in questione con personale che soddisfa i requisiti.</p><p>Durante lo svolgimento dell’evento possono subentrare anche altri gravi motivi che giustificano la sostituzione di personale, ad esempio l’esito negativo del controllo di sicurezza relativo alle persone effettuato dalla Confederazione, la disdetta del contratto di lavoro, un congedo di lunga durata, un infortunio, una malattia ecc. L’offerente è tenuto a sostituire i collaboratori in questione con persone in possesso di qualifiche equivalenti. L’impiego in altri progetti del mandatario non costituisce un motivo grave.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s328",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/7/id",
+        "startUtf16": 0,
+        "endUtf16": 36,
+        "text": "8dbb9009-3065-4ca4-b96d-7e55fe7bfb31",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s329",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/7/title/de",
+        "startUtf16": 0,
+        "endUtf16": 66,
+        "text": "EK 8 Ersatz von Mitarbeitenden während des Veranstaltungszeitraums",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s330",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/7/title/fr",
+        "startUtf16": 0,
+        "endUtf16": 65,
+        "text": "CAp 8 Remplacement de collaborateurs au cours de la manifestation",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s331",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/7/title/it",
+        "startUtf16": 0,
+        "endUtf16": 51,
+        "text": "CI 8 Sostituzione di collaboratori durante l’evento",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s332",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/7/verification/de",
+        "startUtf16": 0,
+        "endUtf16": 66,
+        "text": "<p>Schriftliche Bestätigung im Anhang B.1 \"Angebotsformulare\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s333",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/7/verification/fr",
+        "startUtf16": 0,
+        "endUtf16": 67,
+        "text": "<p>Confirmation écrite dans l'annexe B.1 \"Formulaires d'offre\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s334",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/7/verification/it",
+        "startUtf16": 0,
+        "endUtf16": 72,
+        "text": "<p>Conferma scritta nell'allegato B.1 \"Moduli relativi all'offerta\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s335",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/8/description/de",
+        "startUtf16": 0,
+        "endUtf16": 565,
+        "text": "<p>Der Anbieter bestätigt, dass er sämtliche Spesen in den Angebotspreis mit eingerechnet hat.</p><p>Bei den mehrtägigen Veranstaltungen (House of Switzerland am WEF sowie grosse Konferenzen) sind Verpflegung, Reise und Übernachtung vollständig in der Tagespauschale bzw. im Stundenansatz einzurechnen. Bei den eintägigen Veranstaltungen (Pressekonferenzen, kleine Konferenzen) sowie in der Tabelle «Materialliste Dienstleistungen» sind Verpflegung und Reise, jedoch keine Übernachtungskosten einzurechnen. Eine separate Vergütung erfolgt in allen Fällen nicht.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s336",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/8/description/fr",
+        "startUtf16": 0,
+        "endUtf16": 624,
+        "text": "<p>Le soumissionnaire confirme qu’il a inclus tous les frais dans le prix de l’offre.</p><p>Pour les manifestations de plusieurs jours (House of Switzerland au WEF ainsi que les grandes conférences), les repas, les déplacements et l'hébergement doivent être entièrement inclus dans le forfait journalier ou le tarif horaire. Pour les manifestations d'un jour (conférences de presse, petites conférences) ainsi que dans le tableau « Liste du matériel – Services », seuls les repas et les déplacements doivent être inclus, à l'exclusion des frais d'hébergement. Aucune indemnisation séparée n'est prévue dans tous les cas.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s337",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/8/description/it",
+        "startUtf16": 0,
+        "endUtf16": 587,
+        "text": "<p>L’offerente conferma di aver incluso tutte le spese nel prezzo dell’offerta.</p><p>Per le manifestazioni di più giorni (House of Switzerland al WEF nonché le grandi conferenze), i pasti, gli spostamenti e il pernottamento devono essere interamente inclusi nel forfait giornaliero o nella tariffa oraria. Per le manifestazioni di un giorno (conferenze stampa, piccole conferenze) nonché nella tabella «Elenco dei materiali - Servizi», devono essere inclusi solo i pasti e gli spostamenti, escluse le spese di pernottamento. In tutti i casi non è prevista alcuna indennità separata.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s342",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/8/verification/de",
+        "startUtf16": 0,
+        "endUtf16": 66,
+        "text": "<p>Schriftliche Bestätigung im Anhang B.1 \"Angebotsformulare\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s343",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/8/verification/fr",
+        "startUtf16": 0,
+        "endUtf16": 67,
+        "text": "<p>Confirmation écrite dans l'annexe B.1 \"Formulaires d'offre\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s344",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/8/verification/it",
+        "startUtf16": 0,
+        "endUtf16": 72,
+        "text": "<p>Conferma scritta nell'allegato B.1 \"Moduli relativi all'offerta\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s345",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/9/description/de",
+        "startUtf16": 0,
+        "endUtf16": 672,
+        "text": "<p>Der Anbieter bestätigt, dass er auf aktuelles Eventmaterial gemäss Ziff. 3.2.2 im b26023_Pflichtenheft und b26023_Teil B_Anhang_B.2_Preiseingabe, zurückgreifen kann oder dieses Eventmaterial bei Drittanbietern anmietet (allfällige Mietkosten sind ebenfalls einzuberechnen).</p><p>Wo in der Materialliste keine spezifischen Produktangaben gemacht wurden, bestätigt der Anbieter, dass die von ihm angebotenen Produkte den beschriebenen Spezifikationen entsprechen bzw. gleichwertig sind. Marke und detaillierte technische Spezifikationen der tatsächlich eingesetzten Produkte sind dem Auftraggeber im Rahmen des jeweiligen Einzelauftrags (Abrufverfahren) mitzuteilen.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s346",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/9/description/fr",
+        "startUtf16": 0,
+        "endUtf16": 774,
+        "text": "<p>Le soumissionnaire confirme qu’il peut recourir à du matériel événementiel récent conformément au ch. 3.2.2 du cahier des charges et b26023_PARTIE B_Annexe B.2_Feuille des prix ou qu’il peut louer ce matériel auprès de prestataires tiers (les éventuels frais de location doivent également être intégrés au calcul).</p><p>Lorsque la liste de matériel ne contient pas d'indications spécifiques sur les produits, le soumissionnaire confirme que les produits qu'il propose correspondent aux spécifications décrites, respectivement qu'ils sont équivalents. La marque et les spécifications techniques détaillées des produits effectivement utilisés doivent être communiquées au mandant dans le cadre de la commande individuelle respective (procédure d'appel de prestations).</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s347",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/9/description/it",
+        "startUtf16": 0,
+        "endUtf16": 741,
+        "text": "<p>L’offerente conferma di disporre di materiale per eventi di ultima generazione, conformemente a quanto specificato al numero 3.2.2 del capitolato d’oneri e nell’allegato b26023_PARTE B_Allegato B.2_Listino prezzi, oppure di prenderlo a noleggio da terzi (gli eventuali costi di noleggio vanno inclusi nel calcolo).</p><p>Se nell'elenco del materiale non vengono riportate indicazioni specifiche sui prodotti, l'offerente conferma che i prodotti da esso proposti corrispondono alle specifiche descritte, rispettivamente che sono equivalenti. Il marchio e le specifiche tecniche dettagliate dei prodotti effettivamente utilizzati devono essere comunicati al committente nell'ambito del rispettivo ordine singolo (procedura di richiamo).</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s352",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/9/verification/de",
+        "startUtf16": 0,
+        "endUtf16": 66,
+        "text": "<p>Schriftliche Bestätigung im Anhang B.1 \"Angebotsformulare\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s353",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/9/verification/fr",
+        "startUtf16": 0,
+        "endUtf16": 67,
+        "text": "<p>Confirmation écrite dans l'annexe B.1 \"Formulaires d'offre\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s354",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/9/verification/it",
+        "startUtf16": 0,
+        "endUtf16": 72,
+        "text": "<p>Conferma scritta nell'allegato B.1 \"Moduli relativi all'offerta\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s355",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/10/description/de",
+        "startUtf16": 0,
+        "endUtf16": 680,
+        "text": "<p>Der Anbieter verpflichtet sich zur Diskretion bei der Planung und Abwicklung dieses Auftrages. Ebenso bestätigt der Anbieter, dass sämtliche im Mandat erhaltenen Informationen vertraulich behandelt werden und keine Weitergabe von Informationen an Dritte erfolgt.</p><p><br></p><p>Der Anbieter bestätigt, dass er die Weisungen des Bundesrates über die IKT-Sicherheit in der Bundesverwaltung vgl. <a href=\"https://www.ncsc.admin.ch/ncsc/de/home/dokumentation/sicherheitsvorgaben-bund/sicherheitsverfahren/grundschutz.html\" rel=\"noopener noreferrer\" target=\"_blank\">Si001-Hi0 - Massnahmenumsetzung IT-Grundschutz in der Bundesverwaltung</a> (Stand am 5. Juli 2024) akzeptiert.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s356",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/10/description/fr",
+        "startUtf16": 0,
+        "endUtf16": 758,
+        "text": "<p>Le soumissionnaire s’engage à faire preuve de discrétion dans la planification et la réalisation du présent mandat. De même, le soumissionnaire confirme que toutes les informations reçues dans le cadre du mandat sont traitées de manière confidentielle et qu’aucune information n’est transmise à des tiers.</p><p>&nbsp;</p><p>Le soumissionnaire confirme qu’il accepte les directives concernant la sécurité informatique dans l’administration fédérale, <a href=\"https://www.ncsc.admin.ch/ncsc/fr/home/dokumentation/sicherheitsvorgaben-bund/sicherheitsverfahren/grundschutz.html\" rel=\"noopener noreferrer\" target=\"_blank\">Si001-Hi0 - Mise en œuvre des mesures de protection informatique de base dans l’administration fédérale</a> (état au 5 juillet 2024).</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s357",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/10/description/it",
+        "startUtf16": 0,
+        "endUtf16": 609,
+        "text": "<p>L’offerente è tenuto alla discrezione sia nella pianificazione che nell’esecuzione della presente commessa. Conferma inoltre che tutte le informazioni contenute nel mandato saranno trattate in modo confidenziale e che nessuna informazione sarà trasmessa a terzi.</p><p>&nbsp;</p><p>L’offerente conferma di aver preso atto e di accettare la direttiva del 5 luglio 2024 «<a href=\"https://www.ncsc.admin.ch/ncsc/it/home/dokumentation/sicherheitsvorgaben-bund/sicherheitsverfahren/grundschutz.html\" rel=\"noopener noreferrer\" target=\"_blank\">Si001 - Protezione IT di base nell’Amministrazione federale</a>».</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s362",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/10/verification/de",
+        "startUtf16": 0,
+        "endUtf16": 66,
+        "text": "<p>Schriftliche Bestätigung im Anhang B.1 \"Angebotsformulare\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s363",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/10/verification/fr",
+        "startUtf16": 0,
+        "endUtf16": 67,
+        "text": "<p>Confirmation écrite dans l'annexe B.1 \"Formulaires d'offre\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s364",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/10/verification/it",
+        "startUtf16": 0,
+        "endUtf16": 72,
+        "text": "<p>Conferma scritta nell'allegato B.1 \"Moduli relativi all'offerta\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s365",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/11/description/de",
+        "startUtf16": 0,
+        "endUtf16": 387,
+        "text": "<p>Der Anbieter verpflichtet sich, die vereinbarten Leistungen neutral und unparteiisch zu erbringen. Das bedeutet, dass er bei der Planung und Durchführung weder politische, religiöse noch weltanschauliche Ansichten einbringt oder diese beeinflusst. Die Leistungen dürfen somit nicht genutzt werden, um bestimmte Überzeugungen, Religionen oder Ideologien zu fördern oder abzulehnen.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s366",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/11/description/fr",
+        "startUtf16": 0,
+        "endUtf16": 397,
+        "text": "<p>Le soumissionnaire s’engage à fournir les prestations convenues de manière neutre et impartiale. Cela signifie que, lors de la planification et de la réalisation des prestations, il n’exprimera ni n’introduira aucune opinion politique, religieuse ou philosophique. Les prestations ne doivent donc pas être utilisées pour promouvoir ou réfuter certaines convictions, religions ou idéologies.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s367",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/11/description/it",
+        "startUtf16": 0,
+        "endUtf16": 364,
+        "text": "<p>L’offerente si impegna a fornire le prestazioni convenute in modo neutrale e imparziale. Ciò significa che nella pianificazione e nell’esecuzione non esprime opinioni politiche, religiose o ideologiche, né cerca di influenzarle. Pertanto, le prestazioni non possono essere utilizzate per sostenere o avversare determinate convinzioni, religioni o ideologie.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s372",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/11/verification/de",
+        "startUtf16": 0,
+        "endUtf16": 66,
+        "text": "<p>Schriftliche Bestätigung im Anhang B.1 \"Angebotsformulare\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s373",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/11/verification/fr",
+        "startUtf16": 0,
+        "endUtf16": 67,
+        "text": "<p>Confirmation écrite dans l'annexe B.1 \"Formulaires d'offre\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s374",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/11/verification/it",
+        "startUtf16": 0,
+        "endUtf16": 72,
+        "text": "<p>Conferma scritta nell'allegato B.1 \"Moduli relativi all'offerta\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s375",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/12/description/de",
+        "startUtf16": 0,
+        "endUtf16": 213,
+        "text": "<p>Der Anbieter bestätigt, dass das eingesetzte Personal über die nötigen und gültigen Zertifizierungen im Bereich Höhenarbeit verfügt und bei Bedarf des Auftraggebers auf erste Aufforderung hin vorlegen wird.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s376",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/12/description/fr",
+        "startUtf16": 0,
+        "endUtf16": 202,
+        "text": "<p>Le soumissionnaire confirme que le personnel engagé possède les certifications requises et valables dans le domaine du travail en hauteur et les présentera sans délai au mandant en cas de besoin.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s377",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/12/description/it",
+        "startUtf16": 0,
+        "endUtf16": 230,
+        "text": "<p>L’offerente conferma che il personale impiegato dispone delle licenze valide necessarie nel settore del lavoro in quota e che, all’occorrenza, queste possono essere esibite al committente su prima richiesta di quest’ultimo.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s382",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/12/verification/de",
+        "startUtf16": 0,
+        "endUtf16": 66,
+        "text": "<p>Schriftliche Bestätigung im Anhang B.1 \"Angebotsformulare\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s383",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/12/verification/fr",
+        "startUtf16": 0,
+        "endUtf16": 67,
+        "text": "<p>Confirmation écrite dans l'annexe B.1 \"Formulaires d'offre\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s384",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/12/verification/it",
+        "startUtf16": 0,
+        "endUtf16": 72,
+        "text": "<p>Conferma scritta nell'allegato B.1 \"Moduli relativi all'offerta\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s385",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/13/description/de",
+        "startUtf16": 0,
+        "endUtf16": 674,
+        "text": "<p>Der Anbieter verfügt über geeignete LKWs (Ladekapazität mind. 12 t) sowie über LKW-Fahrer mit einem gültigen Führerausweis mindestens der Kategorie CE oder gleichwertig.</p><p><br></p><p>Die zu verwendenden LKWs sind ausserdem mit einem Kastenaufbau ausgestattet, um das Material optimal gegen Witterung, Einbruch und Vandalismus zu schützen. Das technische Equipment ist hauptsächlich in Flightcases auf Rollen verstaut und muss fachgerecht verladen und gesichert werden.</p><p><br></p><p><em>Definition Führerausweis Kategorie CE:</em></p><p>Fahrzeugkombinationen aus einem Zugfahrzeug der Kategorie C und einem Anhänger mit einem Gesamtgewicht von mehr als 750 kg.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s386",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/13/description/fr",
+        "startUtf16": 0,
+        "endUtf16": 750,
+        "text": "<p>Le soumissionnaire dispose de camions adaptés (capacité de chargement d’au moins 12 tonnes) ainsi que de chauffeurs titulaires d’un permis de conduire valide de catégorie CE au minimum ou équivalent.</p><p>&nbsp;</p><p>Les poids lourds utilisés sont en outre équipés d’une caisse permettant de protéger au mieux le matériel contre les intempéries, les effractions et le vandalisme. Les équipements techniques sont principalement rangés dans des flightcases à roulettes et doivent être déchargés et sécurisés de manière appropriée.</p><p><br></p><p><em>Définition du permis de conduire de la catégorie CE :</em></p><p>Ensembles de véhicules composés d’un véhicule tracteur de catégorie C et d’une remorque d’un poids total dépassant les 750 kg.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s387",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/13/description/it",
+        "startUtf16": 0,
+        "endUtf16": 719,
+        "text": "<p>L’offerente dispone di autocarri adatti (carico minimo: 12 t), nonché di autisti di autocarri in possesso di una licenza di condurre valida almeno della categoria C / CE o equivalente.</p><p>&nbsp;</p><p>Gli autocarri da utilizzare sono inoltre provvisti di un cassone chiuso per proteggere in modo ottimale il materiale dalle intemperie, da furti o da atti di vandalismo. L’attrezzatura tecnica è riposta principalmente in flight case su ruote e deve essere caricata e fissata correttamente.</p><p><br></p><p><em>Definizione di licenza di condurre della categoria CE:</em></p><p>Le combinazioni di veicoli costituite da un veicolo trattore della categoria C e un rimorchio con un peso totale superiore a 750 kg.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s392",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/13/verification/de",
+        "startUtf16": 0,
+        "endUtf16": 135,
+        "text": "<p>Nachvollziehbare Dokumentation des für die Auftragserfüllung zur Verfügung stehenden Fuhrparkes mittels Formulars im Anhang B.1.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s393",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/13/verification/fr",
+        "startUtf16": 0,
+        "endUtf16": 134,
+        "text": "<p>Documentation transparente du parc de véhicules disponible pour l’exécution du mandat à l’aide du formulaire dans l'annexe B.1.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s394",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/13/verification/it",
+        "startUtf16": 0,
+        "endUtf16": 147,
+        "text": "<p>Documentazione che indichi chiaramente il parco veicoli disponibile per l’esecuzione della commessa (compilare il modulo nell'allegato B.1).</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s395",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/14/description/de",
+        "startUtf16": 0,
+        "endUtf16": 366,
+        "text": "<p>Der Anbieter bestätigt, dass während Aufbau und Durchführung des Anlasses eine Interventionszeit von 30 Minuten gewährleistet werden kann. Die Interventionszeit ist die Zeitspanne, die zwischen dem Erkennen eines Problems oder einer Störung (z. B. technischer Defekt, Sicherheitsrisiko, logistische Störung) und dem Beginn der Massnahmen zur Behebung vergeht.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s396",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/14/description/fr",
+        "startUtf16": 0,
+        "endUtf16": 388,
+        "text": "<p>Le soumissionnaire confirme qu’il peut garantir un délai d’intervention de 30 minutes pendant la mise en place et le déroulement de l’événement. Le délai d’intervention correspond au temps qui s’écoule entre la détection d’un problème ou d’un dysfonctionnement (par ex. défaut technique, risque pour la sécurité, incident logistique) et le début des mesures prises pour y remédier.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s397",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/14/description/it",
+        "startUtf16": 0,
+        "endUtf16": 378,
+        "text": "<p>L’offerente conferma che durante l’allestimento e lo svolgimento dell’evento è possibile garantire un tempo d’intervento di 30 minuti. Questo è il lasso di tempo che intercorre fra l’individuazione di un problema o di un guasto (ad es. un problema tecnico, un rischio per la sicurezza, un guasto di carattere logistico) e l’avvio delle misure per risolverlo o eliminarlo.</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s402",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/14/verification/de",
+        "startUtf16": 0,
+        "endUtf16": 66,
+        "text": "<p>Schriftliche Bestätigung im Anhang B.1 \"Angebotsformulare\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s403",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/14/verification/fr",
+        "startUtf16": 0,
+        "endUtf16": 67,
+        "text": "<p>Confirmation écrite dans l'annexe B.1 \"Formulaires d'offre\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s404",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteria/14/verification/it",
+        "startUtf16": 0,
+        "endUtf16": 72,
+        "text": "<p>Conferma scritta nell'allegato B.1 \"Moduli relativi all'offerta\".</p>",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s406",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteriaNote/de",
+        "startUtf16": 0,
+        "endUtf16": 431,
+        "text": "Alle wirtschaftlich leistungsfähigen Unternehmen, welche die nachfolgenden Eignungskriterien bzw. -nachweise erfüllen, sind aufgerufen, ein Angebot in Schweizer Franken (CHF) zu unterbreiten.\nDie nachfolgend aufgeführten Eignungsnachweise müssen vollständig und ohne Einschränkungen oder Modifikation mit der Unterbreitung des Angebotes bestätigt bzw. beigelegt und erfüllt werden, ansonsten wird nicht auf die Offerte eingegangen.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s407",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteriaNote/fr",
+        "startUtf16": 0,
+        "endUtf16": 435,
+        "text": "Toutes les entreprises disposant de la capacité économique nécessaire qui remplissent les critères d'aptitude et peuvent apporter les justificatifs requis sont invitées à déposer une offre en francs suisses (CHF).\nLes preuves de qualification énumérées ci-après doivent être fournies dans leur intégralité et sans restriction, ni modification en même temps que l’offre, car autrement il ne sera pas entré en matière sur cette dernière.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s408",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/qualificationCriteriaNote/it",
+        "startUtf16": 0,
+        "endUtf16": 383,
+        "text": "Tutte le ditte che dispongono di sufficienti competenze economica / finanziaria e tecniche e che sono in grado di presentare leseguenti prove richieste sono invitate a inoltrare un’offerta in CHF.\nI criteri di idoneità elencati devono essere adempiuti e attestati completamente e senza limitazioni o modifiche con la presentazione dell'offerta, altrimenti l'offerta non sarà ammessa.",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s409",
+        "scope": "selected_lot",
+        "role": "service",
+        "rawPath": "/lots/1/title/de",
+        "startUtf16": 0,
+        "endUtf16": 34,
+        "text": "Eventtechnik für Anlässe im Tessin",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s410",
+        "scope": "selected_lot",
+        "role": "service",
+        "rawPath": "/lots/1/title/fr",
+        "startUtf16": 0,
+        "endUtf16": 44,
+        "text": "Matériel technique pour événements au Tessin",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s411",
+        "scope": "selected_lot",
+        "role": "service",
+        "rawPath": "/lots/1/title/it",
+        "startUtf16": 0,
+        "endUtf16": 42,
+        "text": "Attrezzature tecniche per eventi in Ticino",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s412",
+        "scope": "selected_lot",
+        "role": "context",
+        "rawPath": "/lots/1/variants",
+        "startUtf16": 0,
+        "endUtf16": 2,
+        "text": "no",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s416",
+        "scope": "selected_lot",
+        "role": "service",
+        "rawPath": "/base/lots/1/title/de",
+        "startUtf16": 0,
+        "endUtf16": 34,
+        "text": "Eventtechnik für Anlässe im Tessin",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s417",
+        "scope": "selected_lot",
+        "role": "service",
+        "rawPath": "/base/lots/1/title/fr",
+        "startUtf16": 0,
+        "endUtf16": 44,
+        "text": "Matériel technique pour événements au Tessin",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      },
+      {
+        "id": "s418",
+        "scope": "selected_lot",
+        "role": "service",
+        "rawPath": "/base/lots/1/title/it",
+        "startUtf16": 0,
+        "endUtf16": 42,
+        "text": "Attrezzature tecniche per eventi in Ticino",
+        "url": "https://www.simap.ch/api/publications/v1/project/2396c3a8-6955-400f-8bda-41f115de2b53/publication-details/389f8520-cd9a-404e-8f9a-4520c0166cf1"
+      }
+    ]
+  },
+  "readings": [
+    {
+      "chunkId": "chunk1",
+      "status": "complete",
+      "sourceRefs": [
+        "s23",
+        "s24",
+        "s25",
+        "s41"
+      ]
+    },
+    {
+      "chunkId": "chunk2",
+      "status": "complete",
+      "sourceRefs": [
+        "s42",
+        "s43",
+        "s44",
+        "s45",
+        "s46",
+        "s47",
+        "s48",
+        "s50",
+        "s51",
+        "s57"
+      ]
+    },
+    {
+      "chunkId": "chunk3",
+      "status": "complete",
+      "sourceRefs": [
+        "s59",
+        "s60",
+        "s61",
+        "s68",
+        "s69",
+        "s70",
+        "s77",
+        "s78",
+        "s79",
+        "s80",
+        "s63",
+        "s64",
+        "s65",
+        "s66",
+        "s67"
+      ]
+    },
+    {
+      "chunkId": "chunk4",
+      "status": "complete",
+      "sourceRefs": [
+        "s85",
+        "s86",
+        "s87"
+      ]
+    },
+    {
+      "chunkId": "chunk5",
+      "status": "complete",
+      "sourceRefs": [
+        "s126",
+        "s127",
+        "s128",
+        "s140",
+        "s141",
+        "s142",
+        "s143",
+        "s144",
+        "s149",
+        "s150",
+        "s151"
+      ]
+    },
+    {
+      "chunkId": "chunk6",
+      "status": "complete",
+      "sourceRefs": [
+        "s156",
+        "s157",
+        "s158",
+        "s159",
+        "s160",
+        "s161",
+        "s162",
+        "s163",
+        "s170",
+        "s171"
+      ]
+    },
+    {
+      "chunkId": "chunk7",
+      "status": "complete",
+      "sourceRefs": [
+        "s172",
+        "s173",
+        "s214",
+        "s215",
+        "s216"
+      ]
+    },
+    {
+      "chunkId": "chunk8",
+      "status": "complete",
+      "sourceRefs": [
+        "s217",
+        "s218",
+        "s219",
+        "s220",
+        "s221",
+        "s222",
+        "s223",
+        "s224",
+        "s225",
+        "s226",
+        "s228",
+        "s229",
+        "s230",
+        "s231",
+        "s233",
+        "s234",
+        "s235",
+        "s237",
+        "s238",
+        "s239",
+        "s241",
+        "s242",
+        "s243",
+        "s244",
+        "s247",
+        "s248",
+        "s249",
+        "s254",
+        "s255",
+        "s227",
+        "s232",
+        "s236",
+        "s240",
+        "s245",
+        "s246",
+        "s250",
+        "s251",
+        "s252",
+        "s253"
+      ]
+    },
+    {
+      "chunkId": "chunk9",
+      "status": "complete",
+      "sourceRefs": [
+        "s256",
+        "s257",
+        "s258",
+        "s259",
+        "s264",
+        "s265",
+        "s266",
+        "s267",
+        "s268"
+      ]
+    },
+    {
+      "chunkId": "chunk10",
+      "status": "complete",
+      "sourceRefs": [
+        "s269",
+        "s274",
+        "s275",
+        "s276",
+        "s277",
+        "s278",
+        "s279",
+        "s284",
+        "s285",
+        "s286",
+        "s287",
+        "s288"
+      ]
+    },
+    {
+      "chunkId": "chunk11",
+      "status": "complete",
+      "sourceRefs": [
+        "s289",
+        "s294",
+        "s295",
+        "s296",
+        "s297",
+        "s298",
+        "s299",
+        "s300",
+        "s301",
+        "s302"
+      ]
+    },
+    {
+      "chunkId": "chunk12",
+      "status": "complete",
+      "sourceRefs": [
+        "s303",
+        "s304",
+        "s309",
+        "s310",
+        "s311",
+        "s312",
+        "s313",
+        "s314",
+        "s315",
+        "s316",
+        "s317"
+      ]
+    },
+    {
+      "chunkId": "chunk13",
+      "status": "complete",
+      "sourceRefs": [
+        "s322",
+        "s323",
+        "s324",
+        "s325",
+        "s326",
+        "s327",
+        "s332",
+        "s333",
+        "s334",
+        "s319",
+        "s320",
+        "s321",
+        "s328",
+        "s329",
+        "s330",
+        "s331"
+      ]
+    },
+    {
+      "chunkId": "chunk14",
+      "status": "complete",
+      "sourceRefs": [
+        "s335",
+        "s336",
+        "s337",
+        "s342",
+        "s343",
+        "s344",
+        "s345",
+        "s346",
+        "s347",
+        "s352",
+        "s353",
+        "s354",
+        "s355"
+      ]
+    },
+    {
+      "chunkId": "chunk15",
+      "status": "complete",
+      "sourceRefs": [
+        "s356",
+        "s357",
+        "s362",
+        "s363",
+        "s364",
+        "s365",
+        "s366",
+        "s367",
+        "s372",
+        "s373",
+        "s374",
+        "s375",
+        "s376",
+        "s377",
+        "s382",
+        "s383",
+        "s384"
+      ]
+    },
+    {
+      "chunkId": "chunk16",
+      "status": "complete",
+      "sourceRefs": [
+        "s385",
+        "s386",
+        "s387",
+        "s392",
+        "s393",
+        "s394",
+        "s395",
+        "s396",
+        "s397",
+        "s402",
+        "s403",
+        "s404",
+        "s406",
+        "s407"
+      ]
+    },
+    {
+      "chunkId": "chunk17",
+      "status": "complete",
+      "sourceRefs": [
+        "s408",
+        "s409",
+        "s410",
+        "s411",
+        "s412",
+        "s416",
+        "s417",
+        "s418"
+      ]
+    },
+    {
+      "chunkId": "chunk18",
+      "status": "complete",
+      "sourceRefs": []
+    },
+    {
+      "chunkId": "chunk19",
+      "status": "complete",
+      "sourceRefs": []
+    }
+  ]
+}

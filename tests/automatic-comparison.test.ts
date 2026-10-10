@@ -1,3 +1,4 @@
+import { createInventedCanonicalSourceRecord } from "./helpers/canonical-source-record-fixture";
 import { openaiResponseBody } from "../src/lib/openai-responses";
 import {
   inventedSourceEvidence,
@@ -28,7 +29,6 @@ import {
   readAutomaticSourceInterpretation,
 } from "../src/lib/automatic-comparison";
 import {
-  recordSourceInterpretation,
   materializeSourceInterpretationPassages,
   materializeSourceInterpretationFields,
   type SourceInterpretationRecord,
@@ -307,7 +307,7 @@ function sourceRecord(
   readings: readonly unknown[] = [],
   status: "resolved" | "uncertain" | "conflicting" = "resolved",
 ) {
-  return recordSourceInterpretation(
+  return createInventedCanonicalSourceRecord(
     sourceResponse(request, status, readings),
     buildAutomaticSourceRequest(request, readings),
     {
@@ -598,7 +598,7 @@ test("Semantic approval is bound to the exact draft and reviewer configuration",
       readAutomaticSourceSemanticReview(review, source, request),
       review,
     );
-    const changedDraft = recordSourceInterpretation(
+    const changedDraft = createInventedCanonicalSourceRecord(
       { ...source.response, summary: "Altra sintesi inventata." },
       buildAutomaticSourceRequest(request),
       { id: "another-draft", at: source.at, model: source.model },
@@ -676,7 +676,7 @@ test("A structured subcontract prohibition survives review and stored comparison
   );
   assert(index >= 0);
   const fieldId = `f${index}`;
-  const source = recordSourceInterpretation(
+  const source = createInventedCanonicalSourceRecord(
     {
       ...sourceResponse(request),
       details: [
@@ -740,6 +740,7 @@ test("A structured subcontract prohibition survives review and stored comparison
               body.draft,
               claim,
               "supported",
+              body,
             ),
             sourceRefs: claim.sourceRefs,
             readingRefs:
@@ -996,7 +997,7 @@ test("An unresolved source rejects a final comparison and exposes issue evidence
       ),
       false,
     );
-    const interpretation = recordSourceInterpretation(
+    const interpretation = createInventedCanonicalSourceRecord(
       {
         ...interpretationResponse,
         issues: [
@@ -1064,7 +1065,7 @@ test("Missing specifications remain visible through comparison without becoming 
       scope: note.scope,
     },
   ];
-  const source = recordSourceInterpretation(
+  const source = createInventedCanonicalSourceRecord(
     { ...answer, details },
     buildAutomaticSourceRequest(request),
     {
@@ -1103,7 +1104,7 @@ test("Missing specifications remain visible through comparison without becoming 
 test("An identified object with an unresolved role stays in review without a company comparison", () => {
   const request = buildAutomaticComparisonRequest(fixture());
   const answer = sourceResponse(request);
-  const source = recordSourceInterpretation(
+  const source = createInventedCanonicalSourceRecord(
     {
       ...answer,
       status: "uncertain",
@@ -1415,7 +1416,7 @@ test.each(["main", "not_stated"] as const)(
       fixture(detail, { activities: detail.procurement.orderDescription.it }),
     );
     const interpreted = sourceResponse(request);
-    const source = recordSourceInterpretation(
+    const source = createInventedCanonicalSourceRecord(
       {
         ...interpreted,
         components: [
@@ -1476,7 +1477,7 @@ test("An excluded component alone cannot justify a service rejection but remains
   const serviceRef = request.passages.find(
     (passage) => passage.rawPath === "/procurement/orderDescription/it",
   )!.id;
-  const source = recordSourceInterpretation(
+  const source = createInventedCanonicalSourceRecord(
     {
       ...interpreted,
       components: [
@@ -1647,7 +1648,7 @@ test("Related installation and supply remain review candidates without inferring
   const serviceRef = request.passages.find(
     (passage) => passage.rawPath === "/procurement/orderDescription/it",
   )!.id;
-  const source = recordSourceInterpretation(
+  const source = createInventedCanonicalSourceRecord(
     {
       ...sourceResponse(request),
       components: [
@@ -1956,7 +1957,7 @@ test("Only the selected lot's own service text can establish a certain relation"
   ))
     assert.throws(
       () =>
-        recordSourceInterpretation(
+        createInventedCanonicalSourceRecord(
           {
             ...sourceResponse(request),
             targetRef: passage.id,
@@ -2042,7 +2043,7 @@ test("CPV context pairs original codes and multilingual labels with their exact 
   sourceAnswer.classificationReadings[0].sourceRefs.push(contextOnlyRef);
   sourceAnswer.classificationReadings[0].explanation =
     "La classificazione resta generale; la clausola sulle referenze non cambia il servizio acquistato.";
-  const source = recordSourceInterpretation(
+  const source = createInventedCanonicalSourceRecord(
     sourceAnswer,
     buildAutomaticSourceRequest(request),
     {
@@ -2442,7 +2443,7 @@ test("A concise source summary cannot erase the original domain context and grou
     ...classification.labels.flatMap((label) => label.sourceRefs),
   ];
   const answer = sourceResponse(request);
-  const source = recordSourceInterpretation(
+  const source = createInventedCanonicalSourceRecord(
     {
       ...answer,
       summary: "Fornitura del prodotto inventato X.",
@@ -2913,7 +2914,7 @@ test.each([
     const before = JSON.stringify(historical);
     assert.equal(
       request.version,
-      "documentary-service-comparison-v93-source-map-binding-20261010",
+      "documentary-service-comparison-v95-documentary-participation-context",
     );
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
@@ -3914,4 +3915,70 @@ test("Native source-map nonempty domains retain exact ownership and reject missi
       normalizeAutomaticSourceReading(bad, request, chunk.id),
     );
   }
+});
+
+test("Award-note interpretation context preserves originals without deciding language precedence", () => {
+  const detail=raw();detail.procurement.orderDescription.it="Servizio inventato. ".repeat(1800);
+  Object.assign(detail,{criteria:{awardCriteriaNote:{
+    de:"Scoring paragraph. ".repeat(90)+"Die Veröffentlichung auf SIMAP ist massgebend. Bei Unklarheiten oder Widersprüchen hat die italienische Fassung Vorrang.",
+    fr:"Notation. ".repeat(170)+"La publication sur SIMAP est déterminante. En cas d’imprécisions ou de contradictions, la version italienne fait foi.",
+    it:"Testo senza regola di prevalenza: la lingua non la stabilisce.",
+    en:"Pure price arithmetic, no precedence: score = 5 x weight."
+  }}});
+  const original=JSON.stringify(detail),request=buildAutomaticComparisonRequest(fixture(detail));
+  const notes=request.passages.filter(p=>p.rawPath.startsWith("/criteria/awardCriteriaNote/"));
+  assert(notes.length>4);const required=request.readingRequests.flatMap(r=>r.requiredPassageIds??[]);
+  assert(notes.every(p=>required.includes(p.id)));
+  const readings=request.readingRequests.map(r=>({chunkId:r.id,status:"complete",sourceRefs:[...(r.requiredPassageIds??[])]}));
+  const reduced=buildAutomaticSourceRequest(request,readings);
+  for(const p of notes){assert(reduced.selectedIds.includes(p.id));const restored=materializeSourceInterpretationPassages(reduced.prompt).find((q:any)=>q.id===p.id);assert(restored);for(const k of ["text","rawPath","scope","role","startUtf16","endUtf16"] as const)assert.equal(restored[k],p[k]);assert(!reduced.requiredContractClauseIds.includes(p.id));
+    assert.throws(()=>buildAutomaticSourceRequest(request,readings.map(r=>({...r,sourceRefs:r.sourceRefs.filter(id=>id!==p.id)}))),/Incomplete required original service or condition passages/);
+  }
+  assert.equal(JSON.stringify(detail),original);
+});
+
+test("Interpretation-note map requirement is structural for lots without inspecting language or wording", () => {
+  const detail=raw(true);detail.procurement.orderDescription.it="Servizio inventato. ".repeat(1700);
+  Object.assign(detail.lots[0],{criteria:{awardCriteriaNote:{rm:"Opaque original A. ".repeat(80)}}});
+  Object.assign(detail.lots[1],{criteria:{awardCriteriaNote:{it:"Foreign lot original B."}}});
+  const request=buildAutomaticComparisonRequest(fixture(detail)),notes=request.passages.filter(p=>p.rawPath.includes("/criteria/awardCriteriaNote/"));
+  assert(notes.length>0);const required=request.readingRequests.flatMap(r=>r.requiredPassageIds??[]);assert(notes.every(p=>required.includes(p.id)));
+  for(const chunk of request.readingRequests){const own=notes.filter(p=>chunk.passageIds.includes(p.id));if(!own.length)continue;
+    const provider={chunkId:chunk.id,status:"complete",referenceFormat:"explicit_required_originals_v2",requiredSourceRefs:Object.fromEntries((chunk.requiredPassageIds??[]).map(id=>[id,id])),sourceRefs:[]};
+    const normalized=normalizeAutomaticSourceReading(provider,request,chunk.id);assert(own.every(p=>normalized.sourceRefs.includes(p.id)));
+    delete provider.requiredSourceRefs[own[0].id];assert.throws(()=>normalizeAutomaticSourceReading(provider,request,chunk.id));
+  }
+});
+
+test("Original project participation notes and flags survive independently of within-lot partial offers", () => {
+  const detail=raw(true);detail.procurement.orderDescription.it="Servizio inventato. ".repeat(1400);
+  Object.assign(detail.base,{participantLotsLimitation:null,participantLotsLimitationNote:{de:"Offer one or more lots. Evaluate each lot separately.",fr:"Original B. ".repeat(150),it:"Uno o più lotti; valutazione separata per ciascun lotto."}});
+  Object.assign(detail["project-info"],{participantLotsLimitation:null,participantLotsLimitationNote:{de:"Different original restriction, never collapse with base.",it:"Versione distinta da verificare, conservare integralmente."}});
+  Object.assign(detail.lots[0],{partialOffers:"yes",partialOffersNote:{it:"Vietate frazioni interne al singolo lotto."}});
+  const original=JSON.stringify(detail),request=buildAutomaticComparisonRequest(fixture(detail));
+  const notes=request.passages.filter(p=>/^\/(?:base|project-info)\/participantLotsLimitationNote\//.test(p.rawPath)),partial=request.passages.filter(p=>p.rawPath.includes("/partialOffers"));
+  assert(notes.length>5);assert(partial.length>0);const required=request.readingRequests.flatMap(r=>r.requiredPassageIds??[]);assert(notes.every(p=>required.includes(p.id)));
+  const readings=request.readingRequests.map(r=>({chunkId:r.id,status:"complete",sourceRefs:[...(r.requiredPassageIds??[])]})),reduced=buildAutomaticSourceRequest(request,readings),restored=materializeSourceInterpretationPassages(reduced.prompt),fields=materializeSourceInterpretationFields(reduced.prompt);
+  for(const p of [...notes,...partial]){assert(reduced.selectedIds.includes(p.id));const q=restored.find((x:any)=>x.id===p.id);assert(q);for(const k of ["text","rawPath","scope","startUtf16","endUtf16"] as const)assert.equal(q[k],p[k]);}
+  for(const rawPath of ["/base/participantLotsLimitation","/project-info/participantLotsLimitation"])assert.equal(fields.find((f:any)=>f.rawPath===rawPath).value,null);
+  for(const p of notes){assert(reduced.requiredContractClauseIds.includes(p.id));assert.throws(()=>buildAutomaticSourceRequest(request,readings.map(r=>({...r,sourceRefs:r.sourceRefs.filter(id=>id!==p.id)}))),/Incomplete required original service or condition passages/);}
+  assert.equal(JSON.stringify(detail),original);
+});
+
+test("Participation note requirement rejects omissions even when another archived placement repeats the same text", () => {
+  const detail=raw(true);detail.procurement.orderDescription.it="Servizio inventato. ".repeat(1400);
+  const note={de:"Original X.",fr:"Original Y.",it:"Original Z."};Object.assign(detail.base,{participantLotsLimitation:2,participantLotsLimitationNote:note});Object.assign(detail["project-info"],{participantLotsLimitation:2,participantLotsLimitationNote:structuredClone(note)});
+  const request=buildAutomaticComparisonRequest(fixture(detail)),notes=request.passages.filter(p=>p.rawPath.includes("/participantLotsLimitationNote/"));assert.equal(notes.length,6);
+  const chunk=request.readingRequests.find(r=>r.passageIds.includes(notes[0].id))!;
+  const answer={chunkId:chunk.id,status:"complete",referenceFormat:"explicit_required_originals_v2",requiredSourceRefs:Object.fromEntries((chunk.requiredPassageIds??[]).map(id=>[id,id])),sourceRefs:[]};
+  assert(notes.filter(p=>chunk.passageIds.includes(p.id)).every(p=>normalizeAutomaticSourceReading(answer,request,chunk.id).sourceRefs.includes(p.id)));
+  delete answer.requiredSourceRefs[notes[0].id];assert.throws(()=>normalizeAutomaticSourceReading(answer,request,chunk.id));
+  const reduced=buildAutomaticSourceRequest(request,request.readingRequests.map(r=>({chunkId:r.id,status:"complete",sourceRefs:[...(r.requiredPassageIds??[])]}))),fields=materializeSourceInterpretationFields(reduced.prompt);
+  for(const rawPath of ["/base/participantLotsLimitation","/project-info/participantLotsLimitation"])assert.equal(fields.find((f:any)=>f.rawPath===rawPath).value,2);
+});
+
+test("Participation conservation uses exact original field families, not text keywords or similarly named metadata", async () => {
+  const {isContractScopeField}=await import("../src/lib/source-contract-clauses");
+  for(const p of ["/base/participantLotsLimitation","/base/participantLotsLimitationNote/rm","/project-info/participantLotsLimitationNote/en"])assert(isContractScopeField(p,"project_context","selected_lot"));
+  for(const p of ["/metadata/participantLotsLimitationNote/it","/base/participantLotsLimitationNoteSuffix/it","/lots/1/participantLotsLimitationNote/it"])assert.equal(isContractScopeField(p,"project_context","selected_lot"),false);
 });

@@ -10,11 +10,12 @@ import type { AutomaticResponseFormat } from "./automatic-comparison";
 import { sourceEvidencePassages } from "./source-evidence-context";
 import {
   isContractScopeField,
+  isDocumentaryInterpretationContextField,
   sourceScopedCriterionContext,
 } from "./source-contract-clauses";
 
 export const SOURCE_EVIDENCE_READING_VERSION =
-  "source-evidence-reading-v37-map-domain-bound";
+  "source-evidence-reading-v40-common84-integrated";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -74,11 +75,35 @@ const issue = z.strictObject({
   reason: text(600),
   evidence: quotes,
 });
+const detailBasis = z.enum(["explicit_gap", "document_referral"]);
+const detailAspects = z
+  .array(
+    z.enum([
+      "subtype",
+      "composition",
+      "quantities",
+      "dimensions",
+      "models",
+      "brands",
+      "technical_specifications",
+      "task_breakdown",
+      "execution_conditions",
+      "location",
+      "timing",
+      "referenced_documents",
+    ]),
+  )
+  .min(1)
+  .max(12)
+  .refine((items) => new Set(items).size === items.length);
 const missingDetail = z.strictObject({
   serviceRef: z.string().regex(/^s\d+$/),
   description: text(600),
   scope: z.enum(["project_context", "selected_lot"]),
   evidence: quotes,
+  verificationAspects: detailAspects,
+  basis: detailBasis,
+  basisEvidence: quotes,
 });
 const responseSchema = z.strictObject({
   chunkId: z.string().regex(/^evidence[1-9]\d*$/),
@@ -113,21 +138,15 @@ const missingAspectLabels = {
   timing: "tempi di esecuzione di dettaglio",
   referenced_documents: "contenuto dei documenti richiamati",
 } as const;
-const missingAspects = z
-  .array(
-    z.enum(
-      Object.keys(missingAspectLabels) as [
-        keyof typeof missingAspectLabels,
-        ...(keyof typeof missingAspectLabels)[],
-      ],
-    ),
-  )
-  .min(1)
-  .max(12)
-  .refine((items) => new Set(items).size === items.length);
+function detailNoteDescription(
+  basis: z.infer<typeof detailBasis>,
+  aspects: z.infer<typeof detailAspects>,
+) {
+  return `Da verificare (${basis === "explicit_gap" ? "lacuna dichiarata" : "rinvio documentale"}; giudizio AI non verificato): ${aspects.map((a) => missingAspectLabels[a]).join("; ")}. Nessuna assenza globale dedotta dalla parte.`;
+}
 const selectedDetail = missingDetail
-  .omit({ scope: true, evidence: true, description: true })
-  .extend({ ...anchoredSelection, missingAspects });
+  .omit({ scope: true, evidence: true, description: true, basisEvidence: true })
+  .extend({ ...anchoredSelection, basisEvidence: references });
 const selectedClassification = classification
   .omit({ label: true, evidence: true })
   .extend({
@@ -337,6 +356,7 @@ export function buildSourceEvidenceReadingRequest(
         return [
           {
             scope,
+            ids,
             anchor: {
               serviceRef: z.enum(anchors),
               evidence: z
@@ -356,8 +376,14 @@ export function buildSourceEvidenceReadingRequest(
             : selectedObservation.shape.kind,
       }),
     );
-    const details = scopeGroups.map(({ anchor }) =>
-      selectedDetail.safeExtend(anchor),
+    const details = scopeGroups.map(({ anchor, ids }) =>
+      selectedDetail.safeExtend({
+        ...anchor,
+        basisEvidence: z
+          .array(z.strictObject({ sourceRef: z.enum(ids) }))
+          .min(1)
+          .max(16),
+      }),
     );
     const boundedObservations = z
       .array(
@@ -436,7 +462,7 @@ export function buildSourceEvidenceReadingRequest(
         order: [
           "Individua nella descrizione l'azione contrattuale e conserva la denominazione originale del bene.",
           "Leggi la famiglia dichiarata dalle classificazioni originali e riportala come contesto, senza ricavarne ingredienti, materiali o sottotipi.",
-          "Distingui una differenza nominale nei metadati da una incompatibilità materiale. Una categoria che nomina un contesto o un servizio complessivo non esclude di per sé un lavoro specifico: usa broad_context se compatibile, metadata_discrepancy se l'etichetta appare poco pertinente ma azione e oggetto sono espliciti e non incompatibili. Conserva entrambi i testi. Prima di conflicting individua caratteristiche o clausole originali incompatibili, non solo nomi diversi o una tua traduzione.",
+          "Confronta caratteristiche esplicite della descrizione con quelle della classificazione nelle rispettive prove originali. Nomi diversi, categoria più ampia, traduzioni o funzioni non menzionate non dimostrano un disallineamento: se compatibili usa consistent o broad_context, se non determinanti not_decisive. metadata_discrepancy richiede un disallineamento concreto di caratteristiche, con spiegazione e prove proprie di entrambe le parti, lasciando identificabile il lavoro esplicito; non basta che l’etichetta appaia poco pertinente. Se affermazioni incompatibili lasciano incerto il lavoro acquistato, usa conflicting e conserva tutte le controprove. Nessuna priorità fra descrizione, codice o lingua è automatica.",
         ],
         inventedExamplesNotSourceEvidence: [
           {
@@ -451,9 +477,9 @@ export function buildSourceEvidenceReadingRequest(
           {
             description: "Pulizia delle sale di lettura e degli scaffali",
             classification: "Servizi di biblioteca",
-            relationship: "metadata_discrepancy",
+            relationship: "broad_context",
             rationale:
-              "Etichetta generica diversa dal lavoro descritto: non vieta la pulizia né dichiara caratteristiche incompatibili. Il lavoro esplicito resta identificato; conservare l'anomalia come avviso, senza aggiungere gestione o prestito di libri.",
+              "La categoria generale e la pulizia specifica sono compatibili: nomi diversi non provano un’anomalia né aggiungono gestione o prestito di libri.",
           },
           {
             description:
@@ -480,37 +506,37 @@ export function buildSourceEvidenceReadingRequest(
           }
         : {}),
       rules: [
-        "missingAspects dichiara assente l'intera categoria per la prestazione citata, non soltanto un dettaglio ulteriore. Controlla TUTTA la fonte e ogni observation prima di sceglierla: dimensioni/volumi/livelli già noti vietano dimensions generico, materiali/norme/quantità note vietano technical_specifications generico, volumi indicativi non sono quantità assenti. Sottotipo commerciale ignoto non cancella tipologia nota. Periodi, limiti e località noti restano condizioni; referenced_documents significa contenuto non letto, mai indisponibile. Fatti parziali vanno conservati, non negati. Non sostituire una lacuna non esprimibile con una categoria falsa.",
+        "verificationAspects indica soltanto categorie da verificare rispetto a una lacuna dichiarata o a un rinvio, mai categorie globalmente assenti. La sola parte non dimostra un'assenza. Controlla TUTTA la fonte e ogni observation prima di sceglierla: dimensioni/volumi/livelli già noti vietano dimensions generico, materiali/norme/quantità note vietano technical_specifications generico, volumi indicativi non sono quantità assenti. Sottotipo commerciale ignoto non cancella tipologia nota. Periodi, limiti e località noti restano condizioni; referenced_documents significa contenuto non letto, mai indisponibile. Fatti parziali vanno conservati, non negati. Non sostituire una lacuna non esprimibile con una categoria falsa.",
         "Ogni prestazione distinta richiesta dalla commessa ha performance propria e scope originale, anche se espressa nelle condizioni di qualificazione. Capacità, certificazioni e referenze del concorrente restano condition: non creano acquisti o idoneità. Acquisto generale e lotto sono performance separate solo se entrambi espliciti; target_partition geografica non sostituisce performance. Clausole obbligatorie oltre15refs richiedono ulteriori condition nello scope proprio, non omissioni né citazioni aggiunte dalla sola mappa.",
         "Questa richiesta è una parte della fonte, non tutto il documento. Titoli e descrizione stabile non cancellano altri campi: non dichiarare assenza o assenza di precedenza da questa sola parte. Quantità principali designa una tabella, non necessariamente gerarchia contrattuale. Traduzione AI non è seconda prova originale di conflitto.",
         "Le differenze amministrative tra versioni linguistiche restano condizioni originali distinte: conservale tutte in condition con prove proprie, senza armonizzarle o decidere una precedenza non attestata. Per esempio, lingue diverse ammesse per porre domande non rendono indeterminati oggetto e ruolo del lavoro acquistato. source_conflict resta bloccante quando la contraddizione impedisce identificare prestazione, azione, destinatario, luogo, periodo o ambito del target, oppure include ed esclude la medesima prestazione. Non trasformare un dubbio amministrativo nella negazione dell’identità del lavoro. In una parte non dichiarare assente una precedenza o rettifica che potrebbe comparire nelle altre parti.",
-        "Questa richiesta può leggere soltanto una parte della fonte: coverage complete copre tutti e soli gli originali assegnati. Le clausole obbligatorie assegnate sono al massimo16 e richiedono prove effettive, non la sola mappa. Conserva anche gli obiettivi materiali nel contesto del lavoro. missingDetails non dichiara assenti dati che possono trovarsi in altre parti: seleziona solo lacune esplicite o rinvii a contenuti non forniti.",
+        "Questa richiesta può leggere soltanto una parte della fonte: coverage complete copre tutti e soli gli originali assegnati. Le clausole obbligatorie assegnate sono al massimo16 e richiedono prove effettive, non la sola mappa. Conserva anche gli obiettivi materiali nel contesto del lavoro. missingDetails richiede basis explicit_gap o document_referral e basisEvidence proprie e non vuote: il testo deve dichiarare la lacuna o il rinvio. La mancata menzione nella parte non basta; non scegliere una basis per compensarla. Le note restano giudizi da verificare contro tutti gli originali nella revisione semantica.",
         "Leggi anche gli obiettivi materiali prescritti al risultato dell'opera o progettazione nelle descrizioni dell'appalto: prestazioni, qualità, ambiente, innovazione e altri requisiti noti vanno conservati in condition con prova propria e lavoro dello stesso ambito. Non ridurli a contesto opzionale quando il testo li impone; non creare nuovi acquisti o capacità della ditta da tali obiettivi. Motivazioni storiche e referenze pregresse restano distinte.",
         ...(requiredClauses.length
           ? [
-              "requiredClauseSelections: per OGNI ID obbligatorio indica la collection che contiene la sua prova. Lo stesso ID deve comparire davvero nel serviceRef o evidence di una riga di quella collection; scriverlo soltanto nella mappa non basta. Non produrre indici di riga. Per complete almeno una observations o issues conserva il fatto noto; missingDetails da sola non basta. Anche istruzioni amministrative note vanno in condition: scaricare, compilare tutte le parti, consegnare tutte le pagine. Un rinvio può lasciare ignoti articoli o quantità, ma non rende ignoti gli obblighi scritti. missingDetails aggiunge solo le specifiche davvero assenti. Non omettere tipi/date/valori. Nessun testo duplicato nella mappa; unreadable può avere selezioni vuote.",
+              "requiredClauseSelections: per OGNI ID obbligatorio indica la collection che contiene la sua prova. Lo stesso ID deve comparire davvero nel serviceRef o evidence di una riga di quella collection; scriverlo soltanto nella mappa non basta. Non produrre indici di riga. Per complete almeno una observations o issues conserva il fatto noto; missingDetails da sola non basta. Anche istruzioni amministrative note vanno in condition: scaricare, compilare tutte le parti, consegnare tutte le pagine. Un rinvio può lasciare ignoti articoli o quantità, ma non rende ignoti gli obblighi scritti. missingDetails aggiunge solo verifiche di lacune dichiarate o rinvii provati, mai assenze dedotte dalla parte. Non omettere tipi/date/valori. Nessun testo duplicato nella mappa; unreadable può avere selezioni vuote.",
             ]
           : []),
         "originalCoverage descrive soltanto il materiale fornito qui. linkedDocumentsRead false o hasProjectDocuments false non provano indisponibilità esterna: conserva email/portali e condizioni di richiesta presenti. Non negare un documento perché non è archiviato o non è stato letto.",
         "Le observations sono selezioni di prove originali, non un riassunto. Scegli kind, serviceRef ed evidence per individuare tutte le prestazioni e condizioni rilevanti; non produrre parafrasi, traduzioni o un campo statement. Il codice conserva i passaggi integrali. Oggetto, azione, soggetto contrattuale, destinatario, permessi e obblighi rimangono nel testo originale selezionato, che il revisore dovrà leggere direttamente. La sola selezione di un riferimento non dimostra un significato né l'applicabilità al target.",
         "requiredClausePassages e requiredClauseFields elencano note e valori originali su subappalto, opzioni o esecuzione assegnati a questa parte. Per coverage complete conserva ogni riferimento, incluse tutte le lingue e i segmenti, in observations o issues secondo il suo significato; missingDetails può solo aggiungere dubbi sui dettagli assenti, non sostituire fatti noti. Leggi i valori strutturati insieme al percorso originale: il divieto di subappalto espresso da subContractorAllowed no o false delimita il lavoro delegabile anche senza una nota testuale. null significa non indicato, non divieto; non inventare il significato di valori sconosciuti. Una clausola che delimita ruoli, parti delegabili, obblighi od opzioni va in condition con una descrizione del lavoro dello stesso ambito. Un rinvio privo dei dettagli necessari va in missingDetails; un impedimento materiale in issues. Se non riesci a coprirle usa unreadable. Il nome del campo da solo non prova prestazioni, restrizioni, capacità o idoneità non dichiarate dal valore o testo originale.",
         "Le etichette classificatorie dichiarano il contesto originale. Una denominazione generica o polisemica non dimostra che la classificazione sia sbagliata: non inventare una discrepanza né un sottotipo. Una classificazione ampia non aggiunge tutte le attività della sua etichetta.",
-        "Per ciascuna assignedClassificationIds restituisci una relazione con la descrizione. Non restituire label: il codice conserva codice ed etichette originali. In evidence scegli le prove della relazione; i riferimenti della classificazione sono aggiunti dal codice. consistent o broad_context conserva la famiglia compatibile; not_decisive non determina da sola la prestazione locale. metadata_discrepancy segnala una differenza di etichetta senza incompatibilità materiale: richiede in evidence una descrizione originale role service dello stesso ambito, selezionata come serviceRef o prova propria di una performance esplicita, e una spiegazione della differenza, senza correggere il codice. Non risolve oggetti ambigui, fonti incomplete o clausole opposte. conflicting richiede caratteristiche o affermazioni realmente incompatibili, con controprova originale esterna alla classificazione.",
+        "Per ciascuna assignedClassificationIds restituisci una relazione con la descrizione. Non restituire label: il codice conserva codice ed etichette originali. In evidence scegli le prove della relazione; i riferimenti della classificazione sono aggiunti dal codice. consistent o broad_context conserva la famiglia compatibile; not_decisive non determina da sola la prestazione locale. metadata_discrepancy richiede caratteristiche originali concretamente disallineate, non solo diversa etichetta o silenzio su una funzione: identifica nella spiegazione entrambe le caratteristiche e cita le loro prove proprie. La descrizione originale role service dello stesso ambito deve essere selezionata come serviceRef o prova propria di una performance esplicita; conserva codice ed etichette senza correggerli. Le categorie compatibili più ampie richiedono consistent o broad_context, non un avviso di anomalia. Non risolve oggetti ambigui, fonti incomplete o clausole opposte. conflicting richiede caratteristiche o affermazioni realmente incompatibili, con controprova originale esterna alla classificazione.",
         "Classifications: restituisci classificationId, evidence e assessment. assessment contiene una sola chiave, che è la tua scelta: consistent, broad_context o not_decisive con valore null; metadata_discrepancy o conflicting con una spiegazione sostenuta dalla propria evidence. Scegli prima il significato della relazione, non il ramo che permette di scrivere una spiegazione. Un testo che conclude che le prestazioni sono compatibili non può accompagnare conflicting. Per le relazioni compatibili il codice nomina soltanto la scelta e conserva le prove integrali, senza riscrivere oggetti o azioni. La scelta resta da verificare semanticamente. La spiegazione delle anomalie non eredita prove da observations o da altre classificazioni.",
         "Le osservazioni performance descrivono acquisti e azioni: fornitura di beni, esecuzione, gestione, installazione, manutenzione, progettazione o consulenza. Manutenzione conserva o ripristina un bene: luogo, destinatario o settore non la dimostrano. Metadati e classificazioni non sono prestazioni autonome.",
         "Prima di confrontare le classificazioni, identifica il ruolo contrattuale nella frase completa: chi è incaricato e quale prestazione deve svolgere. Le fasi del progetto non sono azioni attribuite automaticamente all'incaricato. Prestazioni di un ingegnere nelle fasi di appalto o realizzazione, direzione o supervisione dei lavori restano servizi professionali, salvo un distinto obbligo esplicito di eseguire materialmente le opere. Non isolare realizzazione, esecuzione o un codice di fase dal soggetto e dal lavoro cui si riferiscono. Conserva invece fornitura e posa quando entrambe sono effettivamente richieste allo stesso operatore.",
         "Prima di scegliere conflicting, indica due contenuti originali che non possono valere insieme per la stessa prestazione e lo stesso ruolo. Una classificazione progettuale o ingegneristica e un incarico professionale durante appalto o realizzazione non sono opposti per la sola differenza delle parole. La fonte non chiarisce il rapporto con la categoria o mancano dettagli non sono controprove di incompatibilità. Se il servizio è identificato, conserva il contesto compatibile o la discrepanza nominale e segnala soltanto i dettagli realmente mancanti; non inventare un conflitto. Clausole realmente opposte restano bloccanti.",
         "Conserva il ciclo della commessa attuale anche quando precisato in criteri o tempi: montaggio e collaudo attuali sono azioni, con prove originali e ambito propri. Referenze passate, qualifiche, prezzi e permessi non sono nuovi acquisti. Un titolo che chiede un'offerta non identifica da solo l'azione professionale.",
         "Una sola osservazione per ciascuna prestazione distinta, con oggetto e azione insieme. Quando titolo e descrizione attestano la stessa prestazione, seleziona entrambi nella sua evidence: un riferimento alternativo non prova il contenuto di quello omesso. Mantieni separati ambiti diversi e segnala le contraddizioni; non unire titoli o descrizioni riferiti a prestazioni diverse. Non creare una seconda performance per ripetere orderType, supplyType o un altro campo amministrativo. Ogni performance e target_partition deve citare almeno una descrizione originale role service dello stesso ambito. Non aggiungere una citazione irrilevante solo per rispettare lo schema.",
-        "missingDetails elenca specifiche non determinate nella fonte fornita: sottotipo, composizione, quantità, modelli o condizioni rinviate ai documenti. Non proporre possibili sottotipi. Queste lacune non diventano issues se famiglia dell'oggetto e azione contrattuale sono identificabili. Per esempio: fornitura di arredi senza dimensioni -> prestazione identificata, dimensioni in missingDetails; solo 'incarico Delta' senza descrizione né famiglia -> object_uncertain. Non trasferire azioni generali o di altri lotti al target.",
-        "missingDetails: scegli serviceRef/evidence propri e missingAspects, solo categorie di specifiche realmente assenti dopo aver letto TUTTA la fonte fornita. Non restituire description: il codice nomina le categorie senza aggiungere oggetti, luoghi, date o requisiti. Il testo originale del serviceRef identifica l'oggetto della lacuna; non eredita prove da altre righe. Una categoria parzialmente precisata non è interamente assente: conserva il fatto noto in observations ed evita una negazione generica. referenced_documents significa contenuto non fornito, mai documento indisponibile. condition conserva limiti e obblighi noti, anche amministrativi per requiredClausePassages/Fields, distinti dalle specifiche mancanti.",
+        "missingDetails registra soltanto una lacuna dichiarata o un rinvio con basisEvidence proprie; non registra una categoria assente per mancata menzione. verificationAspects nomina le verifiche relative a quelle prove, non assenze globali: sottotipo, composizione, quantità, modelli o condizioni rinviate ai documenti. Non proporre possibili sottotipi. Queste lacune non diventano issues se famiglia dell'oggetto e azione contrattuale sono identificabili. Per esempio: fornitura di arredi con «dimensioni nel capitolato» -> prestazione identificata e document_referral con la propria citazione; la semplice mancata menzione delle dimensioni non autorizza una nota; solo 'incarico Delta' senza descrizione né famiglia -> object_uncertain. Non trasferire azioni generali o di altri lotti al target.",
+        "missingDetails: scegli serviceRef/evidence propri, basis e basisEvidence proprie con testo originale che dichiari lacuna o rinvio, e verificationAspects. Non usare missingAspects né dichiarare categorie globalmente assenti. Il solo serviceRef non eredita una prova di lacuna. Non restituire description: il codice nomina le categorie senza aggiungere oggetti, luoghi, date o requisiti. Il testo originale del serviceRef identifica l'oggetto della lacuna; non eredita prove da altre righe. Una categoria parzialmente precisata non è interamente assente: conserva il fatto noto in observations ed evita una negazione generica. referenced_documents significa contenuto non fornito, mai documento indisponibile. condition conserva limiti e obblighi noti, anche amministrativi per requiredClausePassages/Fields, distinti dalle specifiche mancanti.",
         "Una clausola che limita quali parti del lavoro possono svolgere altri operatori delimita i ruoli contrattuali e va conservata come condition: per esempio subappalto ammesso solo per determinate attività o parti riservate all'aggiudicatario. Mantieni l'elenco delle attività e il carattere permesso, obbligatorio o escluso come dichiarati, con la citazione originale della clausola e una descrizione del lavoro. Non trasformare le attività subappaltabili in gare autonome o obblighi principali, né dedurre idoneità delle ditte. Questa condizione è diversa dai soli moduli o adempimenti per presentare l'offerta.",
         "issues contiene solo impedimenti materiali: object_uncertain quando non si può identificare neppure la famiglia o l'azione; target_uncertain quando non si può stabilire l'ambito; source_conflict per affermazioni incompatibili sul medesimo oggetto, senza precedenza o rettifica. Due clausole che includono ed escludono reciprocamente la stessa prestazione restano un conflitto, mai un semplice dettaglio da controllare. Non trasformare dati compatibili o traduzioni in conflitti.",
         "In ogni observations e missingDetails scegli serviceRef: una descrizione principale role service. Il codice ne ricava scope e conserva la citazione; non restituire scope. Gli eventuali riferimenti aggiuntivi in evidence devono appartenere allo stesso ambito originale di serviceRef, non a un’applicabilità dedotta. Conserva le informazioni del progetto in project_context e quelle del lotto in selected_lot, in osservazioni distinte. Il revisore successivo potrà esaminare insieme le due serie; non perderne una e non combinarle in un fatto locale.",
         ...(context.targetScope === "selected_lot"
           ? [
               "PRIORITÀ LOTTO: selected_lot descrive solo ciò che i passaggi locali attestano. Il titolo locale di un bene non dimostra servizi accessori né luoghi di esecuzione indicati soltanto nel progetto. Per esempio, progetto 'fornitura veicoli e smaltimento', lotto 'autocarri': conserva smaltimento nel progetto, non aggiungerlo agli autocarri. Un rinvio al capitolato non prova il contenuto di un documento non fornito. Non assegnare manutenzione, installazione, quantità o ubicazioni puntuali al lotto senza prova locale.",
-              "Se i lotti ripartiscono geograficamente uno stesso lavoro comune, conserva le azioni comuni come performance in project_context e la regione del lotto come target_partition in selected_lot. target_partition descrive solo la suddivisione esplicita del lavoro comune: non è una prestazione autonoma e non può aggiungere azioni, beni o luoghi più precisi. Usalo solo se la fonte presenta realmente il lotto come ripartizione territoriale, non per qualunque titolo generico o lotto con beni diversi. Specifiche o applicabilità accessorie non precisate sono missingDetails; non rendono sconosciuto un oggetto locale identificabile.",
+              "Se i lotti ripartiscono geograficamente uno stesso lavoro comune, conserva le azioni comuni come performance in project_context e la regione del lotto come target_partition in selected_lot. target_partition descrive solo la suddivisione esplicita del lavoro comune: non è una prestazione autonoma e non può aggiungere azioni, beni o luoghi più precisi. Usalo solo se la fonte presenta realmente il lotto come ripartizione territoriale, non per qualunque titolo generico o lotto con beni diversi. Specifiche o applicabilità accessorie richiedono una nota solo se una lacuna o un rinvio è dichiarato; non rendono sconosciuto un oggetto locale identificabile.",
             ]
           : []),
         "Le citazioni sN sono testi originali; fN sono valori JSON originali al percorso rawPath: numero, booleano, null o collezione. Puoi citarli solo se presenti qui. Usa fN per un numero fornito nei campi, senza inventare sN. Non attribuire a una data un significato non attestato dal percorso e dalla nota. Non confondere false, 0 e null. Ogni prestazione performance richiede anche una descrizione originale con role service, non soli metadati o CPV.",
@@ -781,15 +807,27 @@ function materialize(values: unknown[], plan: SourceEvidenceReadingPlan) {
         evidence: resolve(item.evidence),
       })),
       missingDetails: selected.missingDetails.map((item) => {
-        const { missingAspects, ...resolved } = resolveAnchored(item);
-        // The model judges which specifications are missing. It does not
-        // narrate known objects/places again with potentially unrelated refs.
-        // This projection is not evidence that its absence judgment is true.
+        const resolved = resolveAnchored(item);
+        const ownBasis = resolve(item.basisEvidence);
+        if (
+          ownBasis.some((q) => byId.get(q.sourceRef)!.scope !== resolved.scope)
+        )
+          throw new Error("Detail basis crosses original scope");
+        // Enum/aspect choices are unverified semantic judgments. The decoder
+        // supplies only own exact quotes; it never detects an omission by regex
+        // or infers absence from silence in the assigned part.
         return {
           ...resolved,
-          description: `Non precisati nel materiale fornito: ${missingAspects
-            .map((aspect) => missingAspectLabels[aspect])
-            .join("; ")}.`,
+          basisEvidence: ownBasis,
+          evidence: resolve(
+            unique(
+              [...resolved.evidence, ...ownBasis].map((q) => q.sourceRef),
+            ).map((sourceRef) => ({ sourceRef })),
+          ),
+          description: detailNoteDescription(
+            resolved.basis,
+            resolved.verificationAspects,
+          ),
         };
       }),
     };
@@ -951,6 +989,22 @@ function validate(values: unknown[], plan: SourceEvidenceReadingPlan) {
     value.issues.forEach((i) => checkQuotes(i.evidence));
     value.missingDetails.forEach((item) => {
       checkQuotes(item.evidence);
+      checkQuotes(item.basisEvidence);
+      if (
+        item.description !==
+        detailNoteDescription(item.basis, item.verificationAspects)
+      )
+        throw new Error("Detail note is not a global absence assertion");
+      if (
+        item.basisEvidence.some(
+          (q) =>
+            byId.get(q.sourceRef)!.scope !== item.scope ||
+            !item.evidence.some(
+              (e) => e.sourceRef === q.sourceRef && e.text === q.text,
+            ),
+        )
+      )
+        throw new Error("Detail basis lacks its own original scoped evidence");
       checkAnchor(item);
       if (!supportsScope(item.scope, item.evidence))
         throw new Error("Missing detail scope mismatch");
@@ -1214,7 +1268,8 @@ export function requiredSourceMapPassageIds(
     .filter(
       (p) =>
         p.role === "service" ||
-        isContractScopeField(p.rawPath, p.scope, targetScope),
+        isContractScopeField(p.rawPath, p.scope, targetScope) ||
+        isDocumentaryInterpretationContextField(p.rawPath),
     )
     .map((p) => p.id);
 }

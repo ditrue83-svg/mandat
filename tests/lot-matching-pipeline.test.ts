@@ -10,7 +10,10 @@ import {
   materializeSourceInterpretationFields,
   type SourceInterpretationContext,
 } from "../src/lib/source-interpretation";
-import { SOURCE_REVIEW_SUPPORTED_REASON } from "../src/lib/source-semantic-review";
+import {
+  SOURCE_REVIEW_SUPPORTED_REASON,
+  materializeSourceReviewOriginals,
+} from "../src/lib/source-semantic-review";
 import { buildSourceLiteralCatalogue } from "../src/lib/source-literal-catalogue";
 import { resolveSourceSelection } from "../src/lib/source-selection";
 import { componentEvidenceGroups } from "../src/lib/source-interpretation";
@@ -210,12 +213,18 @@ function inventedReviewWire(prompt: string, data: any): any {
                   deref(s.properties.verdict).enum?.includes("supported"),
               )
           : choice;
-        const readingShape = deref(supported.properties.readingRefsById);
+        const readingShape = deref(
+          supported.properties.readingRefsById ??
+            supported.properties.readingRefs,
+        );
         const readingAlternatives = readingShape.anyOf
           ? readingShape.anyOf.map(deref)
           : [readingShape];
-        const readingIds = Object.keys(readingAlternatives[0].properties ?? {});
+        const readingIds = supported.properties.readingRefs
+          ? deref(readingShape.items).enum
+          : Object.keys(readingAlternatives[0].properties ?? {});
         if (
+          !supported.properties.readingRefs &&
           readingAlternatives.some(
             (branch: any) =>
               JSON.stringify(Object.keys(branch.properties ?? {})) !==
@@ -284,9 +293,24 @@ function inventedReviewWire(prompt: string, data: any): any {
             draftQuote: null,
             reason: SOURCE_REVIEW_SUPPORTED_REASON,
             sourceRefs: claim.sourceRefs,
-            readingRefsById: Object.fromEntries(
-              readingIds.map((id) => [id, selected.includes(id)]),
-            ),
+            ...(supported.properties.readingRefs
+              ? { readingRefs: selected }
+              : {
+                  readingRefsById: Object.fromEntries(
+                    readingIds.map((id: string) => [id, selected.includes(id)]),
+                  ),
+                }),
+            ...(supported.properties.performanceRef
+              ? {
+                  performanceRef: selected.find((id: string) =>
+                    (
+                      deref(supported.properties.performanceRef).enum ?? [
+                        deref(supported.properties.performanceRef).const,
+                      ]
+                    ).includes(id),
+                  ),
+                }
+              : {}),
             coverageBySource,
           },
         ];
@@ -327,19 +351,23 @@ function inventedNegativeReview(
             negative = alternatives.find((s: any) =>
               deref(s.properties.verdict).enum?.includes("not_verifiable"),
             );
-          const ids = Object.keys(
-            deref(negative.properties.readingRefsById).properties,
-          );
-          if (
-            Object.entries(check.readingRefsById).some(
-              ([ref, chosen]) => chosen && !ids.includes(ref),
-            )
-          )
+          const ids = negative.properties.readingRefs
+            ? deref(deref(negative.properties.readingRefs).items).enum
+            : Object.keys(
+                deref(negative.properties.readingRefsById).properties,
+              );
+          const selected =
+            check.readingRefs ??
+            Object.entries(check.readingRefsById)
+              .filter(([, chosen]) => chosen)
+              .map(([ref]) => ref);
+          if (selected.some((ref: string) => !ids.includes(ref)))
             throw Error("Invented negative choice loses an original selection");
+          const { performanceRef: _performance, ...negativeChoice } = check;
           return [
             id,
             {
-              ...check,
+              ...negativeChoice,
               verdict: firstOnly ? "contradicted" : "not_verifiable",
               draftQuote: data.assignedClaims
                 .find((c: any) => c.id === id)
@@ -347,9 +375,16 @@ function inventedNegativeReview(
               reason: firstOnly
                 ? "Contraddizione inventata per verificare l'arresto del confronto."
                 : "Riscontro inventato non determinabile.",
-              readingRefsById: Object.fromEntries(
-                ids.map((ref) => [ref, check.readingRefsById[ref] ?? false]),
-              ),
+              ...(negative.properties.readingRefs
+                ? { readingRefs: selected }
+                : {
+                    readingRefsById: Object.fromEntries(
+                      ids.map((ref: string) => [
+                        ref,
+                        check.readingRefsById[ref] ?? false,
+                      ]),
+                    ),
+                  }),
             },
           ];
         },
@@ -480,7 +515,7 @@ function inventedAnswer(prompt: string) {
     };
     const selected: any = {
       ...choice,
-      evidenceFormat: "source_selections_v19",
+      evidenceFormat: "source_selections_v20",
       details: [],
       contractClauseDetails: {},
       classificationReadingsById: Object.fromEntries(
@@ -605,9 +640,10 @@ function inventedAnswer(prompt: string) {
       ...selected,
       components: [],
     });
-    encoded.components = selected.components.map((c: any) => ({
+    encoded.evidenceFormat = "source_selections_v21_owned";
+    encoded.components = selected.components.map(({ evidence: _oldEvidence, ...c }: any) => ({
       ...c,
-      evidence: own.sourceRefs.map((sourceRef) => ({ sourceRef })),
+      evidenceDeclaration: { basis: "selected_action_object_plus_explicit_additional_originals", additionalEvidence: [] },
       roleEvidence: {
         ...c.roleEvidence,
         actionSelection: { literalSelectionId: literal.id },
@@ -1155,20 +1191,8 @@ it("Reads every long-source chunk before interpretation and reuses those reading
     expect(reviewCall[7]?.reasoningEffort).toBe("high");
     const reviewPrompt = JSON.parse(reviewCall[2]);
     expect(reviewPrompt.company).toBeUndefined();
-    for (const encodedPassage of reviewPrompt.passages) {
-      const passage = {
-        ...encodedPassage,
-        text:
-          encodedPassage.text ??
-          encodedPassage.textParts
-            .map((part: any) =>
-              reviewPrompt.originalTextPieces[part.piece].slice(
-                part.startUtf16,
-                part.endUtf16,
-              ),
-            )
-            .join(""),
-      };
+    for (const passage of materializeSourceReviewOriginals(reviewCall[2])
+      .passages) {
       if (
         passage.rawPath === "/lots/0/orderDescription/it" &&
         reviewPrompt.coverage.passageIds.includes(passage.id)
@@ -2747,8 +2771,21 @@ async function useOperationalTransport(
         max,
         {
           complete: async () => {
-            let answer = operationalAnswer(prompt);
+            let answer: any = operationalAnswer(prompt);
             if (transform) answer = await transform(answer, purpose, prompt);
+            // Independent audit fixture encoder: keep the same original invented
+            // semantic answers; emit the actual field-bound wire instead of v4 quotes.
+            const payload = JSON.parse(prompt);
+            if (payload.protocolVersion) {
+              const decoded = decodeOperationalTaskPrompt(prompt);
+              const ref = (p: any) => {
+                const index = decoded.originalProofCatalog.findIndex((q: any) => q.scope === p.scope && q.path === p.path && q.quote === p.quote);
+                if (index < 0) return "invalid-original-proof";
+                return payload.fieldIdentityCatalog.find((row: any) => row[1] === index)[0];
+              };
+              if (answer.checks) answer = {binding:payload.binding,checks:Object.fromEntries(Object.entries(answer.checks).map(([k,v]:[string,any])=>[k,{...v,evidence:v.evidence.map(ref)}])),issues:answer.issues};
+              else answer = {binding:payload.binding,country:answer.country,countryEvidence:answer.countryEvidence.map(ref),canton:answer.canton,cantonEvidence:answer.cantonEvidence.map(ref),city:answer.city,cityEvidence:answer.cityEvidence.map(ref),deadline:{value:answer.deadline,appliesToTarget:answer.deadlineAppliesToTarget,dateFieldId:answer.deadlineEvidence.length?ref(answer.deadlineEvidence[0]):null,submissionFieldIds:[],lotApplicabilityFieldIds:[],otherEvidenceFieldIds:answer.deadlineEvidence.slice(1).map(ref)},rationale:answer.rationale,issues:answer.issues};
+            }
             return {
               text: JSON.stringify(answer),
               inputTokens: 100,
@@ -3133,7 +3170,26 @@ it("A source change between the final guard and atomic commit discards the verif
   expect(run.leaseUntil).toBeNull();
 });
 
-it("Abandoned operational work stays quarantined, exposes no facts and allows only independent professional work",async()=>{
- const {f,companyId,job}=await operationalFixture();await useOperationalTransport();await runAutomaticComparison(job,{now:()=>now});const [op]=await db.select().from(schema.operationalReadingRuns).where(eq(schema.operationalReadingRuns.companyId,companyId));await db.update(schema.operationalReadingRuns).set({status:"running",result:null,updatedAt:new Date(0)}).where(eq(schema.operationalReadingRuns.id,op.id));
- const loaded=await loadLotMatchReview(companyId,f.p.id,viewer);expect(loaded.input.operationalReadings).toHaveLength(0);expect(loaded.input.operationalAttemptKeys).toHaveLength(1);await matchAdoptedPublication({publicationId:f.p.id,now});expect(vi.mocked(infer).mock.calls.filter(c=>c[1].startsWith("documentary-operational-"))).toHaveLength(2);expect(await resumeUnsentOperationalReading(job,viewer,now)).toBe(false);
+it("Abandoned operational work stays quarantined, exposes no facts and allows only independent professional work", async () => {
+  const { f, companyId, job } = await operationalFixture();
+  await useOperationalTransport();
+  await runAutomaticComparison(job, { now: () => now });
+  const [op] = await db
+    .select()
+    .from(schema.operationalReadingRuns)
+    .where(eq(schema.operationalReadingRuns.companyId, companyId));
+  await db
+    .update(schema.operationalReadingRuns)
+    .set({ status: "running", result: null, updatedAt: new Date(0) })
+    .where(eq(schema.operationalReadingRuns.id, op.id));
+  const loaded = await loadLotMatchReview(companyId, f.p.id, viewer);
+  expect(loaded.input.operationalReadings).toHaveLength(0);
+  expect(loaded.input.operationalAttemptKeys).toHaveLength(1);
+  await matchAdoptedPublication({ publicationId: f.p.id, now });
+  expect(
+    vi
+      .mocked(infer)
+      .mock.calls.filter((c) => c[1].startsWith("documentary-operational-")),
+  ).toHaveLength(2);
+  expect(await resumeUnsentOperationalReading(job, viewer, now)).toBe(false);
 });

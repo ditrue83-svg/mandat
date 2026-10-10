@@ -12,11 +12,9 @@ import {
   wrapOperationalRecord,
   type StoredOperationalReading,
   readOperationalGrant,
+  readOperationalRuntimeRecord,
 } from "@/lib/operational-reading-runtime";
 import {
-  buildOperationalReviewTask,
-  operationalReviewRequest,
-  recordOperationalEvidence,
   readOperationalEvidence,
 } from "@/lib/lot-operational-evidence";
 import { infer, type AiTransport } from "./ai";
@@ -59,12 +57,12 @@ export async function ensureOperationalReading(
   for (const row of older) {
     if (row.status === "completed") {
       const value = row.result as StoredOperationalReading | undefined,
-        record = value?.record;
+        record = readOperationalRuntimeRecord(value, plan);
       if (
         record?.model === plan.configuration.model &&
         readOperationalEvidence([record], plan.context)
       ) {
-        const result = wrapOperationalRecord(record, plan);
+        const result = value!; // Raw proofs and their hash remain bound during adoption.
         await options.beforeRequest();
         const adoptionId = randomUUID();
         const [adopted] = await db
@@ -157,7 +155,7 @@ export async function ensureOperationalReading(
   };
   async function call(
     stage: "reading" | "review",
-    task: ReturnType<typeof buildOperationalReviewTask>,
+    task: typeof plan.task,
   ) {
     await guard();
     const purpose = `documentary-operational-${stage}:${id}`;
@@ -199,10 +197,10 @@ export async function ensureOperationalReading(
       .where(eq(operationalReadingRuns.id, id));
     await guard();
     validation = true;
-    const checked = operationalReviewRequest(plan.request, reading);
+    const checked = {answer:plan.protocol.decodeReading(reading)};
     if (checked.answer.issues.length)
       throw new Error("Operational reading has unresolved issues");
-    const task = buildOperationalReviewTask(plan.request, reading);
+    const task = plan.protocol.reviewTask(reading);
     validation = false;
     const review = await call("review", task);
     await db
@@ -211,12 +209,12 @@ export async function ensureOperationalReading(
       .where(eq(operationalReadingRuns.id, id));
     await guard();
     validation = true;
-    const record = recordOperationalEvidence(reading, review, plan.request, {
+    const record = plan.protocol.record(reading, review, {
         id,
         at: clock().toISOString(),
         model: plan.configuration.model,
       }),
-      result = wrapOperationalRecord(record, plan);
+      result = wrapOperationalRecord(record, plan, {reading, review});
     validation = false;
     // Authorization/source/config is rechecked inside the commit lock as well.
     await guard();

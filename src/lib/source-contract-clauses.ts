@@ -14,6 +14,10 @@
 // Keep the availability window and the actual document collection address;
 // a source-type enum or an alternative email cannot replace that information.
 const contractScopePaths = [
+  // Original project participation limits and their notes delimit which lots
+  // may be offered and evaluated. Keep both archived placements separately;
+  // a null flag, repeated wording or partialOffers cannot replace either note.
+  /^\/(?:base|project-info)\/participantLotsLimitation(?:Note)?(?:\/|$)/,
   /^(?:\/base|\/project-info|\/lots\/\d+)\/title\/(?:de|en|fr|it|rm)$/,
   /^(?:\/procurement|\/lots\/\d+)\/(?:contractPeriod|executionPeriod|contractDeadlineType|executionDeadlineType|contractDays|executionDays)(?:\/|$)/,
   /^\/correction\/remarks(?:\/|$)/,
@@ -114,3 +118,11 @@ export function sourceScopedCriterionContext<
     : [];
   return { criteria, authorityOriginalRefs };
 }
+
+// Notes attached to an award-criteria container can also carry official rules
+// for interpreting the source. Preserve every original fragment and language
+// structurally: wording, language order and field presence establish no priority.
+// This context is deliberately separate from required contractual details;
+// price arithmetic is retained as source context, not a purchased service.
+export const isDocumentaryInterpretationContextField = (rawPath: string) =>
+  /^(?:\/lots\/\d+)?\/criteria\/awardCriteriaNote(?:\/|$)/.test(rawPath);

@@ -47,10 +47,10 @@ import {
   normalizeSourceMapSelection,
   requiredSourceMapPassageIds,
 } from "./source-evidence-reading";
-import { isContractScopeField } from "./source-contract-clauses";
+import { isContractScopeField, isDocumentaryInterpretationContextField } from "./source-contract-clauses";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v93-source-map-binding-20261010";
+  "documentary-service-comparison-v95-documentary-participation-context";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,
@@ -591,7 +591,7 @@ export function buildAutomaticComparisonRequest(
       };
       const prompt = JSON.stringify(
         {
-          task: "Leggi tutti gli items di questo segmento. Seleziona gli id dei passaggi che definiscono, limitano, ampliano o contraddicono la prestazione affidata al target. Conserva anche eventuali vincoli che cambiano l'oggetto acquistato. Questa è soltanto una raccolta di riferimenti, NON un confronto con una ditta.",
+          task: "Leggi tutti gli items di questo segmento. Seleziona gli id dei passaggi che definiscono, limitano, ampliano o contraddicono la prestazione affidata al target. Conserva anche eventuali vincoli che cambiano l'oggetto acquistato e regole ufficiali che stabiliscono come interpretare o riconciliare il materiale. Non dedurre precedenza da lingua, ordine o maggioranza delle versioni. Questa è soltanto una raccolta di riferimenti, NON un confronto con una ditta.",
           chunkId: id,
           target: promptBody.target,
           items: group,
@@ -742,7 +742,8 @@ function reducedPassageIds(
             passage.rawPath,
             passage.scope,
             request.targetScope,
-          ),
+          ) ||
+          isDocumentaryInterpretationContextField(passage.rawPath),
       )
       .map((passage) => passage.id),
     // A map selecting only service prose must not discard the classification

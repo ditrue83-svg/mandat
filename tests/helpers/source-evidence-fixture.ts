@@ -37,7 +37,7 @@ export function encodeInventedSourceSelections(
       );
     return { literalSelectionId: picked.id };
   };
-  value.evidenceFormat = "source_selections_v19";
+  value.evidenceFormat = "source_selections_v20";
   for (const c of value.components) {
     c.roleEvidence.actionSelection = choose(c.roleEvidence.actionSelection);
     c.meaning.objectSelection = choose(c.meaning.objectSelection);
@@ -96,6 +96,8 @@ import {
 } from "../../src/lib/source-evidence-reading";
 import {
   buildGroundedSourceReviewRequests,
+  materializeSourceReviewDraft,
+  materializeSourceReviewIndependentReading,
   type SourceSemanticReviewPlan,
 } from "../../src/lib/source-semantic-review";
 import Ajv2020 from "ajv/dist/2020.js";
@@ -292,6 +294,12 @@ export function inventedReadingRefs(
   body: any,
   claim: { sourceRefs: string[]; kind?: string },
 ) {
+  body = {
+    ...body,
+    independentReading: materializeSourceReviewIndependentReading(
+      JSON.stringify(body),
+    ),
+  };
   return [
     ...(claim.kind === "contract_clause_coverage" ||
     claim.kind === "scope_coverage"
@@ -322,26 +330,7 @@ export function inventedCoverageProof(
   // Decode only explicitly invented fixtures. Recorded provider responses are
   // never passed here; dictionary indices retain exact text and citations.
   if (draft.detailEvidenceBindings)
-    draft = {
-      ...draft,
-      details: draft.details.map((item: any) => {
-        const binding = draft.detailEvidenceBindings.find(
-          (b: any) => b.id === item.b,
-        );
-        if (!binding)
-          throw Error("Invented fixture has missing dictionary binding");
-        const explanation =
-          item.explanation ?? body?.originalTextPieces?.[item.literalPiece];
-        if (typeof explanation !== "string")
-          throw Error("Invented fixture has missing literal text");
-        return {
-          ...item,
-          scope: binding.scope,
-          sourceRefs: binding.sourceRefs,
-          explanation,
-        };
-      }),
-    };
+    draft = materializeSourceReviewDraft(JSON.stringify({ ...body, draft }));
   if (!claim.kind?.endsWith("coverage")) return [];
   return claim.sourceRefs.map((sourceRef: string) => {
     const indices = draft.details.flatMap((d: any, index: number) =>

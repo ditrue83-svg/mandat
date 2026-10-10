@@ -87,7 +87,7 @@ function wire(input: SourceInterpretationContext) {
   return {
     request,
     value: {
-      evidenceFormat: "source_selections_v19",
+      evidenceFormat: "source_selections_v21_owned",
       status: "resolved",
       targetRef: target.id,
       summary: "Fornitura di beni inventati.",
@@ -97,7 +97,7 @@ function wire(input: SourceInterpretationContext) {
           description: "Fornitura di beni inventati.",
           importance: "not_stated",
           role: "supply",
-          evidence: [{ sourceRef: target.id }],
+          evidenceDeclaration: { basis: "selected_action_object_plus_explicit_additional_originals", additionalEvidence: [] },
           roleEvidence: {
             state: "identified",
             scope: target.scope,

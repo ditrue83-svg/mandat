@@ -1,3 +1,4 @@
+import { createInventedCanonicalSourceRecord } from "./helpers/canonical-source-record-fixture";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import Ajv2020 from "ajv/dist/2020.js";
@@ -10,7 +11,6 @@ import {
 } from "../src/lib/source-evidence-reading";
 import {
   buildSourceInterpretationRequest,
-  recordSourceInterpretation,
   type SourceInterpretationContext,
 } from "../src/lib/source-interpretation";
 import {
@@ -255,7 +255,9 @@ test("Known form obligations cannot be covered only by unknown product specifica
   );
   complete[index].missingDetails.push({
     serviceRef: "s1",
-    missingAspects: ["technical_specifications"],
+    verificationAspects: ["technical_specifications"],
+    basis: "document_referral",
+    basisEvidence: [{ sourceRef: "s5" }],
     evidence: [{ sourceRef: "s5" }],
   });
   const onlyUnknown = structuredClone(complete);
@@ -781,7 +783,7 @@ test("A flat lot extension deadline rejects an omitted condition and reaches sem
   const before = JSON.stringify(answer);
   assert.throws(
     () =>
-      recordSourceInterpretation({ ...answer, details: [] }, request, {
+      createInventedCanonicalSourceRecord({ ...answer, details: [] }, request, {
         ...metadata,
         model: input.binding.model,
       }),
@@ -791,7 +793,7 @@ test("A flat lot extension deadline rejects an omitted condition and reaches sem
   // and use a separate complete invented fixture for the review plumbing.
   assert.throws(
     () =>
-      recordSourceInterpretation(answer, request, {
+      createInventedCanonicalSourceRecord(answer, request, {
         ...metadata,
         model: input.binding.model,
       }),
@@ -799,7 +801,7 @@ test("A flat lot extension deadline rejects an omitted condition and reaches sem
   );
   const complete = structuredClone(answer);
   complete.details[0].explanation = note;
-  const source = recordSourceInterpretation(complete, request, {
+  const source = createInventedCanonicalSourceRecord(complete, request, {
     ...metadata,
     model: input.binding.model,
   });
@@ -960,7 +962,9 @@ test("Unreadable work clauses stay blocked and missing-detail quotations cannot 
   moved[0].missingDetails = [
     {
       serviceRef: "s5",
-      missingAspects: ["technical_specifications"],
+      verificationAspects: ["technical_specifications"],
+      basis: "explicit_gap",
+      basisEvidence: [{ sourceRef: "s4" }],
       evidence: [{ sourceRef: "s6" }],
     },
   ];
@@ -975,7 +979,7 @@ test("Unreadable work clauses stay blocked and missing-detail quotations cannot 
   );
   assert.throws(
     () => recordSourceEvidenceReading(moved, mixed, metadata),
-    /scope mismatch/,
+    /scope mismatch|basis crosses original scope/,
   );
 });
 
@@ -1861,7 +1865,9 @@ test("Missing specifications remain visible without clearing material uncertaint
   const plan = buildSourceEvidenceReadingRequest(context(), config);
   const answers: any[] = responses(plan);
   answers[0].missingDetails.push({
-    missingAspects: ["subtype"],
+    verificationAspects: ["subtype"],
+    basis: "explicit_gap",
+    basisEvidence: [{ sourceRef: "s4" }],
     serviceRef: "s1",
     evidence: [{ sourceRef: "s4" }],
   });
@@ -1889,13 +1895,15 @@ test("Missing specifications remain visible without clearing material uncertaint
   );
 });
 
-test("Missing details select absent aspects without inventing known objects or places", () => {
+test("Detail notes select verification aspects without asserting global absence or inventing objects", () => {
   const plan = buildSourceEvidenceReadingRequest(context(), config);
   const answers: any[] = responses(plan);
   answers[0].missingDetails.push({
     serviceRef: "s1",
     evidence: [{ sourceRef: "s4" }],
-    missingAspects: ["quantities", "technical_specifications"],
+    verificationAspects: ["quantities", "technical_specifications"],
+    basis: "explicit_gap",
+    basisEvidence: [{ sourceRef: "s4" }],
   });
   const validate = compileInventedSourceEvidenceSchema(
     plan.requests[0].responseFormat.json_schema.schema,
@@ -1905,7 +1913,7 @@ test("Missing details select absent aspects without inventing known objects or p
   const record = recordSourceEvidenceReading(answers, plan, metadata);
   assert.equal(
     record.responses[0].missingDetails[0].description,
-    "Non precisati nel materiale fornito: quantità; specifiche tecniche di dettaglio.",
+    "Da verificare (lacuna dichiarata; giudizio AI non verificato): quantità; specifiche tecniche di dettaglio. Nessuna assenza globale dedotta dalla parte.",
   );
   assert.deepEqual(
     record.responses[0].missingDetails[0].evidence.map((q) => q.sourceRef),
@@ -1925,7 +1933,7 @@ test("Missing details select absent aspects without inventing known objects or p
     ["quantities", "quantities"],
   ]) {
     const bad = structuredClone(answers);
-    bad[0].missingDetails[0].missingAspects = aspects;
+    bad[0].missingDetails[0].verificationAspects = aspects;
     assert.throws(() => recordSourceEvidenceReading(bad, plan, metadata));
   }
 });
@@ -1961,7 +1969,9 @@ test("The provider schema requires descriptive evidence for performances and mis
   answers[0].observations[0].serviceRef = "s1";
   assert.equal(validate(answers[0]), true);
   answers[0].missingDetails.push({
-    missingAspects: ["technical_specifications"],
+    verificationAspects: ["technical_specifications"],
+    basis: "explicit_gap",
+    basisEvidence: [{ sourceRef: "s4" }],
     serviceRef: "s4",
     evidence: [{ sourceRef: "s4" }],
   });
@@ -2024,12 +2034,19 @@ function lotContext(
 }
 
 test("Lot facts and shared facts remain separate in the provider schema and stored reading", () => {
-  const plan = buildSourceEvidenceReadingRequest(lotContext(), config);
+  const plan = buildSourceEvidenceReadingRequest(
+    lotContext(
+      "Il lotto 1 applica il lavoro alla regione Nord. Specifiche nei documenti allegati.",
+    ),
+    config,
+  );
   const valid: any[] = responses(plan);
   valid[0].observations[0].serviceRef = "s5";
   valid[0].observations[0].evidence = [{ sourceRef: "s5" }];
   valid[0].missingDetails.push({
-    missingAspects: ["referenced_documents"],
+    verificationAspects: ["referenced_documents"],
+    basis: "document_referral",
+    basisEvidence: [{ sourceRef: "s5" }],
     serviceRef: "s5",
     evidence: [{ sourceRef: "s5" }],
   });
