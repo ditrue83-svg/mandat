@@ -1,0 +1,151 @@
+/* Shared reading scale, after the desktop and mobile layout rules. */
+.app-shell main {
+  --reading-ink: #243b35;
+  --reading-muted: #465d55;
+  font-size: 16px;
+  line-height: 1.65;
+}
+.app-shell main .panel p,
+.app-shell main .catalog-notice p {
+  color: var(--reading-ink);
+  font-size: 17px;
+  line-height: 1.75;
+}
+.app-shell main .meta,
+.app-shell main .catalog-scope-note,
+.app-shell main .source-summary-line,
+.app-shell main .tender-save-hint,
+.app-shell main .tender-card-buyer,
+.app-shell main .tender-card-sectors {
+  color: var(--reading-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.app-shell main .panel h2 {
+  color: #182f2d;
+  font-weight: 800;
+  line-height: 1.35;
+}
+.app-shell main .tender-brief h3 {
+  color: #182f2d;
+  font-size: 20px;
+  font-weight: 750;
+  line-height: 1.45;
+  margin: 32px 0 16px;
+}
+.app-shell main .tender-brief h4 {
+  font-size: 18px;
+  font-weight: 750;
+  color: #182f2d;
+}
+.app-shell main .brief-facts {
+  gap: 24px;
+}
+.app-shell main .brief-fact + .brief-fact {
+  padding-top: 24px;
+  border-top: 1px solid #d6e0da;
+}
+.app-shell main .brief-fact > strong {
+  display: block;
+  font-size: 17px;
+  font-weight: 750;
+  color: #182f2d;
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+.app-shell main .publication-text {
+  max-width: 72ch;
+  font-size: 18px;
+  color: var(--reading-ink);
+  line-height: 1.8;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.app-shell main .publication-text p {
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  white-space: pre-line;
+  margin: 0 0 16px;
+}
+.app-shell main .publication-text .publication-text-heading {
+  margin: 30px 0 10px;
+  padding-top: 22px;
+  border-top: 1px solid #d6e0da;
+  font-size: 19px;
+  line-height: 1.45;
+  color: #182f2d;
+}
+.app-shell main .publication-text-heading strong {
+  font-weight: 800;
+}
+.app-shell main .publication-text-heading:first-child {
+  border-top: 0;
+  margin-top: 14px;
+  padding-top: 0;
+}
+.app-shell main .publication-text > :last-child {
+  margin-bottom: 0;
+}
+.app-shell main .brief-reference,
+.app-shell main .source-link,
+.app-shell main .decision-grid .text-link {
+  color: #14574e;
+  font-size: 15px;
+  line-height: 1.6;
+  text-underline-offset: 4px;
+}
+.app-shell main .original-text,
+.app-shell main .brief-review blockquote {
+  font-size: 17px;
+  line-height: 1.8;
+  color: var(--reading-ink);
+}
+.app-shell main .decision-grid dt,
+.app-shell main .catalog-details dt,
+.app-shell main .detail-facts dt {
+  font-size: 15px;
+  color: var(--reading-muted);
+  font-weight: 700;
+}
+.app-shell main .decision-grid dd,
+.app-shell main .catalog-details dd,
+.app-shell main .detail-facts dd {
+  font-size: 17px;
+  line-height: 1.7;
+  color: var(--reading-ink);
+}
+.app-shell main .decision-facts strong {
+  font-size: 15px;
+  color: #243b35;
+  margin-bottom: 6px;
+}
+.app-shell main .tender-card-description {
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--reading-ink);
+}
+.app-shell main .brief-translations summary,
+.app-shell main .brief-review summary,
+.app-shell main .original-publication summary,
+.app-shell main .secondary-publication-data summary {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.5;
+  color: #14574e;
+}
+@media (max-width: 900px) {
+  .app-shell main .panel p,
+  .app-shell main .catalog-notice p {
+    font-size: 16px;
+  }
+  .app-shell main .publication-text {
+    font-size: 17px;
+  }
+  .app-shell main .publication-text p {
+    font-size: inherit;
+  }
+  .app-shell main .publication-text .publication-text-heading {
+    font-size: 18px;
+  }
+}

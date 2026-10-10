@@ -1,3 +1,4 @@
+import { PublicationText } from "@/components/publication-text";
 import {
   TenderDetailHeader,
   TenderSectionLinks,
@@ -133,10 +134,13 @@ export default async function CatalogDetail({
               Testo originale disponibile, nella lingua della fonte. Le
               condizioni ufficiali e le rettifiche prevalgono.
             </p>
-            <div className="catalog-original">
-              {item.originalText ||
-                "Il testo non è disponibile. Consulta il portale originale."}
-            </div>
+            <PublicationText
+              className="catalog-original"
+              text={
+                item.originalText ||
+                "Il testo non è disponibile. Consulta il portale originale."
+              }
+            />
           </details>
         </div>
         <aside>

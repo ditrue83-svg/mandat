@@ -3,6 +3,7 @@ import "@fontsource-variable/dm-sans";
 import "@fontsource-variable/manrope";
 import "./globals.css";
 import "./mobile.css";
+import "./readability.css";
 
 export const viewport: Viewport = {
   width: "device-width",

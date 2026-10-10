@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { PublicationText } from "@/components/publication-text";
 import {
   AlertTriangle,
   FileCheck2,
@@ -68,9 +69,11 @@ function Fact({ fact }: { fact: BriefFact }) {
           · {languageNames[fact.language] ?? fact.language} · testo originale
         </span>
       )}
-      <p className="brief-text" lang={fact.language}>
-        {fact.text}
-      </p>
+      <PublicationText
+        className="brief-text"
+        lang={fact.language}
+        text={fact.text}
+      />
       {link && (
         <a
           className="source-link"

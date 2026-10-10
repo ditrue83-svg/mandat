@@ -1,3 +1,4 @@
+import { PublicationText } from "@/components/publication-text";
 import {
   TenderDetailHeader,
   TenderSectionLinks,
@@ -242,7 +243,10 @@ export default async function Detail({
               Pubblicazione non ufficiale. Testo disponibile nella lingua della
               fonte.
             </p>
-            <p className="original-text">{plainText(item.originalText)}</p>
+            <PublicationText
+              className="original-text"
+              text={plainText(item.originalText)}
+            />
             {!viewer.demo && item.sourceUrls.length > 1 && (
               <p>
                 Questa opportunità compare in più pubblicazioni.{" "}
