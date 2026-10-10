@@ -61,6 +61,7 @@ describe("source text presentation", () => {
       "&lt;script&gt;alert(1)&lt;/script&gt; &amp; obbligo",
     );
     expect(html).not.toContain("<script>");
+    expect(html).not.toContain("<p>\n</p>");
   });
   it("recognizes original PDF nonbreaking spaces and uppercase labels", () => {
     const text =

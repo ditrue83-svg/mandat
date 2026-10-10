@@ -12,20 +12,24 @@ export function PublicationText({
 }) {
   return (
     <div className={`publication-text ${className}`.trim()} lang={lang}>
-      {publicationTextBlocks(text).map((block, index) => (
-        <p
-          key={index}
-          className={
-            block.kind === "heading" ? "publication-text-heading" : undefined
-          }
-        >
-          {block.kind === "heading" ? (
-            <strong>{block.text}</strong>
-          ) : (
-            block.text
-          )}
-        </p>
-      ))}
+      {publicationTextBlocks(text).map((block, index) =>
+        block.text.trim() ? (
+          <p
+            key={index}
+            className={
+              block.kind === "heading" ? "publication-text-heading" : undefined
+            }
+          >
+            {block.kind === "heading" ? (
+              <strong>{block.text}</strong>
+            ) : (
+              block.text
+            )}
+          </p>
+        ) : (
+          block.text
+        ),
+      )}
     </div>
   );
 }
