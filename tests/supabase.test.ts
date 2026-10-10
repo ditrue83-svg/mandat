@@ -99,7 +99,7 @@ describe("PostgreSQL gestito senza esporre credenziali o tabelle", () => {
         FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relkind='r'
       `);
-      expect(protection.rows[0]).toEqual({ total: 26, protected: 26 });
+      expect(protection.rows[0]).toEqual({ total: 27, protected: 27 });
       for (const role of ["anon", "authenticated", "service_role"]) {
         await pg.exec(`SET ROLE ${role}`);
         await expect(pg.query("SELECT * FROM public.session")).rejects.toThrow(
@@ -109,6 +109,9 @@ describe("PostgreSQL gestito senza esporre credenziali o tabelle", () => {
           pg.query("SELECT * FROM public.companies"),
         ).rejects.toThrow(/permission denied/i);
         await expect(pg.query("SELECT * FROM public.automatic_match_runs")).rejects.toThrow(/permission denied/i);
+        await expect(
+          pg.query("SELECT * FROM public.operational_reading_runs"),
+        ).rejects.toThrow(/permission denied/i);
         await pg.exec("RESET ROLE");
       }
       await pg.exec(

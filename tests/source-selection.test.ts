@@ -999,7 +999,7 @@ test("Additional details cannot append a document-source enum or a visit consequ
     {
       kind: "execution_condition",
       scope: "project_context",
-      originalText: true,
+      explanation: requestDocs.contractDetailFamilies.find(f=>f.sourceRefs.includes("s5"))!.originalScalarExplanation!,
       sourceRefs: ["s5"],
     },
   ];

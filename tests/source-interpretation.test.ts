@@ -5299,3 +5299,16 @@ test("HR product availability and bidder qualifications require separate complet
   assert.throws(() => recordSourceInterpretation(wrong, request, metadata));
   assert.equal(JSON.stringify(input), before);
 });
+
+test("A document-source type keeps its exact original enum and rejects a generic placeholder", () => {
+ const base=context();const value="documents_source_simap"; const input:SourceInterpretationContext={...base,body:{...base.body,passages:[...base.body.passages,{...base.body.passages[0],id:"s5",role:"context",rawPath:"/project-info/documentsSourceType",text:value,startUtf16:0,endUtf16:value.length}]}};
+ const before=JSON.stringify(input);const request=buildSourceInterpretationRequest(input);const family=request.contractDetailFamilies.find(f=>f.sourceRefs.includes("s5"))!;assert.equal(family.originalScalarExplanation,"Tipo di fonte dei documenti: documents_source_simap.");
+ const good=wireResponse({...response(input),details:[{kind:"execution_condition",scope:"project_context",sourceRefs:["s5"],explanation:family.originalScalarExplanation!}]},request);
+ assert.doesNotThrow(()=>recordSourceInterpretation(good,request,metadata));const bad=structuredClone(good);bad.contractClauseDetails![clauseKey(request,"s5")][0].explanation="Tipo di fonte dei documenti indicato nel campo originale.";
+ assert.throws(()=>recordSourceInterpretation(bad,request,metadata));assert.equal(JSON.stringify(input),before);
+});
+test("Another original document-source enum is preserved without inventing SIMAP or document availability", () => {
+ const base=context();const value="documents_source_external";const input:SourceInterpretationContext={...base,body:{...base.body,passages:[...base.body.passages,{...base.body.passages[0],id:"s5",role:"context",rawPath:"/project-info/documentsSourceType",text:value,startUtf16:0,endUtf16:value.length}]}};
+ const request=buildSourceInterpretationRequest(input);assert.equal(request.contractDetailFamilies.find(f=>f.sourceRefs.includes("s5"))!.originalScalarExplanation,"Tipo di fonte dei documenti: documents_source_external.");
+ const unrelated=structuredClone(input);unrelated.body.passages.at(-1)!.rawPath="/unrelated/documentsSourceType";assert(!buildSourceInterpretationRequest(unrelated).requiredContractClauseIds.includes("s5"));
+});

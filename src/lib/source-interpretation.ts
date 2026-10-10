@@ -30,7 +30,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v81-lossless-storage-schema-bounds";
+  "documentary-source-interpretation-v82-document-source-enum-case19";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -558,6 +558,12 @@ function originalDayDurationPattern(rawPath: string, value: unknown) {
 }
 
 function originalScalarExplanation(rawPath: string, value: unknown) {
+  // Preserve the original enum without claiming availability or a document read.
+  if (
+    rawPath.replace(/^\/lots\/\d+/, "") === "/project-info/documentsSourceType" &&
+    typeof value === "string" && value.length > 0 && value.length <= 100
+  ) return `Tipo di fonte dei documenti: ${value}.`;
+
   // The type is an original enum, not evidence for a neighbouring number,
   // date or starting event. Preserve it without adding any such assertion.
   if (
