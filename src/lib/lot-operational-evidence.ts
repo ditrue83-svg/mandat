@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { LotSourceContext } from "./lot-source-context";
 
-export const LOT_OPERATIONAL_EVIDENCE_VERSION = "lot-operational-evidence-v6-direct-date-bound";
+export const LOT_OPERATIONAL_EVIDENCE_VERSION = "lot-operational-evidence-v7-distinct-text-identities";
 export class OperationalDeadlineConflict extends Error {
   constructor() { super("Operational deadline conflicts with selected-lot deadline or cited offer deadline"); }
 }
@@ -531,8 +531,39 @@ function dictionarySource(
 // Lossless decoding utility for the collaudo runner and capacity regressions.
 // Decoding is not validation/approval: native evidence validators still own that.
 export function decodeOperationalTaskPrompt(prompt: string) {
-  const data = JSON.parse(prompt),
-    dictionary = data.source;
+  const data = JSON.parse(prompt);
+  let dictionary = data.source;
+  // Lossless context decoding only. Native proof/role/scope validators below
+  // are unchanged. The field-bound provider format separates proof and text IDs.
+  if (dictionary.encoding === "original-proof-dictionary-v2") {
+    const values = dictionary.strings;
+    const textIndex = (key: unknown): number => {
+      if (typeof key !== "string" || !/^text_(0|[1-9]\d*)$/.test(key) ||
+          !Object.hasOwn(values, key) || typeof values[key] !== "string")
+        throw new Error("Original text identity invalid");
+      return Number(key.slice(5));
+    };
+    const keys = Object.keys(values);
+    const strings = keys.map((_,i) => values[`text_${i}`]);
+    if (strings.some(v=>typeof v !== "string") || keys.some(k=>textIndex(k)>=keys.length))
+      throw new Error("Original text dictionary identities incomplete");
+    const untag = (node: any): any => {
+      if (!Array.isArray(node)) return node;
+      if (node[0] === "text") return ["s",textIndex(node[1])];
+      if (node[0] === "a") return ["a",node[1].map(untag)];
+      if (node[0] === "o") return ["o",node[1].map(([key,value]: [string,unknown])=>[key,untag(value)])];
+      return node;
+    };
+    data.originalProofCatalog = data.originalProofCatalog.map(
+      ([proofId,scope,path,ref]: [string,string,string,[string,string]],i: number) => {
+        if (proofId !== `f${i}` || ref[0] !== "text")
+          throw new Error("Original proof identity row invalid");
+        return [scope,path,textIndex(ref[1])];
+      });
+    if (data.reading) data.reading = untag(data.reading);
+    dictionary = {...dictionary,encoding:"original-dictionary-v1",strings,
+      selectedLot:untag(dictionary.selectedLot),projectSections:untag(dictionary.projectSections)};
+  }
   if (
     dictionary.encoding !== "original-dictionary-v1" ||
     !Array.isArray(dictionary.strings)

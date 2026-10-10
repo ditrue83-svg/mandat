@@ -4,7 +4,7 @@ import { z } from "zod";
 export class OperationalFieldReferenceError extends Error {}
 export const isFieldBoundRejection = (e) =>
   e instanceof OperationalFieldReferenceError;
-export const PROTOCOL_VERSION = "operational-field-bound-v3-direct-date";
+export const PROTOCOL_VERSION = "operational-field-bound-v4-distinct-text-identities";
 const stable = (v) =>
   Array.isArray(v)
     ? `[${v.map(stable).join(",")}]`
@@ -225,23 +225,49 @@ export function createFieldBoundProtocol(native, request) {
   // Keep the complete native dictionary source; references add path identities,
   // not summaries. Quotes are recovered from that bound source, never supplied
   // or corrected after a provider response. Compact IDs are catalog-local; the required binding makes their identity request-specific.
-  // fieldIdentityCatalog maps [fieldId, originalProofCatalog index] without
-  // repeating any path, scope or quote.
+  // Each originalProofCatalog row directly names its selectable proofId and
+  // its separate text reference, without copying or summarizing original quotes.
   function payload(nativeTask) {
-    const data = JSON.parse(nativeTask.prompt);
+    const data = JSON.parse(nativeTask.prompt), {strings, ...source} = data.source;
+    // Text keys and selectable proof identities are different domains. Never
+    // derive a proof identity from a text key or its numeric suffix.
+    const retag = node => {
+      if (!Array.isArray(node)) return node;
+      if (node[0] === "s") return ["text", `text_${node[1]}`];
+      if (node[0] === "a") return ["a", node[1].map(retag)];
+      if (node[0] === "o") return ["o", node[1].map(([key,value])=>[key,retag(value)])];
+      return node;
+    };
     return {
       ...data,
+      source: {...source, encoding:"original-proof-dictionary-v2",
+        selectedLot:retag(source.selectedLot),projectSections:retag(source.projectSections),
+        strings:Object.fromEntries(strings.map((value,index)=>[`text_${index}`,value]))},
+      originalProofCatalog:data.originalProofCatalog.map(([scope,path,index],i)=>
+        [snapshot[i].fieldId,scope,path,["text",`text_${index}`]]),
+      ...(data.reading ? {reading:retag(data.reading)} : {}),
       protocolVersion: PROTOCOL_VERSION,
       binding,
-      fieldIdentityCatalog: snapshot.map((p, i) => [p.fieldId, i]),
+      referenceDomains:{proofRow:["proofId","scope","path","textReference"],
+        selectable:"Only proofId fN from its own originalProofCatalog row",
+        textReference:"text_N identifies a string in source.strings, never a proof. Numeric suffixes and row positions are not interchangeable."},
     };
+  }
+  // Provider context is retagged to v2; keep native v1 task decoding intact.
+  function providerContextSystem(system) {
+    const oldText = "['s',indice] è la stringa originale INTERA a quell'indice";
+    const oldProof = "originalProofCatalog contiene tuple [scope,percorso originale,indice stringa]: cita il valore originale INTERO del dizionario, mai indice o codice.";
+    if (!system.includes(oldText) || !system.includes(oldProof))
+      throw Error("Operational provider context instructions stale");
+    return system.replace(oldText, "['text','text_N'] identifica la stringa originale INTERA con quella chiave")
+      .replace(oldProof, "originalProofCatalog contiene righe [proofId,scope,percorso originale,['text','text_N']]: seleziona soltanto proofId dalla propria riga, mai text_N o il suo suffisso.");
   }
   function readingTask() {
     current();
     return {
       system:
-        task.system +
-        " Protocollo distinto: seleziona fieldId indivisibili da fieldIdentityCatalog; non emettere percorso o citazione. Per deadline dichiara separatamente data, istruzioni di presentazione e prova dell’applicabilità al lotto; una clausola selezionata non diventa automaticamente prova sufficiente. Se non dimostrabile, value null e motivazione.",
+        providerContextSystem(task.system) +
+        " Protocollo distinto: seleziona soltanto proofId fN dalla propria riga originalProofCatalog [proofId,scope,path,textReference]; text_N identifica una stringa e NON è una prova: non convertirne il suffisso in fN; non emettere percorso o citazione. Per deadline dichiara separatamente data, istruzioni di presentazione e prova dell’applicabilità al lotto; una clausola selezionata non diventa automaticamente prova sufficiente. Se non dimostrabile, value null e motivazione.",
       prompt: JSON.stringify(payload(task)),
       maxTokens: task.maxTokens,
       responseFormat: format(readingSchema, "operational_field_bound_reading"),
@@ -252,8 +278,8 @@ export function createFieldBoundProtocol(native, request) {
       t = native.buildOperationalReviewTask(request, answer);
     return {
       system:
-        t.system +
-        " Seleziona soltanto fieldId del catalogo corrente; verifica indipendentemente ogni prova della lettura.",
+        providerContextSystem(t.system) +
+        " Seleziona soltanto proofId fN dalla propria riga del catalogo corrente; text_N non è una prova e non può diventare fN; verifica indipendentemente ogni prova della lettura.",
       prompt: JSON.stringify(payload(t)),
       maxTokens: t.maxTokens,
       responseFormat: format(reviewSchema, "operational_field_bound_review"),

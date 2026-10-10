@@ -30,7 +30,7 @@ import type { SourceReviewExecutor } from "./source-reviews";
 import * as operationalNative from "./lot-operational-evidence";
 import { createFieldBoundProtocol, PROTOCOL_VERSION } from "./field-bound-protocol.mjs";
 export { isFieldBoundRejection } from "./field-bound-protocol.mjs";
-export const OPERATIONAL_RUNTIME_VERSION = "operational-reading-runtime-v4-direct-date";
+export const OPERATIONAL_RUNTIME_VERSION = "operational-reading-runtime-v5-distinct-text-identities";
 export const operationalReadingEnabled = () =>
   process.env.DOCUMENTARY_OPERATIONAL_READING_ENABLED === "true" &&
   process.env.DOCUMENTARY_COMPARISON_ENABLED === "true";
