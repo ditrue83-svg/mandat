@@ -230,7 +230,6 @@ it("non presenta scadenze e requisiti dei singoli lotti come condizioni generali
 it("rende leggibili le scelte del profilo senza cambiare identificativi", () => {
   const html = render(h(ProfileForm, { viewer }));
   expect(html).toContain("3 settori selezionati");
-  expect(html).toContain("Vedi i settori scelti");
   for (const value of viewer.profile.sectors)
     expect(html).toContain(`value="${value}"`);
   expect(html).toContain("Salva le preferenze");

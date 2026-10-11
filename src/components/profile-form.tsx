@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Check } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Shell } from "./shell";
 import { AiProcessingPanel } from "./ai-processing-panel";
 import type { AiProcessingStatus } from "@/lib/ai-processing-notice";
@@ -272,19 +272,6 @@ export function ProfileForm({
                     </button>
                   )}
                 </div>
-                {form.sectors.length > 0 && (
-                  <details className="selected-sectors">
-                    <summary>Vedi i settori scelti</summary>
-                    <ul>
-                      {form.sectors.map((sector) => (
-                        <li key={sector}>
-                          <Check size={15} aria-hidden="true" />
-                          {sectorLabel(sector)}
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
                 {sectorQuery && (
                   <p className="field-hint">
                     La ricerca non cambia i settori già scelti.

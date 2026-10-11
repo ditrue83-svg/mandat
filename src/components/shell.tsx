@@ -90,7 +90,6 @@ export function Shell({
             >
               <Icon size={20} />
               <NavigationLabel label={label} />
-              {href === "/" && <span className="nav-pill">Beta</span>}
             </Link>
           ))}
         </nav>

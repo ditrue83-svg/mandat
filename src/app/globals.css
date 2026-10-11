@@ -534,15 +534,6 @@ svg {
   background: #2b5549;
   color: #fff;
 }
-.nav-pill {
-  margin-left: auto;
-  background: #517366;
-  color: #e6efe7;
-  font-size: 10px;
-  padding: 1px 7px;
-  border-radius: 4px;
-  letter-spacing: 0.6px;
-}
 .sidebar-bottom {
   margin-top: auto;
   padding-top: 40px;
@@ -1620,30 +1611,6 @@ h1 {
 }
 .sector-selection-bar .text-link {
   min-height: 44px;
-}
-.selected-sectors {
-  font-size: 14px;
-  margin: 8px 0 16px;
-}
-.selected-sectors summary {
-  cursor: pointer;
-  color: var(--green);
-  padding: 10px 0;
-}
-.selected-sectors ul {
-  list-style: none;
-  padding: 0;
-  margin: 8px 0;
-}
-.selected-sectors li {
-  display: flex;
-  gap: 8px;
-  margin: 8px 0;
-  overflow-wrap: anywhere;
-}
-.selected-sectors svg {
-  flex-shrink: 0;
-  margin-top: 3px;
 }
 .field-hint,
 .panel .field-hint {
