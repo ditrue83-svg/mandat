@@ -184,7 +184,8 @@ export function normalizeSimap(
     ? "awarded"
     : ["abandonment", "revocation"].includes(d.type)
       ? "cancelled"
-      : d.type === "tender" && p.processType !== "invitation"
+      : ["tender", "competition", "study_contract"].includes(d.type) &&
+          p.processType !== "invitation"
         ? "open"
         : "closed";
   const reviewReasons = [
@@ -306,24 +307,26 @@ export function normalizeSimap(
 }
 export const simap: SourceAdapter = {
   id: "simap",
-  async list(since) {
+  async list(_since) {
     const all = new Map<string, SourceEntry>();
-    for (const mode of ["canton", "unstructured"]) {
+    // Discover the entire public history: an older notice may still be open.
+    // Never narrow discovery to a trade or project subtype.
+    for (const mode of ["canton", "issuer-ti", "Ticino", "Tessin"]) {
       let cursor: string | undefined;
       const cursors = new Set<string>();
       for (let page = 0; page < 100; page++) {
         const url = new URL(
           "https://www.simap.ch/api/publications/v2/project/project-search",
         );
-        for (const kind of ["construction", "service", "supply"])
-          url.searchParams.append("projectSubTypes", kind);
-        url.searchParams.set(
-          "newestPublicationFrom",
-          since.toISOString().slice(0, 10),
-        );
         if (mode === "canton")
           url.searchParams.set("orderAddressCantons", "TI");
-        else url.searchParams.set("search", "Ticino");
+        else if (mode === "issuer-ti")
+          // Official SIMAP issuer-tree node: Committente > Ticino.
+          url.searchParams.set(
+            "issuedByOrganizations",
+            "1306538b-12b9-4874-801c-9d0e4fa18a4d",
+          );
+        else url.searchParams.set("search", mode);
         if (cursor) url.searchParams.set("lastItem", cursor);
         const data = searchSchema.parse(
           JSON.parse(await fetchOfficial(url.toString(), ["www.simap.ch"])),

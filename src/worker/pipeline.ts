@@ -1,3 +1,4 @@
+import { discoveryIssueDetail } from "@/lib/catalog-discovery";
 import { classificationChanged } from "@/lib/sector-classification";
 import {
   and,
@@ -14,6 +15,7 @@ import { getDb } from "@/db";
 import {
   publications,
   publicationVersions,
+  publicationDocumentarySnapshots,
   sourceRuns,
   issues,
   matches,
@@ -35,6 +37,7 @@ import {
 } from "@/lib/cpv-service-signals";
 import { queueChangeNotices } from "./notifications";
 import { attachFoglioPdf } from "@/sources/foglio";
+import { needsSimapDetail } from "@/sources/simap-discovery";
 import { legacySimapRevision, readSimapRefreshEntry } from "@/sources/simap";
 import {
   collectSimapDocumentary,
@@ -523,6 +526,34 @@ export async function ingest(
           ).map(({ externalId, ...expected }) => [externalId, expected]),
         )
       : null;
+    // Bound accepted editions only. Legacy/unobserved rows must be collected.
+    const collectedEditions =
+      adapter.id === "simap"
+        ? new Map(
+            (
+              await getDb()
+                .select({
+                  externalId: publications.externalId,
+                  sourcePublicationId:
+                    publicationDocumentarySnapshots.sourcePublicationId,
+                  status: publications.status,
+                  deadline: publications.deadline,
+                })
+                .from(publications)
+                .leftJoin(
+                  publicationDocumentarySnapshots,
+                  and(
+                    eq(
+                      publications.documentarySnapshotId,
+                      publicationDocumentarySnapshots.id,
+                    ),
+                    eq(publicationDocumentarySnapshots.state, "accepted"),
+                  ),
+                )
+                .where(eq(publications.source, "simap"))
+            ).map(({ externalId, ...edition }) => [externalId, edition]),
+          )
+        : null;
     const entries = await adapter.list(since);
     const fetched = new Set(entries.map((e) => e.id));
     if (adapter.refresh) {
@@ -573,6 +604,11 @@ export async function ingest(
     }
     for (const e of entries) {
       signal?.throwIfAborted();
+      if (
+        collectedEditions &&
+        !needsSimapDetail(e, collectedEditions.get(e.id), since)
+      )
+        continue;
       try {
         if (
           await collect(
@@ -587,7 +623,14 @@ export async function ingest(
         await recordIssue(
           `source-item:${adapter.id}:${e.id}`,
           "Pubblicazione non importata",
-          err instanceof Error ? err.message : "Errore di parsing",
+          adapter.id === "simap"
+            ? discoveryIssueDetail(
+                e,
+                err instanceof Error ? err.message : "Errore di parsing",
+              )
+            : err instanceof Error
+              ? err.message
+              : "Errore di parsing",
           "critical",
         );
       }

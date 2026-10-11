@@ -3,7 +3,7 @@ import cpvReference from "./sector-cpv-reference.json";
 import { SECTORS, type Sector } from "./sectors";
 import type { Publication } from "./domain";
 
-export const SECTOR_CLASSIFICATION_VERSION = "procurement-sectors-v1";
+export const SECTOR_CLASSIFICATION_VERSION = "procurement-sectors-v2";
 export type ProcurementKind =
   "works" | "design" | "supply" | "installation" | "maintenance" | "service";
 export type ClassificationReason =
@@ -47,7 +47,7 @@ const textRules: MatchRule[] = [
     sector: "progettazione",
     kind: "design",
     pattern: word(
-      "ingegner[ei]|ingegneria|architett[oi]|progettazion[ei]|progettist[ai]|geomatic[oa]|geometra|direzione (?:locale (?:dei )?)?lavori|capo direzione|prestazioni (?:di|da) (?:cdl|dl)|ingénierie|ingénieur|architecte|planification|direction (?:des )?travaux|ingenieurleistungen|ingenieur|planungsleistungen|generalplaner|bauleitung|engineering services|architectural services|design services",
+      "ingegner[ei]|ingegneria|ingegnerie|architett[oi]|progettazion[ei]|progettist[ai]|geomatic[oa]|geometra|direzione (?:locale (?:dei )?)?lavori|capo direzione|prestazioni (?:di|da) (?:cdl|dl)|ingénierie|ingénieur|architecte|planification|direction (?:des )?travaux|ingenieurleistungen|ingenieur|planungsleistungen|generalplaner|bauleitung|engineering services|architectural services|design services",
     ),
   },
   {
@@ -95,7 +95,7 @@ const textRules: MatchRule[] = [
     sector: "veicoli",
     kind: "supply",
     pattern: word(
-      "fornitura (?:di )?(?:(?:un|tre|quattro|\\d+) )?veicol[oi]|acquisto (?:di )?(?:\\d+ )?veicol[oi]|fourniture de véhicules|lieferung von fahrzeugen|vehicle supply|autobus|ambulanz[ae]",
+      "fornitura (?:di )?(?:(?:un|tre|quattro|\\d+) )?veicol[oi]|acquisto (?:di )?(?:\\d+ )?veicol[oi]|fourniture de véhicules|lieferung von fahrzeugen|vehicle supply|supply of (?:(?:one|a|an|\\d+) )?vehicles?|lieferung (?:von |eines |einem )?(?:\\d+ )?fahrzeug(?:en|s|e)?|autobus|ambulanz[ae]",
     ),
   },
   {
@@ -144,7 +144,7 @@ const textRules: MatchRule[] = [
     sector: "giardinaggio",
     kind: "service",
     pattern: word(
-      "giardinaggio|giardinier[ei]|potatura|sfalcio|cura del verde|manutenzione del verde|parchi|giardin[oi]|grünflächenpflege|grünanlagenpflege|grünpflege|grünflächenunterhalt|gartenunterhalt|jardinage|jardinier|jardiniers|jardins|jardin|gardening|landscaping",
+      "selvicoltural[ei]|selvicoltura|silvicoltura|forestali|giardinaggio|giardinier[ei]|potatura|sfalcio|cura del verde|manutenzione del verde|parchi|giardin[oi]|grünflächenpflege|grünanlagenpflege|grünpflege|grünflächenunterhalt|gartenunterhalt|jardinage|jardinier|jardiniers|jardins|jardin|gardening|landscaping",
     ),
   },
   {

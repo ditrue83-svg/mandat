@@ -1,3 +1,4 @@
+import { catalogSearchText } from "./catalog-search";
 import { inArray, sql } from "drizzle-orm";
 import type { getDb } from "@/db";
 import { publicationDocumentarySnapshots } from "@/db/schema";
@@ -20,7 +21,7 @@ type Reader = Pick<ReturnType<typeof getDb>, "select">;
 export async function classifyPublicationRows<T extends Row>(
   reader: Reader,
   rows: readonly T[],
-): Promise<T[]> {
+): Promise<(T & { catalogSearchText: string })[]> {
   const ids = [
     ...new Set(
       rows.flatMap((row) =>
@@ -60,12 +61,17 @@ export async function classifyPublicationRows<T extends Row>(
       snapshot?.publicationId === row.id &&
       snapshot.state === "accepted" &&
       snapshot.sourceRevision === row.revision;
+    const data = withClassification(
+      row.data,
+      valid ? snapshot.archive : null,
+      !!row.documentarySnapshotId && !valid,
+    );
     return {
       ...row,
-      data: withClassification(
-        row.data,
+      data,
+      catalogSearchText: catalogSearchText(
+        data,
         valid ? snapshot.archive : null,
-        !!row.documentarySnapshotId && !valid,
       ),
     };
   });

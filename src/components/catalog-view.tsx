@@ -104,6 +104,21 @@ export function CatalogView({
           </p>
         </details>
       </section>
+      {data.unclassifiedCount > 0 &&
+        data.filters.settore !== "da-classificare" && (
+          <p className="source-summary-line">
+            <Link
+              href={catalogHref({
+                ...data.filters,
+                q: "",
+                settore: "da-classificare",
+              })}
+            >
+              {data.unclassifiedCount} bandi hanno un settore ancora da
+              verificare: consultali qui.
+            </Link>
+          </p>
+        )}
       <div className="catalog-results-heading" role="status">
         <p>
           <strong>{data.total}</strong>{" "}
@@ -115,16 +130,18 @@ export function CatalogView({
         aria-label="Risultati della ricerca"
       >
         {data.items.map((publication) => {
-          const detailHref = catalogDetailHref(
-            publication.id,
-            data.filters,
-            data.page,
-          );
+          const detailHref = publication.collectionIncomplete
+            ? publication.sourceUrl
+            : catalogDetailHref(publication.id, data.filters, data.page);
           return (
             <TenderListCard
               key={publication.id}
               title={publication.title}
-              description={tenderWorkExcerpt(publication)}
+              description={
+                publication.collectionIncomplete
+                  ? publication.originalText
+                  : tenderWorkExcerpt(publication)
+              }
               buyer={publication.buyer}
               location={publication.location}
               deadline={publication.deadline}
@@ -136,12 +153,14 @@ export function CatalogView({
               )}
               detailHref={detailHref}
               saveAction={
-                <CatalogBookmark
-                  id={publication.id}
-                  title={publication.title}
-                  initialSaved={publication.saved}
-                  demo={viewer.demo}
-                />
+                publication.collectionIncomplete ? undefined : (
+                  <CatalogBookmark
+                    id={publication.id}
+                    title={publication.title}
+                    initialSaved={publication.saved}
+                    demo={viewer.demo}
+                  />
+                )
               }
             />
           );

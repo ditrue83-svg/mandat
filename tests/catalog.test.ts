@@ -62,6 +62,7 @@ beforeEach(async () => {
   vi.stubEnv("FOGLIO_REUSE_CONFIRMED", "false");
   await db.delete(schema.publications);
   await db.delete(schema.sourceRuns);
+  await db.delete(schema.issues);
   await db.delete(schema.settings);
 });
 it("segnala una raccolta assente o ferma e mostra l'ultimo completamento riuscito", async () => {
@@ -454,4 +455,43 @@ it("finds Morcote by giardino in the original plural text while preserving statu
   expect(
     (await readCatalog(viewer, { q: "giardino elettrico" }, now)).total,
   ).toBe(0);
+});
+
+it("keeps a refused public discovery visible without making it a qualified publication", async () => {
+  const { discoveryIssueDetail } = await import("../src/lib/catalog-discovery");
+  const id = "11111111-1111-4111-8111-111111111111";
+  await db
+    .insert(schema.issues)
+    .values({
+      id: "discovery-failure",
+      key: `source-item:simap:${id}`,
+      title: "Pubblicazione non importata",
+      severity: "critical",
+      detail: discoveryIssueDetail(
+        {
+          id,
+          raw: {
+            title: { it: "Trasporto scolastico – interruzione" },
+            procOfficeName: { it: "Ente inventato" },
+            publicationDate: "2026-09-15",
+            pubType: "abandonment",
+          },
+        },
+        "missing_lot_details",
+      ),
+    });
+  const result = await readCatalog(
+    viewer,
+    { q: "trasporto", stato: "all" },
+    now,
+  );
+  expect(result.items).toHaveLength(1);
+  expect(result.items[0]).toMatchObject({
+    collectionIncomplete: true,
+    status: "cancelled",
+    sourceUrl: `https://www.simap.ch/it/project-detail/${id}`,
+    saved: false,
+  });
+  expect((await readCatalog(viewer, { q: "trasporto" }, now)).total).toBe(0);
+  expect(await db.select().from(schema.publications)).toHaveLength(0);
 });

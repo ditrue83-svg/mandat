@@ -1,11 +1,14 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, like } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   publications,
+  issues,
   sourceRuns,
   publicationDocumentarySnapshots,
 } from "@/db/schema";
-import { plainText } from "@/sources/common";
+import { readDiscoveryIssue } from "./catalog-discovery";
+import { catalogSearchText } from "./catalog-search";
+import { plainText, publicationDate } from "@/sources/common";
 import {
   compareCanonicalPublications,
   sourceAvailable,
@@ -43,6 +46,7 @@ export type CatalogEntry = {
   originalText: string;
   documents: Publication["documents"];
   saved: boolean;
+  collectionIncomplete?: boolean;
 };
 export type CatalogFilters = {
   q?: string;
@@ -139,7 +143,11 @@ async function catalogPublications(viewer: Viewer, now: Date) {
   if (viewer.demo)
     return getDemoOpportunities()
       .filter((p) => new Date(p.visibleAt) <= now)
-      .map((p) => ({ ...p, canonicalId: p.canonicalKey ?? p.id }));
+      .map((p) => ({
+        ...p,
+        canonicalId: p.canonicalKey ?? p.id,
+        catalogSearchText: catalogSearchText(p),
+      }));
   const rows = await getDb()
     .select()
     .from(publications)
@@ -164,6 +172,7 @@ async function catalogPublications(viewer: Viewer, now: Date) {
       return [
         {
           ...row.data,
+          catalogSearchText: row.catalogSearchText,
           id: row.id,
           canonicalId: row.canonicalId,
           source: row.source as Publication["source"],
@@ -258,6 +267,9 @@ export async function readCatalog(
         viewer.companyId,
         publicationsFound.map((p) => p.canonicalId),
       );
+  const searchById = new Map(
+    publicationsFound.map((p) => [p.id, p.catalogSearchText]),
+  );
   const all = publicationsFound.map((p) =>
     presentCatalogEntry(
       p,
@@ -265,6 +277,49 @@ export async function readCatalog(
       savedByCanonical.get(p.canonicalId)?.saved ?? false,
     ),
   );
+  if (!viewer.demo) {
+    const pending = await getDb()
+      .select({ key: issues.key, detail: issues.detail })
+      .from(issues)
+      .where(
+        and(isNull(issues.resolvedAt), like(issues.key, "source-item:simap:%")),
+      );
+    for (const row of pending) {
+      const p = readDiscoveryIssue(row.key, row.detail);
+      if (!p || all.some((item) => item.id === `simap-${p.id}`)) continue;
+      // Preserve the publication-day embargo using the same source convention.
+      if (publicationDate(p.publishedAt, 8) > now.toISOString()) continue;
+      const title = plainText(p.title),
+        buyer = plainText(p.buyer);
+      const item: CatalogEntry = {
+        id: `simap-${p.id}`,
+        title,
+        buyer,
+        location: "Consulta SIMAP",
+        source: "simap",
+        sourceUrl: `https://www.simap.ch/it/project-detail/${p.id}`,
+        publishedAt: publicationDate(p.publishedAt),
+        deadline: null,
+        valueChf: null,
+        status: ["abandonment", "revocation"].includes(p.pubType)
+          ? "cancelled"
+          : ["award", "direct_award"].includes(p.pubType)
+            ? "awarded"
+            : ["tender", "competition", "study_contract"].includes(p.pubType)
+              ? "open"
+              : "closed",
+        sectors: [],
+        needsSectorClassification: true,
+        originalText:
+          "Pubblicazione individuata su SIMAP. I dettagli richiedono una verifica: consulta la fonte ufficiale.",
+        documents: [],
+        saved: false,
+        collectionIncomplete: true,
+      };
+      all.push(item);
+      searchById.set(item.id, `${title} ${buyer}`);
+    }
+  }
   const filtered = all
     .filter(
       (p) =>
@@ -274,10 +329,7 @@ export async function readCatalog(
           filters.settore,
           p.needsSectorClassification,
         ) &&
-        matchesSearch(
-          `${p.title} ${p.buyer} ${p.location} ${p.originalText} ${p.sectors.map(sectorLabel).join(" ")}`,
-          filters.q,
-        ),
+        matchesSearch(searchById.get(p.id) ?? "", filters.q),
     )
     .sort((a, b) => {
       if (filters.ordine === "scadenza") {
@@ -326,6 +378,11 @@ export async function readCatalog(
     pages,
     total: filtered.length,
     collectedCount: all.length,
+    unclassifiedCount: all.filter(
+      (p) =>
+        p.needsSectorClassification &&
+        (filters.stato === "all" || p.status === filters.stato),
+    ).length,
     openCount: all.filter((p) => p.status === "open").length,
     items: filtered
       .slice((page - 1) * CATALOG_PAGE_SIZE, page * CATALOG_PAGE_SIZE)
