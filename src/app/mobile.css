@@ -76,11 +76,11 @@
      The original image is retained byte-for-byte, with its aspect ratio intact. */
   .mobile-brand-frame img {
     position: absolute;
-    width: 182.926829%;
+    width: 178.571429%;
     max-width: none;
     height: auto;
-    left: -39.02439%;
-    top: -50%;
+    left: -38.095238%;
+    top: -47.619048%;
   }
   .topbar > div {
     gap: 4px;
