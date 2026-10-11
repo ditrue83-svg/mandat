@@ -427,3 +427,31 @@ it("rende testo semplice e ammette soltanto collegamenti web", async () => {
   });
   expect(presentCatalogEntry(p, now).originalText).not.toContain("script");
 });
+
+it("finds Morcote by giardino in the original plural text while preserving status filters", async () => {
+  const originalText =
+    "Interventi di lotta alle neofite invasive in bosco e in aree aperte, anche nei giardini privati con il consenso dei proprietari.";
+  await publication("morcote", {
+    title:
+      "Comune di Morcote - Progetto selvicolturale e gestione neofite invasive",
+    originalText,
+    sectors: [],
+    cpv: ["03000000"],
+  });
+  await publication("morcote-expired", {
+    originalText,
+    deadline: "2026-09-15T10:00:00Z",
+  });
+  const result = await readCatalog(viewer, { q: "giardino" }, now);
+  expect(result.items.map((p) => p.id)).toEqual(["morcote"]);
+  expect(result.items[0].originalText).toBe(originalText);
+  expect((await readCatalog(viewer, { q: "giardini" }, now)).items).toEqual(
+    result.items,
+  );
+  expect(
+    (await readCatalog(viewer, { q: "giardino", stato: "all" }, now)).total,
+  ).toBe(2);
+  expect(
+    (await readCatalog(viewer, { q: "giardino elettrico" }, now)).total,
+  ).toBe(0);
+});
