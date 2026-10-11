@@ -1,3 +1,6 @@
+.mobile-brand {
+  display: none;
+}
 /* Mobile layout is kept together so desktop rules do not override touch sizing. */
 .profile-section-nav,
 .collection-filter-toggle {
@@ -53,14 +56,31 @@
       max(16px, env(safe-area-inset-left, 0px));
   }
   .topbar > .topbar-title {
-    max-width: none;
-    font-size: 12px;
-    white-space: nowrap;
+    display: none;
   }
-  .topbar-title strong {
-    font: 800 20px var(--font-heading);
-    letter-spacing: -0.7px;
-    color: var(--primary);
+  .mobile-brand {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    flex-shrink: 0;
+    border-radius: 6px;
+  }
+  .mobile-brand-frame {
+    position: relative;
+    display: block;
+    width: clamp(140px, 40vw, 172px);
+    aspect-ratio: 4;
+    overflow: hidden;
+  }
+  /* Frame the supplied 1200 x 300 artwork without its outer white margins.
+     The original image is retained byte-for-byte, with its aspect ratio intact. */
+  .mobile-brand-frame img {
+    position: absolute;
+    width: 182.926829%;
+    max-width: none;
+    height: auto;
+    left: -39.02439%;
+    top: -50%;
   }
   .topbar > div {
     gap: 4px;

@@ -122,6 +122,20 @@ export function Shell({
       </aside>
       <div className="main-shell">
         <header className="topbar">
+          <Link
+            href="/"
+            className="mobile-brand"
+            aria-label="Mandat, pagina iniziale"
+          >
+            <span className="mobile-brand-frame" aria-hidden="true">
+              <img
+                src="/brand/mandat-mobile-horizontal.png"
+                width={1200}
+                height={300}
+                alt=""
+              />
+            </span>
+          </Link>
           <span className="topbar-title">
             <strong>Mandat</strong>
             <span> · Radar appalti</span>
