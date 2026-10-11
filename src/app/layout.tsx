@@ -23,7 +23,7 @@ export const metadata: Metadata = {
   description:
     "Le opportunità pubblicate che possono interessare alla tua ditta, in un posto solo.",
   icons: {
-    icon: { url: "/favicon.png", type: "image/png", sizes: "40x40" },
+    icon: { url: "/favicon.png?v=9122eac4", type: "image/png", sizes: "40x40" },
   },
   robots: { index: false, follow: false },
 };
