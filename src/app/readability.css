@@ -1,7 +1,7 @@
 /* Shared reading scale, after the desktop and mobile layout rules. */
 .app-shell main {
-  --reading-ink: #243b35;
-  --reading-muted: #465d55;
+  --reading-ink: #334155;
+  --reading-muted: var(--muted);
   font-size: 16px;
   line-height: 1.65;
 }
@@ -22,12 +22,12 @@
   line-height: 1.6;
 }
 .app-shell main .panel h2 {
-  color: #182f2d;
+  color: var(--ink);
   font-weight: 800;
   line-height: 1.35;
 }
 .app-shell main .tender-brief h3 {
-  color: #182f2d;
+  color: var(--ink);
   font-size: 20px;
   font-weight: 750;
   line-height: 1.45;
@@ -36,20 +36,20 @@
 .app-shell main .tender-brief h4 {
   font-size: 18px;
   font-weight: 750;
-  color: #182f2d;
+  color: var(--ink);
 }
 .app-shell main .brief-facts {
   gap: 24px;
 }
 .app-shell main .brief-fact + .brief-fact {
   padding-top: 24px;
-  border-top: 1px solid #d6e0da;
+  border-top: 1px solid var(--line-strong);
 }
 .app-shell main .brief-fact > strong {
   display: block;
   font-size: 17px;
   font-weight: 750;
-  color: #182f2d;
+  color: var(--ink);
   line-height: 1.5;
   margin-bottom: 8px;
 }
@@ -71,10 +71,10 @@
 .app-shell main .publication-text .publication-text-heading {
   margin: 30px 0 10px;
   padding-top: 22px;
-  border-top: 1px solid #d6e0da;
+  border-top: 1px solid var(--line-strong);
   font-size: 19px;
   line-height: 1.45;
-  color: #182f2d;
+  color: var(--ink);
 }
 .app-shell main .publication-text-heading strong {
   font-weight: 800;
@@ -90,7 +90,7 @@
 .app-shell main .brief-reference,
 .app-shell main .source-link,
 .app-shell main .decision-grid .text-link {
-  color: #14574e;
+  color: var(--primary);
   font-size: 15px;
   line-height: 1.6;
   text-underline-offset: 4px;
@@ -117,7 +117,7 @@
 }
 .app-shell main .decision-facts strong {
   font-size: 15px;
-  color: #243b35;
+  color: #334155;
   margin-bottom: 6px;
 }
 .app-shell main .tender-card-description {
@@ -132,7 +132,7 @@
   font-size: 17px;
   font-weight: 700;
   line-height: 1.5;
-  color: #14574e;
+  color: var(--primary);
 }
 @media (max-width: 900px) {
   .app-shell main .panel p,

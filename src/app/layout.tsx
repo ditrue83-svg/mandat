@@ -1,16 +1,22 @@
 import type { Metadata, Viewport } from "next";
-import "@fontsource-variable/dm-sans";
-import "@fontsource-variable/manrope";
+import localFont from "next/font/local";
 import "./globals.css";
 import "./mobile.css";
 import "./readability.css";
+
+const inter = localFont({
+  src: "./fonts/inter.woff2",
+  variable: "--font-inter",
+  display: "swap",
+  weight: "100 900",
+});
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
   interactiveWidget: "resizes-content",
-  themeColor: "#14574e",
+  themeColor: "#0f172a",
 };
 export const metadata: Metadata = {
   title: { default: "Mandat — Il tuo Radar appalti", template: "%s · Mandat" },
@@ -27,7 +33,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="it">
+    <html lang="it" className={inter.variable}>
       <body>{children}</body>
     </html>
   );

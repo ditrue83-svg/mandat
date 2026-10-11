@@ -23,11 +23,11 @@
   place-items: center;
   border: 0;
   border-radius: 6px;
-  color: var(--green);
+  color: var(--primary);
   background: transparent;
 }
 .password-toggle:hover {
-  background: var(--mint);
+  background: var(--surface-accent);
 }
 
 @media (max-width: 900px) {
@@ -60,7 +60,7 @@
   .topbar-title strong {
     font: 800 20px var(--font-heading);
     letter-spacing: -0.7px;
-    color: var(--green);
+    color: var(--primary);
   }
   .topbar > div {
     gap: 4px;
@@ -164,8 +164,8 @@
     padding-inline: 12px;
   }
   .collection-filter-toggle[aria-expanded="true"] {
-    background: var(--mint);
-    border-color: #88ab9a;
+    background: var(--surface-accent);
+    border-color: #93c5fd;
   }
   .collection-selects {
     display: none;
@@ -193,8 +193,8 @@
     flex-wrap: wrap;
   }
   .filter-toggle[aria-expanded="true"] {
-    background: var(--mint);
-    border-color: #88ab9a;
+    background: var(--surface-accent);
+    border-color: #93c5fd;
   }
   .applied-filters {
     overflow-wrap: anywhere;
@@ -238,7 +238,7 @@
     border: 1px solid var(--line);
     border-radius: 9px;
     background: #fff;
-    color: var(--green);
+    color: var(--primary);
     font-size: 13px;
     font-weight: 600;
     text-align: center;
@@ -260,7 +260,7 @@
     padding: 8px;
     gap: 6px;
     border-radius: 12px;
-    box-shadow: 0 4px 24px #173c2f18;
+    box-shadow: 0 4px 24px #0f172a18;
   }
   .profile-save-bar[data-dirty="false"] > small {
     display: none;
@@ -306,7 +306,7 @@
       calc(6px + env(safe-area-inset-bottom, 0px))
       max(10px, env(safe-area-inset-left, 0px));
     gap: 6px;
-    box-shadow: 0 -4px 20px #173c2f08;
+    box-shadow: 0 -4px 20px #0f172a08;
   }
   .mobile-nav a {
     min-width: 0;
@@ -318,8 +318,8 @@
     justify-content: center;
   }
   .mobile-nav a.active {
-    background: var(--mint);
-    color: var(--green);
+    background: var(--surface-accent);
+    color: var(--primary);
   }
   .footer {
     padding: 0 max(16px, env(safe-area-inset-right, 0px))
