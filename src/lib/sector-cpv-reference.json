@@ -450,6 +450,13 @@
       "label": "Sacchi e sacchetti di polietilene per rifiuti",
       "sector": "ambiente",
       "kind": "supply"
+    },
+    {
+      "prefix": "33772000",
+      "code": "33772000-2",
+      "label": "Prodotti di carta monouso",
+      "sector": "pulizie",
+      "kind": "supply"
     }
   ],
   "validCodes": [

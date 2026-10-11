@@ -3,7 +3,7 @@ import cpvReference from "./sector-cpv-reference.json";
 import { SECTORS, type Sector } from "./sectors";
 import type { Publication } from "./domain";
 
-export const SECTOR_CLASSIFICATION_VERSION = "procurement-sectors-v2";
+export const SECTOR_CLASSIFICATION_VERSION = "procurement-sectors-v3";
 export type ProcurementKind =
   "works" | "design" | "supply" | "installation" | "maintenance" | "service";
 export type ClassificationReason =
@@ -280,7 +280,7 @@ function signals(raw: string, title: boolean) {
   let value = title ? text(raw) : subjectText(raw);
   if (title)
     value = value.split(
-      /\b(?:nell[’']ambito|dans le cadre|im rahmen|occorrenti|destinati|destinata|per la ristrutturazione|per il risanamento)\b/iu,
+      /\b(?:nell[’']ambito|dans le cadre|destinées?|destinés?|im rahmen|occorrenti|destinati|destinata|per la ristrutturazione|per il risanamento)\b/iu,
     )[0]!;
   let found = textRules.filter((rule) => rule.pattern.test(value));
   // A design mandate for a building is not execution of that building. Likewise

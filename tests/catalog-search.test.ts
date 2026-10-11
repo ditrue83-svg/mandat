@@ -146,6 +146,8 @@ it("recognises a multilingual vehicle supply without inventing a transport-servi
 
 it.each([
   ["Fornitura del materiale di pulizia in carta", "33760000", "pulizie"],
+  ["Fornitura di materiale di pulizia in carta", "33772000", "pulizie"],
+  ["Assorbenti e tamponi igienici", "33771100", "sanita"],
   ["Fornitura di sacchi per rifiuti", "19640000", "ambiente"],
   [
     "Progetto selvicolturale e gestione neofite invasive",
@@ -185,4 +187,18 @@ it("bounds discovery diagnostics without truncating their JSON and binds them to
   expect(detail.length).toBeLessThanOrEqual(1400);
   expect(readDiscoveryIssue(`source-item:simap:${id}`, detail)?.id).toBe(id);
   expect(readDiscoveryIssue("source-item:simap:other", detail)).toBeNull();
+});
+
+// An application used for planning remains software. A translated purpose
+// clause must not turn its purchase into a construction design mandate.
+it("preserves the purchased subject before French purpose clauses", () => {
+  const result = classifyProcurement({
+    titles: [
+      "Concorso per la fornitura di un applicativo informatico per la pianificazione e gestione di agende, appuntamenti ambulatoriali e sale operatorie",
+      "Appel d’offres pour la fourniture d’une application informatique destinée à la planification et à la gestion des agendas, des rendez-vous ambulatoires et des salles d’opération",
+    ],
+    descriptions: [], mainCpv: "48000000", additionalCpv: [],
+  });
+  expect(result.sectors).toEqual(["informatica"]);
+  expect(result.needsClassification).toBe(false);
 });
