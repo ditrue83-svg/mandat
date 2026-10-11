@@ -1,4 +1,5 @@
-import { and, eq, lte, inArray } from "drizzle-orm";
+import { automaticResponseMayReachRadar } from "./radar-candidate";
+import { and, eq, lte, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   feedback,
@@ -269,7 +270,11 @@ export async function listOpportunities(
   const completedAutomatic =
     !options.includeInactive && documentaryMatchIds.length
       ? await db
-          .select({ matchId: automaticMatchRuns.matchId })
+          .select({
+            matchId: automaticMatchRuns.matchId,
+            response: sql<unknown>`${automaticMatchRuns.result}->'response'`,
+            hasResponse: sql<boolean>`${automaticMatchRuns.result} ? 'response'`,
+          })
           .from(automaticMatchRuns)
           .where(
             and(
@@ -279,7 +284,16 @@ export async function listOpportunities(
             ),
           )
       : [];
-  const automaticCandidates = new Set(completedAutomatic.map((r) => r.matchId));
+  const automaticCandidates = new Set(
+    completedAutomatic
+      .filter((r) =>
+        automaticResponseMayReachRadar(
+          r.hasResponse ? r.response : undefined,
+          !!options.includeRelatedReview,
+        ),
+      )
+      .map((r) => r.matchId),
+  );
   const candidates = representatives.filter((publication) => {
     const match = matchByPublication.get(publication.id);
     const state = canonicalFeedback.get(publication.canonicalId);
@@ -318,6 +332,30 @@ export async function listOpportunities(
         ).map((p) => [p.id, p]),
       )
     : new Map<string, (typeof representatives)[number]>();
+  // Each reader retains its own canonical transaction and all validity gates.
+  // Bound concurrency to the default pool size instead of serializing every
+  // source or starting an unbounded request for the entire catalogue.
+  const documentaryRows = new Map<
+    string,
+    Awaited<ReturnType<typeof readCanonicalMatch>>
+  >();
+  const documentaryCandidates = candidates.filter(
+    (p) => p.documentarySnapshotId && matchByPublication.has(p.id),
+  );
+  for (let start = 0; start < documentaryCandidates.length; start += 3) {
+    const batch = await Promise.all(
+      documentaryCandidates
+        .slice(start, start + 3)
+        .map(
+          async (p) =>
+            [
+              p.id,
+              await readCanonicalMatch(viewer.companyId, p.id, now),
+            ] as const,
+        ),
+    );
+    for (const [id, row] of batch) documentaryRows.set(id, row);
+  }
   const result: Opportunity[] = [];
   for (const publication of candidates) {
     if (publication.visibleAt > now) continue;
@@ -333,7 +371,7 @@ export async function listOpportunities(
       continue;
     }
     const row = publication.documentarySnapshotId
-      ? await readCanonicalMatch(viewer.companyId, publication.id, now)
+      ? documentaryRows.get(publication.id)
       : legacyRows.get(publication.id);
     if (!row) {
       if (options.includeInactive && state?.saved)

@@ -2161,3 +2161,31 @@ test("A territorial partition identifies the lot only with a separately grounded
     /partition must belong/,
   );
 });
+
+test("Cached source plans bind full originals and configuration without caching verdicts", () => {
+  const input = context();
+  const first = buildSourceEvidenceReadingRequest(input, config);
+  const repeated = buildSourceEvidenceReadingRequest(structuredClone(input), {
+    ...config,
+  });
+  assert.strictEqual(repeated, first);
+  assert.ok(
+    Object.isFrozen(first.requests[0].responseFormat.json_schema.schema),
+  );
+  assert.throws(() => {
+    (first.requests[0] as any).prompt = "altered";
+  });
+  const changed = structuredClone(input);
+  changed.body.passages[0].text = "X" + changed.body.passages[0].text.slice(1);
+  const next = buildSourceEvidenceReadingRequest(changed, config);
+  assert.notEqual(next.inputHash, first.inputHash);
+  assert.notStrictEqual(next, first);
+  const otherModel = buildSourceEvidenceReadingRequest(input, {
+    ...config,
+    model: "another-model",
+  });
+  assert.notEqual(otherModel.inputHash, first.inputHash);
+  const malformed = structuredClone(input);
+  (malformed.body.passages[0] as any).scope = "wrong-scope";
+  assert.throws(() => buildSourceEvidenceReadingRequest(malformed, config));
+});

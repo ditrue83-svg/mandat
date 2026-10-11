@@ -1,3 +1,4 @@
+import { automaticResponseMayReachRadar } from "../src/lib/radar-candidate";
 import { createInventedCanonicalSourceRecord } from "./helpers/canonical-source-record-fixture";
 import { openaiResponseBody } from "../src/lib/openai-responses";
 import {
@@ -3981,4 +3982,43 @@ test("Participation conservation uses exact original field families, not text ke
   const {isContractScopeField}=await import("../src/lib/source-contract-clauses");
   for(const p of ["/base/participantLotsLimitation","/base/participantLotsLimitationNote/rm","/project-info/participantLotsLimitationNote/en"])assert(isContractScopeField(p,"project_context","selected_lot"));
   for(const p of ["/metadata/participantLotsLimitationNote/it","/base/participantLotsLimitationNoteSuffix/it","/lots/1/participantLotsLimitationNote/it"])assert.equal(isContractScopeField(p,"project_context","selected_lot"),false);
+});
+
+test("Radar candidate hints retain possible positive and related results for full validation", () => {
+  const request = buildAutomaticComparisonRequest(fixture());
+  const source = sourceRecord(request);
+  const value = response(request, source);
+  const base = {
+    ...value,
+    facts: {
+      ...value.facts,
+      companyIdentifiesService: true,
+      comparisonUncertain: false,
+      activitiesOverlap: true,
+      mainScopeCovered: true,
+      sameContractualRole: true,
+      relatedActivity: "none",
+    },
+  };
+  assert.equal(automaticResponseMayReachRadar(base, false), true);
+  const different = {
+    ...base,
+    facts: { ...base.facts, activitiesOverlap: false, mainScopeCovered: false },
+  };
+  assert.equal(automaticResponseMayReachRadar(different, true), false);
+  const related = {
+    ...different,
+    facts: {
+      ...different.facts,
+      relatedActivity: "shared_professional_function",
+    },
+  };
+  assert.equal(automaticResponseMayReachRadar(related, true), true);
+  assert.equal(automaticResponseMayReachRadar(related, false), false);
+  assert.equal(automaticResponseMayReachRadar(null, true), false);
+  assert.equal(
+    automaticResponseMayReachRadar({ unexpected: true }, true),
+    true,
+  );
+  assert.equal(automaticResponseMayReachRadar(undefined, true), true);
 });

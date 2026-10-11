@@ -213,7 +213,7 @@ const verified = new WeakSet<object>();
 
 // Deliberately no draft parameter. Neither extraction readings nor company
 // data are serialized: this assessment can only see the original source.
-export function buildSourceEvidenceReadingRequest(
+function buildUncachedSourceEvidenceReadingRequest(
   input: SourceInterpretationContext,
   configuration: {
     model: string;
@@ -664,6 +664,44 @@ export function buildSourceEvidenceReadingRequest(
   verified.add(plan);
   return plan;
 }
+// Only deterministic, deeply frozen source plans are retained, never AI
+// verdicts, database rows, company permissions or operational date decisions.
+// Bind the complete input, not the caller-provided source key or record hash.
+const readingPlanCache = new Map<
+  string,
+  {
+    plan: ReturnType<typeof buildUncachedSourceEvidenceReadingRequest>;
+    bytes: number;
+  }
+>();
+let readingPlanBytes = 0;
+const MAX_CACHED_PLAN_BYTES = 16 * 1024 * 1024;
+export function buildSourceEvidenceReadingRequest(
+  ...args: Parameters<typeof buildUncachedSourceEvidenceReadingRequest>
+): ReturnType<typeof buildUncachedSourceEvidenceReadingRequest> {
+  const key = digest(args);
+  const cached = readingPlanCache.get(key);
+  if (cached) {
+    readingPlanCache.delete(key);
+    readingPlanCache.set(key, cached);
+    return cached.plan;
+  }
+  const plan = buildUncachedSourceEvidenceReadingRequest(...args);
+  const bytes = Buffer.byteLength(JSON.stringify(plan));
+  if (bytes <= MAX_CACHED_PLAN_BYTES) {
+    while (
+      readingPlanCache.size >= 24 ||
+      readingPlanBytes + bytes > MAX_CACHED_PLAN_BYTES
+    ) {
+      const oldest = readingPlanCache.keys().next().value!;
+      readingPlanBytes -= readingPlanCache.get(oldest)!.bytes;
+      readingPlanCache.delete(oldest);
+    }
+    readingPlanCache.set(key, { plan, bytes });
+    readingPlanBytes += bytes;
+  }
+  return plan;
+}
 export type SourceEvidenceReadingPlan = ReturnType<
   typeof buildSourceEvidenceReadingRequest
 >;
@@ -1048,7 +1086,9 @@ export type SourceEvidenceReadingRecord = z.infer<
   typeof sourceEvidenceReadingRecordSchema
 >;
 // Check exact duplicate representations only after every original response and record integrity check.
-function validateDistinctObservations(responses: z.infer<typeof responseSchema>[]) {
+function validateDistinctObservations(
+  responses: z.infer<typeof responseSchema>[],
+) {
   for (const response of responses) {
     const keys = new Set<string>();
     for (const observation of response.observations) {
@@ -1064,7 +1104,11 @@ function validateDistinctObservations(responses: z.infer<typeof responseSchema>[
     }
   }
 }
-function validateSourceEvidenceMetadata(metadata: { id: string; at: string; model: string }) {
+function validateSourceEvidenceMetadata(metadata: {
+  id: string;
+  at: string;
+  model: string;
+}) {
   const result = sourceEvidenceReadingRecordSchema
     .pick({ id: true, at: true, model: true })
     .safeParse({ id: metadata.id, at: metadata.at, model: metadata.model });
@@ -1120,7 +1164,9 @@ export function readSourceEvidenceReading(
       (plan.maxTokens === MAX_TOKENS ? undefined : plan.maxTokens)
   )
     return null;
-  validateSourceEvidenceMetadata(value as { id: string; at: string; model: string });
+  validateSourceEvidenceMetadata(
+    value as { id: string; at: string; model: string },
+  );
   const record = sourceEvidenceReadingRecordSchema.parse(value);
   const { hash: recordedHash, ...unsigned } = record;
   if (digest(unsigned) !== recordedHash)

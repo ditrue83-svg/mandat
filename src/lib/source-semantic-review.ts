@@ -509,7 +509,7 @@ const verifiedPlans = new WeakSet<object>();
 
 // The caller validates the draft against the extraction request first. This
 // API accepts only complete source data, never a company comparison request.
-export function buildSourceSemanticReviewRequest(
+function buildUncachedSourceSemanticReviewRequest(
   input: SourceInterpretationContext,
   draftValue: SourceInterpretationRecord,
   configuration: {
@@ -1537,6 +1537,43 @@ ${item.meaning.statement}`,
     evidencePlan,
   });
   verifiedPlans.add(plan);
+  return plan;
+}
+// Reuse only exact, immutable source plans. Full source/draft/configuration
+// content is hashed; persisted hashes alone never authorize a cache hit.
+const semanticPlanCache = new Map<
+  string,
+  {
+    plan: ReturnType<typeof buildUncachedSourceSemanticReviewRequest>;
+    bytes: number;
+  }
+>();
+let semanticPlanBytes = 0;
+const MAX_CACHED_PLAN_BYTES = 16 * 1024 * 1024;
+export function buildSourceSemanticReviewRequest(
+  ...args: Parameters<typeof buildUncachedSourceSemanticReviewRequest>
+): ReturnType<typeof buildUncachedSourceSemanticReviewRequest> {
+  const key = digest(args);
+  const cached = semanticPlanCache.get(key);
+  if (cached) {
+    semanticPlanCache.delete(key);
+    semanticPlanCache.set(key, cached);
+    return cached.plan;
+  }
+  const plan = buildUncachedSourceSemanticReviewRequest(...args);
+  const bytes = Buffer.byteLength(JSON.stringify(plan));
+  if (bytes <= MAX_CACHED_PLAN_BYTES) {
+    while (
+      semanticPlanCache.size >= 24 ||
+      semanticPlanBytes + bytes > MAX_CACHED_PLAN_BYTES
+    ) {
+      const oldest = semanticPlanCache.keys().next().value!;
+      semanticPlanBytes -= semanticPlanCache.get(oldest)!.bytes;
+      semanticPlanCache.delete(oldest);
+    }
+    semanticPlanCache.set(key, { plan, bytes });
+    semanticPlanBytes += bytes;
+  }
   return plan;
 }
 export type SourceSemanticReviewPlan = ReturnType<
