@@ -1,0 +1,1151 @@
+/* The workspace uses the same blue brand on a quieter, light interface. */
+.app-shell {
+  --ink: #192135;
+  --muted: #657086;
+  --line: #e9ecf3;
+  --line-strong: #d8deea;
+  --paper: #f8f9fc;
+  --surface-accent: #edf3ff;
+  --radius: 14px;
+  --sidebar-width: 248px;
+  --tender-columns: minmax(0, 2.5fr) minmax(0, 1.4fr) 118px 92px 118px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.app-shell .sidebar {
+  width: var(--sidebar-width);
+  background: #fff;
+  color: var(--muted);
+  border-right: 1px solid var(--line);
+  padding: 32px 18px 22px;
+}
+.app-shell .wordmark {
+  background: #fff;
+  padding: 0 10px;
+}
+.light-wordmark-frame {
+  width: 166px;
+  aspect-ratio: 4;
+}
+.light-wordmark-frame img {
+  width: 178.571429%;
+  left: -38.095238%;
+  top: -47.619048%;
+}
+.app-shell .workspace-label {
+  color: #68748a;
+  font-size: 9px;
+  letter-spacing: 1.1px;
+  margin: 42px 15px 13px;
+}
+.app-shell .nav-link {
+  min-height: 48px;
+  padding: 12px 14px;
+  margin-block: 5px;
+  border-radius: 10px;
+  color: #596279;
+  gap: 12px;
+  font-size: 14px;
+  font-weight: 550;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
+}
+.app-shell .nav-link svg {
+  stroke-width: 1.7;
+}
+.app-shell .nav-link:hover {
+  background: #f7f8fc;
+  color: var(--ink);
+}
+.app-shell .nav-link.active {
+  color: #2459cf;
+  background: #edf3ff;
+  font-weight: 650;
+}
+.nav-current-arrow {
+  margin-left: auto;
+}
+.app-shell .sidebar-bottom {
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+.app-shell .admin-link {
+  color: var(--muted);
+  margin: 0 9px 19px;
+}
+.app-shell .company-switch {
+  border: 0;
+  padding: 9px;
+  gap: 10px;
+  border-radius: 10px;
+}
+.app-shell .company-switch:hover {
+  background: var(--paper);
+}
+.app-shell .company-switch > span:last-child {
+  min-width: 0;
+}
+.app-shell .company-switch strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.app-shell .company-switch small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.app-shell .avatar {
+  background: #eef2ff;
+  color: #445bc0;
+  border-radius: 11px;
+}
+.app-shell .logout {
+  color: var(--muted);
+  padding: 10px;
+  margin-top: 6px;
+}
+.app-shell .main-shell {
+  margin-left: var(--sidebar-width);
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+.app-shell .topbar {
+  min-height: 72px;
+  padding: 0 36px;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+}
+.app-shell .topbar-title {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  color: var(--ink);
+  font-size: 13px;
+}
+.app-shell .topbar-title strong {
+  font-weight: 600;
+}
+.topbar-workspace {
+  color: var(--muted);
+}
+.app-shell .topbar > div {
+  gap: 16px;
+}
+.app-shell .locale {
+  background: #f7f8fc;
+  border: 1px solid var(--line);
+  padding: 6px 10px;
+  border-radius: 7px;
+  gap: 7px;
+  font-size: 11px;
+}
+.app-shell .swiss-flag {
+  width: 14px;
+  height: 14px;
+  font-size: 10px;
+  background: #df5959;
+}
+.app-shell .icon-button {
+  border-radius: 9px;
+  color: var(--muted);
+}
+.app-shell .icon-button:hover {
+  background: var(--paper);
+  color: var(--primary);
+}
+.app-shell .demo-banner {
+  background: #f5f7fc;
+  color: #657086;
+  border-color: var(--line);
+  padding: 8px 36px;
+  font-size: 11px;
+}
+.app-shell main {
+  flex: 1;
+  width: 100%;
+  max-width: 1600px;
+  padding: 32px 36px 42px;
+  --reading-ink: #47536a;
+  --reading-muted: var(--muted);
+}
+.app-shell .bandi-header {
+  margin-bottom: 24px;
+}
+.app-shell .eyebrow {
+  color: #687791;
+  font-size: 9px;
+  letter-spacing: 1.3px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.app-shell .bandi-title-row {
+  align-items: center;
+}
+.app-shell .bandi-title-row h1,
+.app-shell .page-heading h1 {
+  font-size: clamp(28px, 2.4vw, 35px);
+  line-height: 1.22;
+  letter-spacing: -1.1px;
+  font-weight: 700;
+}
+.app-shell .bandi-title-row > div > p,
+.app-shell .page-heading > div > p {
+  font-size: 14px;
+  color: var(--muted);
+  margin-top: 8px;
+}
+.app-shell .button {
+  min-height: 42px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 14px;
+}
+.app-shell .button.primary {
+  box-shadow: 0 2px 3px #2563eb0c;
+}
+.app-shell .button.secondary {
+  color: #47536a;
+  border-color: #dfe4ef;
+  background: white;
+}
+.app-shell .button.secondary:hover {
+  background: #f5f8ff;
+  border-color: #cbd7ed;
+  color: var(--primary);
+}
+.app-shell .collection-tabs {
+  display: inline-flex;
+  width: auto;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f0f2f7;
+  margin-top: 23px;
+  gap: 3px;
+  overflow: visible;
+}
+.app-shell .collection-tabs a {
+  min-height: 35px;
+  padding: 7px 17px;
+  border: 0;
+  border-radius: 7px;
+  color: #667188;
+  font-size: 12px;
+}
+.app-shell .collection-tabs a.active {
+  color: #2558c4;
+  background: white;
+  box-shadow: 0 1px 4px #1921350c;
+}
+.app-shell .collection-tabs a:hover {
+  color: #2558c4;
+}
+.workspace-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 26px;
+}
+.overview-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 19px 20px 17px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 2px 4px #19213502;
+}
+.overview-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  color: #657086;
+  font-size: 12px;
+  font-weight: 500;
+}
+.overview-label svg {
+  color: #8795b1;
+  stroke-width: 1.6;
+}
+.overview-card > strong {
+  color: var(--ink);
+  font-size: 30px;
+  line-height: 1.3;
+  font-weight: 700;
+  letter-spacing: -1px;
+  margin: 9px 0 7px;
+  font-variant-numeric: tabular-nums;
+}
+.overview-caption {
+  color: #6b768b;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.overview-deadline .overview-label svg {
+  color: #b48438;
+}
+.overview-saved .overview-label svg {
+  color: #7f72c6;
+}
+.overview-review .overview-label svg {
+  color: #8e80bd;
+}
+.app-shell .catalog-panel {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 18px;
+  margin-bottom: 16px;
+}
+.app-shell .catalog-filters {
+  gap: 13px;
+}
+.app-shell .catalog-search-row {
+  gap: 10px;
+}
+.app-shell .search-input {
+  background: #fff;
+  border: 1px solid #dfe4ef;
+  border-radius: 8px;
+  min-height: 43px;
+  box-shadow: none;
+}
+.app-shell .search-input input {
+  font-size: 13px;
+}
+.app-shell .search-input svg {
+  color: #8a96ad;
+}
+.app-shell .search-input:focus-within,
+.app-shell .select-wrap:focus-within {
+  border-color: #7199f0;
+  box-shadow: 0 0 0 3px #2563eb0c;
+}
+.app-shell .catalog-filter-fields {
+  gap: 12px;
+}
+.app-shell .catalog-filter-fields > label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  gap: 6px;
+}
+.app-shell select,
+.app-shell .select-wrap {
+  border-color: #dfe4ef;
+  border-radius: 8px;
+}
+.app-shell .catalog-filter-fields select {
+  min-height: 40px;
+  font-size: 12px;
+}
+.app-shell .applied-filters {
+  margin-top: 10px;
+  gap: 8px;
+  font-size: 11px;
+}
+.app-shell .applied-filters > span {
+  background: #f2f5fc;
+  color: #576782;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.app-shell main .source-summary-line {
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 12px 15px;
+  margin-bottom: 15px;
+  font-size: 12px;
+  border-radius: 9px;
+}
+.app-shell main .source-summary-line.has-problem {
+  background: #fffbf3;
+  border-color: #f0e3c9;
+  color: #826337;
+}
+.app-shell .source-summary-line summary {
+  font-size: 11px;
+}
+.app-shell .collection-views {
+  display: flex;
+  gap: 18px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0;
+  margin-bottom: 20px;
+}
+.app-shell .collection-views .button {
+  border: 0;
+  border-radius: 0;
+  min-height: 43px;
+  padding: 8px 0 12px;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+  font-size: 13px;
+}
+.app-shell .collection-views .button.primary {
+  color: var(--primary);
+  box-shadow: inset 0 -2px var(--primary);
+}
+.app-shell .collection-controls {
+  margin-bottom: 18px;
+  gap: 12px;
+}
+.app-shell .select-wrap {
+  background: #fff;
+}
+.app-shell .collection-heading {
+  margin-bottom: 15px;
+  align-items: center;
+}
+.app-shell .collection-heading h2 {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.35px;
+}
+.app-shell .collection-heading p,
+.app-shell .catalog-results-heading {
+  font-size: 12px;
+  color: var(--muted);
+}
+.app-shell .tender-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 13px;
+  overflow: clip;
+}
+.app-shell .tender-list:empty {
+  display: none;
+}
+.tender-list-heading {
+  display: grid;
+  grid-template-columns: var(--tender-columns);
+  gap: 20px;
+  padding: 14px 22px;
+  background: #fafbfe;
+  border-bottom: 1px solid var(--line);
+  color: #65718a;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.65px;
+  text-transform: uppercase;
+}
+.app-shell .tender-list-card {
+  display: grid;
+  grid-template-columns: var(--tender-columns);
+  align-items: start;
+  gap: 14px 20px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 22px;
+  box-shadow: none;
+  background: #fff;
+  margin: 0;
+  transition: background-color 150ms ease;
+}
+.app-shell .tender-list-card:last-child {
+  border-bottom: 0;
+}
+.app-shell .tender-list-card:hover {
+  background: #fcfdff;
+}
+.tender-card-subject {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+.app-shell .tender-card-sector {
+  display: block;
+  color: #65718a;
+  font-size: 10px;
+  font-weight: 550;
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+.app-shell main .panel.tender-list-card h2 {
+  color: #202a40;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.5;
+  letter-spacing: -0.2px;
+}
+.app-shell .tender-list-card h2 a:hover {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.app-shell main .panel .tender-card-description {
+  color: #606e85;
+  font-size: 13px;
+  line-height: 1.65;
+  margin-top: 7px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tender-card-organization {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  padding-top: 3px;
+}
+.tender-cell-label {
+  display: none;
+}
+.app-shell main .panel .tender-card-buyer {
+  color: #48556e;
+  font-size: 12px;
+  line-height: 1.55;
+  gap: 6px;
+  margin: 0;
+  align-items: flex-start;
+}
+.app-shell .tender-card-buyer svg {
+  display: none;
+}
+.app-shell .tender-card-buyer span {
+  white-space: normal;
+  overflow: visible;
+  display: block;
+}
+.app-shell main .panel .tender-card-location {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  color: #65718a;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: normal;
+  margin-top: 9px;
+}
+.app-shell .tender-card-location svg {
+  margin-top: 2px;
+}
+.app-shell .tender-card-deadline {
+  grid-column: 3;
+  grid-row: 1;
+  min-width: 0;
+  padding-top: 3px;
+}
+.tender-card-deadline > strong {
+  display: block;
+  color: #48556e;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+.app-shell .tender-card-deadline.expiring > strong {
+  color: #9e6c18;
+}
+.app-shell .deadline-label {
+  display: inline-block;
+  font-size: 10px;
+  background: #fff5de;
+  color: #93651a;
+  padding: 2px 5px;
+  border-radius: 4px;
+  margin-top: 5px;
+}
+.app-shell .tender-card-labels {
+  grid-column: 4;
+  grid-row: 1;
+  padding-top: 1px;
+  min-width: 0;
+}
+.app-shell .status-tag {
+  border-radius: 20px;
+  padding: 4px 9px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.app-shell .status-tag.good {
+  background: #eaf6ef;
+  color: #22724a;
+}
+.app-shell .status-tag.warning {
+  background: #fff3df;
+  color: #91681e;
+}
+.app-shell .status-tag.neutral {
+  background: #f0f2f7;
+  color: #657086;
+}
+.app-shell .tender-card-actions {
+  grid-column: 5;
+  grid-row: 1;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+.app-shell .tender-card-actions .button {
+  min-height: 34px;
+  width: 100%;
+  padding: 6px 9px;
+  font-size: 11px;
+  gap: 5px;
+}
+.app-shell .tender-card-actions > *,
+.app-shell .tender-card-actions .catalog-bookmark-wrap {
+  width: 100%;
+  min-width: 0;
+}
+.app-shell .tender-card-actions .catalog-bookmark-message {
+  max-width: 100%;
+  font-size: 11px;
+}
+.app-shell .tender-card-relevance {
+  grid-column: 1 / 5;
+  grid-row: 2;
+  padding: 0;
+}
+.app-shell .tender-card-relevance .match-note {
+  padding: 11px 13px;
+  border: 0;
+  border-radius: 7px;
+  background: #f5f8ff;
+  margin: 0;
+  color: #526889;
+}
+.app-shell .tender-card-relevance .match-note.needs-review {
+  background: #fffbf1;
+  color: #826934;
+}
+.app-shell .tender-card-relevance .match-note strong {
+  font-size: 11px;
+  font-weight: 650;
+}
+.app-shell main .tender-card-relevance .match-note p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #63718a;
+  margin-top: 2px;
+}
+.app-shell main .tender-card-relevance .publication-review-note {
+  color: #8a672d;
+  font-size: 12px;
+}
+.app-shell .tender-card-secondary {
+  grid-column: 5;
+  grid-row: 2;
+  align-self: center;
+  justify-self: end;
+  padding-top: 0;
+  border: 0;
+}
+.app-shell .tender-card-secondary .dismiss-link {
+  min-height: 30px;
+  font-size: 11px;
+  color: #65718a;
+}
+.app-shell .panel:not(.tender-list-card) {
+  border-color: var(--line);
+  border-radius: 13px;
+  box-shadow: 0 2px 6px #19213502;
+}
+.app-shell .notice,
+.app-shell .radar-progress {
+  border-radius: 10px;
+}
+.app-shell .footer {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 22px 36px;
+  gap: 20px;
+  background: #fff;
+}
+.app-shell .field input,
+.app-shell .field textarea {
+  border-color: #dfe4ef;
+  border-radius: 8px;
+}
+.app-shell .profile-save-bar {
+  border-color: var(--line);
+  border-radius: 11px;
+}
+.app-shell .tender-detail-header {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 26px;
+}
+.app-shell .tender-detail-header h1 {
+  font-weight: 700;
+  letter-spacing: -0.7px;
+}
+
+@media (min-width: 901px) and (max-width: 1270px) {
+  .app-shell {
+    --sidebar-width: 220px;
+    --tender-columns: minmax(0, 2fr) minmax(0, 1.1fr) 100px 80px 104px;
+  }
+  .app-shell .sidebar {
+    padding-inline: 12px;
+  }
+  .app-shell .main-shell main {
+    padding-inline: 25px;
+  }
+  .app-shell .topbar {
+    padding-inline: 25px;
+  }
+  .tender-list-heading,
+  .app-shell .tender-list-card {
+    gap: 14px;
+    padding-inline: 18px;
+  }
+  .overview-card {
+    padding: 16px 14px;
+  }
+  .overview-label {
+    font-size: 11px;
+  }
+  .overview-caption {
+    font-size: 10px;
+  }
+}
+@media (max-width: 1100px) {
+  .app-shell {
+    --tender-columns: minmax(0, 1.8fr) minmax(0, 1fr) 100px 110px;
+  }
+  .tender-list-heading {
+    grid-template-columns: var(--tender-columns);
+  }
+  .tender-list-heading > span:nth-child(4) {
+    display: none;
+  }
+  .app-shell .tender-card-labels {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .app-shell .tender-card-actions {
+    grid-column: 4;
+    grid-row: 1 / 3;
+  }
+  .app-shell .tender-card-relevance {
+    grid-column: 1 / 4;
+    grid-row: 3;
+  }
+  .app-shell .tender-card-secondary {
+    grid-column: 4;
+    grid-row: 3;
+  }
+}
+@media (max-width: 900px) {
+  .app-shell .sidebar {
+    display: none;
+  }
+  .app-shell .main-shell {
+    margin-left: 0;
+  }
+  .app-shell .topbar {
+    min-height: 64px;
+    padding: env(safe-area-inset-top, 0px)
+      max(18px, env(safe-area-inset-right, 0px)) 0
+      max(18px, env(safe-area-inset-left, 0px));
+  }
+  .app-shell .topbar-title {
+    display: none;
+  }
+  .app-shell .topbar > div {
+    gap: 4px;
+  }
+  .app-shell .mobile-brand-frame {
+    width: 136px;
+  }
+  .app-shell main {
+    padding: 26px max(18px, env(safe-area-inset-right, 0px)) 30px
+      max(18px, env(safe-area-inset-left, 0px));
+  }
+  .app-shell .bandi-title-row h1,
+  .app-shell .page-heading h1 {
+    font-size: 29px;
+  }
+  .app-shell .bandi-title-row > div > p {
+    font-size: 14px;
+    line-height: 1.65;
+  }
+  .app-shell .bandi-title-row > .button {
+    min-height: 40px;
+    margin-top: 14px;
+    font-size: 12px;
+  }
+  .app-shell .collection-tabs {
+    display: grid;
+    grid-template-columns: 1.25fr 1.15fr 0.8fr;
+    width: 100%;
+    padding: 4px;
+    margin-top: 20px;
+  }
+  .app-shell .collection-tabs a {
+    justify-content: center;
+    font-size: 12px;
+    padding: 7px 5px;
+    min-height: 40px;
+    white-space: normal;
+  }
+  .workspace-overview {
+    gap: 10px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-bottom: 23px;
+  }
+  .overview-card {
+    padding: 15px;
+    border-radius: 11px;
+  }
+  .overview-card > strong {
+    font-size: 27px;
+    margin-block: 7px 4px;
+  }
+  .overview-label {
+    font-size: 11px;
+    gap: 7px;
+  }
+  .overview-label svg {
+    width: 16px;
+    height: 16px;
+  }
+  .overview-caption {
+    font-size: 10px;
+  }
+  .app-shell .catalog-panel {
+    padding: 14px;
+  }
+  .app-shell .catalog-search-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .app-shell .catalog-search-row .search-input {
+    grid-column: 1 / -1;
+  }
+  .app-shell .catalog-search-row .button {
+    min-height: 44px;
+  }
+  .app-shell .search-input input {
+    font-size: 16px;
+  }
+  .app-shell .collection-controls {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+  .app-shell .collection-controls .search-input {
+    grid-column: 1;
+  }
+  .app-shell .collection-views {
+    gap: 22px;
+  }
+  .app-shell .collection-views .button {
+    min-height: 44px;
+    font-size: 12px;
+  }
+  .app-shell .collection-heading {
+    display: block;
+  }
+  .app-shell .collection-heading p {
+    margin-top: 5px;
+  }
+  .app-shell .catalog-filter-fields select {
+    font-size: 16px;
+    min-height: 48px;
+  }
+  .app-shell .tender-list {
+    background: none;
+    border: 0;
+    border-radius: 0;
+    gap: 14px;
+    overflow: visible;
+  }
+  .tender-list-heading {
+    display: none;
+  }
+  .app-shell .tender-list-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px 12px;
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px 18px;
+  }
+  .app-shell .tender-list-card:last-child {
+    border-bottom: 1px solid var(--line);
+  }
+  .tender-card-subject {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .app-shell .tender-card-labels {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    padding: 0;
+  }
+  .app-shell .status-tag {
+    font-size: 11px;
+  }
+  .app-shell .tender-card-sector {
+    font-size: 11px;
+    margin-bottom: 5px;
+  }
+  .app-shell main .panel.tender-list-card h2 {
+    font-size: 18px;
+    line-height: 1.5;
+  }
+  .app-shell main .panel .tender-card-description {
+    font-size: 14px;
+    margin-top: 9px;
+    -webkit-line-clamp: 3;
+    line-height: 1.7;
+  }
+  .tender-card-organization {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    padding-top: 0;
+  }
+  .app-shell main .panel .tender-card-buyer {
+    font-size: 13px;
+  }
+  .app-shell .tender-card-buyer svg {
+    display: block;
+    margin-top: 2px;
+  }
+  .app-shell main .panel .tender-card-location {
+    font-size: 12px;
+    margin-left: 21px;
+    margin-top: 5px;
+  }
+  .app-shell .tender-card-location svg {
+    display: none;
+  }
+  .app-shell .tender-card-deadline {
+    grid-column: 1 / -1;
+    grid-row: 4;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+  .tender-cell-label {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .tender-card-organization > .tender-cell-label {
+    display: none;
+  }
+  .tender-card-deadline > strong {
+    font-size: 13px;
+    margin-left: auto;
+  }
+  .app-shell .deadline-label {
+    margin: 0;
+  }
+  .app-shell .tender-card-relevance {
+    grid-column: 1 / -1;
+    grid-row: 5;
+  }
+  .app-shell main .tender-card-relevance .match-note p {
+    font-size: 13px;
+  }
+  .app-shell .tender-card-actions {
+    grid-column: 1 / -1;
+    grid-row: 6;
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .app-shell .tender-card-actions .button {
+    min-height: 44px;
+    font-size: 12px;
+    padding: 10px;
+  }
+  .app-shell .tender-card-actions > * {
+    flex: 1;
+    width: 50%;
+  }
+  .app-shell .tender-card-secondary {
+    grid-column: 1 / -1;
+    grid-row: 7;
+  }
+  .app-shell .tender-card-secondary .dismiss-link {
+    min-height: 44px;
+    font-size: 12px;
+  }
+  .app-shell .mobile-nav {
+    background: #ffffffed;
+    backdrop-filter: blur(14px);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -4px 20px #19213504;
+  }
+  .app-shell .mobile-nav a {
+    color: #65718a;
+    padding: 9px 12px;
+    margin: 6px;
+    border-radius: 9px;
+    font-size: 10px;
+  }
+  .app-shell .mobile-nav a.active {
+    color: var(--primary);
+    background: #edf3ff;
+  }
+  .app-shell .footer {
+    margin-bottom: var(--mobile-nav-height);
+    padding: 20px 18px;
+    font-size: 10px;
+  }
+  .app-shell .tender-detail-header {
+    padding: 22px 18px;
+  }
+  .app-shell .tender-detail-header h1 {
+    font-size: 26px;
+  }
+  .app-shell .demo-banner {
+    padding-inline: 18px;
+  }
+}
+@media (max-width: 360px) {
+  .app-shell main {
+    padding-inline: 14px;
+  }
+  .overview-card {
+    padding: 12px;
+  }
+  .overview-label {
+    font-size: 10px;
+  }
+  .overview-label svg {
+    display: none;
+  }
+  .app-shell .tender-list-card {
+    padding: 17px 15px;
+  }
+  .app-shell .collection-tabs a {
+    font-size: 11px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .nav-link,
+  .app-shell .tender-list-card {
+    transition: none;
+  }
+}
+
+/* Advanced filters stay one click away on every screen. */
+.app-shell .catalog-filter-fields {
+  display: none;
+}
+.app-shell .catalog-filter-fields[data-expanded="true"] {
+  display: grid;
+}
+.app-shell .button.filter-toggle {
+  display: inline-flex;
+}
+@media (min-width: 901px) {
+  .app-shell .collection-tabs {
+    display: none;
+  }
+  .app-shell .bandi-header {
+    margin-bottom: 25px;
+  }
+  .overview-card {
+    padding-block: 17px 15px;
+  }
+  .overview-card > strong {
+    margin-block: 6px;
+  }
+}
+@media (max-width: 600px) {
+  .workspace-overview {
+    display: flex;
+    gap: 10px;
+    margin-inline: -18px;
+    padding: 0 18px 4px;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+  }
+  .overview-card {
+    flex: 0 0 162px;
+    scroll-snap-align: start;
+  }
+  .overview-label {
+    align-items: flex-start;
+    min-height: 32px;
+  }
+  .overview-caption {
+    min-height: 30px;
+  }
+  .workspace-overview:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+  }
+}
+@media (max-width: 360px) {
+  .workspace-overview {
+    margin-inline: -14px;
+    padding-inline: 14px;
+  }
+  .overview-card {
+    flex-basis: 148px;
+  }
+}
+.app-shell .tender-card-subject,
+.app-shell .tender-card-organization {
+  overflow-wrap: anywhere;
+}
+.app-shell .radar-progress {
+  background: #f1f6ff;
+  border-color: #dbe7fb;
+  color: #46678e;
+}
+@media (max-width: 600px) {
+  .workspace-overview {
+    scroll-padding-inline: 18px;
+    scrollbar-width: none;
+  }
+  .workspace-overview::-webkit-scrollbar {
+    display: none;
+  }
+  .app-shell .bandi-title-row {
+    position: relative;
+  }
+  .app-shell .bandi-title-row h1 {
+    padding-right: 54px;
+  }
+  .app-shell .bandi-title-row > .bandi-profile-link {
+    position: absolute;
+    right: 0;
+    top: 16px;
+    margin: 0;
+    min-height: 44px;
+    width: 44px;
+    padding: 0;
+  }
+  .bandi-profile-link span {
+    display: none;
+  }
+}
+@media (max-width: 360px) {
+  .workspace-overview {
+    scroll-padding-inline: 14px;
+  }
+}

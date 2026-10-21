@@ -9,11 +9,21 @@ import {
   ArrowUpRight,
   ShieldCheck,
   LogOut,
+  Search,
+  Bookmark,
+  ChevronRight,
 } from "lucide-react";
 import type { Viewer } from "@/lib/domain";
 import { BrandLogo } from "@/components/brand-logo";
 const links = [
   { href: "/", label: "Bandi", icon: Radar },
+  { href: "/profilo", label: "La tua ditta", icon: Building2 },
+  { href: "/notifiche", label: "Notifiche", icon: Bell },
+];
+const workspaceLinks = [
+  { href: "/", label: "Il tuo Radar", icon: Radar },
+  { href: "/esplora", label: "Tutti i bandi", icon: Search },
+  { href: "/salvati", label: "Salvati", icon: Bookmark },
   { href: "/profilo", label: "La tua ditta", icon: Building2 },
   { href: "/notifiche", label: "Notifiche", icon: Bell },
 ];
@@ -75,21 +85,35 @@ export function Shell({
       );
     return path === href;
   };
+  const workspaceActive = (href: string) =>
+    href === "/"
+      ? path === "/" || path.startsWith("/bandi/")
+      : path === href || path.startsWith(`${href}/`);
+  const currentSection = workspaceLinks.find(({ href }) =>
+    workspaceActive(href),
+  );
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <BrandLogo />
-        <div className="workspace-label">IL TUO SPAZIO</div>
+        <BrandLogo light />
+        <div className="workspace-label">IL TUO SPAZIO DI LAVORO</div>
         <nav aria-label="Navigazione principale">
-          {links.map(({ href, label, icon: Icon }) => (
+          {workspaceLinks.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
               href={href}
-              className={`nav-link ${active(href) ? "active" : ""}`}
-              aria-current={active(href) ? "page" : undefined}
+              className={`nav-link ${workspaceActive(href) ? "active" : ""}`}
+              aria-current={workspaceActive(href) ? "page" : undefined}
             >
               <Icon size={20} />
               <NavigationLabel label={label} />
+              {workspaceActive(href) && (
+                <ChevronRight
+                  size={15}
+                  className="nav-current-arrow"
+                  aria-hidden="true"
+                />
+              )}
             </Link>
           ))}
         </nav>
@@ -110,7 +134,7 @@ export function Shell({
             </span>
             <span>
               <strong>{viewer?.profile.name ?? "La tua ditta"}</strong>
-              <small>Beta Radar · gratuita</small>
+              <small>Profilo della ditta</small>
             </span>
           </Link>
           {viewer && !viewer.demo && (
@@ -137,8 +161,12 @@ export function Shell({
             </span>
           </Link>
           <span className="topbar-title">
-            <strong>Mandat</strong>
-            <span> · Radar appalti</span>
+            <span className="topbar-workspace">Il tuo spazio</span>
+            <ChevronRight size={14} aria-hidden="true" />
+            <strong>
+              {currentSection?.label ??
+                (path.startsWith("/admin") ? "Area fondatore" : "Mandat")}
+            </strong>
           </span>
           <div>
             {viewer?.admin && (

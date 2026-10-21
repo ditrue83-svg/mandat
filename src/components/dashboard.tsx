@@ -23,6 +23,7 @@ import { Shell } from "./shell";
 import { MatchNote } from "./match-note";
 import { BandiNavigation } from "./bandi-navigation";
 import { TenderListCard } from "./tender-list-card";
+import { WorkspaceOverview, TenderListHeading } from "./workspace-overview";
 import { LoadingContent } from "./page-states";
 import { matchesSearch } from "@/lib/search";
 import { profileSchema } from "@/lib/validation";
@@ -324,6 +325,51 @@ export function Dashboard({
         active={savedOnly ? "saved" : "radar"}
         showProfileLink={!savedOnly}
       />
+      <WorkspaceOverview
+        items={[
+          {
+            label: savedOnly ? "Bandi salvati" : "Selezionati",
+            value: savedOnly
+              ? collection.length
+              : items.filter((item) => !item.dismissed && !item.reviewCandidate)
+                  .length,
+            caption: savedOnly
+              ? "Nella tua raccolta personale"
+              : "Nel Radar della tua ditta",
+            icon: "radar",
+          },
+          {
+            label: savedOnly ? "Ancora in corso" : "Da verificare",
+            value: savedOnly
+              ? collection.filter(
+                  (item) => statusPresentation(item).label === "In corso",
+                ).length
+              : items.filter(
+                  (item) => !item.dismissed && !!item.reviewCandidate,
+                ).length,
+            caption: savedOnly
+              ? "Tra i bandi che hai salvato"
+              : "Richiedono un approfondimento",
+            icon: "review",
+          },
+          {
+            label: savedOnly ? "Risultati della ricerca" : "Salvati",
+            value: savedOnly
+              ? visible.length
+              : items.filter((item) => item.saved && !item.dismissed).length,
+            caption: savedOnly
+              ? "Con i filtri attuali"
+              : "Tra le proposte del tuo Radar",
+            icon: "saved",
+          },
+          {
+            label: "In scadenza",
+            value: expiring,
+            caption: "Entro 7 giorni, in questa raccolta",
+            icon: "deadline",
+          },
+        ]}
+      />
       {!savedOnly && !viewer.demo && aiProcessingBlocked && (
         <div className="notice" role="status">
           <strong>
@@ -533,6 +579,7 @@ export function Dashboard({
               </div>
             )}
             <div className="tender-list">
+              {visible.length > 0 && <TenderListHeading />}
               {visible.map((item) => {
                 const status = statusPresentation(item);
                 const detailPath = item.catalogOnly

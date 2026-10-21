@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import "./mobile.css";
 import "./readability.css";
+import "./workspace.css";
 
 const inter = localFont({
   src: "./fonts/inter.woff2",
@@ -16,7 +17,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover",
   interactiveWidget: "resizes-content",
-  themeColor: "#0f172a",
+  themeColor: "#ffffff",
 };
 export const metadata: Metadata = {
   title: { default: "Mandat — Il tuo Radar appalti", template: "%s · Mandat" },

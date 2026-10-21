@@ -38,17 +38,28 @@ export function BandiNavigation({
   showProfileLink?: boolean;
 }) {
   const current = collections.find((collection) => collection.id === active)!;
+  const title =
+    active === "radar"
+      ? "Il tuo Radar"
+      : active === "saved"
+        ? "Bandi salvati"
+        : current.label;
   return (
     <header className="bandi-header">
       <div className="bandi-title-row">
         <div>
-          <div className="eyebrow">BANDI</div>
-          <h1>{current.label}</h1>
+          <div className="eyebrow">LE OPPORTUNITÀ PER LA TUA DITTA</div>
+          <h1>{title}</h1>
           <p>{current.description}</p>
         </div>
         {showProfileLink && (
-          <Link href="/profilo" className="button secondary">
-            <SlidersHorizontal size={17} /> Personalizza la tua ditta
+          <Link
+            href="/profilo"
+            className="button secondary bandi-profile-link"
+            aria-label="Personalizza la tua ditta"
+          >
+            <SlidersHorizontal size={17} aria-hidden="true" />{" "}
+            <span>Personalizza la tua ditta</span>
           </Link>
         )}
       </div>

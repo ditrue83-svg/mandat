@@ -15,6 +15,7 @@ import type { readCatalog } from "@/lib/catalog";
 import { sectorCaption } from "@/lib/sectors";
 import { CatalogBookmark } from "@/components/catalog-bookmark";
 import { tenderWorkExcerpt } from "@/lib/tender-work-excerpt";
+import { WorkspaceOverview, TenderListHeading } from "./workspace-overview";
 
 function sourceHeadline(source: CatalogSourceSummary) {
   if (source.state === "disabled") return "non attivo nella beta";
@@ -41,6 +42,34 @@ export function CatalogView({
   return (
     <Shell viewer={viewer}>
       <BandiNavigation active="catalog" />
+      <WorkspaceOverview
+        items={[
+          {
+            label: "Pubblicazioni raccolte",
+            value: data.collectedCount,
+            caption: "Nella raccolta del Ticino",
+            icon: "all",
+          },
+          {
+            label: "Bandi in corso",
+            value: data.openCount,
+            caption: "Nell’intera raccolta",
+            icon: "open",
+          },
+          {
+            label: "Settore da verificare",
+            value: data.unclassifiedCount,
+            caption: "Da consultare senza filtro di settore",
+            icon: "review",
+          },
+          {
+            label: "Risultati della ricerca",
+            value: data.total,
+            caption: "Con i filtri attuali",
+            icon: "radar",
+          },
+        ]}
+      />
       <section
         className="catalog-panel"
         aria-label="Ricerca tra tutti i bandi raccolti"
@@ -129,6 +158,7 @@ export function CatalogView({
         className="tender-list catalog-list"
         aria-label="Risultati della ricerca"
       >
+        {data.items.length > 0 && <TenderListHeading />}
         {data.items.map((publication) => {
           const detailHref = publication.collectionIncomplete
             ? publication.sourceUrl
