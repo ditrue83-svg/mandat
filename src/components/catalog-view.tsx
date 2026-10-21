@@ -137,6 +137,7 @@ export function CatalogView({
         data.filters.settore !== "da-classificare" && (
           <p className="source-summary-line">
             <Link
+              prefetch={false}
               href={catalogHref({
                 ...data.filters,
                 q: "",
@@ -212,6 +213,7 @@ export function CatalogView({
                 : "Prova meno parole oppure azzera settore, stato e ordinamento."}
           </p>
           <Link
+            prefetch={false}
             href={
               data.filters.stato === "open" && !hasCustomFilters
                 ? "/esplora?stato=all"
@@ -229,6 +231,7 @@ export function CatalogView({
         <nav className="pagination" aria-label="Pagine dei risultati">
           {data.page > 1 ? (
             <Link
+              prefetch={false}
               href={catalogHref(data.filters, data.page - 1)}
               className="button secondary"
             >
@@ -242,6 +245,7 @@ export function CatalogView({
           </span>
           {data.page < data.pages ? (
             <Link
+              prefetch={false}
               href={catalogHref(data.filters, data.page + 1)}
               className="button secondary"
             >

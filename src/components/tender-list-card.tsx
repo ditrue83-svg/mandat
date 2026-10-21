@@ -41,7 +41,9 @@ export function TenderListCard({
           {sector}
         </span>
         <h2>
-          <Link href={detailHref}>{title}</Link>
+          <Link prefetch={false} href={detailHref}>
+            {title}
+          </Link>
         </h2>
         <p className="tender-card-description">
           {description ||
@@ -82,7 +84,7 @@ export function TenderListCard({
       </div>
       {relevance && <div className="tender-card-relevance">{relevance}</div>}
       <div className="tender-card-actions">
-        <Link href={detailHref} className="button secondary">
+        <Link prefetch={false} href={detailHref} className="button secondary">
           Vedi dettagli <ArrowUpRight size={15} aria-hidden="true" />
         </Link>
         {saveAction}

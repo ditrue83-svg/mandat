@@ -2,7 +2,12 @@ import Link from "next/link";
 
 export function BrandLogo({ light = false }: { light?: boolean }) {
   return (
-    <Link href="/" className="wordmark" aria-label="Mandat, pagina iniziale">
+    <Link
+      prefetch={false}
+      href="/"
+      className="wordmark"
+      aria-label="Mandat, pagina iniziale"
+    >
       <span
         className={`wordmark-frame${light ? " light-wordmark-frame" : ""}`}
         aria-hidden="true"

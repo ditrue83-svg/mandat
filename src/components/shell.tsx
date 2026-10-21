@@ -100,6 +100,7 @@ export function Shell({
         <nav aria-label="Navigazione principale">
           {workspaceLinks.map(({ href, label, icon: Icon }) => (
             <Link
+              prefetch={false}
               key={href}
               href={href}
               className={`nav-link ${workspaceActive(href) ? "active" : ""}`}
@@ -119,12 +120,12 @@ export function Shell({
         </nav>
         <div className="sidebar-bottom">
           {viewer?.admin && (
-            <Link href="/admin" className="admin-link">
+            <Link prefetch={false} href="/admin" className="admin-link">
               <ShieldCheck size={17} /> Area fondatore{" "}
               <ArrowUpRight size={15} />
             </Link>
           )}
-          <Link href="/profilo" className="company-switch">
+          <Link prefetch={false} href="/profilo" className="company-switch">
             <span className="avatar">
               {viewer ? (
                 viewer.name.slice(0, 1)
@@ -147,6 +148,7 @@ export function Shell({
       <div className="main-shell">
         <header className="topbar">
           <Link
+            prefetch={false}
             href="/"
             className="mobile-brand"
             aria-label="Mandat, pagina iniziale"
@@ -171,6 +173,7 @@ export function Shell({
           <div>
             {viewer?.admin && (
               <Link
+                prefetch={false}
                 href="/admin"
                 className="icon-button"
                 aria-label="Area fondatore"
@@ -182,6 +185,7 @@ export function Shell({
               <span className="swiss-flag">✚</span> Ticino · IT
             </span>
             <Link
+              prefetch={false}
               href="/notifiche"
               aria-label="Impostazioni notifiche"
               className="icon-button topbar-notifications"
@@ -189,6 +193,7 @@ export function Shell({
               <Bell size={19} />
             </Link>
             <Link
+              prefetch={false}
               href="/profilo"
               aria-label="Il tuo profilo"
               className="avatar small topbar-profile"
@@ -225,7 +230,7 @@ export function Shell({
                 · I bandi e le ditte sono esempi inventati.
               </span>
             </span>
-            <Link href="/accedi">
+            <Link prefetch={false} href="/accedi">
               Accesso beta <ArrowUpRight size={14} />
             </Link>
           </div>
@@ -242,13 +247,16 @@ export function Shell({
           <span>© {new Date().getFullYear()} Mandat</span>
           <span>
             Pubblicazione non ufficiale. Gli originali prevalgono sempre.{" "}
-            <Link href="/fonti">Fonti e copertura</Link>
+            <Link prefetch={false} href="/fonti">
+              Fonti e copertura
+            </Link>
           </span>
         </footer>
       </div>
       <nav className="mobile-nav" aria-label="Navigazione mobile">
         {links.map(({ href, label, icon: Icon }) => (
           <Link
+            prefetch={false}
             key={href}
             href={href}
             className={active(href) ? "active" : ""}

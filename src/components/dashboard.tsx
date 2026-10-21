@@ -383,7 +383,11 @@ export function Dashboard({
               : "Puoi continuare a consultare Esplora e i risultati già disponibili."}
           </p>
           {aiProcessingBlocked === "permission" && (
-            <Link className="text-link" href="/profilo#ai-processing-heading">
+            <Link
+              prefetch={false}
+              className="text-link"
+              href="/profilo#ai-processing-heading"
+            >
               Gestisci i confronti AI
             </Link>
           )}
@@ -707,7 +711,11 @@ export function Dashboard({
                     Torna ai bandi selezionati
                   </button>
                 ) : (
-                  <Link href="/esplora" className="button primary">
+                  <Link
+                    prefetch={false}
+                    href="/esplora"
+                    className="button primary"
+                  >
                     {savedOnly
                       ? "Cerca tra tutti i bandi"
                       : "Esplora i bandi in corso"}

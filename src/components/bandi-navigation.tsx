@@ -54,6 +54,7 @@ export function BandiNavigation({
         </div>
         {showProfileLink && (
           <Link
+            prefetch={false}
             href="/profilo"
             className="button secondary bandi-profile-link"
             aria-label="Personalizza la tua ditta"
@@ -66,6 +67,7 @@ export function BandiNavigation({
       <nav className="collection-tabs" aria-label="Raccolte di bandi">
         {collections.map((collection) => (
           <Link
+            prefetch={false}
             key={collection.id}
             href={collection.href}
             className={collection.id === active ? "active" : ""}
