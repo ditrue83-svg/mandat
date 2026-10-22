@@ -150,3 +150,29 @@ it("does not overwrite a later canton edition with an older keyword hit", async 
     "2025-01-01",
   );
 });
+it("refreshes same-UUID corrections and lot editions even after the former deadline expired", () => {
+  const old = {
+    sourcePublicationId: pub,
+    status: "open",
+    deadline: new Date("2024-10-01"),
+  };
+  const since = new Date("2030-01-01"),
+    now = new Date("2030-02-01");
+  expect(
+    needsSimapDetail({ id, raw: { ...raw, corrected: true } }, old, since, now),
+  ).toBe(true);
+  expect(
+    needsSimapDetail(
+      {
+        id,
+        raw: {
+          ...raw,
+          lots: [{ id: "lot", publicationId: "new-lot-edition" }],
+        },
+      },
+      old,
+      since,
+      now,
+    ),
+  ).toBe(true);
+});

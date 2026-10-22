@@ -37,7 +37,7 @@ export function foglioStatus(
   )
     return "awarded";
   if (
-    /^(?:bando(?:\s*[-–:]|\s+di\s+concorso)|concorso\b|appels?\s+d['’]offres\b|ausschreibung\b|wettbewerb\b|mandat[oi]\s+di\s+studio\b)/iu.test(
+    /^(?:bando(?:\s*[-–:]|\s+di\s+concorso)|concorso\b|appels?\s+d['’]offres\b|invitation\s+to\s+tender\b|call\s+for\s+tenders\b|ausschreibung\b|wettbewerb\b|mandat[oi]\s+di\s+studio\b)/iu.test(
       title,
     )
   )

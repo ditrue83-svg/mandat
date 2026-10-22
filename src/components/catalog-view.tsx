@@ -152,17 +152,28 @@ export function CatalogView({
               )
               .join(" · ")}
           </div>
-          <p>
-            {data.officialSearchIncomplete
-              ? "Non possiamo confermare una ricerca completa in questo momento: una fonte non ha concluso il confronto. Riprova; i risultati disponibili restano visibili."
-              : "Sono inclusi anche i risultati individuati sulla fonte e non ancora importati. Queste schede aprono direttamente la pubblicazione ufficiale."}
-          </p>
-          <p>
-            SIMAP può trovare parole anche in edizioni precedenti. Mandat
-            conserva lo stato dell’edizione attualmente raccolta. Le schede non
-            ancora importate restano visibili anche con un filtro di settore o
-            “In corso”, con attività e scadenza da verificare sulla fonte.
-          </p>
+          {data.officialSearchIncomplete && (
+            <p>
+              Non possiamo confermare una ricerca completa in questo momento:
+              una fonte non ha concluso il confronto. Riprova; i risultati
+              disponibili restano visibili.
+            </p>
+          )}
+          <details>
+            <summary>Come leggere i risultati ufficiali</summary>
+            <p>
+              Sono inclusi anche i risultati individuati sulla fonte e non
+              ancora importati. Queste schede aprono direttamente la
+              pubblicazione ufficiale.
+            </p>
+            <p>
+              SIMAP può trovare parole anche in edizioni precedenti. Mandat
+              conserva lo stato dell’edizione attualmente raccolta. Le schede
+              non ancora importate restano visibili anche con un filtro di
+              settore o “In corso”, con attività e scadenza da verificare sulla
+              fonte.
+            </p>
+          </details>
         </section>
       )}
       {data.unclassifiedCount > 0 &&

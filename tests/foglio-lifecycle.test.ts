@@ -7,6 +7,7 @@ it.each([
   "Concorso - Assicurazioni",
   "Appel d’offres - Assicurazioni",
   "Appel d'offres - Projet",
+  "Invitation to tender - Packaging materials",
   "Ausschreibung - Arbeiten",
   "Wettbewerb - Bau",
   "Mandato di studio - Paese",

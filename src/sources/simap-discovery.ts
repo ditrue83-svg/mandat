@@ -16,7 +16,17 @@ export function needsSimapDetail(
   const raw = entry.raw as {
     publicationId?: unknown;
     publicationDate?: unknown;
+    corrected?: unknown;
+    lots?: unknown;
   };
+  // A correction can retain the publication UUID/date. And a lot can change
+  // while the project-level edition still looks identical. Neither condition
+  // may be skipped because an old deadline has already passed.
+  if (
+    raw.corrected === true ||
+    (Array.isArray(raw.lots) && raw.lots.length > 0)
+  )
+    return true;
   if (
     !previous?.sourcePublicationId ||
     previous.sourcePublicationId !== raw.publicationId

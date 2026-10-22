@@ -13,6 +13,9 @@ const context = vi.hoisted(() => ({
   db: undefined as unknown,
   headers: new Headers(),
 }));
+// Synthetic database tests do not depend on live public search availability.
+// Official query behavior is covered by its own source contract tests.
+vi.mock("@/lib/official-catalog-search", () => ({ searchOfficialCatalog: async () => [] }));
 vi.mock("@/db", () => ({
   getDb: () => context.db,
   closeDb: async () => {},
