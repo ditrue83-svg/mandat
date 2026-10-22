@@ -195,14 +195,14 @@ async function main() {
   // replays an idempotent handoff; no jobs/results/history are deleted or relabelled.
   await boss.work(
     "match",
-    { batchSize: 500, pollingIntervalSeconds: 0.5 },
+    { batchSize: 500, pollingIntervalSeconds: 2, burstWhenBatchFull: true },
     async () => {
       await requestMatchingSweep(boss);
     },
   );
   await boss.work<PublicationMatchJob>(
     "match-publication",
-    { batchSize: 5000, pollingIntervalSeconds: 0.5 },
+    { batchSize: 5000, pollingIntervalSeconds: 2, burstWhenBatchFull: true },
     async (jobs) => {
       await requestPublicationMatchingBatch(
         boss,
@@ -232,14 +232,14 @@ async function main() {
   );
   await boss.work(
     "digest",
-    { batchSize: 500, pollingIntervalSeconds: 0.5 },
+    { batchSize: 500, pollingIntervalSeconds: 2, burstWhenBatchFull: true },
     async () => {
       await requestNotificationDigest(boss);
     },
   );
   await boss.work(
     "send",
-    { batchSize: 500, pollingIntervalSeconds: 0.5 },
+    { batchSize: 500, pollingIntervalSeconds: 2, burstWhenBatchFull: true },
     async () => {
       await requestNotificationDelivery(boss);
     },
