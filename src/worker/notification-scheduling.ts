@@ -19,8 +19,9 @@ export function notificationWorkJob(value: unknown): NotificationWorkJob {
 async function requestNotificationWork(
   boss: Pick<PgBoss, "send" | "upsert">,
   kind: NotificationWorkJob["kind"],
+  sourceBound: boolean,
 ) {
-  await boss.send(
+  const inserted = await boss.send(
     NOTIFICATION_WORK_QUEUE,
     { kind },
     { singletonKey: kind, startAfter: 60 },
@@ -28,21 +29,32 @@ async function requestNotificationWork(
   // Keep an existing pending deadline, but lock that intent through the source
   // transaction. If a consumer took it between send and upsert, upsert creates
   // a trailing request instead. Neither path can acknowledge an unseen source.
-  await boss.upsert(NOTIFICATION_WORK_QUEUE, { kind }, { singletonKey: kind });
+  // Outside a source transaction, results are committed before this wake-up;
+  // an ordinary send is sufficient. A newly inserted row is already held by its
+  // transaction. Only a coalesced source-bound signal needs the extra row lock.
+  if (sourceBound && !inserted)
+    await boss.upsert(
+      NOTIFICATION_WORK_QUEUE,
+      { kind },
+      { singletonKey: kind },
+    );
 }
 export async function requestNotificationDigest(
   boss: Pick<PgBoss, "send" | "upsert">,
+  sourceBound = false,
 ) {
-  await requestNotificationWork(boss, "digest");
+  await requestNotificationWork(boss, "digest", sourceBound);
 }
 export async function requestNotificationSweeps(
   boss: Pick<PgBoss, "send" | "upsert">,
+  sourceBound = false,
 ) {
-  await requestNotificationDigest(boss);
-  await requestNotificationDelivery(boss);
+  await requestNotificationDigest(boss, sourceBound);
+  await requestNotificationDelivery(boss, sourceBound);
 }
 export async function requestNotificationDelivery(
   boss: Pick<PgBoss, "send" | "upsert">,
+  sourceBound = false,
 ) {
-  await requestNotificationWork(boss, "send");
+  await requestNotificationWork(boss, "send", sourceBound);
 }

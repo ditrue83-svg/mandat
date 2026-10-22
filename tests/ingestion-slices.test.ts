@@ -94,6 +94,24 @@ it("commits source and durable follow-ups together, without inline reconciliatio
     (await db.select().from(schema.publications)).map((p) => p.id),
   ).toEqual(["foglio-ti-1"]);
   await boss.createQueue("radar-publication", { policy: "stately" });
+  // A later failure, after the matching intent was persisted inside the source
+  // transaction, must also roll back the source and its immutable version.
+  await boss.deleteQueue("notification-work");
+  await expect(
+    storePublication(
+      {
+        ...publication(1),
+        revision: "invented-failed-notice",
+        title: "Nuovo titolo inventato",
+      },
+      { deferNotifications: true },
+    ),
+  ).rejects.toThrow();
+  expect((await db.select().from(schema.publications))[0].revision).toBe(
+    "invented-amended",
+  );
+  expect(await db.select().from(schema.publicationVersions)).toHaveLength(2);
+  await boss.createQueue("notification-work", { policy: "stately" });
 });
 it("ends historical work between records, keeps partial status and resumes after the actual attempted record", async () => {
   let tick = 0;

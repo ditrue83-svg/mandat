@@ -43,7 +43,8 @@ it("keeps one pending request per kind during slow active work, across producer 
       "select id::text,start_after::text due from pgboss.job where state='created'",
     )
   ).rows;
-  for (let i = 0; i < 100; i++) await requestNotificationSweeps(boss);
+  for (let i = 0; i < 100; i++)
+    await requestNotificationSweeps(boss, i % 2 === 0);
   const counts = await pg.query<{ state: string; n: number }>(
     "select state,count(*)::int n from pgboss.job group by state order by state",
   );

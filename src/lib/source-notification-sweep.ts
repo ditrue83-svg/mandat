@@ -20,5 +20,5 @@ export async function enqueueSourceFollowUps(
     createSchema: false,
   });
   await requestPublicationMatching(producer, { publicationId }, urgent);
-  if (notify) await requestNotificationSweeps(producer);
+  if (notify) await requestNotificationSweeps(producer, true);
 }
