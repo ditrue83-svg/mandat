@@ -216,3 +216,19 @@ it("segnala ritardo anche senza heartbeat e lascia la demo indipendente dal DB",
     pendingCount: 0,
   });
 });
+
+it("non presenta gli avvisi non aggiornabili come elaborazione AI ancora in corso", async () => {
+  await publication();
+  await db
+    .insert(schema.issues)
+    .values({
+      id: "held-source",
+      key: "source-item:simap:p",
+      title: "Fonte sospesa",
+      detail: "Accesso negato inventato",
+      severity: "critical",
+    });
+  expect((await getRadarStatus(viewer, now)).pendingCount).toBe(0);
+  await db.delete(schema.issues).where(eq(schema.issues.id, "held-source"));
+  expect((await getRadarStatus(viewer, now)).pendingCount).toBe(1);
+});

@@ -288,9 +288,7 @@ test("refused unknown input remains an observation and source issue, never a fab
     "fetch",
     vi.fn(async () => new Response("{broken")),
   );
-  await expect(ingest(adapter(), since, undefined, options)).rejects.toThrow(
-    "Importazione parziale",
-  );
+  await expect(ingest(adapter(), since, undefined, options)).resolves.toBe(0);
   expect(await db.select().from(schema.publications)).toHaveLength(0);
   expect(await db.select().from(schema.publicationVersions)).toHaveLength(0);
   expect(
@@ -321,9 +319,7 @@ test("existing refused input installs a barrier and ordinary refresh recovers it
     "fetch",
     vi.fn(async () => new Response("{broken")),
   );
-  await expect(ingest(adapter(), since, undefined, options)).rejects.toThrow(
-    "Importazione parziale",
-  );
+  await expect(ingest(adapter(), since, undefined, options)).resolves.toBe(0);
   const refused = await current();
   expect({
     ...refused,

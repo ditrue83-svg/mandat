@@ -15,6 +15,10 @@ const binding = Object.freeze({
   formatVersion: SOURCE_LOT_VERSION,
   sourceInputVersion: SOURCE_INPUT_VERSION,
 });
+// Trust only objects constructed, detached and deeply frozen in this module.
+// Database JSON, caller-frozen copies and equal hashes still take every guard.
+const verifiedArchives = new WeakSet<object>();
+const comparisonCache = new WeakMap<object, Map<string, LotComparison>>();
 
 export const SOURCE_LOT_LIMITS = Object.freeze({
   maxLots: 64,
@@ -232,6 +236,30 @@ function isReferencedLotAward(d: Obj, base: Obj): boolean {
     reference.publicationId !== d.id
   );
 }
+function isReferencedAbandonment(d: Obj, base: Obj): boolean {
+  if (
+    d.type !== "abandonment" ||
+    base.type !== "abandonment" ||
+    has(d, "lots") ||
+    has(base, "lots") ||
+    !d.abandonment ||
+    typeof d.abandonment !== "object" ||
+    Array.isArray(d.abandonment) ||
+    !has(d, "abandonedLot")
+  )
+    return false;
+  uuid(base.referencingPubId, "/base/referencingPubId");
+  if (base.referencingPubId === d.id) return false;
+  if (d.abandonedLot === null) return base.referencingLotId === null;
+  const lot = object(d.abandonedLot, "/abandonedLot");
+  uuid(lot.id, "/abandonedLot/id");
+  return (
+    base.referencingLotId === lot.id &&
+    typeof lot.lotNumber === "number" &&
+    Number.isSafeInteger(lot.lotNumber) &&
+    lot.lotNumber > 0
+  );
+}
 export function preserveSimapLots(
   detail: unknown,
   expected: Identity,
@@ -261,7 +289,8 @@ export function preserveSimapLots(
   if (
     !directory.length &&
     (baseDirectory.length || base.lotsType === "with") &&
-    !isReferencedLotAward(d, base)
+    !isReferencedLotAward(d, base) &&
+    !isReferencedAbandonment(d, base)
   )
     return bad("missing_lot_details", "/lots");
   if (
@@ -311,9 +340,12 @@ export function preserveSimapLots(
   // The wrapper/directory also consume nodes and depth. Apply exactly the
   // reader's structural guards before returning an accepted archive, so our
   // output cannot immediately fail verifyArchive only because of its shape.
-  return freeze(copyJson(archive)) as unknown as LotArchive;
+  const result = freeze(copyJson(archive)) as unknown as LotArchive;
+  verifiedArchives.add(result);
+  return result;
 }
-function verifyArchive(archive: LotArchive): LotArchive {
+export function verifySimapLotArchive(archive: LotArchive): LotArchive {
+  if (verifiedArchives.has(archive)) return archive;
   const a = object(copyJson(archive), "archive");
   const { archiveHash, ...body } = a;
   if (archiveHash !== hash(body) || a.version !== SOURCE_LOT_VERSION)
@@ -344,14 +376,14 @@ export function restoreLotFields(archive: LotArchive): {
   detail: Obj;
   base: Obj;
 } {
-  const a = verifyArchive(archive);
+  const a = verifySimapLotArchive(archive);
   return copyJson({ detail: a.lotField, base: a.baseLotField }) as {
     detail: Obj;
     base: Obj;
   };
 }
 export function restoreSimapDetail(archive: LotArchive): Obj {
-  const a = verifyArchive(archive);
+  const a = verifySimapLotArchive(archive);
   const sections = a.projectSections as Obj;
   return copyJson({
     ...sections,
@@ -591,9 +623,12 @@ export function buildLotComparisonCorpus(
   lotId: string,
   options: { complete?: boolean } = {},
 ): LotComparison {
-  const a = verifyArchive(archive);
+  const a = verifySimapLotArchive(archive);
   const item = a.directory.find((x) => x.id === lotId);
   if (!item) return bad("lot_selection_required_or_unknown", "lotId");
+  const cacheKey = `${lotId}:${options.complete ? "complete" : "bounded"}`;
+  const cached = comparisonCache.get(a)?.get(cacheKey);
+  if (cached) return cached;
   const root = { lots: a.lotField.lots, base: { lots: a.baseLotField.lots } };
   const lot = pointer(root, item.path) as Obj;
   const header = item.basePath ? (pointer(root, item.basePath) as Obj) : null;
@@ -700,7 +735,7 @@ export function buildLotComparisonCorpus(
     projectHash: project.scopeHash,
     lotHash: selected.scopeHash,
   });
-  return freeze({
+  const result: LotComparison = freeze({
     version: SOURCE_LOT_VERSION,
     binding,
     target,
@@ -714,6 +749,10 @@ export function buildLotComparisonCorpus(
     interpretation:
       "documentary_only_no_awardability_or_service_attribution_inferred",
   });
+  let cache = comparisonCache.get(a);
+  if (!cache) comparisonCache.set(a, (cache = new Map()));
+  cache.set(cacheKey, result);
+  return result;
 }
 export function resolveLotTextReference(
   archive: LotArchive,

@@ -3,7 +3,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import * as schema from "../src/db/schema";
-import type { SourceAdapter } from "../src/sources/common";
+import { OfficialHttpError, type SourceAdapter } from "../src/sources/common";
 
 const context = vi.hoisted(() => ({
   db: undefined as unknown,
@@ -93,7 +93,7 @@ it("ritenta il PDF temporaneamente indisponibile senza archiviare come completa 
       expect.objectContaining({ key: "source:foglio-ti", resolvedAt: null }),
     ]),
   );
-  expect((await db.select().from(schema.sourceRuns))[0].status).toBe("failed");
+  expect((await db.select().from(schema.sourceRuns))[0].status).toBe("partial");
 
   await expect(ingest(adapter, new Date("2026-09-01"))).resolves.toBe(1);
   const [stored] = await db.select().from(schema.publications);
@@ -113,7 +113,7 @@ it("ritenta il PDF temporaneamente indisponibile senza archiviare come completa 
   ).toBe(true);
   expect(
     (await db.select().from(schema.sourceRuns)).map((r) => r.status).sort(),
-  ).toEqual(["failed", "success"]);
+  ).toEqual(["partial", "success"]);
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(context.summarize).not.toHaveBeenCalled();
   expect(context.classify).not.toHaveBeenCalled();
@@ -122,4 +122,49 @@ it("ritenta il PDF temporaneamente indisponibile senza archiviare come completa 
 
   await expect(ingest(adapter, new Date("2026-09-01"))).resolves.toBe(0);
   expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it("isola un accesso negato senza ritentare l'intera fonte e continua gli altri bandi", async () => {
+  const deniedId = "77777777-7777-4777-8777-777777777777";
+  const availableId = "88888888-8888-4888-8888-888888888888";
+  const good = normalizeFoglio(
+    xml
+      .replaceAll(publication.externalId, availableId)
+      .replaceAll("OB-TI10-LOCAL", "OB-TI10-SECOND"),
+  );
+  const mixed: SourceAdapter = {
+    id: "foglio-ti",
+    list: async () => [
+      { id: deniedId, raw: {} },
+      { id: availableId, raw: {} },
+    ],
+    detail: async (entry) => {
+      if (entry.id === deniedId)
+        throw new OfficialHttpError(
+          401,
+          `https://amtsblattportal.ch/api/v1/publications/${deniedId}/xml`,
+        );
+      return good;
+    },
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("%PDF-1.7 inventato")),
+  );
+  await expect(ingest(mixed, new Date("2026-09-01"))).resolves.toBe(1);
+  const { eq } = await import("drizzle-orm");
+  const [held] = await db
+    .select()
+    .from(schema.issues)
+    .where(eq(schema.issues.key, `source-item:foglio-ti:${deniedId}`));
+  expect(held).toMatchObject({ resolvedAt: null, severity: "critical" });
+  const runs = await db.select().from(schema.sourceRuns);
+  expect(runs.some((r) => r.status === "partial" && r.imported === 1)).toBe(
+    true,
+  );
+  expect(
+    (await db.select().from(schema.publications)).some(
+      (p) => p.externalId === availableId,
+    ),
+  ).toBe(true);
 });

@@ -12,7 +12,7 @@ import {
   type PreliminaryLotMatch,
 } from "./lot-matching";
 import {
-  captureLotSourceSnapshot,
+  validateLotSourceSnapshot,
   LOT_SOURCE_CONTEXT_VERSION,
   resolveLotSourceReferences,
   type LotDocumentaryReference,
@@ -672,15 +672,17 @@ function snapshotIndex(
     ),
   ];
   for (const candidateInput of candidates) {
-    const candidate = copy(candidateInput) as LotSourceSnapshot;
-    const { version, snapshotHash, ...body } = candidate;
-    const verified = captureLotSourceSnapshot(body);
-    if (
-      version !== LOT_SOURCE_CONTEXT_VERSION ||
-      snapshotHash !== verified.snapshotHash ||
-      stable(candidate) !== stable(verified)
-    )
-      throw new Error("Altered lot evidence snapshot");
+    let verified: LotSourceSnapshot;
+    try {
+      verified = validateLotSourceSnapshot(candidateInput);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === "Altered lot source snapshot"
+      )
+        throw new Error("Altered lot evidence snapshot");
+      throw error;
+    }
     if (verified.publicationId !== input.publication.id)
       throw new Error("Evidence snapshot belongs to another publication");
     const previous = map.get(verified.observationId);

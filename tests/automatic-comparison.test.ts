@@ -704,14 +704,11 @@ test("A structured subcontract prohibition survives review and stored comparison
     plan.evidencePlan.requests.map((r) => {
       const body = JSON.parse(r.prompt),
         answer = inventedSourceEvidenceAnswer(body);
-      const serviceRef = body.passages.find(
-        (p: any) => p.role === "service",
-      ).id;
-      answer.observations.push({
-        kind: "condition",
-        serviceRef,
-        evidence: [{ sourceRef: serviceRef }, { sourceRef: fieldId }],
-      });
+      // The invented helper already supplies the required structured condition;
+      // the reader adds its service anchor. A second copy is rightly rejected.
+      assert(answer.observations.some((o: any) =>
+        o.kind === "condition" && o.evidence.some((e: any) => e.sourceRef === fieldId)
+      ));
       return answer;
     }),
     plan.evidencePlan,

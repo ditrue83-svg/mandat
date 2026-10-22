@@ -10,6 +10,7 @@ import {
 } from "../src/lib/source-review-context";
 import {
   captureLotSourceSnapshot,
+  validateLotSourceSnapshot,
   createLotSourceReviewRecord,
   isLotSourceDependencyCurrent,
   LOT_SOURCE_CONTEXT_VERSION,
@@ -103,6 +104,31 @@ function snapshot(
     sourceScopeReview,
   });
 }
+
+test("Snapshot verification detaches caller-frozen input and rejects a later nested edit", () => {
+  const original = snapshot();
+  const incoming = structuredClone(original);
+  Object.freeze(incoming);
+  const checked = validateLotSourceSnapshot(incoming);
+  assert.deepEqual(checked, original);
+  assert.ok(Object.isFrozen(checked.acquisition));
+  if (incoming.acquisition.state !== "accepted")
+    throw new Error("Expected invented archive");
+  (incoming.acquisition.archive.lotField.lots as any[])[0].orderDescription.it =
+    "Changed caller-owned evidence";
+  assert.throws(() => validateLotSourceSnapshot(incoming));
+  assert.equal(
+    validateLotSourceSnapshot(checked).snapshotHash,
+    original.snapshotHash,
+  );
+  assert.equal(
+    (
+      resolveLotSourceContext(checked, aTarget, []).targetContent?.selectedLot
+        ?.record as any
+    ).orderDescription.it,
+    aText,
+  );
+});
 
 let eventSequence = 0;
 function metadata() {

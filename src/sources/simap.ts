@@ -8,6 +8,8 @@ import type {
 import { classifyPublication } from "@/lib/sector-classification";
 import {
   fetchOfficial,
+  fetchOfficialResponse,
+  type OfficialResponseReceipt,
   fingerprint,
   parseDeadline,
   plainText,
@@ -17,6 +19,11 @@ import {
   type SourceAdapter,
   type SourceEntry,
 } from "./common";
+import {
+  abandonmentHeaderCondition,
+  abandonmentHeaderUrl,
+  validateAbandonmentHeader,
+} from "./simap-abandonment";
 const projectSchema = z
   .object({
     id: z.uuid(),
@@ -48,7 +55,12 @@ const projectHeaderSchema = z.object({
   lotsType: z.string().nullish(),
   latestPublication: publicationHeaderSchema.nullish(),
   lots: z
-    .array(z.object({ latestPublication: publicationHeaderSchema.nullish() }))
+    .array(
+      z.object({
+        id: z.uuid().optional(),
+        latestPublication: publicationHeaderSchema.nullish(),
+      }),
+    )
     .nullish(),
 });
 const record = (v: unknown) =>
@@ -130,6 +142,7 @@ function ordered(value: unknown): unknown {
 export function normalizeSimap(
   entry: SourceEntry,
   input: unknown,
+  abandonmentHeader?: OfficialResponseReceipt,
 ): Publication {
   const p = projectSchema.parse(entry.raw);
   const d = z
@@ -142,6 +155,24 @@ export function normalizeSimap(
     .parse(input);
   if (d.id !== p.publicationId)
     throw new Error("Dettaglio simap riferito a una pubblicazione diversa");
+  const abandonedLotId =
+    d.type === "abandonment" ? record(d.abandonedLot).id : null;
+  const lifecycle =
+    typeof abandonedLotId === "string"
+      ? [
+          abandonmentHeaderCondition(
+            abandonmentHeader ??
+              (() => {
+                throw new Error(
+                  "Annullamento di un singolo lotto: verificare lo stato degli altri lotti",
+                );
+              })(),
+            p.id,
+            p.publicationId,
+            abandonedLotId,
+          ),
+        ]
+      : [];
   const info = record(d["project-info"]),
     proc = record(d.procurement),
     dates = record(d.dates),
@@ -236,7 +267,10 @@ export function normalizeSimap(
       : // The entry comes from search, or from the header during refresh.
         // Its request URL is unavailable; link to the public project page.
         originalTitles(p.title, sourceUrl, "entry.title"),
-    sourceConditions: sourceConditions(terms, proc, detailUrl),
+    sourceConditions: [
+      ...sourceConditions(terms, proc, detailUrl),
+      ...lifecycle,
+    ],
     summary: null,
     requirements: [],
     evidence: [
@@ -283,6 +317,18 @@ export function normalizeSimap(
         // Retain every detail field, including publication identity, terms and
         // document metadata that may not yet have a dedicated display field.
         detail: d,
+        ...(lifecycle.length
+          ? {
+              lifecycle: lifecycle.map(({ path, url, value }) => {
+                const { receivedAt: _receivedAt, ...receipt } = value as {
+                  receivedAt: string;
+                  body: string;
+                  bodySha256: string;
+                };
+                return { path, url, value: receipt };
+              }),
+            }
+          : {}),
       }),
     )}`,
   };
@@ -346,10 +392,14 @@ export const simap: SourceAdapter = {
   async detail(entry) {
     const p = projectSchema.parse(entry.raw);
     const url = `https://www.simap.ch/api/publications/v1/project/${p.id}/publication-details/${p.publicationId}`;
-    return normalizeSimap(
-      entry,
-      JSON.parse(await fetchOfficial(url, ["www.simap.ch"])),
-    );
+    const detail = JSON.parse(await fetchOfficial(url, ["www.simap.ch"]));
+    const header =
+      detail.type === "abandonment" && record(detail.abandonedLot).id
+        ? await fetchOfficialResponse(abandonmentHeaderUrl(p.id), [
+            "www.simap.ch",
+          ])
+        : undefined;
+    return normalizeSimap(entry, detail, header);
   },
 };
 
@@ -357,33 +407,46 @@ export const simap: SourceAdapter = {
 export async function readSimapRefreshEntry(
   previous: Publication,
 ): Promise<SourceEntry> {
-  const parsed = projectHeaderSchema.safeParse(
-    JSON.parse(
-      await fetchOfficial(
-        `https://www.simap.ch/api/publications/v2/project/${previous.externalId}/project-header`,
-        ["www.simap.ch"],
-      ),
-    ),
+  const headerBody = await fetchOfficial(
+    `https://www.simap.ch/api/publications/v2/project/${previous.externalId}/project-header`,
+    ["www.simap.ch"],
   );
+  const parsed = projectHeaderSchema.safeParse(JSON.parse(headerBody));
   if (!parsed.success || parsed.data.id !== previous.externalId)
     throw new Error("Header simap non riconosciuto");
   const header = parsed.data;
   let latest = header.latestPublication;
   if (!latest) {
     // For projects with lots, simap puts the latest publication on each lot.
-    // A single project record is safe only when every lot points to the same
-    // publication. Divergent or incomplete lots need review, not a guessed state.
-    const first = header.lots?.[0]?.latestPublication;
+    // Distinct notices are safe here only for a wholly abandoned project.
+    // Mixed or incomplete states still require review. The acquisition fetches
+    // and preserves a fresh header before it can normalize a terminal state.
+    const first = [...(header.lots ?? [])].sort((a, b) =>
+      (b.latestPublication?.dates.publicationDate ?? "").localeCompare(
+        a.latestPublication?.dates.publicationDate ?? "",
+      ),
+    )[0]?.latestPublication;
+    const allAbandoned =
+      first?.pubType === "abandonment" &&
+      (() => {
+        try {
+          validateAbandonmentHeader(headerBody, previous.externalId, first.id);
+          return true;
+        } catch {
+          return false;
+        }
+      })();
     if (
-      header.lotsType !== "with" ||
-      !first ||
-      header.lots!.some(
-        ({ latestPublication: candidate }) =>
-          !candidate ||
-          candidate.id !== first.id ||
-          candidate.pubType !== first.pubType ||
-          candidate.dates.publicationDate !== first.dates.publicationDate,
-      )
+      !allAbandoned &&
+      (header.lotsType !== "with" ||
+        !first ||
+        header.lots!.some(
+          ({ latestPublication: candidate }) =>
+            !candidate ||
+            candidate.id !== first.id ||
+            candidate.pubType !== first.pubType ||
+            candidate.dates.publicationDate !== first.dates.publicationDate,
+        ))
     )
       throw new Error(
         "Pubblicazioni dei lotti simap incomplete o discordanti: richiesta revisione",

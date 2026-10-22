@@ -3196,3 +3196,17 @@ it("Abandoned operational work stays quarantined, exposes no facts and allows on
   ).toHaveLength(2);
   expect(await resumeUnsentOperationalReading(job, viewer, now)).toBe(false);
 });
+
+it("suspends queued AI before transport while its source item cannot be refreshed", async () => {
+  const { f, job } = await automaticFixture();
+  await db.insert(schema.issues).values({
+    id: randomUUID(), key: `source-item:simap:${f.p.externalId}`,
+    title: "Fonte temporaneamente non leggibile", detail: "HTTP 403 inventato", severity: "critical",
+  });
+  expect(await matchAdoptedPublication({ publicationId: f.p.id, now })).toEqual({handled: true, matched: 0});
+  expect(await runAutomaticComparison(job, {now: () => now})).toEqual({status: "skipped"});
+  expect(infer).not.toHaveBeenCalled();
+  const [run] = await db.select().from(schema.automaticMatchRuns).where(eq(schema.automaticMatchRuns.id, job.runId));
+  expect(run.status).toBe("superseded");
+  expect(run.attempts).toBe(0);
+});

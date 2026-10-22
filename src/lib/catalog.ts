@@ -1,3 +1,8 @@
+import {
+  readBlockedSourceItems,
+  sourceItemKey,
+  sourceItemBlocked,
+} from "./source-item-availability";
 import { and, desc, eq, inArray, isNull, like } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
@@ -47,6 +52,7 @@ export type CatalogEntry = {
   documents: Publication["documents"];
   saved: boolean;
   collectionIncomplete?: boolean;
+  sourceUnavailable?: boolean;
 };
 export type CatalogFilters = {
   q?: string;
@@ -67,6 +73,7 @@ export type CatalogSourceStatus = {
     | "ok"
     | "updating"
     | "error"
+    | "partial"
     | "delayed"
     | "unavailable"
     | "disabled"
@@ -270,13 +277,17 @@ export async function readCatalog(
   const searchById = new Map(
     publicationsFound.map((p) => [p.id, p.catalogSearchText]),
   );
-  const all = publicationsFound.map((p) =>
-    presentCatalogEntry(
+  const blocked = viewer.demo
+    ? new Set<string>()
+    : await readBlockedSourceItems(getDb());
+  const all: CatalogEntry[] = publicationsFound.map((p) => ({
+    ...presentCatalogEntry(
       p,
       now,
       savedByCanonical.get(p.canonicalId)?.saved ?? false,
     ),
-  );
+    sourceUnavailable: blocked.has(sourceItemKey(p)),
+  }));
   if (!viewer.demo) {
     const pending = await getDb()
       .select({ key: issues.key, detail: issues.detail })
@@ -397,7 +408,7 @@ export async function readCatalog(
     sourceDelayed: sources.some(
       (source) =>
         source.included &&
-        ["error", "delayed", "unavailable"].includes(source.state),
+        ["error", "partial", "delayed", "unavailable"].includes(source.state),
     ),
   };
 }
@@ -472,23 +483,29 @@ export async function readCatalogEntry(
             : "") + target.reason,
       ) ?? [];
   const hasCurrentJudgment = assessed && currentReasons.length > 0;
+  const unavailable = await sourceItemBlocked(getDb(), row);
   return {
     ...presentCatalogEntry(p, now, saved),
+    sourceUnavailable: unavailable,
     classification: p.classification,
     tenderBrief: buildTenderBrief(p, archive, refused),
-    reason: refused
-      ? "La versione più recente della fonte non è leggibile: il confronto con la tua ditta è sospeso. Verifica la pubblicazione originale."
-      : hasCurrentJudgment
-        ? [...new Set(currentReasons)].join(" ")
-        : potentialInterest(p, current.company.profile, now) +
-          (archive?.directory.length
-            ? " La gara comprende più lotti: verifica separatamente attività e territorio di ciascuno."
-            : ""),
-    assessment: refused
+    reason: unavailable
+      ? "Aggiornamento della fonte non disponibile: i dati archiviati sono consultabili, ma il confronto con la tua ditta è sospeso."
+      : refused
+        ? "La versione più recente della fonte non è leggibile: il confronto con la tua ditta è sospeso. Verifica la pubblicazione originale."
+        : hasCurrentJudgment
+          ? [...new Set(currentReasons)].join(" ")
+          : potentialInterest(p, current.company.profile, now) +
+            (archive?.directory.length
+              ? " La gara comprende più lotti: verifica separatamente attività e territorio di ciascuno."
+              : ""),
+    assessment: unavailable
       ? "uncertain"
-      : hasCurrentJudgment
-        ? assessed.assessment
-        : "unreviewed",
+      : refused
+        ? "uncertain"
+        : hasCurrentJudgment
+          ? assessed.assessment
+          : "unreviewed",
   };
 }
 
@@ -582,6 +599,7 @@ export function catalogSourceStatus(
     lastSuccessAt: lastSuccess?.toISOString() ?? null,
     lastAttemptAt: lastAttemptAt?.toISOString() ?? null,
   };
+  if (latest?.status === "partial") return { state: "partial", ...base };
   if (latest?.status === "failed") return { state: "error", ...base };
   if (latest?.status === "running")
     return {

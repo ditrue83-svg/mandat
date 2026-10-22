@@ -2307,14 +2307,11 @@ for (const flag of ["no", "yes", false] as const) {
       plan.evidencePlan.requests.map((part) => {
         const body = JSON.parse(part.prompt);
         const answer = inventedSourceEvidenceAnswer(body);
-        // This fixture also reads the explicit false scalar. The usual
-        // passage-only helper cannot stand in for a required JSON field.
+        // The fixture helper already declares the required scalar reading.
         for (const field of body.requiredClauseFields) {
-          answer.observations.push({
-            kind: "condition",
-            serviceRef: "s1",
-            evidence: [{ sourceRef: field.sourceRef }],
-          });
+          assert(answer.observations.some((observation: any) =>
+            observation.kind === "condition" && observation.evidence.some((ref: any) => ref.sourceRef === field.sourceRef),
+          ));
         }
         return answer;
       }),
@@ -3512,11 +3509,9 @@ test("A structured condition owns a review claim and retains false without becom
   const selections = plan.evidencePlan.requests.map((r) => {
     const body = JSON.parse(r.prompt);
     const answer = inventedSourceEvidenceAnswer(body);
-    answer.observations.push({
-      kind: "condition",
-      serviceRef: "s1",
-      evidence: [{ sourceRef: "s1" }, { sourceRef: "f0" }],
-    });
+    assert(answer.observations.some((observation: any) =>
+      observation.kind === "condition" && observation.evidence.some((ref: any) => ref.sourceRef === "f0"),
+    ));
     return answer;
   });
   const evidence = recordSourceEvidenceReading(

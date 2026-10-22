@@ -19,6 +19,8 @@ import { WorkspaceOverview, TenderListHeading } from "./workspace-overview";
 
 function sourceHeadline(source: CatalogSourceSummary) {
   if (source.state === "disabled") return "non attivo nella beta";
+  if (source.state === "partial")
+    return "aggiornato con pubblicazioni da verificare";
   if (source.state === "error") return "problema nell’ultimo aggiornamento";
   if (source.state === "delayed") return "aggiornamento in ritardo";
   if (source.state === "unavailable") return "prima raccolta non disponibile";
@@ -98,7 +100,9 @@ export function CatalogView({
             {data.sources.map((source) => {
               const problem =
                 source.included &&
-                ["error", "delayed", "unavailable"].includes(source.state);
+                ["error", "partial", "delayed", "unavailable"].includes(
+                  source.state,
+                );
               return (
                 <div
                   className={`source-status ${source.state}`}
@@ -176,8 +180,18 @@ export function CatalogView({
               buyer={publication.buyer}
               location={publication.location}
               deadline={publication.deadline}
-              status={CATALOG_STATUS_LABELS[publication.status]}
-              statusTone={publication.status === "open" ? "good" : "neutral"}
+              status={
+                publication.sourceUnavailable
+                  ? "Aggiornamento da verificare"
+                  : CATALOG_STATUS_LABELS[publication.status]
+              }
+              statusTone={
+                publication.sourceUnavailable
+                  ? "warning"
+                  : publication.status === "open"
+                    ? "good"
+                    : "neutral"
+              }
               sector={sectorCaption(
                 publication.sectors,
                 publication.needsSectorClassification,

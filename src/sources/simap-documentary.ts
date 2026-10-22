@@ -12,6 +12,7 @@ import {
   type SourceEntry,
 } from "./common";
 import { normalizeSimap } from "./simap";
+import { abandonmentHeaderUrl } from "./simap-abandonment";
 
 export const SIMAP_ACQUISITION_VERSION = "simap-documentary-acquisition-v1";
 
@@ -62,7 +63,9 @@ export type SimapAcquisitionResult =
 
 const requestIdentity = z.object({ id: z.uuid(), publicationId: z.uuid() });
 
-export function simapDocumentaryIdentity(entry: SourceEntry): Readonly<Identity> {
+export function simapDocumentaryIdentity(
+  entry: SourceEntry,
+): Readonly<Identity> {
   const p = requestIdentity.parse(entry.raw);
   if (entry.id !== p.id)
     throw new Error("Identità della richiesta simap discordante");
@@ -93,17 +96,18 @@ function normalizedTextIssue(publication: Publication) {
       if (!value.isWellFormed()) return "invalid_unicode";
       if (value.includes("\u0000")) return "unsupported_jsonb_text";
     } else if (value && typeof value === "object") {
-      for (const [key, child] of Object.entries(value)) pending.push(key, child);
+      for (const [key, child] of Object.entries(value))
+        pending.push(key, child);
     }
   }
   return null;
 }
 
-function interpretResponse(
+async function interpretResponse(
   entry: SourceEntry,
   identity: Readonly<Identity>,
   response: OfficialResponseReceipt,
-): SimapAcquisitionResult {
+): Promise<SimapAcquisitionResult> {
   // The response is created by our HTTP reader, never supplied by a client.
   if (response.url !== identity.detailUrl)
     throw new Error("Risposta simap estranea alla richiesta documentaria");
@@ -162,7 +166,15 @@ function interpretResponse(
   }
   let publication: Publication;
   try {
-    publication = normalizeSimap(entry, raw);
+    const detail = raw as Record<string, unknown>;
+    const header =
+      detail.type === "abandonment" && detail.abandonedLot
+        ? await fetchOfficialResponse(
+            abandonmentHeaderUrl(identity.projectId),
+            ["www.simap.ch"],
+          )
+        : undefined;
+    publication = normalizeSimap(entry, raw, header);
   } catch {
     return refuse("normalize", "invalid_publication");
   }

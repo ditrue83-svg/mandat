@@ -1,7 +1,11 @@
+import { sourceItemBlocked } from "@/lib/source-item-availability";
 import { PgBoss, fromDrizzle } from "pg-boss";
 import type { SourceReviewViewer } from "@/lib/source-reviews";
 import { AUTOMATIC_COMPARISON_QUEUE } from "@/lib/automatic-comparison-queue";
-import { ensureOperationalReading, OperationalInputsChanged } from "./operational-reading";
+import {
+  ensureOperationalReading,
+  OperationalInputsChanged,
+} from "./operational-reading";
 import {
   buildOperationalRuntimePlan,
   needsOperationalReading,
@@ -126,7 +130,11 @@ async function failExhaustedComparison(
 
 async function current(tx: Tx, job: AutomaticComparisonJob, now: Date) {
   const locked = await lockCanonicalPublications(tx, job.publicationId);
-  if (!locked?.publication.documentarySnapshotId) return null;
+  if (
+    !locked?.publication.documentarySnapshotId ||
+    (await sourceItemBlocked(tx, locked.publication))
+  )
+    return null;
   const [company] = await tx
     .select()
     .from(companies)
@@ -521,7 +529,10 @@ export async function runAutomaticComparison(
       };
     });
   } catch (error) {
-    if (error instanceof ComparisonInputsChanged || error instanceof OperationalInputsChanged) {
+    if (
+      error instanceof ComparisonInputsChanged ||
+      error instanceof OperationalInputsChanged
+    ) {
       await getDb()
         .update(automaticMatchRuns)
         .set({

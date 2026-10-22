@@ -1,4 +1,9 @@
 import {
+  readBlockedSourceItems,
+  sourceItemKey,
+  sourceItemBlocked,
+} from "./source-item-availability";
+import {
   readCanonicalFeedback,
   readCanonicalFeedbackBatch,
 } from "./canonical-feedback";
@@ -36,7 +41,11 @@ export async function readCurrentLotMatch(
 ) {
   return getDb().transaction(async (tx) => {
     const group = await lockCanonicalPublications(tx, publicationId);
-    if (!group?.publication.documentarySnapshotId) return null;
+    if (
+      !group?.publication.documentarySnapshotId ||
+      (await sourceItemBlocked(tx, group.publication))
+    )
+      return null;
     const [company] = await tx
       .select()
       .from(companies)
@@ -277,6 +286,7 @@ export async function readCanonicalLegacyMatches(
       group.push(member);
       byGroup.set(member.canonicalId, group);
     }
+    const blocked = await readBlockedSourceItems(tx);
     const selected = observed.flatMap((row) => {
       const group = byGroup.get(row.canonicalId) ?? [];
       if (!group.some((p) => p.id === row.id))
@@ -286,7 +296,7 @@ export async function readCanonicalLegacyMatches(
       const representative = group
         .filter((p) => sourceAvailable(p.source))
         .sort(compareCanonicalPublications)[0];
-      return representative
+      return representative && !blocked.has(sourceItemKey(representative))
         ? [{ requestedId: row.id, publication: representative }]
         : [];
     });
@@ -384,6 +394,15 @@ async function readPublicationMatch(
     .where(eq(companies.id, companyId))
     .for("share");
   if (!company) return null;
+  if (await sourceItemBlocked(tx, publication))
+    return {
+      publication,
+      company,
+      match: null,
+      loaded: null,
+      sourceReview: null,
+      feedback: null,
+    };
   const [match] = await tx
     .select()
     .from(matches)

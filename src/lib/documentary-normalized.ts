@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { verifyAbandonmentCondition } from "@/sources/simap-abandonment";
 import { SECTORS, type Publication } from "./domain";
 import type { Identity } from "./source-lots";
 
@@ -137,7 +138,17 @@ export function copyNormalizedDocumentaryPublication(
   const urls = [
     ...(p.originalDescriptions ?? []),
     ...(p.originalTitles ?? []),
-    ...(p.sourceConditions ?? []),
+    ...(p.sourceConditions ?? []).filter(
+      (condition) =>
+        !(
+          p.status === "cancelled" &&
+          verifyAbandonmentCondition(
+            condition,
+            identity.projectId,
+            identity.publicationId,
+          )
+        ),
+    ),
     ...p.evidence,
     ...p.documents,
   ];

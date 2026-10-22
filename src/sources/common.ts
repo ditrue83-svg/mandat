@@ -83,6 +83,15 @@ export type OfficialResponseReceipt = {
   bodyByteLength: number;
   body: Uint8Array;
 };
+export class OfficialHttpError extends Error {
+  constructor(
+    readonly status: number,
+    url: string,
+  ) {
+    super(`Fonte ${new URL(url).hostname}: HTTP ${status}`);
+    this.name = "OfficialHttpError";
+  }
+}
 
 export async function fetchOfficialResponse(
   url: string,
@@ -99,8 +108,10 @@ export async function fetchOfficialResponse(
     signal: AbortSignal.timeout(25000),
     cache: "no-store",
   });
-  if (!r.ok)
-    throw new Error(`Fonte ${new URL(url).hostname}: HTTP ${r.status}`);
+  if (!r.ok) {
+    await r.body?.cancel();
+    throw new OfficialHttpError(r.status, url);
+  }
   if (Number(r.headers.get("content-length") ?? 0) > maxBytes) {
     await r.body?.cancel();
     throw new Error("Risposta della fonte troppo grande");

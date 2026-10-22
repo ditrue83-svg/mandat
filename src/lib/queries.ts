@@ -1,3 +1,8 @@
+import {
+  readBlockedSourceItems,
+  sourceItemKey,
+  sourceItemBlocked,
+} from "./source-item-availability";
 import { automaticResponseMayReachRadar } from "./radar-candidate";
 import { and, eq, lte, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -97,8 +102,12 @@ export async function getRadarStatus(
       tx,
       candidates.map((row) => row.canonicalId),
     );
+    const blocked = await readBlockedSourceItems(tx);
     const visible = representatives.filter(
-      (row) => row.visibleAt <= now && row.status === "open",
+      (row) =>
+        row.visibleAt <= now &&
+        row.status === "open" &&
+        !blocked.has(sourceItemKey(row)),
     );
     const matchRows = visible.length
       ? await tx
@@ -294,12 +303,18 @@ export async function listOpportunities(
       )
       .map((r) => r.matchId),
   );
+  const blocked = await readBlockedSourceItems(db);
   const candidates = representatives.filter((publication) => {
     const match = matchByPublication.get(publication.id);
     const state = canonicalFeedback.get(publication.canonicalId);
     if (publication.visibleAt > now) return false;
     if (options.includeInactive) return !!state?.saved;
-    if (!match || publication.status !== "open") return false;
+    if (
+      !match ||
+      publication.status !== "open" ||
+      blocked.has(sourceItemKey(publication))
+    )
+      return false;
     if (!publication.documentarySnapshotId)
       return (
         !(publication.deadline && publication.deadline <= now) &&
@@ -537,7 +552,7 @@ export async function getOpportunity(
   const row = await readCanonicalMatch(viewer.companyId, id, now, {
     legacyDetail: true,
   });
-  if (!row) return null;
+  if (!row || (await sourceItemBlocked(getDb(), row.publication))) return null;
   const item = canonicalOpportunity(row, now, true, false);
   if (!item) return null;
   // A pending detail still explains the public work against this company's

@@ -1,3 +1,4 @@
+import { sourceItemBlocked } from "@/lib/source-item-availability";
 import { and, eq, isNull, isNotNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import { companies, matches } from "@/db/schema";
@@ -28,6 +29,8 @@ export async function matchAdoptedPublication({
     const locked = await lockCanonicalPublications(tx, publicationId);
     if (!locked?.publication.documentarySnapshotId)
       return { handled: false, matched: 0 };
+    if (await sourceItemBlocked(tx, locked.publication))
+      return { handled: true, matched: 0 };
     // Acquire every participating company before match/feedback locks. Profiles
     // from the scheduler's earlier inventory must not become comparison inputs.
     const firms = await tx

@@ -21,6 +21,8 @@ import {
 } from "../src/lib/catalog";
 import { saveCatalogBookmark } from "../src/lib/company";
 import { readCanonicalFeedback } from "../src/lib/canonical-feedback";
+import { readCanonicalLegacyMatches } from "../src/lib/lot-readers";
+import { sourceItemBlocked } from "../src/lib/source-item-availability";
 import { listOpportunities } from "../src/lib/queries";
 const pg = new PGlite();
 const db = drizzle(pg, { schema });
@@ -494,4 +496,25 @@ it("keeps a refused public discovery visible without making it a qualified publi
   });
   expect((await readCatalog(viewer, { q: "trasporto" }, now)).total).toBe(0);
   expect(await db.select().from(schema.publications)).toHaveLength(0);
+});
+
+
+it("conserva il bando non aggiornabile nel catalogo e nei salvati, sospendendo le valutazioni", async () => {
+  await publication("unavailable");
+  await saveCatalogBookmark(viewer.companyId, "unavailable", true, now);
+  expect((await readCanonicalLegacyMatches(viewer.companyId, ["unavailable"], now)).has("unavailable")).toBe(true);
+  await db.insert(schema.issues).values({id: "source-hold", key: "source-item:simap:unavailable", title: "Fonte non leggibile", detail: "HTTP 403 inventato", severity: "critical"});
+  expect(await sourceItemBlocked(db, {source: "simap", externalId: "unavailable"})).toBe(true);
+  const list = await readCatalog(viewer, {}, now);
+  expect(list.items[0]).toMatchObject({id: "unavailable", sourceUnavailable: true, saved: true});
+  expect(await readCatalogEntry(viewer, "unavailable", now)).toMatchObject({sourceUnavailable: true, assessment: "uncertain"});
+  expect(await listOpportunities(viewer)).toEqual([]);
+  expect((await readCanonicalLegacyMatches(viewer.companyId, ["unavailable"], now)).has("unavailable")).toBe(false);
+  const { eq } = await import("drizzle-orm");
+  await db.update(schema.issues).set({resolvedAt: now}).where(eq(schema.issues.id, "source-hold"));
+  expect(await sourceItemBlocked(db, {source: "simap", externalId: "unavailable"})).toBe(false);
+  expect((await readCatalogEntry(viewer, "unavailable", now))?.sourceUnavailable).toBe(false);
+});
+it("presenta gli aggiornamenti parziali come incompleti anche dopo un vecchio successo", () => {
+  expect(catalogSourceStatus({status: "partial", startedAt: now, finishedAt: now}, now, now).state).toBe("partial");
 });

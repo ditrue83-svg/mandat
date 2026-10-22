@@ -5,6 +5,7 @@ import {
   buildLotComparisonCorpus,
   LotInputError,
   restoreSimapDetail,
+  verifySimapLotArchive,
   SOURCE_LOT_VERSION,
   type Identity,
   type LotArchive,
@@ -50,6 +51,7 @@ export type LotSourceSnapshot = DeepReadonly<
     snapshotHash: string;
   }
 >;
+const verifiedSnapshots = new WeakSet<object>();
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 function copy(value: unknown): Json {
   let count = 0,
@@ -191,7 +193,11 @@ export function captureLotSourceSnapshot(
   const acquisition = obj(clean.acquisition);
   if (acquisition.state === "accepted") {
     keys(acquisition, ["state", "archive"]);
-    restoreSimapDetail(acquisition.archive as LotArchive); // verifies every archived field/hash/index
+    // Keep the verified immutable archive instead of discarding it and
+    // rebuilding the same documentary tree for each target in the Radar.
+    acquisition.archive = verifySimapLotArchive(
+      acquisition.archive as LotArchive,
+    );
   } else if (acquisition.state === "refused") {
     keys(acquisition, ["state", "identity", "reason", "receiptHash"]);
     validateIdentity(acquisition.identity);
@@ -208,9 +214,14 @@ export function captureLotSourceSnapshot(
     version: LOT_SOURCE_CONTEXT_VERSION as typeof LOT_SOURCE_CONTEXT_VERSION,
     ...clean,
   };
-  return freeze({ ...body, snapshotHash: hash(body) });
+  const snapshot = freeze({ ...body, snapshotHash: hash(body) });
+  verifiedSnapshots.add(snapshot);
+  return snapshot;
 }
-function verifySnapshot(input: LotSourceSnapshot): LotSourceSnapshot {
+export function validateLotSourceSnapshot(
+  input: LotSourceSnapshot,
+): LotSourceSnapshot {
+  if (verifiedSnapshots.has(input)) return input;
   const clean = copy(input) as unknown as LotSourceSnapshot;
   const { version, snapshotHash, ...body } = clean;
   const rebuilt = captureLotSourceSnapshot(body);
@@ -772,7 +783,9 @@ export function verifyLotSourceHistory(
   for (const record of history.slice(prefix)) {
     if (record.event.version !== LOT_SOURCE_CONTEXT_VERSION)
       throw new Error("Unsupported or late legacy review version");
-    const snapshot = verifySnapshot(record.snapshot as LotSourceSnapshot);
+    const snapshot = validateLotSourceSnapshot(
+      record.snapshot as LotSourceSnapshot,
+    );
     if (snapshot.publicationId !== publicationId || ids.has(record.event.id))
       throw new Error("Foreign or repeated source event");
     const event = record.event as LotSourceReviewEvent;
@@ -794,7 +807,7 @@ export function resolveLotSourceContext(
   requestedTarget: LotSourceTarget,
   history: readonly MixedSourceReviewRecord[],
 ): LotSourceContext {
-  const snapshot = verifySnapshot(current),
+  const snapshot = validateLotSourceSnapshot(current),
     checked = verifyLotSourceHistory(snapshot.publicationId, history),
     target = targetOf(requestedTarget, snapshot);
   return resolveChecked(snapshot, target, checked);
@@ -807,7 +820,7 @@ export function resolveLotSourceReferences(
   history: readonly MixedSourceReviewRecord[],
   references: readonly LotDocumentaryReference[],
 ): readonly LotResolvedReference[] {
-  const snapshot = verifySnapshot(current);
+  const snapshot = validateLotSourceSnapshot(current);
   verifyLotSourceHistory(snapshot.publicationId, history);
   const target = targetOf(requestedTarget, snapshot);
   const clean = copy(references) as unknown as LotDocumentaryReference[];
@@ -836,7 +849,7 @@ export function createLotSourceReviewRecord(
     "note",
   ]);
   keys(metadata, ["id", "sourceRevision", "contentRevision", "createdAt"]);
-  const snapshot = verifySnapshot(current),
+  const snapshot = validateLotSourceSnapshot(current),
     checked = verifyLotSourceHistory(snapshot.publicationId, history),
     target = targetOf(command.target, snapshot),
     context = resolveChecked(snapshot, target, checked);

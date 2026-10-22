@@ -106,7 +106,7 @@ test("Explicit shadow capture enriches an unchanged source without replacing its
 
 test("An unusable detail is retained as a refusal and a source error, with no fabricated publication", async () => {
   vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("{broken"))));
-  await expect(ingest(adapter(), since, undefined, options)).rejects.toThrow("Importazione parziale");
+  await expect(ingest(adapter(), since, undefined, options)).resolves.toBe(0);
   expect(await db.select().from(schema.publications)).toHaveLength(0);
   expect(await db.select().from(schema.publicationVersions)).toHaveLength(0);
   const [observation] = await db.select().from(schema.publicationDocumentarySnapshots);
@@ -115,7 +115,7 @@ test("An unusable detail is retained as a refusal and a source error, with no fa
   expect(await db.select().from(schema.issues)).toEqual(expect.arrayContaining([
     expect.objectContaining({ key: `source-item:simap:${projectId}`, severity: "critical", resolvedAt: null }),
   ]));
-  expect((await db.select().from(schema.sourceRuns))[0].status).toBe("failed");
+  expect((await db.select().from(schema.sourceRuns))[0].status).toBe("partial");
   expect(await db.select().from(schema.notifications)).toHaveLength(0);
 });
 

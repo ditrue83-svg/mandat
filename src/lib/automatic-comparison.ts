@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { CompanyProfile, Publication } from "./domain";
 import type { PreliminaryTargetMatch } from "./lot-assessment";
 import {
-  captureLotSourceSnapshot,
+  validateLotSourceSnapshot,
   type LotSourceSnapshot,
   type LotSourceTarget,
   type MixedSourceReviewRecord,
@@ -47,7 +47,10 @@ import {
   normalizeSourceMapSelection,
   requiredSourceMapPassageIds,
 } from "./source-evidence-reading";
-import { isContractScopeField, isDocumentaryInterpretationContextField } from "./source-contract-clauses";
+import {
+  isContractScopeField,
+  isDocumentaryInterpretationContextField,
+} from "./source-contract-clauses";
 
 export const AUTOMATIC_COMPARISON_VERSION =
   "documentary-service-comparison-v95-documentary-participation-context";
@@ -292,10 +295,17 @@ export function buildAutomaticComparisonRequest(
 ) {
   z.string().min(1).max(200).parse(input.companyId);
   profileSchema.strict().parse(input.profile);
-  const { version, snapshotHash, ...snapshotBody } = input.snapshot;
-  const snapshot = captureLotSourceSnapshot(snapshotBody);
-  if (snapshot.snapshotHash !== snapshotHash || snapshot.version !== version)
-    throw new AutomaticComparisonUnavailable("altered_snapshot");
+  let snapshot: LotSourceSnapshot;
+  try {
+    snapshot = validateLotSourceSnapshot(input.snapshot);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "Altered lot source snapshot"
+    )
+      throw new AutomaticComparisonUnavailable("altered_snapshot");
+    throw error;
+  }
   if (
     input.publication.id !== snapshot.publicationId ||
     input.publication.source !== "simap" ||

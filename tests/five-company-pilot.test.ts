@@ -316,7 +316,7 @@ afterAll(async () => {
 });
 
 describe("collaudo isolato con cinque ditte complete", () => {
-  it("attraversa OTP, consenso, profili, catalogo, salvataggi e coorte con cinque sessioni isolate", async () => {
+  it("attraversa accesso con password, consenso, profili, catalogo, salvataggi e coorte con cinque sessioni isolate", async () => {
     expect(
       [...new Set(firms.flatMap((firm) => firm.profile.sectors))].sort(),
     ).toEqual([...BETA_PRIORITY_SECTORS].sort());
@@ -666,7 +666,8 @@ describe("collaudo isolato con cinque ditte complete", () => {
     ).toBe(true);
     expect(await db.select().from(schema.notifications)).toHaveLength(0);
     expect(await db.select().from(schema.pilotFeedbackEvents)).toHaveLength(0);
-    expect(sendMail).toHaveBeenCalledTimes(11);
+    // Password sign-in sends no OTP mail; only the five invitations are sent.
+    expect(sendMail).toHaveBeenCalledTimes(firms.length);
     expect(
       vi
         .mocked(sendMail)

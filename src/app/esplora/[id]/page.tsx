@@ -70,6 +70,13 @@ export default async function CatalogDetail({
         Salvalo anche se la pertinenza per la tua ditta non è stata ancora
         valutata.
       </p>
+      {item.sourceUnavailable && (
+        <div className="notice" role="alert">
+          Aggiornamento della fonte non disponibile. Questi sono i dati
+          archiviati: stato e scadenza potrebbero essere cambiati. Il confronto
+          con la tua ditta è sospeso fino a una nuova lettura riuscita.
+        </div>
+      )}
       {item.status !== "open" && (
         <div className="notice" role="status">
           Stato del bando: {CATALOG_STATUS_LABELS[item.status]}. Questa

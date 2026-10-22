@@ -3,6 +3,7 @@ import { decodeDocumentarySnapshotRow } from "./documentary-store";
 import { stableDocumentaryJson } from "./documentary-observation";
 import {
   captureLotSourceSnapshot,
+  validateLotSourceSnapshot,
   resolveLotSourceContext,
   LOT_SOURCE_CONTEXT_VERSION,
   type LotSourceContext,
@@ -82,13 +83,12 @@ function unresolved(reason: string): AssessmentShape {
 export function deriveAssessmentShape(
   snapshot: LotSourceSnapshot,
 ): AssessmentShape {
-  const { version, snapshotHash, ...body } = snapshot;
-  const checked = captureLotSourceSnapshot(body);
-  if (
-    version !== LOT_SOURCE_CONTEXT_VERSION ||
-    snapshotHash !== checked.snapshotHash
-  )
+  let checked: LotSourceSnapshot;
+  try {
+    checked = validateLotSourceSnapshot(snapshot);
+  } catch {
     throw new Error("Altered assessment shape snapshot");
+  }
   if (checked.acquisition.state === "refused")
     return unresolved("documentary_input_refused");
   const archive = checked.acquisition.archive;

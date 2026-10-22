@@ -1,3 +1,7 @@
+import {
+  readBlockedSourceItems,
+  sourceItemKey,
+} from "@/lib/source-item-availability";
 import { discoveryIssueDetail } from "@/lib/catalog-discovery";
 import { classificationChanged } from "@/lib/sector-classification";
 import {
@@ -24,7 +28,7 @@ import {
 } from "@/db/schema";
 import type { Publication } from "@/lib/domain";
 import type { SourceAdapter } from "@/sources/common";
-import { fingerprint } from "@/sources/common";
+import { fingerprint, OfficialHttpError } from "@/sources/common";
 import {
   preliminaryMatch,
   materialChange,
@@ -444,6 +448,14 @@ export async function storePublication(
     await queueChangeNotices(prior, p);
   return true;
 }
+class SourceItemReviewRequired extends Error {}
+class PartialSourceImport extends Error {}
+const needsImmediateRetry = (error: unknown) =>
+  !(
+    error instanceof SourceItemReviewRequired ||
+    (error instanceof OfficialHttpError &&
+      [401, 403, 404, 410].includes(error.status))
+  );
 export async function ingest(
   adapter: SourceAdapter,
   since: Date,
@@ -464,6 +476,7 @@ export async function ingest(
     .values({ id, source: adapter.id, status: "running" });
   let imported = 0,
     errors = 0;
+  let retryableErrors = 0;
   // Activation comes only from protected server configuration. Job payloads and
   // source content never select a rollout; missing configuration stays legacy.
   const documentaryShadow =
@@ -479,7 +492,9 @@ export async function ingest(
         signal,
       });
       if (result.requiresReview)
-        throw new Error(`Dettaglio simap da verificare: ${result.refusalCode}`);
+        throw new SourceItemReviewRequired(
+          `Dettaglio simap da verificare: ${result.refusalCode}`,
+        );
       return result.imported;
     }
     const [adopted] = await getDb()
@@ -504,7 +519,9 @@ export async function ingest(
       storePublication(p, { extractDocuments: true }),
     );
     if (result.requiresReview)
-      throw new Error(`Dettaglio simap da verificare: ${result.refusalCode}`);
+      throw new SourceItemReviewRequired(
+        `Dettaglio simap da verificare: ${result.refusalCode}`,
+      );
     return result.imported;
   };
   try {
@@ -593,6 +610,7 @@ export async function ingest(
           await resolveIssue(`source-item:${adapter.id}:${old.externalId}`);
         } catch (error) {
           errors++;
+          if (needsImmediateRetry(error)) retryableErrors++;
           await recordIssue(
             `source-item:${adapter.id}:${old.externalId}`,
             "Bando aperto non aggiornato",
@@ -620,6 +638,7 @@ export async function ingest(
         await resolveIssue(`source-item:${adapter.id}:${e.id}`);
       } catch (err) {
         errors++;
+        if (needsImmediateRetry(err)) retryableErrors++;
         await recordIssue(
           `source-item:${adapter.id}:${e.id}`,
           "Pubblicazione non importata",
@@ -646,9 +665,22 @@ export async function ingest(
           : null,
       })
       .where(eq(sourceRuns.id, id));
-    if (errors) throw new Error(`Importazione parziale: ${errors} errori`);
-    await resolveIssue(`source:${adapter.id}`);
+    if (errors) {
+      await recordIssue(
+        `source:${adapter.id}`,
+        "Fonte aggiornata parzialmente",
+        `${errors} pubblicazioni richiedono un controllo; gli altri aggiornamenti sono stati elaborati.`,
+        "critical",
+      );
+      if (retryableErrors)
+        throw new PartialSourceImport(
+          `Importazione parziale: ${errors} errori`,
+        );
+    } else await resolveIssue(`source:${adapter.id}`);
   } catch (err) {
+    // Item failures were already recorded as partial. A queue retry must not
+    // erase successful imports or turn a specific hold into a total outage.
+    if (err instanceof PartialSourceImport) throw err;
     await getDb()
       .update(sourceRuns)
       .set({
@@ -707,9 +739,11 @@ export async function enrichAndMatch(
     .where(
       and(isNull(companies.disabledAt), companyAllowsPilotProcessingSql()),
     );
+  const blocked = await readBlockedSourceItems(db);
   let failedAnalyses = 0;
   for (const row of rows) {
     options.signal?.throwIfAborted();
+    if (blocked.has(sourceItemKey(row))) continue;
     // Check the current pointer before legacy processing, without introducing
     // a legacy transaction before its own source/CAS read. Adoption drains old
     // requests; the write guards below still reject every in-flight AI result.

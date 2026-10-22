@@ -9,6 +9,7 @@ import {
   resolveLotTextReference,
   restoreLotFields,
   restoreSimapDetail,
+  verifySimapLotArchive,
   SOURCE_LOT_LIMITS,
   SOURCE_LOT_VERSION,
   type LotArchive,
@@ -382,6 +383,42 @@ test("Rejects tampered archival content, directory references, hashes and unsupp
     rejected(() => restoreSimapDetail(copy), "altered_archive");
     rejected(() => buildLotComparisonCorpus(copy, firstLot), "altered_archive");
   }
+});
+
+test("Verified immutable archives never lend trust to a mutable or caller-frozen copy", () => {
+  const original = preserveSimapLots(fixture(), identity);
+  const incoming = structuredClone(original);
+  Object.freeze(incoming); // Nested caller-owned data remains mutable.
+  const checked = verifySimapLotArchive(incoming);
+  assert.notEqual(checked, incoming);
+  assert.ok(Object.isFrozen(checked.lotField));
+  assert.deepEqual(
+    buildLotComparisonCorpus(checked, firstLot),
+    buildLotComparisonCorpus(original, firstLot),
+  );
+  (incoming.lotField.lots as any[])[0].orderDescription.it =
+    "Changed after a successful read";
+  rejected(
+    () => buildLotComparisonCorpus(incoming, firstLot),
+    "altered_archive",
+  );
+  assert.equal(
+    (restoreSimapDetail(checked).lots as any[])[0].orderDescription.it,
+    exactText,
+  );
+});
+
+test("A cached complete corpus cannot bypass the bounded comparison limit", () => {
+  const raw = fixture();
+  raw.lots[0].orderDescription.it = "x".repeat(
+    SOURCE_LOT_LIMITS.maxComparisonUtf16 + 1,
+  );
+  const archive = preserveSimapLots(raw, identity);
+  assert.ok(buildLotComparisonCorpus(archive, firstLot, { complete: true }));
+  rejected(
+    () => buildLotComparisonCorpus(archive, firstLot),
+    "comparison_limit",
+  );
 });
 
 test("Rejects unsafe JSON without running getters or accepting strings that JSONB cannot preserve", () => {
