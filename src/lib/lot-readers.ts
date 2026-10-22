@@ -20,7 +20,8 @@ import {
 } from "./source-reviews";
 import {
   lockCanonicalPublicationRead,
-  lockCanonicalPublicationReadGroups,
+  readCanonicalPublicationGroupSnapshot,
+  readCanonicalPublicationSnapshot,
   CanonicalMembershipConflict,
 } from "./canonical-lock";
 import {
@@ -257,129 +258,163 @@ export async function readCanonicalMatch(
   });
 }
 
-// List-only batch reader: keep the canonical -> company -> match lock order,
-// reselect the representative under the lock, and batch legacy dependencies.
-// A source adopted during loading still uses the full documentary reader.
+// A coherent, committed point-in-time view for interactive pages only. Writers
+// and quality/notification readers retain their existing canonical locks.
+export async function readCanonicalDisplayMatch(
+  companyId: string,
+  publicationId: string,
+  now = new Date(),
+  options: { legacyDetail?: boolean } = {},
+) {
+  return getDb().transaction(
+    async (tx) => {
+      const group = await readCanonicalPublicationSnapshot(tx, publicationId);
+      if (!group) return null;
+      const available = group.publications.filter((p) =>
+        sourceAvailable(p.source),
+      );
+      const publication =
+        options.legacyDetail && !available.some((p) => p.documentarySnapshotId)
+          ? available.find((p) => p.id === publicationId)
+          : available.sort(compareCanonicalPublications)[0];
+      if (!publication) return null;
+      return readPublicationMatch(tx, publication, companyId, now, true);
+    },
+    { isolationLevel: "repeatable read", accessMode: "read only" },
+  );
+}
+
+// Display-only list snapshot: source membership, company, match and histories
+// come from one committed MVCC view. No writer locks are acquired or upgraded.
+// Adoption, vetoes and claims still revalidate under their own exclusive locks.
 export async function readCanonicalLegacyMatches(
   companyId: string,
   publicationIds: readonly string[],
   now = new Date(),
 ) {
-  return getDb().transaction(async (tx) => {
-    const ids = [...new Set(publicationIds)];
-    const result = new Map<
-      string,
-      NonNullable<Awaited<ReturnType<typeof readCanonicalMatch>>>
-    >();
-    if (!ids.length) return result;
-    const observed = await tx
-      .select({ id: publications.id, canonicalId: publications.canonicalId })
-      .from(publications)
-      .where(inArray(publications.id, ids));
-    const members = await lockCanonicalPublicationReadGroups(
-      tx,
-      observed.map((p) => p.canonicalId),
-    );
-    const byGroup = new Map<string, typeof members>();
-    for (const member of members) {
-      const group = byGroup.get(member.canonicalId) ?? [];
-      group.push(member);
-      byGroup.set(member.canonicalId, group);
-    }
-    const blocked = await readBlockedSourceItems(tx);
-    const selected = observed.flatMap((row) => {
-      const group = byGroup.get(row.canonicalId) ?? [];
-      if (!group.some((p) => p.id === row.id))
-        throw new CanonicalMembershipConflict(
-          "Il gruppo della pubblicazione è cambiato: ripetere la transazione.",
+  return getDb().transaction(
+    async (tx) => {
+      const ids = [...new Set(publicationIds)];
+      const result = new Map<
+        string,
+        NonNullable<Awaited<ReturnType<typeof readCanonicalMatch>>>
+      >();
+      if (!ids.length) return result;
+      const observed = await tx
+        .select({ id: publications.id, canonicalId: publications.canonicalId })
+        .from(publications)
+        .where(inArray(publications.id, ids));
+      const members = await readCanonicalPublicationGroupSnapshot(
+        tx,
+        observed.map((p) => p.canonicalId),
+      );
+      const byGroup = new Map<string, typeof members>();
+      for (const member of members) {
+        const group = byGroup.get(member.canonicalId) ?? [];
+        group.push(member);
+        byGroup.set(member.canonicalId, group);
+      }
+      const blocked = await readBlockedSourceItems(tx);
+      const selected = observed.flatMap((row) => {
+        const group = byGroup.get(row.canonicalId) ?? [];
+        if (!group.some((p) => p.id === row.id))
+          throw new CanonicalMembershipConflict(
+            "Il gruppo della pubblicazione è cambiato: ripetere la transazione.",
+          );
+        const representative = group
+          .filter((p) => sourceAvailable(p.source))
+          .sort(compareCanonicalPublications)[0];
+        return representative && !blocked.has(sourceItemKey(representative))
+          ? [{ requestedId: row.id, publication: representative }]
+          : [];
+      });
+      if (!selected.length) return result;
+      const [company] = await tx
+        .select()
+        .from(companies)
+        .where(eq(companies.id, companyId));
+      if (!company) return result;
+      const selectedIds = [...new Set(selected.map((r) => r.publication.id))];
+      const matched = await tx
+        .select()
+        .from(matches)
+        .where(
+          and(
+            eq(matches.companyId, companyId),
+            inArray(matches.publicationId, selectedIds),
+          ),
         );
-      const representative = group
-        .filter((p) => sourceAvailable(p.source))
-        .sort(compareCanonicalPublications)[0];
-      return representative && !blocked.has(sourceItemKey(representative))
-        ? [{ requestedId: row.id, publication: representative }]
-        : [];
-    });
-    if (!selected.length) return result;
-    const [company] = await tx
-      .select()
-      .from(companies)
-      .where(eq(companies.id, companyId))
-      .for("share");
-    if (!company) return result;
-    const selectedIds = [...new Set(selected.map((r) => r.publication.id))];
-    const matched = await tx
-      .select()
-      .from(matches)
-      .where(
-        and(
-          eq(matches.companyId, companyId),
-          inArray(matches.publicationId, selectedIds),
-        ),
-      )
-      .for("share");
-    const byPublication = new Map(matched.map((m) => [m.publicationId, m]));
-    const legacy = selected.filter((r) => !r.publication.documentarySnapshotId);
-    const contexts = await readSourceReviewContexts(
-      tx,
-      legacy.map((r) => r.publication),
-    );
-    const canonicalFeedback = await readCanonicalFeedbackBatch(
-      tx,
-      companyId,
-      legacy.map((r) => r.publication.canonicalId),
-    );
-    const feedbackRows = legacy.length
-      ? await tx
-          .select()
-          .from(feedback)
-          .where(
-            and(
-              eq(feedback.companyId, companyId),
-              inArray(
-                feedback.publicationId,
-                legacy.map((r) => r.publication.id),
+      const byPublication = new Map(matched.map((m) => [m.publicationId, m]));
+      const legacy = selected.filter(
+        (r) => !r.publication.documentarySnapshotId,
+      );
+      const contexts = await readSourceReviewContexts(
+        tx,
+        legacy.map((r) => r.publication),
+      );
+      const canonicalFeedback = await readCanonicalFeedbackBatch(
+        tx,
+        companyId,
+        legacy.map((r) => r.publication.canonicalId),
+      );
+      const feedbackRows = legacy.length
+        ? await tx
+            .select()
+            .from(feedback)
+            .where(
+              and(
+                eq(feedback.companyId, companyId),
+                inArray(
+                  feedback.publicationId,
+                  legacy.map((r) => r.publication.id),
+                ),
               ),
-            ),
-          )
-          .for("share")
-      : [];
-    const feedbackByPublication = new Map(
-      feedbackRows.map((f) => [f.publicationId, f]),
-    );
-    for (const { requestedId, publication } of selected) {
-      if (publication.documentarySnapshotId) {
-        const row = await readPublicationMatch(tx, publication, companyId, now);
-        if (row) result.set(requestedId, row);
-        continue;
+            )
+        : [];
+      const feedbackByPublication = new Map(
+        feedbackRows.map((f) => [f.publicationId, f]),
+      );
+      for (const { requestedId, publication } of selected) {
+        if (publication.documentarySnapshotId) {
+          const row = await readPublicationMatch(
+            tx,
+            publication,
+            companyId,
+            now,
+            true,
+          );
+          if (row) result.set(requestedId, row);
+          continue;
+        }
+        const match = byPublication.get(publication.id) ?? null;
+        const f = feedbackByPublication.get(publication.id);
+        if (!match) {
+          result.set(requestedId, {
+            publication,
+            company,
+            match: null,
+            loaded: null,
+            sourceReview: null,
+            feedback: null,
+          });
+        } else {
+          result.set(requestedId, {
+            publication,
+            company,
+            match,
+            loaded: null,
+            sourceReview: contexts.get(publication.id) ?? null,
+            feedback: {
+              ...canonicalFeedback.get(publication.canonicalId)!,
+              relevant: f?.relevant ?? null,
+            },
+          });
+        }
       }
-      const match = byPublication.get(publication.id) ?? null;
-      const f = feedbackByPublication.get(publication.id);
-      if (!match) {
-        result.set(requestedId, {
-          publication,
-          company,
-          match: null,
-          loaded: null,
-          sourceReview: null,
-          feedback: null,
-        });
-      } else {
-        result.set(requestedId, {
-          publication,
-          company,
-          match,
-          loaded: null,
-          sourceReview: contexts.get(publication.id) ?? null,
-          feedback: {
-            ...canonicalFeedback.get(publication.canonicalId)!,
-            relevant: f?.relevant ?? null,
-          },
-        });
-      }
-    }
-    return result;
-  });
+      return result;
+    },
+    { isolationLevel: "repeatable read", accessMode: "read only" },
+  );
 }
 
 async function readPublicationMatch(
@@ -387,12 +422,15 @@ async function readPublicationMatch(
   publication: typeof publications.$inferSelect,
   companyId: string,
   now: Date,
+  displaySnapshot = false,
 ) {
-  const [company] = await tx
+  const companyQuery = tx
     .select()
     .from(companies)
-    .where(eq(companies.id, companyId))
-    .for("share");
+    .where(eq(companies.id, companyId));
+  const [company] = await (displaySnapshot
+    ? companyQuery
+    : companyQuery.for("share"));
   if (!company) return null;
   if (await sourceItemBlocked(tx, publication))
     return {
@@ -403,7 +441,7 @@ async function readPublicationMatch(
       sourceReview: null,
       feedback: null,
     };
-  const [match] = await tx
+  const matchQuery = tx
     .select()
     .from(matches)
     .where(
@@ -411,8 +449,10 @@ async function readPublicationMatch(
         eq(matches.companyId, companyId),
         eq(matches.publicationId, publication.id),
       ),
-    )
-    .for("share");
+    );
+  const [match] = await (displaySnapshot
+    ? matchQuery
+    : matchQuery.for("share"));
   if (!match)
     return {
       publication,
@@ -429,6 +469,7 @@ async function readPublicationMatch(
       company,
       match,
       now,
+      { displaySnapshot },
     );
     return {
       publication,
@@ -439,7 +480,7 @@ async function readPublicationMatch(
       feedback: loaded.feedback,
     };
   }
-  const [currentFeedback] = await tx
+  const feedbackQuery = tx
     .select()
     .from(feedback)
     .where(
@@ -447,8 +488,10 @@ async function readPublicationMatch(
         eq(feedback.companyId, companyId),
         eq(feedback.publicationId, publication.id),
       ),
-    )
-    .for("share");
+    );
+  const [currentFeedback] = await (displaySnapshot
+    ? feedbackQuery
+    : feedbackQuery.for("share"));
   return {
     publication,
     company,

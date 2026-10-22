@@ -21,7 +21,7 @@ import {
 } from "../src/lib/catalog";
 import { saveCatalogBookmark } from "../src/lib/company";
 import { readCanonicalFeedback } from "../src/lib/canonical-feedback";
-import { readCanonicalLegacyMatches } from "../src/lib/lot-readers";
+import { readCanonicalMatch, readCanonicalDisplayMatch, readCanonicalLegacyMatches } from "../src/lib/lot-readers";
 import { sourceItemBlocked } from "../src/lib/source-item-availability";
 import { listOpportunities } from "../src/lib/queries";
 const pg = new PGlite();
@@ -517,4 +517,17 @@ it("conserva il bando non aggiornabile nel catalogo e nei salvati, sospendendo l
 });
 it("presenta gli aggiornamenti parziali come incompleti anche dopo un vecchio successo", () => {
   expect(catalogSourceStatus({status: "partial", startedAt: now, finishedAt: now}, now, now).state).toBe("partial");
+});
+
+
+it("la vista per la pagina resta coerente con il lettore di qualità e non ripiega su un'edizione superata", async () => {
+  await publication("display-old", {}, "display-group");
+  const locked = await readCanonicalMatch(viewer.companyId, "display-old", now);
+  expect(await readCanonicalDisplayMatch(viewer.companyId, "display-old", now)).toEqual(locked);
+  await publication("display-new", {status: "cancelled", publishedAt: "2026-09-16T06:00:00Z"}, "display-group");
+  const refreshed = await readCanonicalDisplayMatch(viewer.companyId, "display-old", now);
+  expect(refreshed?.publication.id).toBe("display-new");
+  expect(refreshed?.publication.status).toBe("cancelled");
+  expect(refreshed).toEqual(await readCanonicalMatch(viewer.companyId, "display-old", now));
+  expect((await readCatalog(viewer, {}, now)).total).toBe(0);
 });

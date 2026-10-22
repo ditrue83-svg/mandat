@@ -71,3 +71,36 @@ export const lockCanonicalPublicationRead = (
   tx: CanonicalExecutor,
   id: string,
 ) => lockCanonical(tx, id, true);
+
+// Display-only MVCC readers. Call inside REPEATABLE READ / READ ONLY; never use
+// this view to authorize a mutation, notification claim or quality approval.
+export async function readCanonicalPublicationGroupSnapshot(
+  tx: CanonicalExecutor,
+  ids: readonly string[],
+) {
+  if (!ids.length) return [];
+  return tx
+    .select()
+    .from(publications)
+    .where(inArray(publications.canonicalId, [...new Set(ids)]))
+    .orderBy(publications.id);
+}
+export async function readCanonicalPublicationSnapshot(
+  tx: CanonicalExecutor,
+  id: string,
+) {
+  const [observed] = await tx
+    .select({ canonicalId: publications.canonicalId })
+    .from(publications)
+    .where(eq(publications.id, id));
+  if (!observed) return null;
+  const rows = await readCanonicalPublicationGroupSnapshot(tx, [
+    observed.canonicalId,
+  ]);
+  const publication = rows.find((row) => row.id === id);
+  if (!publication)
+    throw new CanonicalMembershipConflict(
+      "La pubblicazione non appartiene allo snapshot canonico.",
+    );
+  return { canonicalId: observed.canonicalId, publication, publications: rows };
+}

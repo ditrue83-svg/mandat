@@ -27,7 +27,10 @@ import {
   potentialInterest,
   type TenderBrief,
 } from "./tender-brief";
-import { readCanonicalMatch, presentLotOpportunity } from "./lot-readers";
+import {
+  readCanonicalDisplayMatch as readCanonicalMatch,
+  presentLotOpportunity,
+} from "./lot-readers";
 import { decodeDocumentarySnapshotRow } from "./documentary-store";
 import type { MatchAssessment } from "./domain";
 import type { LotArchive } from "./source-lots";

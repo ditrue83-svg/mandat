@@ -14,7 +14,7 @@ import {
   automaticMatchRuns,
 } from "@/db/schema";
 import {
-  readCanonicalMatch,
+  readCanonicalDisplayMatch as readCanonicalMatch,
   readCanonicalLegacyMatches,
   presentLotOpportunity,
   lotOpportunityVisible,

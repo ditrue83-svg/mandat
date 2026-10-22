@@ -377,6 +377,7 @@ export async function readLotMatchReview(
   company: CompanyRow,
   match: MatchRow,
   now = new Date(),
+  options: { displaySnapshot?: boolean } = {},
 ) {
   if (match.companyId !== company.id || match.publicationId !== publication.id)
     throw new Error("Valutazione associata a un’altra ditta o pubblicazione.");
@@ -409,7 +410,7 @@ export async function readLotMatchReview(
     evidenceSnapshots.push(event.evidenceSnapshot);
     history.push(event);
   }
-  const [currentFeedback] = await tx
+  const feedbackQuery = tx
     .select()
     .from(feedback)
     .where(
@@ -417,8 +418,10 @@ export async function readLotMatchReview(
         eq(feedback.companyId, company.id),
         eq(feedback.publicationId, publication.id),
       ),
-    )
-    .for("share");
+    );
+  const [currentFeedback] = await (options.displaySnapshot
+    ? feedbackQuery
+    : feedbackQuery.for("share"));
   const canonicalFeedback = await readCanonicalFeedback(
     tx,
     company.id,
