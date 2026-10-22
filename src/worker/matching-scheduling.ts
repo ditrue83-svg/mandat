@@ -28,9 +28,12 @@ export async function requestPublicationMatching(
       priority: 10,
     });
   }
-  return boss.send(PUBLICATION_MATCH_QUEUE, data, {
+  // In a source transaction, touch the pending row even at background
+  // priority: its queue lock lasts until the source commit. A consumer cannot
+  // take the only pending signal before the corresponding source is visible.
+  // Omitting priority preserves a previous urgent request; a new job defaults to0.
+  return boss.upsert(PUBLICATION_MATCH_QUEUE, data, {
     singletonKey: data.publicationId,
-    priority: 0,
   });
 }
 

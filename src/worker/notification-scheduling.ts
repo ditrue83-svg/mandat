@@ -16,22 +16,33 @@ export function notificationWorkJob(value: unknown): NotificationWorkJob {
 // time on every signal or continually scanning all projects between matches.
 // One consumer serializes the existing digest and delivery handlers; each still
 // reloads policy/current source evidence and owns its original delivery claims.
-export async function requestNotificationDigest(boss: Pick<PgBoss, "send">) {
+async function requestNotificationWork(
+  boss: Pick<PgBoss, "send" | "upsert">,
+  kind: NotificationWorkJob["kind"],
+) {
   await boss.send(
     NOTIFICATION_WORK_QUEUE,
-    { kind: "digest" },
-    { singletonKey: "digest", startAfter: 60 },
+    { kind },
+    { singletonKey: kind, startAfter: 60 },
   );
+  // Keep an existing pending deadline, but lock that intent through the source
+  // transaction. If a consumer took it between send and upsert, upsert creates
+  // a trailing request instead. Neither path can acknowledge an unseen source.
+  await boss.upsert(NOTIFICATION_WORK_QUEUE, { kind }, { singletonKey: kind });
 }
-export async function requestNotificationSweeps(boss: Pick<PgBoss, "send">) {
+export async function requestNotificationDigest(
+  boss: Pick<PgBoss, "send" | "upsert">,
+) {
+  await requestNotificationWork(boss, "digest");
+}
+export async function requestNotificationSweeps(
+  boss: Pick<PgBoss, "send" | "upsert">,
+) {
   await requestNotificationDigest(boss);
   await requestNotificationDelivery(boss);
 }
-
-export async function requestNotificationDelivery(boss: Pick<PgBoss, "send">) {
-  await boss.send(
-    NOTIFICATION_WORK_QUEUE,
-    { kind: "send" },
-    { singletonKey: "send", startAfter: 60 },
-  );
+export async function requestNotificationDelivery(
+  boss: Pick<PgBoss, "send" | "upsert">,
+) {
+  await requestNotificationWork(boss, "send");
 }

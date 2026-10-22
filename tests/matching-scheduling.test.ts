@@ -36,6 +36,7 @@ it("keeps current priority, an immutable active request and one trailing refresh
     { publicationId: "b" },
   ]);
   await requestPublicationMatching(boss, { publicationId: "b" }, true);
+  await requestPublicationMatching(boss, { publicationId: "b" });
   for (let i = 0; i < 10; i++)
     await requestPublicationMatchingBatch(boss, [
       { publicationId: "a" },
