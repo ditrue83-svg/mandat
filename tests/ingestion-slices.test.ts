@@ -48,8 +48,8 @@ beforeAll(async () => {
   ctx.db = db;
   await migrate(db, { migrationsFolder: "drizzle" });
   await boss.start();
-  for (const name of ["match-publication", "digest", "send"])
-    await boss.createQueue(name, { policy: "singleton" });
+  for (const name of ["radar-publication", "notification-work"])
+    await boss.createQueue(name, { policy: "stately" });
 });
 beforeEach(async () => {
   ctx.notices.mockClear();
@@ -83,18 +83,17 @@ it("commits source and durable follow-ups together, without inline reconciliatio
     "select distinct name from pgboss.job order by name",
   );
   expect(jobs.rows.map((r) => r.name)).toEqual([
-    "digest",
-    "match-publication",
-    "send",
+    "notification-work",
+    "radar-publication",
   ]);
-  await boss.deleteQueue("match-publication");
+  await boss.deleteQueue("radar-publication");
   await expect(
     storePublication(publication(2), { deferNotifications: true }),
   ).rejects.toThrow();
   expect(
     (await db.select().from(schema.publications)).map((p) => p.id),
   ).toEqual(["foglio-ti-1"]);
-  await boss.createQueue("match-publication", { policy: "singleton" });
+  await boss.createQueue("radar-publication", { policy: "stately" });
 });
 it("ends historical work between records, keeps partial status and resumes after the actual attempted record", async () => {
   let tick = 0;
@@ -143,15 +142,13 @@ it("ends historical work between records, keeps partial status and resumes after
 });
 it("an unchanged original recovering from a hold clears the hold and durably wakes its own matching/notice jobs", async () => {
   await storePublication(publication(1));
-  await db
-    .insert(schema.issues)
-    .values({
-      id: "held-source",
-      key: "source-item:foglio-ti:1",
-      title: "Fonte temporaneamente non disponibile",
-      detail: "Errore inventato",
-      severity: "critical",
-    });
+  await db.insert(schema.issues).values({
+    id: "held-source",
+    key: "source-item:foglio-ti:1",
+    title: "Fonte temporaneamente non disponibile",
+    detail: "Errore inventato",
+    severity: "critical",
+  });
   const adapter: SourceAdapter = {
     id: "foglio-ti",
     list: async () => [
@@ -182,9 +179,8 @@ it("an unchanged original recovering from a hold clears the hold and durably wak
     "select distinct name from pgboss.job order by name",
   );
   expect(jobs.rows.map((r) => r.name)).toEqual([
-    "digest",
-    "match-publication",
-    "send",
+    "notification-work",
+    "radar-publication",
   ]);
   expect(ctx.notices).not.toHaveBeenCalled();
   expect(await db.select().from(schema.publicationVersions)).toHaveLength(1);

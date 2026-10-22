@@ -17,7 +17,6 @@ import {
   LOT_RECONCILIATION_QUEUE,
   type LotReconciliationJob,
 } from "@/lib/lot-reconciliation";
-import { matchAdoptedPublication } from "./lot-matching";
 import { DOCUMENTARY_ADOPTION_CAPABILITY } from "@/lib/documentary-capability";
 import { loadDocumentaryRuntimeActivation } from "@/lib/documentary-runtime-config";
 import { recoverStaleAiReservations } from "./ai";
@@ -31,6 +30,9 @@ import {
   runAutomaticComparison,
 } from "./automatic-matching";
 import {
+  NOTIFICATION_WORK_QUEUE,
+  notificationWorkJob,
+  type NotificationWorkJob,
   requestNotificationDelivery,
   requestNotificationSweeps,
 } from "./notification-scheduling";
@@ -40,6 +42,15 @@ import {
   requestSourceIngestions,
   type SourceIngestionJob,
 } from "./ingestion-scheduling";
+import {
+  PUBLICATION_MATCH_QUEUE,
+  MATCH_SWEEP_QUEUE,
+  publicationMatchJob,
+  requestPublicationMatching,
+  requestPublicationMatchingBatch,
+  requestMatchingSweep,
+  type PublicationMatchJob,
+} from "./matching-scheduling";
 async function main() {
   assertProductionConfig();
   // Read once before registering consumers. A malformed release file stops
@@ -65,6 +76,18 @@ async function main() {
       retryBackoff: true,
       policy: "singleton",
       expireInSeconds: name === "ingest" ? 7200 : 1800,
+    });
+  for (const name of [
+    PUBLICATION_MATCH_QUEUE,
+    MATCH_SWEEP_QUEUE,
+    NOTIFICATION_WORK_QUEUE,
+  ])
+    await boss.createQueue(name, {
+      policy: "stately",
+      retryLimit: 2,
+      retryDelay: 60,
+      retryBackoff: true,
+      expireInSeconds: 1800,
     });
   await recoverUncertainDeliveries();
   await boss.createQueue(AUTOMATIC_COMPARISON_QUEUE, {
@@ -94,13 +117,13 @@ async function main() {
     LOT_RECONCILIATION_QUEUE,
     { batchSize: 1 },
     async ([job]) => {
-      await matchAdoptedPublication({
-        publicationId: job.data.publicationId,
-        signal: job.signal,
-      });
-      // digest/send own the global reconciliation, including stale pending
-      // content. Do not lock every company's projects once for every source.
-      await requestNotificationSweeps(boss);
+      // Preserve the original event job as the handoff receipt. The sole
+      // publication consumer reloads all current source/profile/review bindings.
+      await requestPublicationMatching(
+        boss,
+        { publicationId: job.data.publicationId },
+        true,
+      );
     },
   );
   await requestNotificationSweeps(boss);
@@ -166,37 +189,75 @@ async function main() {
         );
     },
   );
-  await boss.work("match", { batchSize: 1 }, async () => {
+  // Legacy intent queues are drained through normal pg-boss completion only
+  // after their replacement request is durable. A crash before acknowledgement
+  // replays an idempotent handoff; no jobs/results/history are deleted or relabelled.
+  await boss.work(
+    "match",
+    { batchSize: 500, pollingIntervalSeconds: 0.5 },
+    async () => {
+      await requestMatchingSweep(boss);
+    },
+  );
+  await boss.work<PublicationMatchJob>(
+    "match-publication",
+    { batchSize: 5000, pollingIntervalSeconds: 0.5 },
+    async (jobs) => {
+      await requestPublicationMatchingBatch(
+        boss,
+        jobs.map((job) => job.data),
+      );
+    },
+  );
+  await boss.work(MATCH_SWEEP_QUEUE, { batchSize: 1 }, async () => {
     const rows = await getDb()
-      .select({ id: publications.id })
+      .select({ publicationId: publications.id })
       .from(publications)
       .where(eq(publications.status, "open"));
-    for (const p of rows)
-      await boss.send(
-        "match-publication",
-        { publicationId: p.id },
-        { singletonKey: p.id },
-      );
+    await requestPublicationMatchingBatch(boss, rows);
   });
-  await boss.work<{ publicationId: string }>(
-    "match-publication",
+  await boss.work<PublicationMatchJob>(
+    PUBLICATION_MATCH_QUEUE,
     { batchSize: 1 },
     async ([job]) => {
+      const data = publicationMatchJob(job.data);
       await enrichAndMatch({
-        publicationId: job.data.publicationId,
+        publicationId: data.publicationId,
         signal: job.signal,
         documentaryActivation,
       });
       await requestNotificationSweeps(boss);
     },
   );
-  await boss.work("digest", { batchSize: 1 }, async () => {
-    await queueDigests();
-    await requestNotificationDelivery(boss);
-  });
-  await boss.work("send", { batchSize: 1 }, async () => {
-    await sendPending();
-  });
+  await boss.work(
+    "digest",
+    { batchSize: 500, pollingIntervalSeconds: 0.5 },
+    async () => {
+      await boss.send(
+        NOTIFICATION_WORK_QUEUE,
+        { kind: "digest" },
+        { singletonKey: "digest" },
+      );
+    },
+  );
+  await boss.work(
+    "send",
+    { batchSize: 500, pollingIntervalSeconds: 0.5 },
+    async () => {
+      await requestNotificationDelivery(boss);
+    },
+  );
+  await boss.work<NotificationWorkJob>(
+    NOTIFICATION_WORK_QUEUE,
+    { batchSize: 1 },
+    async ([job]) => {
+      const { kind } = notificationWorkJob(job.data);
+      if (kind === "digest") {
+        await queueDigests();
+        await requestNotificationDelivery(boss);
+      } else await sendPending();
+    },
+  );
   const heartbeat = async () => {
     if (automaticComparisonEnabled())
       await reconcileAutomaticComparisonLeases();

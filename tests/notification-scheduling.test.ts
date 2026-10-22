@@ -1,56 +1,65 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import { PgBoss, fromPglite } from "pg-boss";
-import { requestNotificationSweeps } from "../src/worker/notification-scheduling";
+import {
+  NOTIFICATION_WORK_QUEUE,
+  requestNotificationSweeps,
+  notificationWorkJob,
+} from "../src/worker/notification-scheduling";
 
 const pg = new PGlite();
 const boss = new PgBoss({
-  db: fromPglite(pg), backend: "pglite", schema: "pgboss",
-  schedule: false, supervise: false,
+  db: fromPglite(pg),
+  backend: "pglite",
+  schema: "pgboss",
+  schedule: false,
+  supervise: false,
 });
 beforeAll(async () => {
   await boss.start();
-  for (const name of ["digest", "send"])
-    await boss.createQueue(name, { policy: "singleton" });
+  await boss.createQueue(NOTIFICATION_WORK_QUEUE, { policy: "stately" });
 });
-afterAll(async () => { await boss.stop(); await pg.close(); });
+afterAll(async () => {
+  await boss.stop();
+  await pg.close();
+});
 
-it("a burst keeps one trailing database job while a sweep is active, including across producer restart", async () => {
-  // Freeze PostgreSQL's now() for this burst so running the test near a minute
-  // boundary cannot turn one burst into two legitimate scheduling windows.
-  await pg.exec("begin");
+it("keeps one pending request per kind during slow active work, across producer restart, without a minute-window backlog", async () => {
   await requestNotificationSweeps(boss);
-  const active = new Map<string, string>();
-  for (const name of ["digest", "send"]) {
-    const jobs = await boss.fetch(name);
-    expect(jobs).toHaveLength(1);
-    active.set(name, jobs[0].id);
-  }
+  const [active] = await boss.fetch(NOTIFICATION_WORK_QUEUE);
   for (let i = 0; i < 100; i++) await requestNotificationSweeps(boss);
-  const counts = await pg.query<{name: string; state: string; n: number}>(
-    "select name,state,count(*)::int n from pgboss.job group by name,state order by name,state",
+  const counts = await pg.query<{ state: string; n: number }>(
+    "select state,count(*)::int n from pgboss.job group by state order by state",
   );
   expect(counts.rows).toEqual([
-    {name: "digest", state: "created", n: 1},
-    {name: "digest", state: "active", n: 1},
-    {name: "send", state: "created", n: 1},
-    {name: "send", state: "active", n: 1},
+    { state: "created", n: 2 },
+    { state: "active", n: 1 },
   ]);
-  await pg.exec("commit");
   await boss.stop();
   await boss.start();
-  for (const name of ["digest", "send"]) {
-    expect(await boss.fetch(name)).toHaveLength(0);
-    await boss.complete(name, active.get(name)!);
+  // A fresh producer after a real restart must retain the existing two slots.
+  await requestNotificationSweeps(boss);
+  expect(
+    (
+      await pg.query<{ n: number }>(
+        "select count(*)::int n from pgboss.job where state='created'",
+      )
+    ).rows[0].n,
+  ).toBe(2);
+  await boss.complete(NOTIFICATION_WORK_QUEUE, active.id);
+  const seen = new Set();
+  for (let i = 0; i < 2; i++) {
+    const [next] = await boss.fetch<{ kind: string }>(NOTIFICATION_WORK_QUEUE);
+    expect(next).toBeDefined();
+    seen.add(notificationWorkJob(next.data).kind);
+    await boss.complete(NOTIFICATION_WORK_QUEUE, next.id);
   }
-  // Make the persisted trailing slot due without a wall-clock sleep. Do not
-  // create another signal: recovery must consume the already committed jobs.
-  await pg.exec("update pgboss.job set start_after=now() where state='created'");
-  for (const name of ["digest", "send"]) {
-    const next = await boss.fetch(name);
-    expect(next).toHaveLength(1);
-    expect(next[0].id).not.toBe(active.get(name));
-    await boss.complete(name, next[0].id);
-    expect(await boss.fetch(name)).toHaveLength(0);
-  }
+  expect(seen).toEqual(new Set(["digest", "send"]));
+  expect(await boss.fetch(NOTIFICATION_WORK_QUEUE)).toEqual([]);
+});
+it("rejects malformed work without silently choosing a delivery or digest", () => {
+  expect(() => notificationWorkJob({ kind: "anything" })).toThrow(
+    "Invalid notification",
+  );
+  expect(() => notificationWorkJob(null)).toThrow("Invalid notification");
 });

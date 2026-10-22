@@ -1,18 +1,32 @@
 import type { PgBoss } from "pg-boss";
 
-// All jobs reread committed state. Keep a trailing sweep when a new event
-// arrives during the active one, without adding a full-company scan per item.
-// Debouncing persists both the current and next time slot in PostgreSQL; a
-// process restart cannot lose the trailing request. Queue policy is unchanged.
-export async function requestNotificationSweeps(
-  boss: Pick<PgBoss, "sendDebounced">,
-) {
-  await boss.sendDebounced("digest", {}, {}, 60, "all");
+export const NOTIFICATION_WORK_QUEUE = "notification-work";
+export type NotificationWorkJob = { kind: "digest" | "send" };
+
+export function notificationWorkJob(value: unknown): NotificationWorkJob {
+  const kind = (value as { kind?: unknown } | null)?.kind;
+  if (kind !== "digest" && kind !== "send")
+    throw new Error("Invalid notification work intent");
+  return { kind };
+}
+
+// Queue one pending refresh per kind, including while that kind is active.
+// Unlike a minute debounce, stately stays bounded when a scan takes minutes.
+// One consumer serializes the existing digest and delivery handlers; each still
+// reloads policy/current source evidence and owns its original delivery claims.
+export async function requestNotificationSweeps(boss: Pick<PgBoss, "send">) {
+  await boss.send(
+    NOTIFICATION_WORK_QUEUE,
+    { kind: "digest" },
+    { singletonKey: "digest" },
+  );
   await requestNotificationDelivery(boss);
 }
 
-export async function requestNotificationDelivery(
-  boss: Pick<PgBoss, "sendDebounced">,
-) {
-  await boss.sendDebounced("send", {}, {}, 60, "all");
+export async function requestNotificationDelivery(boss: Pick<PgBoss, "send">) {
+  await boss.send(
+    NOTIFICATION_WORK_QUEUE,
+    { kind: "send" },
+    { singletonKey: "send" },
+  );
 }

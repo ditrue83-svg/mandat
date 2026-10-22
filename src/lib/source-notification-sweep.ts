@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { PgBoss, fromDrizzle, type DrizzleTransactionLike } from "pg-boss";
+import { requestPublicationMatching } from "@/worker/matching-scheduling";
 import { requestNotificationSweeps } from "@/worker/notification-scheduling";
 // Persist the wake-up in the source transaction. Digest/send reconstruct
 // outstanding changes from committed source history and revalidate every claim.
@@ -17,12 +18,6 @@ export async function enqueueSourceFollowUps(
     migrate: false,
     createSchema: false,
   });
-  await producer.sendDebounced(
-    "match-publication",
-    { publicationId },
-    { priority: 10 },
-    60,
-    publicationId,
-  );
+  await requestPublicationMatching(producer, { publicationId }, true);
   if (notify) await requestNotificationSweeps(producer);
 }
