@@ -11,14 +11,17 @@ export class CanonicalMembershipConflict extends Error {}
 // Acquire every group before any row lock; callers must never append another
 // group after locking a company or its matches. An empty inventory is valid for
 // a newly onboarded company and must be rechecked under its company lock.
-export async function lockCanonicalPublicationGroups(
+async function lockCanonicalGroups(
   tx: CanonicalExecutor,
   canonicalIds: readonly string[],
+  readOnly: boolean,
 ) {
   const groups = [...new Set(canonicalIds)].sort();
   for (const group of groups)
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${`mandat-canonical:${group}`}, 0))`,
+      readOnly
+        ? sql`select pg_advisory_xact_lock_shared(hashtextextended(${`mandat-canonical:${group}`}, 0))`
+        : sql`select pg_advisory_xact_lock(hashtextextended(${`mandat-canonical:${group}`}, 0))`,
     );
   if (!groups.length) return [];
   return tx
@@ -26,22 +29,34 @@ export async function lockCanonicalPublicationGroups(
     .from(publications)
     .where(inArray(publications.canonicalId, groups))
     .orderBy(publications.id)
-    .for("update");
+    .for(readOnly ? "share" : "update");
 }
+
+// Writers keep exclusive locks. Read-only transactions can coexist while still
+// blocking every membership/source/profile writer that uses the same key.
+export const lockCanonicalPublicationGroups = (
+  tx: CanonicalExecutor,
+  ids: readonly string[],
+) => lockCanonicalGroups(tx, ids, false);
+export const lockCanonicalPublicationReadGroups = (
+  tx: CanonicalExecutor,
+  ids: readonly string[],
+) => lockCanonicalGroups(tx, ids, true);
 
 // Call only inside a transaction. Every participating writer must acquire this
 // group lock before its publication/company/match/feedback/notification locks.
 // The initial lookup chooses a lock, never the final membership to operate on.
-export async function lockCanonicalPublications(
+async function lockCanonical(
   tx: CanonicalExecutor,
   publicationId: string,
+  readOnly: boolean,
 ) {
   const [observed] = await tx
     .select({ canonicalId: publications.canonicalId })
     .from(publications)
     .where(eq(publications.id, publicationId));
   if (!observed) return null;
-  const rows = await lockCanonicalPublicationGroups(tx, [observed.canonicalId]);
+  const rows = await lockCanonicalGroups(tx, [observed.canonicalId], readOnly);
   const publication = rows.find((row) => row.id === publicationId);
   if (!publication)
     throw new CanonicalMembershipConflict(
@@ -49,3 +64,10 @@ export async function lockCanonicalPublications(
     );
   return { canonicalId: observed.canonicalId, publication, publications: rows };
 }
+
+export const lockCanonicalPublications = (tx: CanonicalExecutor, id: string) =>
+  lockCanonical(tx, id, false);
+export const lockCanonicalPublicationRead = (
+  tx: CanonicalExecutor,
+  id: string,
+) => lockCanonical(tx, id, true);

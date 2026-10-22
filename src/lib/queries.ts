@@ -348,8 +348,8 @@ export async function listOpportunities(
       )
     : new Map<string, (typeof representatives)[number]>();
   // Each reader retains its own canonical transaction and all validity gates.
-  // Bound concurrency to the default pool size instead of serializing every
-  // source or starting an unbounded request for the entire catalogue.
+  // Reserve one of the default three connections for session/status requests.
+  // Full document reads must not exhaust the pool while another page opens.
   const documentaryRows = new Map<
     string,
     Awaited<ReturnType<typeof readCanonicalMatch>>
@@ -357,10 +357,10 @@ export async function listOpportunities(
   const documentaryCandidates = candidates.filter(
     (p) => p.documentarySnapshotId && matchByPublication.has(p.id),
   );
-  for (let start = 0; start < documentaryCandidates.length; start += 3) {
+  for (let start = 0; start < documentaryCandidates.length; start += 2) {
     const batch = await Promise.all(
       documentaryCandidates
-        .slice(start, start + 3)
+        .slice(start, start + 2)
         .map(
           async (p) =>
             [

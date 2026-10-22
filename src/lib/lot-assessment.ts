@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { assessmentLocation } from "./assessment-location";
 import {
   resolveAutomaticComparison,
+  prepareAutomaticComparisonRecords,
   type ResolvedAutomaticComparison,
 } from "./automatic-comparison";
 import { z } from "zod";
@@ -814,6 +815,9 @@ export function resolveProjectLotAssessment(
       : suppressionSchema.parse(copy(input.suppression));
   const feedback = feedbackSchema.parse(copy(input.feedback ?? {}));
   const snapshots = snapshotIndex(input);
+  const automaticComparisons = prepareAutomaticComparisonRecords(
+    input.automaticComparisons ?? [],
+  );
   const directory = checked.project.targetContent?.directory ?? [];
   const targets: ResolvedTargetAssessment[] =
     input.shapeState.shape.targets.map((target) => {
@@ -890,7 +894,7 @@ export function resolveProjectLotAssessment(
         ? { comparison: null, issue: null }
         : resolveAutomaticComparison(
             { ...input, target, preliminary },
-            input.automaticComparisons ?? [],
+            automaticComparisons,
           );
       const operationalVeto = !preliminary.eligible;
       const state = evaluation

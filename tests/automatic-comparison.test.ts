@@ -20,6 +20,7 @@ import {
   AutomaticComparisonUnavailable,
   recordAutomaticComparison as recordWithRequiredReview,
   readAutomaticComparison,
+  prepareAutomaticComparisonRecords,
   buildAutomaticReductionRequest,
   automaticComparisonModel,
   resolveAutomaticComparison,
@@ -4018,4 +4019,28 @@ test("Radar candidate hints retain possible positive and related results for ful
     true,
   );
   assert.equal(automaticResponseMayReachRadar(undefined, true), true);
+});
+
+
+test("Prepared comparison envelopes remain detached, tamper-checked and bound to the current request", () => {
+  const input = fixture();
+  const request = buildAutomaticComparisonRequest(input);
+  const source = sourceRecord(request);
+  const stored = recordAutomaticComparison(response(request, source), request, {
+    id: "prepared-envelope", at: "2030-01-20T12:02:00.000Z", model: automaticComparisonModel(), sourceInterpretation: source,
+  });
+  const mutable = JSON.parse(JSON.stringify(stored));
+  const [prepared] = prepareAutomaticComparisonRecords([mutable]);
+  const baseline = readAutomaticComparison(mutable, request);
+  assert.deepEqual(readAutomaticComparison(prepared, request), baseline);
+  assert(Object.isFrozen(prepared));
+  assert(Object.isFrozen((prepared as typeof stored).sourceInterpretation.response));
+  mutable.sourceInterpretation.response.summary += " TEST_TAMPER";
+  assert.throws(() => readAutomaticComparison(mutable, request), /Altered automatic comparison/);
+  assert.deepEqual(readAutomaticComparison(prepared, request), baseline);
+  const [invalid] = prepareAutomaticComparisonRecords([mutable]);
+  assert.throws(() => readAutomaticComparison(invalid, request), /Altered automatic comparison/);
+  const stale = buildAutomaticComparisonRequest({...input, profile: {...input.profile, employees: 12}});
+  assert.equal(readAutomaticComparison(prepared, stale), null);
+  assert.throws(() => readAutomaticComparison(invalid, stale), /Altered automatic comparison/);
 });

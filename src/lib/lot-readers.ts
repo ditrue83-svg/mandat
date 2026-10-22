@@ -19,8 +19,8 @@ import {
   readSourceReviewContexts,
 } from "./source-reviews";
 import {
-  lockCanonicalPublications,
-  lockCanonicalPublicationGroups,
+  lockCanonicalPublicationRead,
+  lockCanonicalPublicationReadGroups,
   CanonicalMembershipConflict,
 } from "./canonical-lock";
 import {
@@ -40,7 +40,7 @@ export async function readCurrentLotMatch(
   now = new Date(),
 ) {
   return getDb().transaction(async (tx) => {
-    const group = await lockCanonicalPublications(tx, publicationId);
+    const group = await lockCanonicalPublicationRead(tx, publicationId);
     if (
       !group?.publication.documentarySnapshotId ||
       (await sourceItemBlocked(tx, group.publication))
@@ -227,7 +227,7 @@ export async function readCurrentMatch(
   now = new Date(),
 ) {
   return getDb().transaction(async (tx) => {
-    const group = await lockCanonicalPublications(tx, publicationId);
+    const group = await lockCanonicalPublicationRead(tx, publicationId);
     return group
       ? readPublicationMatch(tx, group.publication, companyId, now)
       : null;
@@ -243,7 +243,7 @@ export async function readCanonicalMatch(
   options: { legacyDetail?: boolean } = {},
 ) {
   return getDb().transaction(async (tx) => {
-    const group = await lockCanonicalPublications(tx, publicationId);
+    const group = await lockCanonicalPublicationRead(tx, publicationId);
     if (!group) return null;
     const available = group.publications.filter((p) =>
       sourceAvailable(p.source),
@@ -276,7 +276,7 @@ export async function readCanonicalLegacyMatches(
       .select({ id: publications.id, canonicalId: publications.canonicalId })
       .from(publications)
       .where(inArray(publications.id, ids));
-    const members = await lockCanonicalPublicationGroups(
+    const members = await lockCanonicalPublicationReadGroups(
       tx,
       observed.map((p) => p.canonicalId),
     );

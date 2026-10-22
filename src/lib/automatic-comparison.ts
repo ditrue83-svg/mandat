@@ -1231,6 +1231,36 @@ const storedComparisonSchema = z.strictObject({
   hash: z.string().regex(/^[a-f0-9]{64}$/),
 });
 export type StoredAutomaticComparison = z.infer<typeof storedComparisonSchema>;
+const verifiedStoredComparisons = new WeakSet<object>();
+function verifiedStoredComparison(value: unknown): StoredAutomaticComparison {
+  if (
+    value &&
+    typeof value === "object" &&
+    verifiedStoredComparisons.has(value)
+  )
+    return value as StoredAutomaticComparison;
+  const record = storedComparisonSchema.parse(value);
+  const { hash, ...unsigned } = record;
+  if (digest(unsigned) !== hash)
+    throw new Error("Altered automatic comparison");
+  freeze(record);
+  verifiedStoredComparisons.add(record);
+  return record;
+}
+
+// Detach and verify each full stored envelope ONCE for a multi-target read.
+// Only the private, deeply frozen result is trusted. Mutable caller objects,
+// historic versions, invalid records and current-request semantic checks keep
+// their original behavior; this never caches a company/target verdict.
+export function prepareAutomaticComparisonRecords(values: readonly unknown[]) {
+  return values.map((value) => {
+    try {
+      return verifiedStoredComparison(value);
+    } catch {
+      return value;
+    }
+  });
+}
 
 export function recordAutomaticComparison(
   response: unknown,
@@ -1293,10 +1323,7 @@ export function readAutomaticComparison(
   // Historic schemas remain audit data, not poison pills for a new result.
   // They cannot be current because the version is part of the input digest.
   if (envelope.version !== AUTOMATIC_COMPARISON_VERSION) return null;
-  const record = storedComparisonSchema.parse(input);
-  const { hash, ...unsigned } = record;
-  if (digest(unsigned) !== hash)
-    throw new Error("Altered automatic comparison");
+  const record = verifiedStoredComparison(input);
   if (
     record.companyId !== request.dependency.companyId ||
     record.publicationId !== request.dependency.target.publicationId
