@@ -115,6 +115,7 @@ export async function storePublication(
   options: {
     extractDocuments?: boolean;
     deferNotifications?: boolean;
+    matchingUrgent?: boolean;
     lockTimeoutMs?: number;
   } = {},
 ) {
@@ -467,6 +468,7 @@ export async function storePublication(
           materialChange(currentPredecessor.data, p) &&
           p.status !== "closed",
         ),
+        options.matchingUrgent ?? true,
       );
   });
   if (p.reviewRequired)
@@ -545,6 +547,7 @@ export async function ingest(
   const storeOptions = {
     extractDocuments: true,
     deferNotifications: options.deferNotifications,
+    matchingUrgent: mode !== "archive",
     ...(options.mode ? { lockTimeoutMs: 5000 } : {}),
   };
   // Activation comes only from protected server configuration. Job payloads and
@@ -577,7 +580,8 @@ export async function ingest(
             eq(publications.externalId, externalId),
           ),
         );
-      if (row) await enqueueSourceFollowUps(tx, row.id, true);
+      if (row)
+        await enqueueSourceFollowUps(tx, row.id, true, mode !== "archive");
     });
   };
   const collect = async (

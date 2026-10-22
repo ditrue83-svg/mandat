@@ -9,6 +9,7 @@ export async function enqueueSourceFollowUps(
   tx: DrizzleTransactionLike,
   publicationId: string,
   notify: boolean,
+  urgent = true,
 ) {
   const producer = new PgBoss({
     db: fromDrizzle(tx, sql),
@@ -18,6 +19,6 @@ export async function enqueueSourceFollowUps(
     migrate: false,
     createSchema: false,
   });
-  await requestPublicationMatching(producer, { publicationId }, true);
+  await requestPublicationMatching(producer, { publicationId }, urgent);
   if (notify) await requestNotificationSweeps(producer);
 }

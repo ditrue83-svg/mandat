@@ -33,6 +33,7 @@ import {
   NOTIFICATION_WORK_QUEUE,
   notificationWorkJob,
   type NotificationWorkJob,
+  requestNotificationDigest,
   requestNotificationDelivery,
   requestNotificationSweeps,
 } from "./notification-scheduling";
@@ -233,11 +234,7 @@ async function main() {
     "digest",
     { batchSize: 500, pollingIntervalSeconds: 0.5 },
     async () => {
-      await boss.send(
-        NOTIFICATION_WORK_QUEUE,
-        { kind: "digest" },
-        { singletonKey: "digest" },
-      );
+      await requestNotificationDigest(boss);
     },
   );
   await boss.work(

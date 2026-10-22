@@ -134,6 +134,14 @@ it("ends historical work between records, keeps partial status and resumes after
     (s) => s.key === FOGLIO_REFRESH_CURSOR,
   );
   expect(cursor.value).toMatchObject({ backfill: "40" });
+  // Historical recovery must not compete with new publications for urgency.
+  expect(
+    (
+      await pg.query<{ priority: number }>(
+        "select priority from pgboss.job where name='radar-publication'",
+      )
+    ).rows,
+  ).toEqual([{ priority: 0 }]);
   expect((await db.select().from(schema.sourceRuns))[0]).toMatchObject({
     source: "foglio-ti:archive",
     status: "partial",
