@@ -43,7 +43,8 @@ import {
 import { queueChangeNotices } from "./notifications";
 import { attachFoglioPdf } from "@/sources/foglio";
 import {
-  planFoglioDetails,
+  planFoglioLane,
+  type FoglioIngestionMode,
   FOGLIO_REFRESH_CURSOR,
 } from "@/sources/foglio-discovery";
 import { needsSimapDetail } from "@/sources/simap-discovery";
@@ -76,6 +77,7 @@ import {
   CompanyAiProcessingBlocked,
 } from "@/lib/ai-processing-permission";
 import { sourceEdition } from "@/lib/source-edition";
+import { enqueueSourceFollowUps } from "@/lib/source-notification-sweep";
 // A human source judgment is not an automatic company comparison. Version
 // this completed manual-review path so an earlier automatic cache cannot win
 // merely because it happens to carry the same documentary dependency.
@@ -110,7 +112,11 @@ export async function resolveIssue(key: string) {
 }
 export async function storePublication(
   p: Publication,
-  options: { extractDocuments?: boolean } = {},
+  options: {
+    extractDocuments?: boolean;
+    deferNotifications?: boolean;
+    lockTimeoutMs?: number;
+  } = {},
 ) {
   const db = getDb();
   const [previous] = await db
@@ -168,7 +174,9 @@ export async function storePublication(
   const canonicalId = p.canonicalKey || p.id;
   if (p.status === "open") {
     const otherSource = await db
-      .select()
+      .select({
+        data: sql<Publication>`jsonb_build_object('source',${publications.source},'title',${publications.data}->'title','buyer',${publications.data}->'buyer','publishedAt',${publications.data}->'publishedAt','canonicalKey',${publications.data}->'canonicalKey','sourceUrl',${publications.data}->'sourceUrl')`,
+      })
       .from(publications)
       .where(
         and(
@@ -248,6 +256,17 @@ export async function storePublication(
     );
   }
   await db.transaction(async (tx) => {
+    if (options.lockTimeoutMs !== undefined) {
+      if (
+        !Number.isInteger(options.lockTimeoutMs) ||
+        options.lockTimeoutMs < 100 ||
+        options.lockTimeoutMs > 30000
+      )
+        throw new Error("Invalid source lock timeout");
+      await tx.execute(
+        sql`select set_config('lock_timeout', ${String(options.lockTimeoutMs) + "ms"}, true)`,
+      );
+    }
     // New publications have no row to lock yet. Serialize their membership and
     // inherited feedback with canonical veto/reopen/claim, including the first
     // member. If an existing publication moves, acquire both groups in order.
@@ -439,6 +458,16 @@ export async function storePublication(
           isNull(matches.lotSuppression),
         ),
       );
+    if (options.deferNotifications)
+      await enqueueSourceFollowUps(
+        tx,
+        p.id,
+        Boolean(
+          currentPredecessor &&
+          materialChange(currentPredecessor.data, p) &&
+          p.status !== "closed",
+        ),
+      );
   });
   if (p.reviewRequired)
     await recordIssue(
@@ -449,7 +478,12 @@ export async function storePublication(
       p.id,
     );
   const prior = predecessor?.data;
-  if (prior && materialChange(prior, p) && p.status !== "closed")
+  if (
+    !options.deferNotifications &&
+    prior &&
+    materialChange(prior, p) &&
+    p.status !== "closed"
+  )
     await queueChangeNotices(prior, p);
   return true;
 }
@@ -468,8 +502,28 @@ export async function ingest(
   options: {
     documentaryMode?: "shadow";
     documentaryActivation?: DocumentaryAdoptionActivation;
+    mode?: FoglioIngestionMode;
+    budgetMs?: number;
+    deferNotifications?: boolean;
+    onProgress?: (progress: {
+      mode: FoglioIngestionMode;
+      processed: number;
+      imported: number;
+      newImported: number;
+      missing: number;
+      remainingSelected: number;
+      elapsedMs: number;
+    }) => void;
   } = {},
 ) {
+  const startedMono = performance.now();
+  const startedAt = new Date();
+  const mode = options.mode ?? "complete";
+  if (
+    options.budgetMs !== undefined &&
+    (!Number.isFinite(options.budgetMs) || options.budgetMs < 1)
+  )
+    throw new Error("Invalid ingestion time slice");
   const activation = options.documentaryActivation?.enabled
     ? assertDocumentaryAdoptionActivation(options.documentaryActivation)
     : null;
@@ -478,15 +532,54 @@ export async function ingest(
   const id = crypto.randomUUID();
   await getDb()
     .insert(sourceRuns)
-    .values({ id, source: adapter.id, status: "running" });
+    .values({
+      id,
+      source: mode === "archive" ? `${adapter.id}:archive` : adapter.id,
+      status: "running",
+    });
   let imported = 0,
     errors = 0;
   let retryableErrors = 0;
+  let processed = 0,
+    newImported = 0;
+  const storeOptions = {
+    extractDocuments: true,
+    deferNotifications: options.deferNotifications,
+    ...(options.mode ? { lockTimeoutMs: 5000 } : {}),
+  };
   // Activation comes only from protected server configuration. Job payloads and
   // source content never select a rollout; missing configuration stays legacy.
   const documentaryShadow =
     adapter.id === "simap" && options.documentaryMode === "shadow";
   const documentaryEnabled = adapter.id === "simap" && activation !== null;
+  let foglioPlan: ReturnType<typeof planFoglioLane> | null = null;
+  const clearCollectedIssue = async (externalId: string) => {
+    if (!options.deferNotifications)
+      return resolveIssue(`source-item:${adapter.id}:${externalId}`);
+    await getDb().transaction(async (tx) => {
+      const cleared = await tx
+        .update(issues)
+        .set({ resolvedAt: new Date() })
+        .where(
+          and(
+            eq(issues.key, `source-item:${adapter.id}:${externalId}`),
+            isNull(issues.resolvedAt),
+          ),
+        )
+        .returning({ id: issues.id });
+      if (!cleared.length) return;
+      const [row] = await tx
+        .select({ id: publications.id })
+        .from(publications)
+        .where(
+          and(
+            eq(publications.source, adapter.id),
+            eq(publications.externalId, externalId),
+          ),
+        );
+      if (row) await enqueueSourceFollowUps(tx, row.id, true);
+    });
+  };
   const collect = async (
     entry: Parameters<SourceAdapter["detail"]>[0],
     expectedRefresh?: DocumentaryRefreshExpectation | null,
@@ -517,9 +610,7 @@ export async function ingest(
         "Aggiornamento documentario sospeso: configurazione di adozione assente.",
       );
     if (!documentaryShadow)
-      return storePublication(await adapter.detail(entry), {
-        extractDocuments: true,
-      });
+      return storePublication(await adapter.detail(entry), storeOptions);
     const result = await collectSimapDocumentary(entry, (p) =>
       storePublication(p, { extractDocuments: true }),
     );
@@ -578,7 +669,6 @@ export async function ingest(
         : null;
     const inventory = await adapter.list(since);
     let entries = inventory;
-    let foglioPlan: ReturnType<typeof planFoglioDetails> | null = null;
     if (adapter.id === "foglio-ti") {
       const collected = await getDb()
         .select({
@@ -592,11 +682,17 @@ export async function ingest(
         .select({ value: settings.value })
         .from(settings)
         .where(eq(settings.key, FOGLIO_REFRESH_CURSOR));
-      foglioPlan = planFoglioDetails(inventory, collected, cursor?.value);
+      foglioPlan = planFoglioLane(
+        inventory,
+        collected,
+        cursor?.value,
+        mode,
+        startedAt,
+      );
       entries = foglioPlan.entries;
     }
     const fetched = new Set(inventory.map((e) => e.id));
-    if (adapter.refresh) {
+    if (adapter.refresh && mode !== "archive") {
       const tracked = await getDb()
         .select()
         .from(publications)
@@ -626,11 +722,12 @@ export async function ingest(
                   documentarySnapshotId: old.documentarySnapshotId,
                   buyer: old.data.buyer,
                 })
-              : await storePublication(await adapter.refresh(old.data), {
-                  extractDocuments: true,
-                });
+              : await storePublication(
+                  await adapter.refresh(old.data),
+                  storeOptions,
+                );
           if (updated) imported++;
-          await resolveIssue(`source-item:${adapter.id}:${old.externalId}`);
+          await clearCollectedIssue(old.externalId);
         } catch (error) {
           errors++;
           if (needsImmediateRetry(error)) retryableErrors++;
@@ -645,6 +742,8 @@ export async function ingest(
     }
     for (const e of entries) {
       signal?.throwIfAborted();
+      if (performance.now() - startedMono >= (options.budgetMs ?? Infinity))
+        break;
       if (
         collectedEditions &&
         !needsSimapDetail(e, collectedEditions.get(e.id), since)
@@ -656,9 +755,11 @@ export async function ingest(
             e,
             observedForList ? (observedForList.get(e.id) ?? null) : undefined,
           )
-        )
+        ) {
           imported++;
-        await resolveIssue(`source-item:${adapter.id}:${e.id}`);
+          if (foglioPlan?.missingIds.has(e.id)) newImported++;
+        }
+        await clearCollectedIssue(e.id);
       } catch (err) {
         errors++;
         if (needsImmediateRetry(err)) retryableErrors++;
@@ -675,27 +776,35 @@ export async function ingest(
               : "Errore di parsing",
           "critical",
         );
+      } finally {
+        processed++;
+        foglioPlan?.completeEntry(e.id);
       }
     }
+    const laneProgress = foglioPlan?.progress();
+    const missing = foglioPlan
+      ? Math.max(0, foglioPlan.missingCount - newImported)
+      : 0;
+    const remainingSelected = laneProgress?.remainingSelected ?? 0;
     if (foglioPlan) {
       await getDb()
         .insert(settings)
-        .values({ key: FOGLIO_REFRESH_CURSOR, value: foglioPlan.nextCursor })
+        .values({ key: FOGLIO_REFRESH_CURSOR, value: laneProgress!.nextCursor })
         .onConflictDoUpdate({
           target: settings.key,
-          set: { value: foglioPlan.nextCursor },
+          set: { value: laneProgress!.nextCursor },
         });
       const coverageKey = "source-coverage:foglio-ti";
-      if (foglioPlan.deferredCount)
+      if (missing)
         await recordIssue(
           coverageKey,
           "Storico del Foglio Ufficiale in recupero",
-          `${foglioPlan.discovered} pubblicazioni individuate; ${foglioPlan.deferredCount} dettagli storici ancora da raccogliere. La ricerca ufficiale resta disponibile.`,
+          `${inventory.length} pubblicazioni individuate; ${missing} dettagli storici ancora da raccogliere. La ricerca ufficiale resta disponibile.`,
           "warning",
         );
       else await resolveIssue(coverageKey);
     }
-    const deferred = foglioPlan?.deferredCount ?? 0;
+    const deferred = missing + remainingSelected;
     await getDb()
       .update(sourceRuns)
       .set({
@@ -705,13 +814,13 @@ export async function ingest(
         error: errors
           ? `${errors} pubblicazioni richiedono un controllo`
           : deferred
-            ? `${deferred} dettagli storici in recupero`
+            ? `${missing} dettagli storici in recupero; ${remainingSelected} controlli della corsia da completare`
             : null,
       })
       .where(eq(sourceRuns.id, id));
     if (errors) {
       await recordIssue(
-        `source:${adapter.id}`,
+        `source:${adapter.id}${mode === "archive" ? ":archive" : ""}`,
         "Fonte aggiornata parzialmente",
         `${errors} pubblicazioni richiedono un controllo; gli altri aggiornamenti sono stati elaborati.`,
         "critical",
@@ -720,7 +829,10 @@ export async function ingest(
         throw new PartialSourceImport(
           `Importazione parziale: ${errors} errori`,
         );
-    } else await resolveIssue(`source:${adapter.id}`);
+    } else
+      await resolveIssue(
+        `source:${adapter.id}${mode === "archive" ? ":archive" : ""}`,
+      );
   } catch (err) {
     // Item failures were already recorded as partial. A queue retry must not
     // erase successful imports or turn a specific hold into a total outage.
@@ -735,13 +847,46 @@ export async function ingest(
       })
       .where(eq(sourceRuns.id, id));
     await recordIssue(
-      `source:${adapter.id}`,
+      `source:${adapter.id}${mode === "archive" ? ":archive" : ""}`,
       "Fonte non aggiornata",
       err instanceof Error ? err.message : "Errore sconosciuto",
       "critical",
     );
     throw err;
   }
+  const progress = {
+    mode,
+    processed,
+    imported,
+    newImported,
+    missing: foglioPlan
+      ? Math.max(0, foglioPlan.missingCount - newImported)
+      : 0,
+    remainingSelected: foglioPlan?.progress().remainingSelected ?? 0,
+    elapsedMs: Math.round(performance.now() - startedMono),
+  };
+  if (options.mode)
+    await getDb()
+      .insert(settings)
+      .values({
+        key: `source_ingest_progress:${adapter.id}:${mode}`,
+        value: {
+          ...progress,
+          startedAt: startedAt.toISOString(),
+          finishedAt: new Date().toISOString(),
+        },
+      })
+      .onConflictDoUpdate({
+        target: settings.key,
+        set: {
+          value: {
+            ...progress,
+            startedAt: startedAt.toISOString(),
+            finishedAt: new Date().toISOString(),
+          },
+        },
+      });
+  options.onProgress?.(progress);
   return imported;
 }
 export async function enrichAndMatch(

@@ -10,14 +10,13 @@ import {
   recoverUncertainDeliveries,
 } from "./notifications";
 import { closeDb, getDb } from "@/db";
-import { settings, sourceRuns, publications } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { settings, publications } from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { databaseOptions } from "@/lib/database-config";
 import {
   LOT_RECONCILIATION_QUEUE,
   type LotReconciliationJob,
 } from "@/lib/lot-reconciliation";
-import { reconcileLotNotices } from "./lot-notifications";
 import { matchAdoptedPublication } from "./lot-matching";
 import { DOCUMENTARY_ADOPTION_CAPABILITY } from "@/lib/documentary-capability";
 import { loadDocumentaryRuntimeActivation } from "@/lib/documentary-runtime-config";
@@ -35,6 +34,12 @@ import {
   requestNotificationDelivery,
   requestNotificationSweeps,
 } from "./notification-scheduling";
+import {
+  SOURCE_INGEST_QUEUE,
+  requestSourceIngestion,
+  requestSourceIngestions,
+  type SourceIngestionJob,
+} from "./ingestion-scheduling";
 async function main() {
   assertProductionConfig();
   // Read once before registering consumers. A malformed release file stops
@@ -98,35 +103,69 @@ async function main() {
       await requestNotificationSweeps(boss);
     },
   );
-  await reconcileLotNotices();
-  await boss.work("ingest", { batchSize: 1 }, async ([job]) => {
-    const adapters = [
-      simap,
-      ...(process.env.FOGLIO_REUSE_CONFIRMED === "true" ? [foglio] : []),
-    ];
-    const errors: string[] = [];
-    for (const adapter of adapters) {
-      const [last] = await getDb()
-        .select()
-        .from(sourceRuns)
-        .where(eq(sourceRuns.source, adapter.id))
-        .orderBy(desc(sourceRuns.finishedAt))
-        .limit(1);
-      const now = DateTime.now().setZone("Europe/Zurich");
-      const since = now
-        .minus({ days: !last || now.hour === 8 ? 90 : 7 })
-        .toJSDate();
-      try {
-        await ingest(adapter, since, job.signal, { documentaryActivation });
-      } catch (e) {
-        errors.push(
-          e instanceof Error ? e.message : "Importazione non riuscita",
-        );
-      }
-    }
-    await boss.send("match", {}, { singletonKey: "all" });
-    if (errors.length) throw new Error(errors.join("; "));
+  await requestNotificationSweeps(boss);
+  await boss.createQueue(SOURCE_INGEST_QUEUE, {
+    policy: "stately",
+    retryLimit: 2,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 900,
   });
+  // Old queued refresh intents are dispatch-only. They coalesce into the same
+  // durable source/lane keys rather than replaying hours of identical imports.
+  await boss.work("ingest", { batchSize: 1 }, async () => {
+    await requestSourceIngestions(
+      boss,
+      process.env.FOGLIO_REUSE_CONFIRMED === "true",
+    );
+  });
+  // One consumer serializes source writes. Current updates outrank historical
+  // slices; neither source has a concurrent collector or mutable snapshot.
+  await boss.work<SourceIngestionJob>(
+    SOURCE_INGEST_QUEUE,
+    { batchSize: 1 },
+    async ([job]) => {
+      const { source, mode } = job.data;
+      if (
+        !["simap", "foglio-ti"].includes(source) ||
+        !["current", "archive"].includes(mode) ||
+        (source === "simap" && mode !== "current")
+      )
+        throw new Error("Invalid ingestion intent");
+      if (
+        source === "foglio-ti" &&
+        process.env.FOGLIO_REUSE_CONFIRMED !== "true"
+      )
+        return;
+      const adapter = source === "simap" ? simap : foglio;
+      let continueArchive = false;
+      await ingest(
+        adapter,
+        DateTime.now().setZone("Europe/Zurich").minus({ days: 7 }).toJSDate(),
+        job.signal,
+        {
+          documentaryActivation,
+          mode,
+          deferNotifications: true,
+          ...(source === "foglio-ti"
+            ? { budgetMs: mode === "archive" ? 60_000 : 120_000 }
+            : {}),
+          onProgress(progress) {
+            continueArchive =
+              mode === "archive" &&
+              progress.newImported > 0 &&
+              progress.missing > 0;
+          },
+        },
+      );
+      if (continueArchive)
+        await requestSourceIngestion(
+          boss,
+          { source: "foglio-ti", mode: "archive" },
+          true,
+        );
+    },
+  );
   await boss.work("match", { batchSize: 1 }, async () => {
     const rows = await getDb()
       .select({ id: publications.id })
