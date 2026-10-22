@@ -7,7 +7,16 @@ import { demoViewer, getDemoOpportunities } from "../src/lib/demo";
 import type { Publication } from "../src/lib/domain";
 import { matchesSearch } from "../src/lib/search";
 
-const context = vi.hoisted(() => ({ db: undefined as unknown }));
+const context = vi.hoisted(() => ({
+  db: undefined as unknown,
+  officialSearch: vi.fn(
+    async () =>
+      [] as import("../src/lib/official-catalog-search").OfficialSearchReceipt[],
+  ),
+}));
+vi.mock("@/lib/official-catalog-search", () => ({
+  searchOfficialCatalog: context.officialSearch,
+}));
 vi.mock("@/db", () => ({ getDb: () => context.db }));
 import {
   readCatalog,
@@ -21,7 +30,11 @@ import {
 } from "../src/lib/catalog";
 import { saveCatalogBookmark } from "../src/lib/company";
 import { readCanonicalFeedback } from "../src/lib/canonical-feedback";
-import { readCanonicalMatch, readCanonicalDisplayMatch, readCanonicalLegacyMatches } from "../src/lib/lot-readers";
+import {
+  readCanonicalMatch,
+  readCanonicalDisplayMatch,
+  readCanonicalLegacyMatches,
+} from "../src/lib/lot-readers";
 import { sourceItemBlocked } from "../src/lib/source-item-availability";
 import { listOpportunities } from "../src/lib/queries";
 const pg = new PGlite();
@@ -61,6 +74,7 @@ beforeAll(async () => {
   });
 });
 beforeEach(async () => {
+  context.officialSearch.mockReset().mockResolvedValue([]);
   vi.stubEnv("FOGLIO_REUSE_CONFIRMED", "false");
   await db.delete(schema.publications);
   await db.delete(schema.sourceRuns);
@@ -445,12 +459,16 @@ it("finds Morcote by giardino in the original plural text while preserving statu
     originalText,
     deadline: "2026-09-15T10:00:00Z",
   });
-  const result = await readCatalog(viewer, { q: "giardino" }, now);
+  const result = await readCatalog(
+    viewer,
+    { q: "giardino", stato: "open" },
+    now,
+  );
   expect(result.items.map((p) => p.id)).toEqual(["morcote"]);
   expect(result.items[0].originalText).toBe(originalText);
-  expect((await readCatalog(viewer, { q: "giardini" }, now)).items).toEqual(
-    result.items,
-  );
+  expect(
+    (await readCatalog(viewer, { q: "giardini", stato: "open" }, now)).items,
+  ).toEqual(result.items);
   expect(
     (await readCatalog(viewer, { q: "giardino", stato: "all" }, now)).total,
   ).toBe(2);
@@ -462,26 +480,24 @@ it("finds Morcote by giardino in the original plural text while preserving statu
 it("keeps a refused public discovery visible without making it a qualified publication", async () => {
   const { discoveryIssueDetail } = await import("../src/lib/catalog-discovery");
   const id = "11111111-1111-4111-8111-111111111111";
-  await db
-    .insert(schema.issues)
-    .values({
-      id: "discovery-failure",
-      key: `source-item:simap:${id}`,
-      title: "Pubblicazione non importata",
-      severity: "critical",
-      detail: discoveryIssueDetail(
-        {
-          id,
-          raw: {
-            title: { it: "Trasporto scolastico – interruzione" },
-            procOfficeName: { it: "Ente inventato" },
-            publicationDate: "2026-09-15",
-            pubType: "abandonment",
-          },
+  await db.insert(schema.issues).values({
+    id: "discovery-failure",
+    key: `source-item:simap:${id}`,
+    title: "Pubblicazione non importata",
+    severity: "critical",
+    detail: discoveryIssueDetail(
+      {
+        id,
+        raw: {
+          title: { it: "Trasporto scolastico – interruzione" },
+          procOfficeName: { it: "Ente inventato" },
+          publicationDate: "2026-09-15",
+          pubType: "abandonment",
         },
-        "missing_lot_details",
-      ),
-    });
+      },
+      "missing_lot_details",
+    ),
+  });
   const result = await readCatalog(
     viewer,
     { q: "trasporto", stato: "all" },
@@ -494,40 +510,206 @@ it("keeps a refused public discovery visible without making it a qualified publi
     sourceUrl: `https://www.simap.ch/it/project-detail/${id}`,
     saved: false,
   });
-  expect((await readCatalog(viewer, { q: "trasporto" }, now)).total).toBe(0);
+  expect(
+    (await readCatalog(viewer, { q: "trasporto", stato: "open" }, now)).total,
+  ).toBe(0);
   expect(await db.select().from(schema.publications)).toHaveLength(0);
 });
-
 
 it("conserva il bando non aggiornabile nel catalogo e nei salvati, sospendendo le valutazioni", async () => {
   await publication("unavailable");
   await saveCatalogBookmark(viewer.companyId, "unavailable", true, now);
-  expect((await readCanonicalLegacyMatches(viewer.companyId, ["unavailable"], now)).has("unavailable")).toBe(true);
-  await db.insert(schema.issues).values({id: "source-hold", key: "source-item:simap:unavailable", title: "Fonte non leggibile", detail: "HTTP 403 inventato", severity: "critical"});
-  expect(await sourceItemBlocked(db, {source: "simap", externalId: "unavailable"})).toBe(true);
+  expect(
+    (
+      await readCanonicalLegacyMatches(viewer.companyId, ["unavailable"], now)
+    ).has("unavailable"),
+  ).toBe(true);
+  await db
+    .insert(schema.issues)
+    .values({
+      id: "source-hold",
+      key: "source-item:simap:unavailable",
+      title: "Fonte non leggibile",
+      detail: "HTTP 403 inventato",
+      severity: "critical",
+    });
+  expect(
+    await sourceItemBlocked(db, { source: "simap", externalId: "unavailable" }),
+  ).toBe(true);
   const list = await readCatalog(viewer, {}, now);
-  expect(list.items[0]).toMatchObject({id: "unavailable", sourceUnavailable: true, saved: true});
-  expect(await readCatalogEntry(viewer, "unavailable", now)).toMatchObject({sourceUnavailable: true, assessment: "uncertain"});
+  expect(list.items[0]).toMatchObject({
+    id: "unavailable",
+    sourceUnavailable: true,
+    saved: true,
+  });
+  expect(await readCatalogEntry(viewer, "unavailable", now)).toMatchObject({
+    sourceUnavailable: true,
+    assessment: "uncertain",
+  });
   expect(await listOpportunities(viewer)).toEqual([]);
-  expect((await readCanonicalLegacyMatches(viewer.companyId, ["unavailable"], now)).has("unavailable")).toBe(false);
+  expect(
+    (
+      await readCanonicalLegacyMatches(viewer.companyId, ["unavailable"], now)
+    ).has("unavailable"),
+  ).toBe(false);
   const { eq } = await import("drizzle-orm");
-  await db.update(schema.issues).set({resolvedAt: now}).where(eq(schema.issues.id, "source-hold"));
-  expect(await sourceItemBlocked(db, {source: "simap", externalId: "unavailable"})).toBe(false);
-  expect((await readCatalogEntry(viewer, "unavailable", now))?.sourceUnavailable).toBe(false);
+  await db
+    .update(schema.issues)
+    .set({ resolvedAt: now })
+    .where(eq(schema.issues.id, "source-hold"));
+  expect(
+    await sourceItemBlocked(db, { source: "simap", externalId: "unavailable" }),
+  ).toBe(false);
+  expect(
+    (await readCatalogEntry(viewer, "unavailable", now))?.sourceUnavailable,
+  ).toBe(false);
 });
 it("presenta gli aggiornamenti parziali come incompleti anche dopo un vecchio successo", () => {
-  expect(catalogSourceStatus({status: "partial", startedAt: now, finishedAt: now}, now, now).state).toBe("partial");
+  expect(
+    catalogSourceStatus(
+      { status: "partial", startedAt: now, finishedAt: now },
+      now,
+      now,
+    ).state,
+  ).toBe("partial");
 });
-
 
 it("la vista per la pagina resta coerente con il lettore di qualità e non ripiega su un'edizione superata", async () => {
   await publication("display-old", {}, "display-group");
   const locked = await readCanonicalMatch(viewer.companyId, "display-old", now);
-  expect(await readCanonicalDisplayMatch(viewer.companyId, "display-old", now)).toEqual(locked);
-  await publication("display-new", {status: "cancelled", publishedAt: "2026-09-16T06:00:00Z"}, "display-group");
-  const refreshed = await readCanonicalDisplayMatch(viewer.companyId, "display-old", now);
+  expect(
+    await readCanonicalDisplayMatch(viewer.companyId, "display-old", now),
+  ).toEqual(locked);
+  await publication(
+    "display-new",
+    { status: "cancelled", publishedAt: "2026-09-16T06:00:00Z" },
+    "display-group",
+  );
+  const refreshed = await readCanonicalDisplayMatch(
+    viewer.companyId,
+    "display-old",
+    now,
+  );
   expect(refreshed?.publication.id).toBe("display-new");
   expect(refreshed?.publication.status).toBe("cancelled");
-  expect(refreshed).toEqual(await readCanonicalMatch(viewer.companyId, "display-old", now));
+  expect(refreshed).toEqual(
+    await readCanonicalMatch(viewer.companyId, "display-old", now),
+  );
   expect((await readCatalog(viewer, {}, now)).total).toBe(0);
+});
+
+it("includes expired and cancelled keyword matches by default while preserving an explicit open filter", async () => {
+  await publication("keyword-open", { title: "Verde speciale" });
+  await publication("keyword-expired", {
+    title: "Verde speciale",
+    deadline: "2026-09-01T00:00:00Z",
+  });
+  await publication("keyword-cancelled", {
+    title: "Verde speciale",
+    status: "cancelled",
+  });
+  const all = await readCatalog(viewer, { q: "verde" }, now);
+  expect(all.filters.stato).toBe("all");
+  expect(all.total).toBe(3);
+  expect(
+    (await readCatalog(viewer, { q: "verde", stato: "open" }, now)).total,
+  ).toBe(1);
+  expect((await readCatalog(viewer, {}, now)).total).toBe(1);
+});
+it("includes official keyword matches without inventing a current text match or reopening a cancelled source", async () => {
+  await publication("current-cancelled", {
+    title: "Edizione attuale senza il vocabolo",
+    originalText: "Testo attuale",
+    sectors: [],
+    status: "cancelled",
+  });
+  context.officialSearch.mockResolvedValue([
+    {
+      source: "simap",
+      state: "complete",
+      checkedAt: now.toISOString(),
+      hits: [
+        {
+          id: "current-cancelled",
+          externalId: "public-project",
+          source: "simap",
+          title: "Edizione precedente",
+          buyer: "Ente",
+          location: "Lugano",
+          publishedAt: "2026-09-01T00:00:00Z",
+          sourceUrl: "https://www.simap.ch/it/project-detail/public-project",
+          status: "unverified",
+        },
+      ],
+    },
+  ]);
+  const all = await readCatalog(viewer, { q: "termine-storico" }, now);
+  expect(all.items).toMatchObject([
+    {
+      id: "current-cancelled",
+      status: "cancelled",
+      officialSearchMatch: true,
+      title: "Edizione attuale senza il vocabolo",
+    },
+  ]);
+  expect(
+    (await readCatalog(viewer, { q: "termine-storico", stato: "open" }, now))
+      .total,
+  ).toBe(0);
+});
+it("exposes an unimported official discovery through the source without fabricating a sector, deadline, company match or save action", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  context.officialSearch.mockResolvedValue([
+    {
+      source: "simap",
+      state: "complete",
+      checkedAt: now.toISOString(),
+      hits: [
+        {
+          id: `simap-${id}`,
+          externalId: id,
+          source: "simap",
+          title: "Oggetto originale",
+          buyer: "Ente",
+          location: "Lugano",
+          publishedAt: "2026-09-01T00:00:00Z",
+          sourceUrl: `https://www.simap.ch/it/project-detail/${id}`,
+          status: "unverified",
+        },
+      ],
+    },
+  ]);
+  const result = await readCatalog(
+    viewer,
+    { q: "termine-storico", stato: "open", settore: "giardinaggio" },
+    now,
+  );
+  expect(result.items).toMatchObject([
+    {
+      collectionIncomplete: true,
+      status: "unverified",
+      sectors: [],
+      deadline: null,
+      saved: false,
+    },
+  ]);
+  expect(result.total).toBe(1);
+  expect(result.collectedCount).toBe(0);
+  expect(result.openCount).toBe(0);
+  expect(await db.select().from(schema.publications)).toEqual([]);
+  expect(await db.select().from(schema.matches)).toEqual([]);
+  expect(await db.select().from(schema.feedback)).toEqual([]);
+});
+it("signals an unavailable official comparison independently of locally successful ingestion", async () => {
+  context.officialSearch.mockResolvedValue([
+    {
+      source: "simap",
+      state: "unavailable",
+      checkedAt: now.toISOString(),
+      hits: [],
+    },
+  ]);
+  const result = await readCatalog(viewer, { q: "giardino" }, now);
+  expect(result.officialSearchIncomplete).toBe(true);
+  expect(result.officialSearch[0].state).toBe("unavailable");
 });

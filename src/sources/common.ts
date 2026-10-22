@@ -97,6 +97,7 @@ export async function fetchOfficialResponse(
   url: string,
   hosts: string[],
   maxBytes = 12_000_000,
+  signal?: AbortSignal,
 ): Promise<OfficialResponseReceipt> {
   safeOfficialUrl(url, hosts);
   const r = await fetch(url, {
@@ -105,7 +106,9 @@ export async function fetchOfficialResponse(
       "User-Agent": "MandatRadar/0.1",
     },
     redirect: "error",
-    signal: AbortSignal.timeout(25000),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(25000)])
+      : AbortSignal.timeout(25000),
     cache: "no-store",
   });
   if (!r.ok) {
@@ -150,7 +153,8 @@ export async function fetchOfficial(
   url: string,
   hosts: string[],
   maxBytes = 12_000_000,
+  signal?: AbortSignal,
 ) {
-  const response = await fetchOfficialResponse(url, hosts, maxBytes);
+  const response = await fetchOfficialResponse(url, hosts, maxBytes, signal);
   return Buffer.from(response.body).toString("utf8");
 }

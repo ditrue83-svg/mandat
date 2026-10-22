@@ -118,3 +118,35 @@ it("never skips a missing, changed or still-open notice, even outside the date w
     ),
   ).toBe(true);
 });
+it("rejects an empty page that still advertises a continuation", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({ projects: [], pagination: { lastItem: "more" } }),
+    ),
+  );
+  await expect(simap.list(new Date())).rejects.toThrow(
+    "pagina vuota con cursore",
+  );
+});
+it("does not overwrite a later canton edition with an older keyword hit", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string) =>
+      Response.json({
+        projects: [
+          {
+            ...raw,
+            publicationDate: new URL(input).searchParams.has("search")
+              ? "2024-01-01"
+              : "2025-01-01",
+          },
+        ],
+        pagination: { lastItem: null },
+      }),
+    ),
+  );
+  expect((await simap.list(new Date()))[0].raw.publicationDate).toBe(
+    "2025-01-01",
+  );
+});

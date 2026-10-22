@@ -14,10 +14,12 @@ export function CatalogFilters({
   statuses: Record<string, string>;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [status, setStatus] = useState(filters.stato);
+  const [statusChosen, setStatusChosen] = useState(false);
   const panelId = useId();
   const count =
     Number(filters.settore !== "all") +
-    Number(filters.stato !== "open") +
+    Number(status !== "open") +
     Number(filters.ordine !== "recenti");
   const custom = count > 0 || !!filters.q;
   return (
@@ -33,6 +35,9 @@ export function CatalogFilters({
               key={filters.q}
               aria-label="Cerca tra tutti i bandi raccolti"
               placeholder="Titolo, ente o luogo…"
+              onChange={() => {
+                if (!statusChosen) setStatus("all");
+              }}
               maxLength={200}
               enterKeyHint="search"
             />
@@ -82,8 +87,11 @@ export function CatalogFilters({
             Stato
             <select
               name="stato"
-              defaultValue={filters.stato}
-              key={filters.stato}
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value);
+                setStatusChosen(true);
+              }}
             >
               <option value="all">Tutti gli stati</option>
               {Object.entries(statuses).map(([value, label]) => (
@@ -114,6 +122,10 @@ export function CatalogFilters({
           </div>
         </div>
       </form>
+      <p className="catalog-scope-note">
+        La ricerca per parola chiave comprende anche lo storico. Puoi
+        restringerla scegliendo lo stato nei filtri.
+      </p>
       <div className="applied-filters" aria-label="Criteri applicati">
         <span>
           {filters.stato === "all"

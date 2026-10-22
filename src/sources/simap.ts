@@ -351,40 +351,68 @@ export function normalizeSimap(
   legacyRevisions.set(publication, fingerprint({ p, d }));
   return publication;
 }
+// Use the same official search engine as SIMAP, with no language, sector,
+// publication-type or date restrictions. Query matches may refer to an older
+// edition: a search receipt is discovery metadata, never an adopted source.
+export async function listSimapProjects(
+  filters: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<SourceEntry[]> {
+  const all = new Map<string, SourceEntry>();
+  let cursor: string | undefined;
+  const cursors = new Set<string>();
+  for (let page = 0; page < 500; page++) {
+    signal?.throwIfAborted();
+    const url = new URL(
+      "https://www.simap.ch/api/publications/v2/project/project-search",
+    );
+    for (const [key, value] of Object.entries(filters))
+      url.searchParams.set(key, value);
+    if (cursor) url.searchParams.set("lastItem", cursor);
+    const data = searchSchema.parse(
+      JSON.parse(
+        await fetchOfficial(
+          url.toString(),
+          ["www.simap.ch"],
+          12_000_000,
+          signal,
+        ),
+      ),
+    );
+    for (const p of data.projects) all.set(p.id, { id: p.id, raw: p });
+    const next = data.pagination.lastItem;
+    if (!next) return [...all.values()];
+    // An empty page with a continuation is not proof of complete coverage.
+    if (!data.projects.length)
+      throw new Error("Paginazione simap incompleta: pagina vuota con cursore");
+    if (cursors.has(next)) throw new Error("Paginazione simap ripetuta");
+    cursors.add(next);
+    cursor = next;
+  }
+  throw new Error("Paginazione simap incompleta: limite raggiunto");
+}
+export const SIMAP_TICINO_ISSUER = "1306538b-12b9-4874-801c-9d0e4fa18a4d";
 export const simap: SourceAdapter = {
   id: "simap",
   async list(_since) {
     const all = new Map<string, SourceEntry>();
-    // Discover the entire public history: an older notice may still be open.
-    // Never narrow discovery to a trade or project subtype.
-    for (const mode of ["canton", "issuer-ti", "Ticino", "Tessin"]) {
-      let cursor: string | undefined;
-      const cursors = new Set<string>();
-      for (let page = 0; page < 100; page++) {
-        const url = new URL(
-          "https://www.simap.ch/api/publications/v2/project/project-search",
-        );
-        if (mode === "canton")
-          url.searchParams.set("orderAddressCantons", "TI");
-        else if (mode === "issuer-ti")
-          // Official SIMAP issuer-tree node: Committente > Ticino.
-          url.searchParams.set(
-            "issuedByOrganizations",
-            "1306538b-12b9-4874-801c-9d0e4fa18a4d",
-          );
-        else url.searchParams.set("search", mode);
-        if (cursor) url.searchParams.set("lastItem", cursor);
-        const data = searchSchema.parse(
-          JSON.parse(await fetchOfficial(url.toString(), ["www.simap.ch"])),
-        );
-        for (const p of data.projects) all.set(p.id, { id: p.id, raw: p });
-        const next = data.pagination.lastItem;
-        if (!next || data.projects.length === 0) break;
-        if (cursors.has(next)) throw new Error("Paginazione simap ripetuta");
-        cursors.add(next);
-        cursor = next;
-        if (page === 99)
-          throw new Error("Paginazione simap incompleta: limite raggiunto");
+    for (const filters of [
+      { orderAddressCantons: "TI" },
+      { issuedByOrganizations: SIMAP_TICINO_ISSUER },
+      { search: "Ticino" },
+      { search: "Tessin" },
+    ] as Record<string, string>[]) {
+      for (const entry of await listSimapProjects(filters)) {
+        const previous = all.get(entry.id);
+        // A keyword scope must never overwrite a later edition discovered by
+        // canton/issuer. Same-day disagreements are resolved by the detail/header
+        // guards during adoption, not by assuming a favourable lifecycle state.
+        if (
+          !previous ||
+          String(entry.raw.publicationDate) >
+            String(previous.raw.publicationDate)
+        )
+          all.set(entry.id, entry);
       }
     }
     return [...all.values()];

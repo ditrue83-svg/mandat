@@ -137,6 +137,34 @@ export function CatalogView({
           </p>
         </details>
       </section>
+      {!!data.officialSearch?.length && (
+        <section
+          className={`source-summary-line${data.officialSearchIncomplete ? " has-problem" : ""}`}
+          role={data.officialSearchIncomplete ? "alert" : "status"}
+          aria-label="Confronto della ricerca con le fonti ufficiali"
+        >
+          <div>
+            <strong>Ricerca confrontata con le fonti ufficiali.</strong>{" "}
+            {data.officialSearch
+              .map(
+                (source) =>
+                  `${source.source === "simap" ? "SIMAP" : "Foglio Ufficiale TI"}: ${source.state === "complete" ? `${source.count} risultati ufficiali` : source.state === "query-too-short" ? "servono almeno 3 caratteri" : "confronto incompleto"}`,
+              )
+              .join(" · ")}
+          </div>
+          <p>
+            {data.officialSearchIncomplete
+              ? "Non possiamo confermare una ricerca completa in questo momento: una fonte non ha concluso il confronto. Riprova; i risultati disponibili restano visibili."
+              : "Sono inclusi anche i risultati individuati sulla fonte e non ancora importati. Queste schede aprono direttamente la pubblicazione ufficiale."}
+          </p>
+          <p>
+            SIMAP può trovare parole anche in edizioni precedenti. Mandat
+            conserva lo stato dell’edizione attualmente raccolta. Le schede non
+            ancora importate restano visibili anche con un filtro di settore o
+            “In corso”, con attività e scadenza da verificare sulla fonte.
+          </p>
+        </section>
+      )}
       {data.unclassifiedCount > 0 &&
         data.filters.settore !== "da-classificare" && (
           <p className="source-summary-line">
@@ -175,7 +203,7 @@ export function CatalogView({
               description={
                 publication.collectionIncomplete
                   ? publication.originalText
-                  : tenderWorkExcerpt(publication)
+                  : `${publication.officialSearchMatch ? "Trovato anche nella ricerca ufficiale. " : ""}${tenderWorkExcerpt(publication)}`
               }
               buyer={publication.buyer}
               location={publication.location}
@@ -215,16 +243,20 @@ export function CatalogView({
         <section className="empty-state panel">
           <Search size={32} aria-hidden="true" />
           <h2>
-            {data.collectedCount === 0
-              ? "Nessun bando è ancora disponibile nella raccolta."
-              : "Nessun risultato corrisponde ai filtri."}
+            {data.officialSearchIncomplete
+              ? "Ricerca incompleta: nessun risultato disponibile finora."
+              : data.collectedCount === 0
+                ? "Nessun bando è ancora disponibile nella raccolta."
+                : "Nessun risultato corrisponde ai filtri."}
           </h2>
           <p>
-            {data.collectedCount === 0
-              ? "Controlla lo stato delle fonti: un errore di raccolta viene segnalato separatamente."
-              : data.filters.stato === "open" && !hasCustomFilters
-                ? "Non risultano bandi in corso. Puoi consultare anche gli altri stati."
-                : "Prova meno parole oppure azzera settore, stato e ordinamento."}
+            {data.officialSearchIncomplete
+              ? "Una fonte non ha completato il confronto. Riprova: questo risultato non conferma l’assenza di bandi sulla fonte ufficiale."
+              : data.collectedCount === 0
+                ? "Controlla lo stato delle fonti: un errore di raccolta viene segnalato separatamente."
+                : data.filters.stato === "open" && !hasCustomFilters
+                  ? "Non risultano bandi in corso. Puoi consultare anche gli altri stati."
+                  : "Prova meno parole oppure azzera settore, stato e ordinamento."}
           </p>
           <Link
             prefetch={false}

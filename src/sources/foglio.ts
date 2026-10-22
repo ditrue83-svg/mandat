@@ -1,7 +1,7 @@
 import { XMLParser } from "fast-xml-parser";
-import { DateTime } from "luxon";
 import { z } from "zod";
 import type { Publication } from "@/lib/domain";
+import { foglioStatus } from "./foglio-lifecycle";
 import {
   classifySectors,
   fetchOfficial,
@@ -67,7 +67,7 @@ export function normalizeFoglio(text: string): Publication {
         `${deadlineMatch[1].split(".").reverse().join("-")}T${deadlineMatch[2]}`,
       )
     : null;
-  const status: Publication["status"] =
+  const legacyStatus: Publication["status"] =
     m.publicationState === "CANCELLED" ||
     /^(?:annullamento|revoca|interruzione)/i.test(title)
       ? "cancelled"
@@ -76,6 +76,7 @@ export function normalizeFoglio(text: string): Publication {
         : /^Bando(?:\s*[-–:]|\s+di\s+concorso)/i.test(title)
           ? "open"
           : "closed";
+  const status = foglioStatus(m.publicationState, title, c.contractNotice);
   const location =
     body
       .match(
@@ -134,39 +135,61 @@ export function normalizeFoglio(text: string): Publication {
     ],
     reviewRequired: reviewReasons.length > 0,
     reviewReasons,
-    revision: fingerprint(root),
+    revision: `${status === legacyStatus ? "" : "foglio-lifecycle-v2:"}${fingerprint(root)}`,
   };
+}
+export async function listFoglioPublications(
+  filters: Record<string, string> = {},
+  signal?: AbortSignal,
+): Promise<SourceEntry[]> {
+  const result = new Map<string, SourceEntry>();
+  for (const state of ["PUBLISHED", "CANCELLED"]) {
+    const ids = new Set<string>();
+    for (let page = 0; page < 500; page++) {
+      signal?.throwIfAborted();
+      const url = new URL("https://amtsblattportal.ch/api/v1/publications/xml");
+      Object.entries({
+        ...filters,
+        tenant: "kabti",
+        publicationStates: state,
+        rubrics: "OB-TI",
+        "pageRequest.size": "100",
+        "pageRequest.page": String(page),
+        // Old notices can be corrected or cancelled today. Publication date
+        // alone is not an update cursor. Scan metadata for the whole history.
+        "pageRequest.sortOrders": "column:UPDATE_DATE|direction:DESC",
+      }).forEach(([k, v]) => url.searchParams.set(k, v));
+      const data = parseFoglioList(
+        await fetchOfficial(
+          url.toString(),
+          ["amtsblattportal.ch"],
+          12_000_000,
+          signal,
+        ),
+      );
+      for (const entry of data.entries) {
+        if (ids.has(entry.id))
+          throw new Error(
+            "Elenco Foglio Ufficiale incompleto: pagina ripetuta",
+          );
+        ids.add(entry.id);
+        result.set(entry.id, entry);
+      }
+      if ((page + 1) * 100 >= data.total) {
+        if (ids.size !== data.total)
+          throw new Error("Conteggio Foglio Ufficiale non riconciliato");
+        break;
+      }
+      if (data.entries.length === 0 || page === 499)
+        throw new Error("Elenco Foglio Ufficiale incompleto");
+    }
+  }
+  return [...result.values()];
 }
 export const foglio: SourceAdapter = {
   id: "foglio-ti",
-  async list(since) {
-    const result: SourceEntry[] = [];
-    for (const state of ["PUBLISHED", "CANCELLED"]) {
-      for (let page = 0; page < 100; page++) {
-        const url = new URL(
-          "https://amtsblattportal.ch/api/v1/publications/xml",
-        );
-        Object.entries({
-          tenant: "kabti",
-          publicationStates: state,
-          rubrics: "OB-TI",
-          "publicationDate.start": since.toISOString().slice(0, 10),
-          "publicationDate.end": DateTime.now()
-            .setZone("Europe/Zurich")
-            .toISODate()!,
-          "pageRequest.size": "100",
-          "pageRequest.page": String(page),
-        }).forEach(([k, v]) => url.searchParams.set(k, v));
-        const data = parseFoglioList(
-          await fetchOfficial(url.toString(), ["amtsblattportal.ch"]),
-        );
-        result.push(...data.entries);
-        if ((page + 1) * 100 >= data.total) break;
-        if (data.entries.length === 0 || page === 99)
-          throw new Error("Elenco Foglio Ufficiale incompleto");
-      }
-    }
-    return result;
+  async list(_since) {
+    return listFoglioPublications();
   },
   async detail(entry) {
     const id = z.uuid().parse(entry.id);

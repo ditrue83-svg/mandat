@@ -12,6 +12,10 @@ import {
   publicationDocumentarySnapshots,
 } from "@/db/schema";
 import { readDiscoveryIssue } from "./catalog-discovery";
+import {
+  searchOfficialCatalog,
+  type OfficialSearchReceipt,
+} from "./official-catalog-search";
 import { catalogSearchText } from "./catalog-search";
 import { plainText, publicationDate } from "@/sources/common";
 import {
@@ -48,7 +52,7 @@ export type CatalogEntry = {
   publishedAt: string;
   deadline: string | null;
   valueChf: number | null;
-  status: Publication["status"] | "expired";
+  status: Publication["status"] | "expired" | "unverified";
   sectors: Publication["sectors"];
   needsSectorClassification: boolean;
   originalText: string;
@@ -56,6 +60,7 @@ export type CatalogEntry = {
   saved: boolean;
   collectionIncomplete?: boolean;
   sourceUnavailable?: boolean;
+  officialSearchMatch?: boolean;
 };
 export type CatalogFilters = {
   q?: string;
@@ -95,6 +100,7 @@ export const CATALOG_STATUS_LABELS = {
   closed: "Concluso",
   cancelled: "Annullato",
   awarded: "Aggiudicato",
+  unverified: "Stato da verificare sulla fonte",
 };
 
 function publicUrl(value: string) {
@@ -202,11 +208,19 @@ export async function readCatalog(
   const filters = {
     q: (input.q ?? "").trim().slice(0, 200),
     settore: sectorFilter(input.settore),
-    stato: ["all", "expired", "cancelled", "awarded", "closed"].includes(
-      input.stato ?? "",
-    )
+    stato: [
+      "all",
+      "open",
+      "expired",
+      "cancelled",
+      "awarded",
+      "closed",
+      "unverified",
+    ].includes(input.stato ?? "")
       ? input.stato!
-      : "open",
+      : (input.q ?? "").trim()
+        ? "all"
+        : "open",
     ordine: input.ordine === "scadenza" ? "scadenza" : "recenti",
   };
   const foglioAvailable = sourceAvailable("foglio-ti");
@@ -270,6 +284,21 @@ export async function readCatalog(
           .limit(1),
   ]);
   const collectedAt = lastSuccessful[0]?.at ?? null;
+  const officialSearch: OfficialSearchReceipt[] =
+    !viewer.demo && filters.q
+      ? await searchOfficialCatalog(
+          filters.q,
+          foglioAvailable,
+          new Set(
+            publicationsFound
+              .filter((p) => p.source === "simap")
+              .map((p) => p.externalId),
+          ),
+        )
+      : [];
+  const officialIds = new Set(
+    officialSearch.flatMap((s) => s.hits.map((h) => h.id)),
+  );
   const savedByCanonical = viewer.demo
     ? new Map<string, { saved: boolean; dismissed: boolean }>()
     : await readCanonicalFeedbackBatch(
@@ -290,6 +319,7 @@ export async function readCatalog(
       savedByCanonical.get(p.canonicalId)?.saved ?? false,
     ),
     sourceUnavailable: blocked.has(sourceItemKey(p)),
+    officialSearchMatch: officialIds.has(p.id),
   }));
   if (!viewer.demo) {
     const pending = await getDb()
@@ -334,16 +364,44 @@ export async function readCatalog(
       searchById.set(item.id, `${title} ${buyer}`);
     }
   }
+  const collectedCount = all.length;
+  for (const hit of officialSearch.flatMap((s) => s.hits)) {
+    if (all.some((p) => p.id === hit.id)) continue;
+    // Metadata is visible while documentary collection catches up. It is never
+    // promoted to an open tender, a validated assessment or a company match.
+    if (publicationDate(hit.publishedAt, 8) > now.toISOString()) continue;
+    all.push({
+      ...hit,
+      deadline: null,
+      valueChf: null,
+      sectors: [],
+      needsSectorClassification: true,
+      originalText:
+        "Trovato nella ricerca ufficiale. Consulta la fonte per l’edizione, le condizioni e la scadenza aggiornate; i dettagli in Mandat sono in preparazione.",
+      documents: [],
+      saved: false,
+      collectionIncomplete: true,
+      officialSearchMatch: true,
+    });
+  }
   const filtered = all
     .filter(
       (p) =>
-        (filters.stato === "all" || p.status === filters.stato) &&
-        matchesSectorFilter(
+        (filters.stato === "all" ||
+          p.status === filters.stato ||
+          (filters.stato === "open" &&
+            p.collectionIncomplete &&
+            p.status === "unverified")) &&
+        (matchesSectorFilter(
           p.sectors,
           filters.settore,
           p.needsSectorClassification,
-        ) &&
-        matchesSearch(searchById.get(p.id) ?? "", filters.q),
+        ) ||
+          (p.collectionIncomplete &&
+            officialIds.has(p.id) &&
+            p.needsSectorClassification)) &&
+        (officialIds.has(p.id) ||
+          matchesSearch(searchById.get(p.id) ?? "", filters.q)),
     )
     .sort((a, b) => {
       if (filters.ordine === "scadenza") {
@@ -391,7 +449,7 @@ export async function readCatalog(
     page,
     pages,
     total: filtered.length,
-    collectedCount: all.length,
+    collectedCount,
     unclassifiedCount: all.filter(
       (p) =>
         p.needsSectorClassification &&
@@ -405,6 +463,13 @@ export async function readCatalog(
         originalText: p.originalText.slice(0, 320),
       })),
     foglioAvailable,
+    officialSearch: officialSearch.map(({ hits, ...receipt }) => ({
+      ...receipt,
+      count: hits.length,
+    })),
+    officialSearchIncomplete: officialSearch.some(
+      (s) => s.state !== "complete",
+    ),
     collectedAt: collectedAt?.toISOString() ?? null,
     sourceStatus,
     sources,
@@ -568,6 +633,7 @@ export function collectionReturnHref(
         "cancelled",
         "awarded",
         "closed",
+        "unverified",
       ].includes(stato ?? "")
         ? stato
         : undefined,

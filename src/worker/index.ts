@@ -184,7 +184,7 @@ async function main() {
   };
   await boss.work("heartbeat", { batchSize: 1 }, heartbeat);
   await heartbeat();
-  await boss.schedule("ingest", "5 * * * *", {}, { tz: "Europe/Zurich" });
+  await boss.schedule("ingest", "*/10 * * * *", {}, { tz: "Europe/Zurich" });
   await boss.schedule("match", "10 * * * *", {}, { tz: "Europe/Zurich" });
   await boss.schedule("digest", "*/10 9-20 * * *", {}, { tz: "Europe/Zurich" });
   await boss.schedule("send", "*/5 * * * *", {}, { tz: "Europe/Zurich" });

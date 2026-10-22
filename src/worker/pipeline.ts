@@ -25,6 +25,7 @@ import {
   matches,
   companies,
   feedback,
+  settings,
 } from "@/db/schema";
 import type { Publication } from "@/lib/domain";
 import type { SourceAdapter } from "@/sources/common";
@@ -41,6 +42,10 @@ import {
 } from "@/lib/cpv-service-signals";
 import { queueChangeNotices } from "./notifications";
 import { attachFoglioPdf } from "@/sources/foglio";
+import {
+  planFoglioDetails,
+  FOGLIO_REFRESH_CURSOR,
+} from "@/sources/foglio-discovery";
 import { needsSimapDetail } from "@/sources/simap-discovery";
 import { legacySimapRevision, readSimapRefreshEntry } from "@/sources/simap";
 import {
@@ -571,8 +576,26 @@ export async function ingest(
             ).map(({ externalId, ...edition }) => [externalId, edition]),
           )
         : null;
-    const entries = await adapter.list(since);
-    const fetched = new Set(entries.map((e) => e.id));
+    const inventory = await adapter.list(since);
+    let entries = inventory;
+    let foglioPlan: ReturnType<typeof planFoglioDetails> | null = null;
+    if (adapter.id === "foglio-ti") {
+      const collected = await getDb()
+        .select({
+          externalId: publications.externalId,
+          status: publications.status,
+          deadline: publications.deadline,
+        })
+        .from(publications)
+        .where(eq(publications.source, adapter.id));
+      const [cursor] = await getDb()
+        .select({ value: settings.value })
+        .from(settings)
+        .where(eq(settings.key, FOGLIO_REFRESH_CURSOR));
+      foglioPlan = planFoglioDetails(inventory, collected, cursor?.value);
+      entries = foglioPlan.entries;
+    }
+    const fetched = new Set(inventory.map((e) => e.id));
     if (adapter.refresh) {
       const tracked = await getDb()
         .select()
@@ -654,15 +677,36 @@ export async function ingest(
         );
       }
     }
+    if (foglioPlan) {
+      await getDb()
+        .insert(settings)
+        .values({ key: FOGLIO_REFRESH_CURSOR, value: foglioPlan.nextCursor })
+        .onConflictDoUpdate({
+          target: settings.key,
+          set: { value: foglioPlan.nextCursor },
+        });
+      const coverageKey = "source-coverage:foglio-ti";
+      if (foglioPlan.deferredCount)
+        await recordIssue(
+          coverageKey,
+          "Storico del Foglio Ufficiale in recupero",
+          `${foglioPlan.discovered} pubblicazioni individuate; ${foglioPlan.deferredCount} dettagli storici ancora da raccogliere. La ricerca ufficiale resta disponibile.`,
+          "warning",
+        );
+      else await resolveIssue(coverageKey);
+    }
+    const deferred = foglioPlan?.deferredCount ?? 0;
     await getDb()
       .update(sourceRuns)
       .set({
-        status: errors ? "partial" : "success",
+        status: errors || deferred ? "partial" : "success",
         finishedAt: new Date(),
         imported,
         error: errors
           ? `${errors} pubblicazioni richiedono un controllo`
-          : null,
+          : deferred
+            ? `${deferred} dettagli storici in recupero`
+            : null,
       })
       .where(eq(sourceRuns.id, id));
     if (errors) {
