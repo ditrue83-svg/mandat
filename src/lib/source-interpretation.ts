@@ -30,7 +30,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v88-summary-original-fields";
+  "documentary-source-interpretation-v89-original-action-scope";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -1263,26 +1263,26 @@ function buildOwnedSelectionResponseSchema(
     );
   const ownedKnown = known
     .omit({ evidence: true })
-    .extend({ evidenceDeclaration: declaration });
+    .extend({ evidenceDeclaration: declaration, roleEvidence: known.shape.roleEvidence.omit({scope:true}) });
   const ownedAny = z.union([
     alternatives[0]
       .omit({ evidence: true })
-      .extend({ evidenceDeclaration: declaration }),
+      .extend({ evidenceDeclaration: declaration, roleEvidence: alternatives[0].shape.roleEvidence.omit({scope:true}) }),
     alternatives[1]
       .omit({ evidence: true })
-      .extend({ evidenceDeclaration: declaration }),
+      .extend({ evidenceDeclaration: declaration, roleEvidence: alternatives[1].shape.roleEvidence.omit({scope:true}) }),
   ]);
   return z.discriminatedUnion("status", [
     previous.options[0].extend({
-      evidenceFormat: z.literal("source_selections_v21_owned"),
+      evidenceFormat: z.literal("source_selections_v22_owned"),
       components: z.array(ownedKnown).min(1).max(64),
     }),
     previous.options[1].extend({
-      evidenceFormat: z.literal("source_selections_v21_owned"),
+      evidenceFormat: z.literal("source_selections_v22_owned"),
       components: z.array(ownedAny).max(64),
     }),
     previous.options[2].extend({
-      evidenceFormat: z.literal("source_selections_v21_owned"),
+      evidenceFormat: z.literal("source_selections_v22_owned"),
       components: z.array(ownedAny).max(64),
     }),
   ]);
@@ -1291,7 +1291,7 @@ function decodeOwnedSelectionResponse(
   response: unknown,
   request: SourceInterpretationRequest,
 ) {
-  if (request.providerFormat !== "source_selections_v21_owned")
+  if (request.providerFormat !== "source_selections_v22_owned")
     throw new Error("Owned selection protocol does not match its request");
   const value = buildOwnedSelectionResponseSchema(
     request.classificationContext,
@@ -1316,8 +1316,6 @@ function decodeOwnedSelectionResponse(
   const components = value.components.map((component) => {
     const action = selected(component.roleEvidence.actionSelection),
       object = selected(component.meaning.objectSelection);
-    if (action.scope !== component.roleEvidence.scope)
-      throw new Error("Owned action selection crosses declared scope");
     const selectedRefs = [
       ...new Set([...action.sourceRefs, ...object.sourceRefs]),
     ];
@@ -1343,7 +1341,9 @@ function decodeOwnedSelectionResponse(
         "Owned component evidence exceeds original reference limit",
       );
     const { evidenceDeclaration: _declaration, ...declared } = component;
-    return { ...declared, evidence: refs.map((sourceRef) => ({ sourceRef })) };
+    // V22 selects the original action; its original scope is copied with it.
+    // No semantic verdict or separately guessed scope is substituted.
+    return { ...declared, roleEvidence: {...declared.roleEvidence, scope: action.scope}, evidence: refs.map((sourceRef) => ({ sourceRef })) };
   });
   // This is only the new contract's explicit evidence projection. Never route
   // a v20 response here or repair its separately declared evidence array.
@@ -1665,7 +1665,7 @@ function decodeProviderResponse(
     !("evidenceFormat" in response)
   )
     return response;
-  if ((response as {evidenceFormat?:string}).evidenceFormat === "source_selections_v21_owned") return decodeOwnedSelectionResponse(response,request);
+  if ((response as {evidenceFormat?:string}).evidenceFormat === "source_selections_v22_owned") return decodeOwnedSelectionResponse(response,request);
   if (
     (response as { evidenceFormat?: string }).evidenceFormat ===
     "source_selections_v20"
@@ -2316,7 +2316,7 @@ export function buildSourceInterpretationRequest(
       ? {}
       : {
           acceptancePolicy: RADAR_ACCEPTANCE_POLICY,
-          evidenceProtocol: options.legacyEvidenceSelectionProtocolForRegression ? "source_selections_v20" : "source_selections_v21_owned",
+          evidenceProtocol: options.legacyEvidenceSelectionProtocolForRegression ? "source_selections_v20" : "source_selections_v22_owned",
           summaryEvidenceRule:
             "targetRef cita il target; summaryAdditionalSourceRefs aggiunge prove originali proprie: sN testi, fN valori strutturati, senza cambiarne valore o ambito. Non usare gN/literalSelectionId, inventare o ripetere refs, omettere prove o dedurre prestazioni da metadati.",
           selectionRules:
@@ -2339,7 +2339,7 @@ export function buildSourceInterpretationRequest(
             "Più fasi o complessità non bastano per other. Una funzione esecutiva senza ruolo più specifico usa execute se attestata. other richiede azione nota realmente fuori dai ruoli definiti; valuta tutte le azioni con tassonomia condivisa, senza inventarne alcuna. Nessuna deroga generale per alternative, noleggio o offerte parziali; limiti e collegamenti richiedono contratto originale verificabile.",
           originalLiteralRule: options.legacyEvidenceSelectionProtocolForRegression
             ? "Solo gli ID nello schema sono citabili; whitespace conservato integralmente nel dizionario non è una citazione. actionSelection/objectSelection scelgono solo literalSelectionId dal catalogo: ogni parte è intervallo originale intero entro600, immutabile e nel proprio scope. Il codice copia senza riscritture/apostrofi/HTML modificati. La scelta richiede la propria evidence completa, mai ereditata; IDs non approvano significati o ruoli. quoteSelection di dettagli facoltativi mantiene il formato letterale dichiarato. Per affermazioni più precise scegli una parte che ne contenga la prova; non inventare citazioni. Le ancore o exactText non sono il formato delle selezioni componenti."
-            : "v21: evidenceDeclaration.basis dichiara ESPLICITAMENTE action/object+additionalEvidence, mai evidence da prosa. I proprietari sN di action/object sono già nell'evidence: lo stesso sN è dichiarato una volta. additionalEvidence per nuovi proprietari, mai lo stesso sN anche per altra frase. Un gN aggiuntivo espande tutti i suoi sN: non sovrapporlo a sN già scelti o aggiuntivi; scegli solo i nuovi sN pertinenti. Ogni fatto richiede prova propria: proprietario presente e frammento non approvano altri fatti. ID FR resta FR, non IT per equivalenza; altri scope/comparti richiedono prova propria. Solo ID dello schema; whitespace non è citazione. actionSelection/objectSelection: solo literalSelectionId, intervallo originale intero entro600, immutabile nel suo scope; copia senza riscritture/apostrofi/HTML alterati. Evidence propria completa, mai ereditata; ID non approva significati/ruoli. quoteSelection facoltativa: formato letterale dichiarato. Affermazioni precise: scegli parti che le provino; non inventare citazioni. Né ancore né exactText per componenti.",
+            : "v22: roleEvidence non ha scope: si copia dall'actionSelection originale. evidenceDeclaration.basis dichiara action/object+additionalEvidence, mai prove da prosa. I proprietari sN di action/object sono già nell'evidence: lo stesso sN è dichiarato una volta. additionalEvidence solo per nuovi proprietari, anche per frasi diverse. Un gN aggiuntivo espande tutti i suoi sN: non sovrapporlo a sN scelti o aggiuntivi. Ogni fatto richiede prova propria: proprietario e frammento non approvano altri fatti; niente prove ereditate. ID FR resta FR; altri ambiti richiedono prova propria. Solo ID dello schema, mai whitespace. actionSelection/objectSelection: solo literalSelectionId, intero originale entro600, scope originale, senza riscritture/apostrofi/HTML alterati, non ancore/exactText. Precisione richiede parti che la provino; nessuna citazione inventata. quoteSelection facoltativa resta letterale.",
         }),
     ...(sourceIdentityAssertions.length ? { sourceIdentityAssertions } : {}),
     rules: [
@@ -2741,7 +2741,7 @@ export function buildSourceInterpretationRequest(
     selectedIds: body.passages.map((passage) => passage.id),
     providerFormat: options.legacyProviderFormatForRegression
       ? "component_quotations_v8"
-      : options.legacyEvidenceSelectionProtocolForRegression ? "source_selections_v20" : "source_selections_v21_owned",
+      : options.legacyEvidenceSelectionProtocolForRegression ? "source_selections_v20" : "source_selections_v22_owned",
     version: SOURCE_INTERPRETATION_VERSION,
     sourceKey,
     inputHash: digest({
@@ -2805,7 +2805,7 @@ export function validateSourceInterpretation(
   }
   if (
     value.status === "resolved" ||
-    ["source_selections_v20","source_selections_v21_owned"].includes(request.providerFormat)
+    ["source_selections_v20","source_selections_v22_owned"].includes(request.providerFormat)
   ) {
     for (const row of value.details) {
       if (
@@ -2832,7 +2832,7 @@ export function validateSourceInterpretation(
         row.sourceRefs.some((ref) => family.sourceRefs.includes(ref)),
       );
       if (
-        ["source_selections_v20","source_selections_v21_owned"].includes(request.providerFormat) &&
+        ["source_selections_v20","source_selections_v22_owned"].includes(request.providerFormat) &&
         rows.some(
           (row) =>
             row.scope !== family.scope ||
@@ -2843,7 +2843,7 @@ export function validateSourceInterpretation(
           "Contract clause detail must cite its own scoped source",
         );
       if (
-        ["source_selections_v20","source_selections_v21_owned"].includes(request.providerFormat) &&
+        ["source_selections_v20","source_selections_v22_owned"].includes(request.providerFormat) &&
         family.originalScalarExplanation &&
         rows.some((row) => row.kind !== "execution_condition")
       )
@@ -2941,7 +2941,7 @@ export function validateSourceInterpretation(
       "Source interpretation requires selected-target service evidence",
     );
   if (
-    ["source_selections_v20","source_selections_v21_owned"].includes(request.providerFormat) &&
+    ["source_selections_v20","source_selections_v22_owned"].includes(request.providerFormat) &&
     !value.summarySourceRefs.includes(value.targetRef)
   )
     throw new Error("Source summary must cite its own selected target");
@@ -3244,7 +3244,7 @@ export function recordSourceInterpretation(
   // New raw owned responses must enter through their strict decoder. Saved
   // canonical records are checked separately by readSourceInterpretation.
   if (
-    request.providerFormat === "source_selections_v21_owned" &&
+    request.providerFormat === "source_selections_v22_owned" &&
     (typeof response !== "object" ||
       response === null ||
       !("evidenceFormat" in response) ||

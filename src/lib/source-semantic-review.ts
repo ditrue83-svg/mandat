@@ -45,7 +45,7 @@ import {
 } from "./source-contract-clauses";
 
 export const SOURCE_SEMANTIC_REVIEW_VERSION =
-  "documentary-source-semantic-review-v78-common84-integrated";
+  "documentary-source-semantic-review-v79-unique-reading-selection";
 export const SOURCE_REVIEW_SUPPORTED_REASON =
   "Le prove indicate sostengono il claim; coverageProof distingue fatti rappresentati e dati facoltativi.";
 const MAX_BYTES = 160_000;
@@ -144,6 +144,7 @@ const providerCheckValue = checkShape
     readingRefsById: z.record(z.string(), z.boolean()).optional(),
     coverageBySource: z.unknown().optional(),
     performanceRef: z.string().optional(),
+    readingSelection: z.string().optional(),
   });
 const findingShape = z.strictObject({
   kind: findingKind,
@@ -164,7 +165,7 @@ function providerResponseSchema(
     | "claim_keyed_refs_v2"
     | "claim_keyed_refs_v3"
     | "claim_keyed_refs_v4"
-    | "claim_keyed_refs_v6" = "claim_keyed_v1",
+    | "claim_keyed_refs_v7" = "claim_keyed_v1",
 ) {
   const keyedReadings = format !== "claim_keyed_v1";
   // References identify a set. Its cardinality bounds the wire response while
@@ -180,14 +181,20 @@ function providerResponseSchema(
   const checkReferences =
     format === "claim_keyed_refs_v3" ||
     format === "claim_keyed_refs_v4" ||
-    format === "claim_keyed_refs_v6"
+    format === "claim_keyed_refs_v7"
       ? boundedRefs(bounds.sourceIds, 0)
       : references;
-  // A keyed selection represents each available reference exactly once.
-  // False preserves available but unused evidence; only true selects a citation.
+  // V7 is an ordered subset of the closed ID domain. Each optional token
+  // occurs once in the pattern; no growing boolean object or duplicate list.
+  // Regression protocols retain their original keyed/list representation.
   const readingSelection = (ids?: string[]) =>
-    format === "claim_keyed_refs_v6" && ids
-      ? { readingRefs: boundedRefs(ids) }
+    format === "claim_keyed_refs_v7" && ids
+      ? { readingSelection: (() => {
+          if (new Set(ids).size !== ids.length) throw new Error("Repeated reading selection domain");
+          const escape = (id: string) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          return z.string().min(2).max(ids.reduce((n,id)=>n+id.length+1,0))
+            .regex(new RegExp("^" + ids.map(id => "(\\|"+escape(id)+")?").join("") + "$"));
+        })() }
       : keyedReadings && ids
         ? {
             readingRefsById: z.strictObject(
@@ -220,11 +227,11 @@ function providerResponseSchema(
       schema:
         group.supportedReadingIds ||
         format === "claim_keyed_refs_v4" ||
-        format === "claim_keyed_refs_v6"
+        format === "claim_keyed_refs_v7"
           ? z.union([
               schema.extend({
                 verdict: z.literal("supported"),
-                ...(format === "claim_keyed_refs_v6"
+                ...(format === "claim_keyed_refs_v7"
                   ? { draftQuote: z.null() }
                   : {}),
                 // Nearby Note/value context cannot replace the original
@@ -237,7 +244,7 @@ function providerResponseSchema(
                       ),
                     }
                   : {}),
-                ...(["claim_keyed_refs_v4", "claim_keyed_refs_v6"].includes(
+                ...(["claim_keyed_refs_v4", "claim_keyed_refs_v7"].includes(
                   format,
                 )
                   ? {
@@ -248,7 +255,7 @@ function providerResponseSchema(
                   group.supportedReadingIds ?? group.readingIds,
                 ),
                 ...(keyedReadings && group.supportedPerformanceIds?.length
-                  ? format === "claim_keyed_refs_v6"
+                  ? format === "claim_keyed_refs_v7"
                     ? { performanceRef: z.enum(group.supportedPerformanceIds) }
                     : {
                         readingRefsById: (() => {
@@ -315,7 +322,7 @@ function providerResponseSchema(
         bounds.claimIds.map((id) => {
           const check =
             groups?.find((group) => group.ids.includes(id))?.schema ?? common;
-          if (format !== "claim_keyed_refs_v6") return [id, check] as const;
+          if (format !== "claim_keyed_refs_v7") return [id, check] as const;
           const binding = bounds.coverageBindings?.find(
             (b) => b.claimId === id,
           );
@@ -2013,7 +2020,7 @@ export function buildGroundedSourceReviewRequests(
               },
               plan.legacyProviderFormatForRegression
                 ? "claim_keyed_refs_v3"
-                : "claim_keyed_refs_v6",
+                : "claim_keyed_refs_v7",
             ),
           ),
         },
@@ -2033,14 +2040,17 @@ export function buildGroundedSourceReviewRequests(
       };
       const prompt = JSON.stringify({
         ...basePrompt,
-        rules: JSON.parse(request.prompt).rules.map((rule: string) =>
-          rule.replace(
+        rules: JSON.parse(request.prompt).rules.map((rule: string) => {
+          const bound = rule.replace(
             "e cita lo stesso sN o fN in sourceRefs.",
             plan.legacyProviderFormatForRegression
               ? "e seleziona il relativo o-sN/o-fN: il formato v3 collega il suo sourceRef originale."
               : "e seleziona il relativo o-sN/o-fN; supported richiede anche un originale proprio esplicito in sourceRefs.",
-          ),
-        ),
+          );
+          return plan.legacyProviderFormatForRegression
+            ? bound
+            : bound.replaceAll("readingRefs", "readingSelection");
+        }),
         ...(plan.legacyProviderFormatForRegression
           ? {}
           : {
@@ -2063,10 +2073,10 @@ export function buildGroundedSourceReviewRequests(
         referenceSelectionFormat: {
           checksFormat: plan.legacyProviderFormatForRegression
             ? "claim_keyed_refs_v3"
-            : "claim_keyed_refs_v6",
+            : "claim_keyed_refs_v7",
           rule: plan.legacyProviderFormatForRegression
             ? "readingRefsById richiede una chiave booleana per ogni ID previsto: true seleziona una prova, false la lascia inutilizzata. Seleziona almeno una prova. Per o-sN/o-fN il codice collega il sourceRef originale del fatto scelto: non serve ripeterlo in sourceRefs. Cita in sourceRefs le altre prove necessarie. Nessuna nuova chiave o readingRefs. Ambito, significato e sostegno proprio del claim restano da verificare; il collegamento non assegna verdetti."
-            : "readingRefs è la lista esplicita non vuota di ID delle prove selezionate dal dominio dichiarato, senza duplicati o nuove chiavi. Il contesto delle altre prove resta completo nel prompt, ma non selezionato. performanceRef, quando richiesto per supported, sceglie esplicitamente una performance propria dal dominio dichiarato e la include nella medesima selezione; non approva significato o sostegno. Per supported sourceRefs richiede almeno un originale proprio del claim, scelto fra quelli consentiti, anche per gruppi di campi null: il solo contesto vicino non li prova. I readingRefs o-sN/o-fN possono aggiungere il contesto originale collegato; non sostituiscono la selezione esplicita in sourceRefs. Per esiti negativi restano disponibili le controprove del gruppo. Nessuna nuova chiave o readingRefs. Selezionare un riferimento non approva significato, completezza o applicabilita.",
+            : "readingSelection è una stringa non vuota di ID selezionati, ognuno preceduto da |, nell’ordine del pattern dello schema: per esempio |e1-1|o-s5. Ogni ID può comparire una sola volta. Non restituire readingRefs. Tutte le altre prove restano nel prompt, non selezionate. performanceRef, quando richiesto per supported, sceglie esplicitamente una performance propria dal dominio dichiarato e la include nella medesima selezione; non approva significato o sostegno. Per supported sourceRefs richiede almeno un originale proprio del claim, scelto fra quelli consentiti, anche per gruppi di campi null: il solo contesto vicino non li prova. I riferimenti selezionati o-sN/o-fN possono aggiungere il contesto originale collegato; non sostituiscono la selezione esplicita in sourceRefs. Per esiti negativi restano disponibili le controprove del gruppo. Nessuna nuova chiave o readingRefs. Selezionare un riferimento non approva significato, completezza o applicabilita.",
         },
         sourceEvidenceHash: independent.hash,
         originalFacts,
@@ -2242,7 +2252,7 @@ function validateResponses(
       if (
         !plan.legacyProviderFormatForRegression &&
         (!("checksFormat" in value) ||
-          value.checksFormat !== "claim_keyed_refs_v6")
+          value.checksFormat !== "claim_keyed_refs_v7")
       )
         throw new Error(
           "Source review provider protocol does not match its request",
@@ -2267,7 +2277,7 @@ function validateResponses(
           (value.checksFormat === "claim_keyed_refs_v2" ||
             value.checksFormat === "claim_keyed_refs_v3" ||
             value.checksFormat === "claim_keyed_refs_v4" ||
-            value.checksFormat === "claim_keyed_refs_v6")
+            value.checksFormat === "claim_keyed_refs_v7")
           ? value.checksFormat
           : "claim_keyed_v1",
       ).parse(value);
@@ -2294,13 +2304,14 @@ function validateResponses(
                   };
                 })()
               : raw;
-          if (_format === "claim_keyed_refs_v6" && check.readingRefs) {
-            const { performanceRef, ...rest } = check;
-            if (new Set(check.readingRefs).size !== check.readingRefs.length)
+          if (_format === "claim_keyed_refs_v7" && check.readingSelection) {
+            const { performanceRef, readingSelection, ...rest } = check;
+            const selected = readingSelection.slice(1).split("|");
+            if (new Set(selected).size !== selected.length)
               throw Error("Source review repeats reading evidence");
             const readingRefs = unique([
               ...(performanceRef ? [performanceRef] : []),
-              ...check.readingRefs,
+              ...selected,
             ]);
             return {
               claimId,
@@ -2332,7 +2343,7 @@ function validateResponses(
               // Ownership, scope and semantic guards still run below.
               ...(_format === "claim_keyed_refs_v3" ||
               _format === "claim_keyed_refs_v4" ||
-              _format === "claim_keyed_refs_v6"
+              _format === "claim_keyed_refs_v7"
                 ? {
                     sourceRefs: unique([
                       ...rest.sourceRefs,

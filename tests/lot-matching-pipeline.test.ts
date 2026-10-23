@@ -1,3 +1,4 @@
+import {inventedReadingDomainFromPattern} from "./helpers/source-review-selection-fixture";
 import {
   encodeInventedSourceSelections,
   inventedSourceEvidenceAnswer,
@@ -214,17 +215,19 @@ function inventedReviewWire(prompt: string, data: any): any {
               )
           : choice;
         const readingShape = deref(
-          supported.properties.readingRefsById ??
+          supported.properties.readingSelection ?? supported.properties.readingRefsById ??
             supported.properties.readingRefs,
         );
         const readingAlternatives = readingShape.anyOf
           ? readingShape.anyOf.map(deref)
           : [readingShape];
-        const readingIds = supported.properties.readingRefs
+        const readingIds = supported.properties.readingSelection
+          ? inventedReadingDomainFromPattern(readingShape.pattern)
+          : supported.properties.readingRefs
           ? deref(readingShape.items).enum
           : Object.keys(readingAlternatives[0].properties ?? {});
         if (
-          !supported.properties.readingRefs &&
+          !supported.properties.readingSelection && !supported.properties.readingRefs &&
           readingAlternatives.some(
             (branch: any) =>
               JSON.stringify(Object.keys(branch.properties ?? {})) !==
@@ -293,7 +296,9 @@ function inventedReviewWire(prompt: string, data: any): any {
             draftQuote: null,
             reason: SOURCE_REVIEW_SUPPORTED_REASON,
             sourceRefs: claim.sourceRefs,
-            ...(supported.properties.readingRefs
+            ...(supported.properties.readingSelection
+              ? { readingSelection: readingIds.filter((id:string)=>selected.includes(id)).map((id:string)=>"|"+id).join("") }
+              : supported.properties.readingRefs
               ? { readingRefs: selected }
               : {
                   readingRefsById: Object.fromEntries(
@@ -351,13 +356,15 @@ function inventedNegativeReview(
             negative = alternatives.find((s: any) =>
               deref(s.properties.verdict).enum?.includes("not_verifiable"),
             );
-          const ids = negative.properties.readingRefs
+          const ids = negative.properties.readingSelection
+            ? inventedReadingDomainFromPattern(deref(negative.properties.readingSelection).pattern)
+            : negative.properties.readingRefs
             ? deref(deref(negative.properties.readingRefs).items).enum
             : Object.keys(
                 deref(negative.properties.readingRefsById).properties,
               );
           const selected =
-            check.readingRefs ??
+            (check.readingSelection ? check.readingSelection.slice(1).split("|") : undefined) ?? check.readingRefs ??
             Object.entries(check.readingRefsById)
               .filter(([, chosen]) => chosen)
               .map(([ref]) => ref);
@@ -375,7 +382,9 @@ function inventedNegativeReview(
               reason: firstOnly
                 ? "Contraddizione inventata per verificare l'arresto del confronto."
                 : "Riscontro inventato non determinabile.",
-              ...(negative.properties.readingRefs
+              ...(negative.properties.readingSelection
+                ? { readingSelection: ids.filter((id:string)=>selected.includes(id)).map((id:string)=>"|"+id).join("") }
+                : negative.properties.readingRefs
                 ? { readingRefs: selected }
                 : {
                     readingRefsById: Object.fromEntries(
@@ -640,7 +649,7 @@ function inventedAnswer(prompt: string) {
       ...selected,
       components: [],
     });
-    encoded.evidenceFormat = "source_selections_v21_owned";
+    encoded.evidenceFormat = "source_selections_v22_owned";
     encoded.components = selected.components.map(({ evidence: _oldEvidence, ...c }: any) => ({
       ...c,
       evidenceDeclaration: { basis: "selected_action_object_plus_explicit_additional_originals", additionalEvidence: [] },
@@ -653,6 +662,7 @@ function inventedAnswer(prompt: string) {
         objectSelection: { literalSelectionId: literal.id },
       },
     }));
+    for (const c of encoded.components) delete c.roleEvidence.scope;
     return encoded;
   }
 

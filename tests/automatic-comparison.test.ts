@@ -2882,6 +2882,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v95-documentary-participation-context",
     sourceVersion: "documentary-source-interpretation-v87-common84-integrated",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v96-source88-reader41",
+    sourceVersion: "documentary-source-interpretation-v88-summary-original-fields",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2917,7 +2921,7 @@ test.each([
     const before = JSON.stringify(historical);
     assert.equal(
       request.version,
-      "documentary-service-comparison-v96-source88-reader41",
+      "documentary-service-comparison-v97-source89-review79",
     );
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);

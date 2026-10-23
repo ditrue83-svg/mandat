@@ -1,3 +1,4 @@
+import {encodeInventedReviewSelections} from "./helpers/source-review-selection-fixture";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import Ajv2020 from "ajv/dist/2020.js";
@@ -1323,7 +1324,7 @@ test("Production review V5 requires explicit coverage proof and cannot emit the 
   });
   const evidence = inventedSourceEvidence(plan);
   const requests = buildGroundedSourceReviewRequests(plan, evidence);
-  const responses = requests.map((r) => {
+  let responses: any[] = requests.map((r) => {
     const body = JSON.parse(r.prompt);
     return {
       chunkId: r.id,
@@ -1399,6 +1400,7 @@ test("Production review V5 requires explicit coverage proof and cannot emit the 
       ),
     };
   });
+  responses = encodeInventedReviewSelections(responses, requests);
   requests.forEach((r, index) => {
     const native = openaiResponseBody(
       "gpt-6-luna",
@@ -1425,7 +1427,7 @@ test("Production review V5 requires explicit coverage proof and cannot emit the 
     );
     if (territory) {
       assert(territory.requiredSourceRefs?.includes("s5"));
-      const optional = structuredClone(responses[index]);
+      const optional: any = structuredClone(responses[index]);
       const check = optional.checksByClaim[territory.claimId];
       check.coverageBySource.s5 = {
         disposition: "not_required",
@@ -1442,7 +1444,7 @@ test("Production review V5 requires explicit coverage proof and cannot emit the 
       const own = plan.claims.find((c) => c.id === id)!;
       const group = r.claimReadingGroups.find((g) => g.claimIds.includes(id))!;
       assert.deepEqual(group.supportedSourceIds, own.sourceRefs);
-      const missingOwn = structuredClone(responses[index]);
+      const missingOwn: any = structuredClone(responses[index]);
       missingOwn.checksByClaim[id].sourceRefs = [];
       assert.equal(accepts(missingOwn), false);
       const contextRef = r.sourceIds.find(
@@ -1459,20 +1461,22 @@ test("Production review V5 requires explicit coverage proof and cannot emit the 
         "Controprova inventata, non un giudizio sul bando reale.";
       delete negative.performanceRef;
       assert(
-        negative.readingRefs.every((ref: string) =>
+        negative.readingSelection.slice(1).split("|").every((ref: string) =>
           group.readingIds.includes(ref),
         ),
       );
+      const selectedRefs=negative.readingSelection.slice(1).split("|");
+      negative.readingSelection=group.readingIds.filter(id=>selectedRefs.includes(id)).map(id=>"|"+id).join("");
       assert(accepts(missingOwn), JSON.stringify(accepts.errors));
     }
-    const bad = structuredClone(responses[index]);
+    const bad: any = structuredClone(responses[index]);
     const check: any = Object.values(bad.checksByClaim).find(
       (c: any) => Object.keys(c.coverageBySource).length,
     );
     check.reason =
       "Le date precise sono conservate nei dettagli o nel summary.";
     assert(!accepts(bad));
-    const missing = structuredClone(responses[index]);
+    const missing: any = structuredClone(responses[index]);
     const mandatory = plan.claims.find(
       (c) =>
         r.assignedClaimIds.includes(c.id) &&
@@ -1500,9 +1504,9 @@ test("Production review V5 requires explicit coverage proof and cannot emit the 
       sourceEvidence: evidence,
     }),
   );
-  const bad = structuredClone(responses);
+  const bad: any = structuredClone(responses);
   const check: any = bad
-    .flatMap((r) => Object.values(r.checksByClaim))
+    .flatMap((r: any) => Object.values(r.checksByClaim))
     .find((c: any) => Object.keys(c.coverageBySource).length);
   check.coverageBySource = {};
   assert.throws(

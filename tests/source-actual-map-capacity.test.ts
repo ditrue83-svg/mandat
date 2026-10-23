@@ -1,3 +1,4 @@
+import {encodeInventedReviewSelections} from "./helpers/source-review-selection-fixture";
 // Actual original context and accepted maps; test choices are synthetic, not AI qualification.
 import { test, expect } from "vitest";
 import fs from "node:fs";
@@ -51,7 +52,7 @@ function fixture() {
       (g) => g.id === literal.sourceRef,
     )?.sourceRefs ?? [literal.sourceRef];
   const value: any = {
-    evidenceFormat: "source_selections_v21_owned",
+    evidenceFormat: "source_selections_v22_owned",
     status: "resolved",
     targetRef: target.id,
     summary: "Synthetic fixture for original storage only.",
@@ -64,7 +65,6 @@ function fixture() {
         evidenceDeclaration: { basis: "selected_action_object_plus_explicit_additional_originals", additionalEvidence: [] },
         roleEvidence: {
           state: "identified",
-          scope: "selected_lot",
           actionSelection: { literalSelectionId: part[0] },
         },
         meaning: {
@@ -162,6 +162,8 @@ test("Synthetic complete original block choices pass strict native schema and ca
   );
   expect(accepts(value)).toBe(true);
   const record = recordSourceInterpretation(value, r, meta);
+  expect(value.components[0].roleEvidence).not.toHaveProperty("scope");
+  expect(record.response.components[0].roleEvidence.scope).toBe("selected_lot");
   expect(record.response.details).toHaveLength(28);
   expect(record.response.details.every((d) => d.sourceRefs.length <= 32)).toBe(
     true,
@@ -453,9 +455,9 @@ test("Missing current original piece, moved global index and missing reader tupl
     materializeSourceReviewIndependentReading(JSON.stringify(obs)),
   ).toThrow();
 });
-test("V6 keeps every claim/proof domain closed and native rejection of duplicated or missing reading selections", () => {
+test("V7 keeps every claim/proof domain closed and native rejection of duplicated or missing reading selections", () => {
   const { plan, reading, requests } = downstream();
-  const wire = requests.map((r) => ({
+  let wire: any[] = requests.map((r) => ({
     chunkId: r.id,
     sourceEvidenceHash: reading.hash,
     coverage: "complete",
@@ -487,6 +489,7 @@ test("V6 keeps every claim/proof domain closed and native rejection of duplicate
       }),
     ),
   }));
+  wire = encodeInventedReviewSelections(wire, requests);
   for (const [r, index] of requests.map((r, i) => [r, i] as const)) {
     const accept = new Ajv2020({ strict: false }).compile(
       r.responseFormat.json_schema.schema,
@@ -501,15 +504,15 @@ test("V6 keeps every claim/proof domain closed and native rejection of duplicate
   ).not.toThrow();
   const duplicate = structuredClone(wire);
   const first = Object.values(duplicate[0].checksByClaim)[0] as any;
-  first.readingRefs.push(first.readingRefs[0]);
+  first.readingSelection += "|" + first.readingSelection.split("|").at(-1);
   expect(() =>
     recordSourceSemanticReview(duplicate, plan, {
       ...meta,
       sourceEvidence: reading,
     }),
-  ).toThrow(/repeats reading/);
+  ).toThrow();
   const missing = structuredClone(wire);
-  (Object.values(missing[0].checksByClaim)[0] as any).readingRefs = [];
+  (Object.values(missing[0].checksByClaim)[0] as any).readingSelection = "";
   expect(() =>
     recordSourceSemanticReview(missing, plan, {
       ...meta,
@@ -517,7 +520,7 @@ test("V6 keeps every claim/proof domain closed and native rejection of duplicate
     }),
   ).toThrow();
 });
-test("V6 performance selector keeps mandatory own proof on wire and rejects absent or foreign performance IDs", () => {
+test("V7 performance selector keeps mandatory own proof on wire and rejects absent or foreign performance IDs", () => {
   const { plan, reading, requests } = downstream();
   const r = requests.find((r) =>
       r.claimReadingGroups.some((g) => g.supportedPerformanceIds?.length),
@@ -527,7 +530,7 @@ test("V6 performance selector keeps mandatory own proof on wire and rejects abse
     )!,
     id = perfGroup.claimIds[0],
     perf = perfGroup.supportedPerformanceIds![0];
-  const wire: any = {
+  let wire: any = {
     chunkId: r.id,
     sourceEvidenceHash: reading.hash,
     coverage: "complete",
@@ -567,6 +570,7 @@ test("V6 performance selector keeps mandatory own proof on wire and rejects abse
     performanceRef: perf,
     coverageBySource: {},
   };
+  wire = encodeInventedReviewSelections([wire], [r])[0];
   const accepts = new Ajv2020({ strict: false }).compile(
     r.responseFormat.json_schema.schema,
   );
