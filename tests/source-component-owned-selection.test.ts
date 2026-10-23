@@ -16,3 +16,28 @@ test("Identical text at another original path cannot substitute the selected own
 
 test("Owned recorder rejects markerless canonical input while saved records remain verifiable",()=>{const {request,value,meta}=fixture();const before=JSON.stringify(value);const saved=recordSourceInterpretation(value,request,meta);assert.equal(JSON.stringify(value),before);assert.throws(()=>recordSourceInterpretation(saved.response,request,meta),/requires its explicit request protocol/);assert(readSourceInterpretation(saved,request));assert(validateSourceInterpretation(saved.response,request));});
 test("Owned recorder refuses foreign legacy, missing declarations and a forged canonical marker",()=>{for(const mutation of [(v:any)=>{v.evidenceFormat="source_selections_v20"},(v:any)=>{delete v.evidenceFormat},(v:any)=>{delete v.components[0].evidenceDeclaration}]){const {request,value,meta}=fixture();mutation(value);assert.throws(()=>recordSourceInterpretation(value,request,meta));}const {request,value,meta}=fixture();const saved=recordSourceInterpretation(value,request,meta);assert.throws(()=>recordSourceInterpretation({...saved.response,evidenceFormat:"source_selections_v21_owned"},request,meta));});
+
+test.each([false,true])("Provider and decoder preserve declared structured summary evidence (legacy selections %s)", legacy=>{
+ const {context,value,meta}=fixture();
+ const extended={...context,body:{...context.body,fields:[
+  {scope:"project_context" as const,rawPath:"/optional/originalQuantity",value:7},
+  {scope:"project_context" as const,rawPath:"/optional/originalBoolean",value:false},
+  {scope:"project_context" as const,rawPath:"/optional/originalZero",value:0},
+  {scope:"project_context" as const,rawPath:"/optional/originalUnknown",value:null},
+ ]}};
+ const request=buildSourceInterpretationRequest(extended,legacy?{legacyEvidenceSelectionProtocolForRegression:true}:{});
+ const answer=structuredClone(value);answer.summaryAdditionalSourceRefs=["f0","f1","f2"];
+ if(legacy){answer.evidenceFormat="source_selections_v20";answer.components=answer.components.map((c:any)=>{const {evidenceDeclaration:_,...rest}=c;return {...rest,evidence:[{sourceRef:"s1"}]};});}
+ const accepts=new Ajv({strict:false}).compile<any>(request.responseFormat.json_schema.schema);
+ assert(accepts(answer),JSON.stringify(accepts.errors));
+ const original=JSON.stringify({extended,answer});
+ const record=recordSourceInterpretation(answer,request,meta);
+ assert.deepEqual(record.response.summarySourceRefs,["s2","f0","f1","f2"]);
+ assert(readSourceInterpretation(record,request));
+ assert.equal(JSON.stringify({extended,answer}),original);
+ for(const refs of [["f999999"],["f3"],["f0","f0"]]){
+  const bad={...structuredClone(answer),summaryAdditionalSourceRefs:refs};
+  if(refs.length===1)assert(!accepts(bad));
+  assert.throws(()=>recordSourceInterpretation(bad,request,meta));
+ }
+});

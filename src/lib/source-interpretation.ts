@@ -30,7 +30,7 @@ import type {
 import type { LotSourceTarget } from "./lot-source-context";
 
 export const SOURCE_INTERPRETATION_VERSION =
-  "documentary-source-interpretation-v87-common84-integrated";
+  "documentary-source-interpretation-v88-summary-original-fields";
 // Both allowances include provider reasoning. A multi-service source can
 // exhaust 8192 tokens well before 32000 characters; leave room for its
 // components, contractual conditions and classification accounting.
@@ -1137,7 +1137,7 @@ function buildSelectionResponseSchema(
       .array(
         args[0]?.detailRefs
           ? (args[0].detailRefs as z.ZodArray).element
-          : sourceId,
+          : detailRefs.element,
       )
       .max(31)
       .describe(
@@ -2318,7 +2318,7 @@ export function buildSourceInterpretationRequest(
           acceptancePolicy: RADAR_ACCEPTANCE_POLICY,
           evidenceProtocol: options.legacyEvidenceSelectionProtocolForRegression ? "source_selections_v20" : "source_selections_v21_owned",
           summaryEvidenceRule:
-            "targetRef dichiara il riferimento originale proprio del target della summary. summaryAdditionalSourceRefs contiene soltanto le ulteriori prove. Il riferimento dichiarato e quelli aggiuntivi costituiscono insieme le citazioni della sintesi; non inventare prove né omettere una prova necessaria.",
+            "targetRef dichiara il passaggio originale proprio del target della summary. summaryAdditionalSourceRefs contiene soltanto ulteriori prove originali: sN per testi, fN per i campi strutturati effettivamente presenti. Un numero, booleano o valore nullo non diventa una prestazione: conserva valore e ambito originali, senza inventare fatti. Il riferimento dichiarato e quelli aggiuntivi costituiscono insieme le citazioni della sintesi. Non usare gN/literalSelectionId qui, né riferimenti assenti o ripetuti; non omettere una prova necessaria.",
           selectionRules:
             "actionSelection/objectSelection/quoteSelection: sourceRef sN/gN ed exactText, stringa letterale unica oppure {startText,endText} con ancore letterali uniche e ordinate nello stesso originale. Il codice copia l’intervallo contiguo, anche HTML e spazi; massimo 600 caratteri, parole intere. Per una parola le ancore coincidono. Conserva articoli, refusi e punteggiatura; disambigua ripetizioni con contesto. Un sourceRef gN indica l’intera concatenazione dei suoi passaggi: exactText deve comparire una sola volta in quel testo intero, non solo nel frammento vicino. Se un nome ricorre più volte, includi nella citazione la proposizione specifica che lo identifica; non usare il solo nome ripetuto. Mai calcolare posizioni, riscrivere spazi o restituire actionText/objectText. Le prove rientrano nella evidence e nello scope propri. classificationReadingsById: ogni ID come chiave, use, ownSourceRef proprio, sourceRefs di eventuali controprove, componentIndexes zero-based come unico legame al significato; niente explanation libera o meaning.classificationContextIds. Nome/codice/etichette restano originali. clarifies_domain richiede propria etichetta e componente concreta; shared_project_only solo per classificazioni condivise. Motiva conflitti materiali nelle issues con prove proprie. details aggiuntivi: solo quoteSelection/kind/scope, senza parafrasi o duplicati delle clausole. contractClauseDetails conserva tutte le clausole richieste anche in uncertain/conflicting: un dubbio sul ruolo non elimina condizioni note. Specifiche assenti non sono issues; nessun fatto inventato. Un mandato professionale esplicito per fasi definite resta identificato senza inventare le azioni di dettaglio: conserva funzione e fasi, other se nessun ruolo specifico le riassume. Il solo mestiere non basta; non espandere sigle da memoria né confondere prestazioni professionali con lavori materiali. role_identity richiede una funzione davvero indeterminabile, non il sottotipo mancante.",
         }),
