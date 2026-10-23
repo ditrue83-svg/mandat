@@ -747,9 +747,14 @@ it("Durably schedules once, completes a referenced comparison, and never creates
       .from(schema.automaticMatchRuns)
       .where(eq(schema.automaticMatchRuns.publicationId, f.p.id)),
   ).toHaveLength(1);
-  vi.mocked(infer).mockImplementation(async (_pub, _purpose, prompt) =>
-    inventedAnswer(prompt),
-  );
+  vi.mocked(infer).mockImplementation(async (_pub, _purpose, prompt, _max, _transport, _system, _format, configuration) => {
+    const [owned]=await db.select().from(schema.automaticMatchRuns).where(eq(schema.automaticMatchRuns.id,job.runId));
+    expect(owned.leaseUntil!.getTime()-now.getTime()).toBeGreaterThan(configuration!.timeoutMs!);
+    await reconcileAutomaticComparisonLeases(new Date(now.getTime()+configuration!.timeoutMs!+1000));
+    const [afterHeartbeat]=await db.select().from(schema.automaticMatchRuns).where(eq(schema.automaticMatchRuns.id,job.runId));
+    expect(afterHeartbeat.status).toBe("running");
+    return inventedAnswer(prompt);
+  });
   expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
     status: "completed",
   });

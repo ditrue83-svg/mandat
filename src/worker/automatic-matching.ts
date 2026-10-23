@@ -45,6 +45,9 @@ import type { AiTransport } from "./ai";
 type Tx = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 class ComparisonInputsChanged extends Error {}
 const DELIVERY_HELD = "comparison_delivery_held";
+// Provider stages have a 300s timeout. Keep ownership beyond that timeout
+// so the heartbeat cannot classify a still-running request as abandoned.
+const COMPARISON_LEASE_MS = 6 * 60_000;
 async function holdUnfinishedDelivery(
   tx: Pick<Tx, "update">,
   run: typeof automaticMatchRuns.$inferSelect,
@@ -321,7 +324,7 @@ export async function runAutomaticComparison(
         status: "running",
         attempts: attempt,
         issue: null,
-        leaseUntil: new Date(clock().getTime() + 5 * 60_000),
+        leaseUntil: new Date(clock().getTime() + COMPARISON_LEASE_MS),
         updatedAt: clock(),
       })
       .where(eq(automaticMatchRuns.id, job.runId));
@@ -411,7 +414,7 @@ export async function runAutomaticComparison(
               await tx
                 .update(automaticMatchRuns)
                 .set({
-                  leaseUntil: new Date(clock().getTime() + 5 * 60_000),
+                  leaseUntil: new Date(clock().getTime() + COMPARISON_LEASE_MS),
                   updatedAt: clock(),
                 })
                 .where(owned());
@@ -466,7 +469,7 @@ export async function runAutomaticComparison(
           await tx
             .update(automaticMatchRuns)
             .set({
-              leaseUntil: new Date(clock().getTime() + 5 * 60_000),
+              leaseUntil: new Date(clock().getTime() + COMPARISON_LEASE_MS),
               updatedAt: clock(),
             })
             .where(owned());
