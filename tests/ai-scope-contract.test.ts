@@ -539,8 +539,14 @@ it("applica il limite esistente anche fra controllo fonte e scoring", async () =
   expect(usage).toHaveLength(1);
   expect(usage[0].purpose).toBe("match-scope");
   const settings = await db.select().from(schema.settings);
-  expect(settings).toHaveLength(1);
-  expect(settings[0].key).toBe("ai_budget_blocked");
+  const month = DateTime.now().setZone("Europe/Zurich").toFormat("yyyy-MM");
+  expect(settings).toHaveLength(2);
+  expect(settings).toEqual(
+    expect.arrayContaining([
+      { key: "ai_budget_blocked", value: month },
+      { key: "ai_budget_blocked_limit", value: { month, budgetChf: 0 } },
+    ]),
+  );
 });
 
 it.each(["historical", "current"] as const)(
