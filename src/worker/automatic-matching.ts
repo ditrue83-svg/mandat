@@ -14,6 +14,7 @@ import {
 import { enqueueAutomaticComparisons } from "@/lib/automatic-comparison-queue";
 import { and, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { withWorkerDatabaseTransaction } from "@/db/worker-transaction";
 import {
   aiUsage,
   administrators,
@@ -287,11 +288,13 @@ export async function runAutomaticComparison(
     now?: () => Date;
   } = {},
 ) {
+  const transaction = <T>(body: (tx: Tx) => Promise<T>) =>
+    withWorkerDatabaseTransaction(body, options.signal);
   const clock = options.now ?? (() => new Date());
   options.signal?.throwIfAborted();
   if (!automaticComparisonEnabled())
     throw new Error("Confronto automatico disattivato");
-  const claimed = await getDb().transaction(async (tx) => {
+  const claimed = await transaction(async (tx) => {
     const loaded = await current(tx, job, clock());
     if (!loaded) {
       await supersedeUnavailable(tx, job, clock());
@@ -362,7 +365,7 @@ export async function runAutomaticComparison(
           transport: options.transport,
           now: clock,
           commitRecord: async (id, result) => {
-            await getDb().transaction(async (tx) => {
+            await transaction(async (tx) => {
               const latest = await current(tx, job, clock());
               if (
                 !latest?.rawInput ||
@@ -397,7 +400,7 @@ export async function runAutomaticComparison(
           },
           beforeRequest: async () => {
             options.signal?.throwIfAborted();
-            await getDb().transaction(async (tx) => {
+            await transaction(async (tx) => {
               const latest = await current(tx, job, clock());
               if (
                 !latest?.rawInput ||
@@ -422,7 +425,7 @@ export async function runAutomaticComparison(
           },
         },
       );
-      return await getDb().transaction(async (tx) => {
+      return await transaction(async (tx) => {
         const latest = await current(tx, job, clock());
         await tx
           .update(automaticMatchRuns)
@@ -448,7 +451,7 @@ export async function runAutomaticComparison(
         options.signal?.throwIfAborted();
         if (!automaticComparisonEnabled())
           throw new Error("Confronto automatico disattivato");
-        const currentInput = await getDb().transaction(async (tx) => {
+        const currentInput = await transaction(async (tx) => {
           const latest = await current(tx, job, clock());
           if (
             !latest?.input ||
@@ -528,7 +531,7 @@ export async function runAutomaticComparison(
       },
     );
     options.signal?.throwIfAborted();
-    return await getDb().transaction(async (tx) => {
+    return await transaction(async (tx) => {
       const latest = await current(tx, job, clock());
       if (!latest) {
         await tx
