@@ -2,7 +2,7 @@ import { X509Certificate } from "node:crypto";
 import type { PoolConfig } from "pg";
 
 type Environment = Record<string, string | undefined>;
-type Purpose = "app" | "queue" | "migration" | "probe";
+type Purpose = "app" | "queue" | "migration" | "probe" | "ledger";
 
 export function databaseProvider(env: Environment = process.env) {
   const provider = env.DATABASE_PROVIDER || "local";
@@ -55,7 +55,10 @@ export function databaseOptions(
     user,
     password,
     database,
-    max: purpose === "migration" || purpose === "probe" ? 1 : maximum,
+    max:
+      purpose === "migration" || purpose === "probe" || purpose === "ledger"
+        ? 1
+        : maximum,
     connectionTimeoutMillis: 8000,
     idleTimeoutMillis: 30000,
     application_name: `mandat-${purpose}`,

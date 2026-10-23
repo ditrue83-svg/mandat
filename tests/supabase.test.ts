@@ -25,6 +25,12 @@ describe("PostgreSQL gestito senza esporre credenziali o tabelle", () => {
     expect(options).not.toHaveProperty("connectionString");
     expect(options.max).toBe(3);
     expect(databaseOptions(supabase, "migration").max).toBe(1);
+    expect(databaseOptions(supabase, "ledger")).toMatchObject({
+      max: 1,
+      application_name: "mandat-ledger",
+      ssl: options.ssl,
+      connectionTimeoutMillis: options.connectionTimeoutMillis,
+    });
     expect(databaseOptions(supabase, "queue").application_name).toBe(
       "mandat-queue",
     );
@@ -108,7 +114,9 @@ describe("PostgreSQL gestito senza esporre credenziali o tabelle", () => {
         await expect(
           pg.query("SELECT * FROM public.companies"),
         ).rejects.toThrow(/permission denied/i);
-        await expect(pg.query("SELECT * FROM public.automatic_match_runs")).rejects.toThrow(/permission denied/i);
+        await expect(
+          pg.query("SELECT * FROM public.automatic_match_runs"),
+        ).rejects.toThrow(/permission denied/i);
         await expect(
           pg.query("SELECT * FROM public.operational_reading_runs"),
         ).rejects.toThrow(/permission denied/i);

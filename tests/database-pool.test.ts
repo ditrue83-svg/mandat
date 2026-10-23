@@ -65,6 +65,39 @@ afterEach(async () => {
 });
 
 describe("PostgreSQL connection loss", () => {
+  it("settles ledger queries while every general-purpose client is occupied", async () => {
+    vi.stubEnv("DATABASE_POOL_MAX", "1");
+    const general = getDb().$client;
+    const held = await general.connect();
+    let acquired = false;
+    const waiting = general.connect().then((client) => {
+      acquired = true;
+      return client;
+    });
+    expect(general.waitingCount).toBe(1);
+    const ledger = getDb("ledger").$client;
+    try {
+      expect(ledger).not.toBe(general);
+      expect(ledger.options.max).toBe(1);
+      expect(ledger.options.application_name).toBe("mandat-ledger");
+      expect(getDb("ledger").$client).toBe(ledger);
+      await expect(
+        ledger.query("UPDATE synthetic_ledger"),
+      ).resolves.toMatchObject({
+        rows: [{ value: 1 }],
+      });
+      expect(acquired).toBe(false);
+      expect(general.waitingCount).toBe(1);
+    } finally {
+      held.release();
+      (await waiting).release();
+    }
+    await closeDb();
+    expect(ledger.ended).toBe(true);
+    expect(general.ended).toBe(true);
+    expect(getDb("ledger").$client).not.toBe(ledger);
+  });
+
   it("removes a disconnected idle client and reconnects for the next query", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const pool = getDb().$client;

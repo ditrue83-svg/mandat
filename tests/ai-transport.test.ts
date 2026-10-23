@@ -15,8 +15,14 @@ import { sql } from "drizzle-orm";
 import * as schema from "../src/db/schema";
 import { getDemoOpportunities } from "../src/lib/demo";
 
-const context = vi.hoisted(() => ({ db: undefined as unknown }));
-vi.mock("@/db", () => ({ getDb: () => context.db }));
+const context = vi.hoisted(() => ({
+  db: undefined as unknown,
+  ledgerDb: undefined as unknown,
+}));
+vi.mock("@/db", () => ({
+  getDb: (purpose?: string) =>
+    purpose === "ledger" && context.ledgerDb ? context.ledgerDb : context.db,
+}));
 import {
   configuredTransport,
   infer,
@@ -236,6 +242,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   context.db = db;
+  context.ledgerDb = undefined;
   vi.stubEnv("LLM_API_KEY", "test-transport-only");
   vi.stubEnv("LLM_API_BASE_URL", "https://provider.example.invalid/openai/v1");
   vi.stubEnv("LLM_MODEL", expectedModel);
@@ -247,6 +254,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
   context.db = db;
+  context.ledgerDb = undefined;
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
@@ -2047,6 +2055,36 @@ describe("trasporto AI e consumo degli output respinti", () => {
       inputTokens: null,
       outputTokens: null,
     });
+  });
+
+  it("reserves and settles on the ledger connection when general writes cannot acquire a client", async () => {
+    context.ledgerDb = db;
+    context.db = new Proxy(db, {
+      get(target, property, receiver) {
+        if (
+          property === "update" ||
+          property === "insert" ||
+          property === "delete" ||
+          property === "transaction"
+        )
+          return () => {
+            throw new Error("timeout exceeded when trying to connect");
+          };
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const complete = vi.fn(async () => ({
+      text: JSON.stringify(summary),
+      inputTokens: 100,
+      outputTokens: 50,
+    }));
+    await expect(summarize(publication, { complete })).resolves.toMatchObject({
+      summary: summary.summary,
+    });
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(await db.select().from(schema.aiUsage)).toMatchObject([
+      { status: "completed", costChf: "0.000200", error: null },
+    ]);
   });
 
   it("ritenta la sola chiusura del registro senza ripetere la richiesta al fornitore", async () => {

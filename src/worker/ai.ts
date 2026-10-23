@@ -334,7 +334,10 @@ async function settleAiUsage(id: string, values: AiUsageSettlement) {
     try {
       // Repeating this write is safe if PostgreSQL committed a prior attempt but
       // the connection failed before acknowledging it.
-      await getDb().update(aiUsage).set(values).where(eq(aiUsage.id, id));
+      await getDb("ledger")
+        .update(aiUsage)
+        .set(values)
+        .where(eq(aiUsage.id, id));
       return;
     } catch (error) {
       lastError = error;
@@ -346,7 +349,7 @@ export async function recoverStaleAiReservations(now = new Date()) {
   if (!Number.isFinite(now.getTime()))
     throw new Error("Data di recupero AI non valida");
   const cutoff = new Date(now.getTime() - aiReservationStaleAfterMs);
-  const recovered = await getDb()
+  const recovered = await getDb("ledger")
     .update(aiUsage)
     .set({
       status: "uncertain",
@@ -803,7 +806,7 @@ export async function infer(
   const month = DateTime.now().setZone("Europe/Zurich").toFormat("yyyy-MM");
   const id = crypto.randomUUID();
   try {
-    await getDb().transaction(async (tx) => {
+    await getDb("ledger").transaction(async (tx) => {
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtext(${`mandat-ai-${month}`}))`,
       );
@@ -829,7 +832,7 @@ export async function infer(
     });
   } catch (error) {
     if (error instanceof BudgetExceeded)
-      await getDb()
+      await getDb("ledger")
         .insert(settings)
         .values([
           { key: "ai_budget_blocked", value: month },
@@ -844,7 +847,7 @@ export async function infer(
         });
     throw error;
   }
-  await getDb()
+  await getDb("ledger")
     .delete(settings)
     .where(
       and(eq(settings.key, "ai_budget_blocked"), eq(settings.value, month)),
