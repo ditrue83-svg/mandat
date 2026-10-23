@@ -734,6 +734,12 @@ async function storedAutomaticResult(runId: string) {
 
 it("Durably schedules once, completes a referenced comparison, and never creates a human quality vote", async () => {
   const { f, companyId, job } = await automaticFixture();
+  const broker = await pg.query<{ retry_limit: number }>(
+    "select retry_limit from pgboss.job where name=$1 and data->>'runId'=$2",
+    [AUTOMATIC_COMPARISON_QUEUE, job.runId],
+  );
+  expect(broker.rows).toHaveLength(1);
+  expect(broker.rows[0].retry_limit).toBe(0);
   await matchAdoptedPublication({ publicationId: f.p.id, now });
   expect(
     await db
@@ -1431,27 +1437,24 @@ it("A source correction during semantic review prevents the final company compar
   });
 });
 
-it("Semantic-review transport errors retain bounded technical retry and never become semantic rejections", async () => {
+it("A semantic-review transport failure holds the delivery without repeating its paid source stages", async () => {
   const { job } = await automaticFixture();
   vi.mocked(infer).mockImplementation(async (_pub, purpose, prompt) => {
     if (purpose === "documentary-source-semantic-review")
       throw new Error("Invented semantic-review transport error");
     return inventedAnswer(prompt);
   });
-  for (let attempt = 1; attempt <= 3; attempt++)
-    await expect(
-      runAutomaticComparison(job, { now: () => now }),
-    ).rejects.toThrow("Invented semantic-review transport error");
+  await expect(runAutomaticComparison(job, { now: () => now })).rejects.toThrow(
+    "Invented semantic-review transport error",
+  );
   expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
     status: "skipped",
   });
-  expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual(
-    Array.from({ length: 3 }).flatMap(() => [
-      "documentary-source-interpretation",
-      "documentary-source-evidence",
-      "documentary-source-semantic-review",
-    ]),
-  );
+  expect(vi.mocked(infer).mock.calls.map((call) => call[1])).toEqual([
+    "documentary-source-interpretation",
+    "documentary-source-evidence",
+    "documentary-source-semantic-review",
+  ]);
   const [run] = await db
     .select()
     .from(schema.automaticMatchRuns)
@@ -1459,28 +1462,38 @@ it("Semantic-review transport errors retain bounded technical retry and never be
   expect(run).toMatchObject({
     status: "failed",
     result: null,
-    attempts: 3,
-    issue: "comparison_failed",
+    attempts: 1,
+    issue: "comparison_delivery_held",
   });
 });
 
-it("Provider errors retry within the same durable input and stop after three attempts", async () => {
+it("A provider failure holds its durable input even when broker delivery or matching is repeated", async () => {
   const { job } = await automaticFixture();
   vi.mocked(infer).mockRejectedValue(new Error("Provider unavailable"));
-  for (let attempt = 1; attempt <= 3; attempt++)
-    await expect(
-      runAutomaticComparison(job, { now: () => now }),
-    ).rejects.toThrow("Provider unavailable");
+  await expect(runAutomaticComparison(job, { now: () => now })).rejects.toThrow(
+    "Provider unavailable",
+  );
   expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
     status: "skipped",
   });
-  expect(infer).toHaveBeenCalledTimes(3);
+  await matchAdoptedPublication({ publicationId: job.publicationId, now });
+  expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+    status: "skipped",
+  });
+  expect(infer).toHaveBeenCalledTimes(1);
   const [run] = await db
     .select()
     .from(schema.automaticMatchRuns)
     .where(eq(schema.automaticMatchRuns.id, job.runId));
   expect(run.status).toBe("failed");
-  expect(run.issue).toBe("comparison_failed");
+  expect(run.issue).toBe("comparison_delivery_held");
+  expect(run.attempts).toBe(1);
+  const warnings = await db
+    .select()
+    .from(schema.issues)
+    .where(eq(schema.issues.key, `automatic-comparison:${job.runId}`));
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0].detail).toContain("non viene ripetuta automaticamente");
 });
 
 it("Revoking processing during a provider call discards the answer and clears its lease", async () => {
@@ -1507,7 +1520,7 @@ it("Revoking processing during a provider call discards the answer and clears it
   ]);
 });
 
-it("An expired lease can be recovered once, while a live lease prevents a duplicate paid request", async () => {
+it("Live and abandoned deliveries both prevent another potentially paid request", async () => {
   const { job } = await automaticFixture();
   await db
     .update(schema.automaticMatchRuns)
@@ -1529,9 +1542,20 @@ it("An expired lease can be recovered once, while a live lease prevents a duplic
     inventedAnswer(prompt),
   );
   expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
-    status: "completed",
+    status: "skipped",
   });
-  expect(infer).toHaveBeenCalledTimes(6);
+  expect(infer).not.toHaveBeenCalled();
+  const [held] = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(eq(schema.automaticMatchRuns.id, job.runId));
+  expect(held).toMatchObject({
+    status: "failed",
+    issue: "comparison_delivery_held",
+    attempts: 1,
+    result: null,
+    leaseUntil: null,
+  });
 });
 
 it("An abandoned third attempt is closed once without another provider call", async () => {
@@ -1680,7 +1704,7 @@ for (const input of ["current", "revoked", "expired"] as const)
     expect(infer).not.toHaveBeenCalled();
   });
 
-it("Lease reconciliation preserves a live attempt, ordinary retries and a paused feature", async () => {
+it("Lease reconciliation preserves live/paused work and holds an abandoned delivery without resetting attempts", async () => {
   const { job } = await automaticFixture();
   const [live] = await db
     .update(schema.automaticMatchRuns)
@@ -1706,7 +1730,13 @@ it("Lease reconciliation preserves a live attempt, ordinary retries and a paused
     .where(eq(schema.automaticMatchRuns.id, job.runId))
     .returning();
   await reconcileAutomaticComparisonLeases(now);
-  expect(await readRun()).toEqual(retryable);
+  expect(await readRun()).toMatchObject({
+    ...retryable,
+    status: "failed",
+    issue: "comparison_delivery_held",
+    leaseUntil: null,
+    updatedAt: now,
+  });
   const [paused] = await db
     .update(schema.automaticMatchRuns)
     .set({ attempts: 3 })
@@ -3200,13 +3230,23 @@ it("Abandoned operational work stays quarantined, exposes no facts and allows on
 it("suspends queued AI before transport while its source item cannot be refreshed", async () => {
   const { f, job } = await automaticFixture();
   await db.insert(schema.issues).values({
-    id: randomUUID(), key: `source-item:simap:${f.p.externalId}`,
-    title: "Fonte temporaneamente non leggibile", detail: "HTTP 403 inventato", severity: "critical",
+    id: randomUUID(),
+    key: `source-item:simap:${f.p.externalId}`,
+    title: "Fonte temporaneamente non leggibile",
+    detail: "HTTP 403 inventato",
+    severity: "critical",
   });
-  expect(await matchAdoptedPublication({ publicationId: f.p.id, now })).toEqual({handled: true, matched: 0});
-  expect(await runAutomaticComparison(job, {now: () => now})).toEqual({status: "skipped"});
+  expect(await matchAdoptedPublication({ publicationId: f.p.id, now })).toEqual(
+    { handled: true, matched: 0 },
+  );
+  expect(await runAutomaticComparison(job, { now: () => now })).toEqual({
+    status: "skipped",
+  });
   expect(infer).not.toHaveBeenCalled();
-  const [run] = await db.select().from(schema.automaticMatchRuns).where(eq(schema.automaticMatchRuns.id, job.runId));
+  const [run] = await db
+    .select()
+    .from(schema.automaticMatchRuns)
+    .where(eq(schema.automaticMatchRuns.id, job.runId));
   expect(run.status).toBe("superseded");
   expect(run.attempts).toBe(0);
 });

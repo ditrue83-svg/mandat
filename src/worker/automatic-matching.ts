@@ -44,6 +44,30 @@ import type { AiTransport } from "./ai";
 
 type Tx = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 class ComparisonInputsChanged extends Error {}
+const DELIVERY_HELD = "comparison_delivery_held";
+async function holdUnfinishedDelivery(
+  tx: Pick<Tx, "update">,
+  run: typeof automaticMatchRuns.$inferSelect,
+  now: Date,
+) {
+  const rows = await tx
+    .update(automaticMatchRuns)
+    .set({
+      status: "failed",
+      issue: DELIVERY_HELD,
+      leaseUntil: null,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(automaticMatchRuns.id, run.id),
+        eq(automaticMatchRuns.attempts, run.attempts),
+        eq(automaticMatchRuns.status, run.status),
+      ),
+    )
+    .returning({ id: automaticMatchRuns.id });
+  return rows.length;
+}
 const expiredLease = (now: Date) =>
   or(
     isNull(automaticMatchRuns.leaseUntil),
@@ -61,11 +85,11 @@ async function recordExhaustedComparison(
     .values({
       id: crypto.randomUUID(),
       key: `automatic-comparison:${job.runId}`,
-      title: "Confronto automatico non riuscito",
+      title: "Confronto automatico da verificare",
       severity: "warning",
       publicationId: job.publicationId,
       detail:
-        "Tre tentativi non hanno prodotto una valutazione utilizzabile. La proposta resta da verificare nell’area fondatore.",
+        "L’elaborazione non ha prodotto una valutazione utilizzabile e non viene ripetuta automaticamente. La proposta resta da verificare nell’area fondatore.",
     })
     .onConflictDoNothing();
 }
@@ -237,9 +261,13 @@ export async function reconcileAutomaticComparisonLeases(now = new Date()) {
         return 0;
       if (!loaded.input)
         return (await supersedeUnavailable(tx, job, now)).length;
+      // A delivery interrupted after its claim may already have reached the
+      // provider. Never infer "unsent" merely from an expired application lease.
+      if (loaded.run.attempts > 0 && loaded.run.attempts < 3)
+        return holdUnfinishedDelivery(tx, loaded.run, now);
       if (loaded.run.attempts >= 3)
         return failExhaustedComparison(tx, job, loaded.run, now);
-      // Remaining attempts still belong to the durable pg-boss retry schedule.
+      // An unclaimed zero-attempt row has not started a delivery.
       return 0;
     });
   }
@@ -271,6 +299,15 @@ export async function runAutomaticComparison(
       throw new Error("Confronto già in elaborazione");
     if (!loaded.input) {
       await supersedeUnavailable(tx, job, clock());
+      return null;
+    }
+    if (loaded.run.issue === DELIVERY_HELD) return null;
+    if (
+      loaded.run.status === "running" &&
+      loaded.run.attempts > 0 &&
+      loaded.run.attempts < 3
+    ) {
+      await holdUnfinishedDelivery(tx, loaded.run, clock());
       return null;
     }
     if (loaded.run.attempts >= 3) {
@@ -550,15 +587,15 @@ export async function runAutomaticComparison(
       .set({
         status: "failed",
         leaseUntil: null,
-        issue: "comparison_failed",
+        issue: DELIVERY_HELD,
         updatedAt: clock(),
       })
       .where(owned())
       .returning({ id: automaticMatchRuns.id });
-    if (changed.length && claimed.attempt >= 3)
-      await recordExhaustedComparison(getDb(), job);
-    // pg-boss owns bounded retry. Provider messages and private prompt text are
-    // never copied into product diagnostics; actual/uncertain spend is ledgered.
+    if (changed.length) await recordExhaustedComparison(getDb(), job);
+    // A transport error or rejected response is a held delivery, not permission
+    // to repeat all its paid stages. Surface the original failure (including
+    // integrity/auth errors); the durable held flag forbids another delivery.
     throw error;
   }
 }

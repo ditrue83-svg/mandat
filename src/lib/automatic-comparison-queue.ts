@@ -119,11 +119,15 @@ export async function enqueueAutomaticComparisons(
         migrate: false,
         createSchema: false,
       });
-      const id = await producer.send(AUTOMATIC_COMPARISON_QUEUE, {
-        runId: run.id,
-        publicationId: loaded.publication.id,
-        companyId: loaded.company.id,
-      } satisfies AutomaticComparisonJob);
+      const id = await producer.send(
+        AUTOMATIC_COMPARISON_QUEUE,
+        {
+          runId: run.id,
+          publicationId: loaded.publication.id,
+          companyId: loaded.company.id,
+        } satisfies AutomaticComparisonJob,
+        { retryLimit: 0 },
+      );
       if (!id) throw new Error("Confronto automatico non accodato.");
       queued++;
     } catch (error) {

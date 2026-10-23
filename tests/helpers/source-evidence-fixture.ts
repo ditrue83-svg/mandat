@@ -150,15 +150,15 @@ export function inventedClauseSelections(
   return Object.fromEntries(
     required.map((id) => [
       id,
-      ["observations", "issues"].flatMap((collection) =>
-        (answer[collection] ?? []).some(
-          (row: any) =>
-            row.serviceRef === id ||
-            row.evidence.some((e: any) => e.sourceRef === id),
+      ["observations", "issues"]
+        .filter((collection) =>
+          (answer[collection] ?? []).some(
+            (row: any) =>
+              row.serviceRef === id ||
+              row.evidence.some((e: any) => e.sourceRef === id),
+          ),
         )
-          ? [{ collection }]
-          : [],
-      ),
+        .join("_and_") || "none",
     ]),
   );
 }

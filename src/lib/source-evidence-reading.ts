@@ -15,7 +15,7 @@ import {
 } from "./source-contract-clauses";
 
 export const SOURCE_EVIDENCE_READING_VERSION =
-  "source-evidence-reading-v40-common84-integrated";
+  "source-evidence-reading-v41-distinct-clause-collections";
 const MAX_BYTES = 160_000;
 const MAX_PARTS = 32;
 const MAX_TOKENS = 8192;
@@ -180,6 +180,28 @@ function classificationRelationLabel(relationship: string) {
 const clauseSelection = z.strictObject({
   collection: z.enum(["observations", "missingDetails", "issues"]),
 });
+// A single set choice cannot repeat a collection. This is a new provider
+// grammar, not a repair/deduplication of a previously rejected array.
+const clauseCollectionSets = {
+  none: [],
+  observations: ["observations"],
+  issues: ["issues"],
+  missingDetails: ["missingDetails"],
+  observations_and_issues: ["observations", "issues"],
+  observations_and_missingDetails: ["observations", "missingDetails"],
+  issues_and_missingDetails: ["issues", "missingDetails"],
+  observations_and_issues_and_missingDetails: [
+    "observations",
+    "issues",
+    "missingDetails",
+  ],
+} as const;
+const wireClauseSelection = z.enum(
+  Object.keys(clauseCollectionSets) as [
+    keyof typeof clauseCollectionSets,
+    ...(keyof typeof clauseCollectionSets)[],
+  ],
+);
 const selectionSchema = responseSchema
   .omit({
     observations: true,
@@ -199,8 +221,13 @@ const selectionSchema = responseSchema
       .optional(),
   });
 const wireSelectionSchema = selectionSchema
-  .omit({ classifications: true })
-  .extend({ classifications: z.array(wireClassification).max(1024) });
+  .omit({ classifications: true, requiredClauseSelections: true })
+  .extend({
+    classifications: z.array(wireClassification).max(1024),
+    requiredClauseSelections: z
+      .record(z.string().regex(/^[sf]\d+$/), wireClauseSelection)
+      .optional(),
+  });
 const unique = (values: string[]) => [...new Set(values)];
 function freeze<T>(value: T): T {
   if (value && typeof value === "object") {
@@ -420,15 +447,8 @@ function buildUncachedSourceEvidenceReadingRequest(
           requiredClauses.map(({ id }) => [
             id,
             complete
-              ? z
-                  .array(
-                    clauseSelection.extend({
-                      collection: z.enum(["observations", "issues"]),
-                    }),
-                  )
-                  .min(1)
-                  .max(2)
-              : z.array(clauseSelection).max(3),
+              ? z.enum(["observations", "issues", "observations_and_issues"])
+              : wireClauseSelection,
           ]),
         ),
       );
@@ -514,7 +534,7 @@ function buildUncachedSourceEvidenceReadingRequest(
         "Leggi anche gli obiettivi materiali prescritti al risultato dell'opera o progettazione nelle descrizioni dell'appalto: prestazioni, qualità, ambiente, innovazione e altri requisiti noti vanno conservati in condition con prova propria e lavoro dello stesso ambito. Non ridurli a contesto opzionale quando il testo li impone; non creare nuovi acquisti o capacità della ditta da tali obiettivi. Motivazioni storiche e referenze pregresse restano distinte.",
         ...(requiredClauses.length
           ? [
-              "requiredClauseSelections: per OGNI ID obbligatorio indica la collection che contiene la sua prova. Lo stesso ID deve comparire davvero nel serviceRef o evidence di una riga di quella collection; scriverlo soltanto nella mappa non basta. Non produrre indici di riga. Per complete almeno una observations o issues conserva il fatto noto; missingDetails da sola non basta. Anche istruzioni amministrative note vanno in condition: scaricare, compilare tutte le parti, consegnare tutte le pagine. Un rinvio può lasciare ignoti articoli o quantità, ma non rende ignoti gli obblighi scritti. missingDetails aggiunge solo verifiche di lacune dichiarate o rinvii provati, mai assenze dedotte dalla parte. Non omettere tipi/date/valori. Nessun testo duplicato nella mappa; unreadable può avere selezioni vuote.",
+              "requiredClauseSelections: per OGNI ID obbligatorio scegli UN valore enum: observations, issues oppure observations_and_issues. La scelta nomina un insieme di collection, non singole righe: più righe della stessa collection restano tutte conservate senza ripetere la scelta. Lo stesso ID deve comparire davvero nel serviceRef o evidence di una riga di OGNI collection scelta; scriverlo soltanto nella mappa non basta. Non produrre array o indici di riga. Per complete observations o issues conserva ogni fatto noto; missingDetails non sostituisce le prove. Anche istruzioni amministrative note vanno in condition: scaricare, compilare tutte le parti, consegnare tutte le pagine. Un rinvio non rende ignoti gli obblighi scritti. missingDetails aggiunge solo lacune dichiarate o rinvii provati, mai assenze dedotte dalla parte. Non omettere tipi/date/valori. Solo unreadable può scegliere none o insiemi con missingDetails.",
             ]
           : []),
         "originalCoverage descrive soltanto il materiale fornito qui. linkedDocumentsRead false o hasProjectDocuments false non provano indisponibilità esterna: conserva email/portali e condizioni di richiesta presenti. Non negare un documento perché non è archiviato o non è stato letto.",
@@ -715,6 +735,20 @@ function materialize(values: unknown[], plan: SourceEvidenceReadingPlan) {
     const wire = wireSelectionSchema.parse(value);
     const selected = selectionSchema.parse({
       ...wire,
+      ...(wire.requiredClauseSelections === undefined
+        ? {}
+        : {
+            requiredClauseSelections: Object.fromEntries(
+              Object.entries(wire.requiredClauseSelections).map(
+                ([id, choice]) => [
+                  id,
+                  clauseCollectionSets[choice].map((collection) => ({
+                    collection,
+                  })),
+                ],
+              ),
+            ),
+          }),
       classifications: wire.classifications.map(({ assessment, ...rest }) => {
         const [relationship, explanation] = Object.entries(assessment)[0];
         return { ...rest, relationship, explanation };

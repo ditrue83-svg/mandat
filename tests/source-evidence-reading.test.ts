@@ -261,11 +261,7 @@ test("Known form obligations cannot be covered only by unknown product specifica
     evidence: [{ sourceRef: "s5" }],
   });
   const onlyUnknown = structuredClone(complete);
-  onlyUnknown[index].requiredClauseSelections.s5 = [
-    {
-      collection: "missingDetails",
-    },
-  ];
+  onlyUnknown[index].requiredClauseSelections.s5 = "missingDetails";
   assert.throws(
     () => recordSourceEvidenceReading(onlyUnknown, plan, metadata),
     /as an unknown specification/,
@@ -533,7 +529,7 @@ test("Complete reading requires every original selection and its own reference i
       /clause selections/,
     );
     const empty = structuredClone(complete);
-    empty[0].requiredClauseSelections[id] = [];
+    empty[0].requiredClauseSelections[id] = "none";
     assert(!accepts(empty[0]));
     assert.throws(
       () => recordSourceEvidenceReading(empty, plan, metadata),
@@ -542,7 +538,7 @@ test("Complete reading requires every original selection and its own reference i
   }
   const borrowed = structuredClone(complete);
   // The original remains in observations: selecting issues cannot borrow it.
-  borrowed[0].requiredClauseSelections.s5 = [{ collection: "issues" }];
+  borrowed[0].requiredClauseSelections.s5 = "issues";
   borrowed[0].issues.push({
     kind: "object_uncertain",
     reason: "Un dubbio inventato con una citazione diversa.",
@@ -557,7 +553,9 @@ test("Complete reading requires every original selection and its own reference i
   const obsolete = encodeInventedSourceEvidenceAnswer(
     structuredClone(complete[0]),
   );
-  obsolete.requiredClauseSelections.s5[0].index = 1;
+  obsolete.requiredClauseSelections.s5 = [
+    { collection: "observations", index: 1 },
+  ];
   assert.throws(
     () => recordProviderSourceEvidenceReading([obsolete], plan, metadata),
     ZodError,
@@ -581,16 +579,20 @@ test("Complete reading requires every original selection and its own reference i
     );
   }
   const duplicated = structuredClone(complete);
-  duplicated[0].requiredClauseSelections.s5.push({
-    ...duplicated[0].requiredClauseSelections.s5[0],
-  });
+  duplicated[0].requiredClauseSelections.s5 = [
+    { collection: "observations" },
+    { collection: "observations" },
+  ];
+  const duplicateOriginal = JSON.stringify(duplicated);
+  assert(!accepts(duplicated[0]));
   assert.throws(
     () => recordSourceEvidenceReading(duplicated, plan, metadata),
-    /Repeated.*selection/,
+    ZodError,
   );
+  assert.equal(JSON.stringify(duplicated), duplicateOriginal);
   const unreadable = structuredClone(complete);
   unreadable[0].coverage = "unreadable";
-  unreadable[0].requiredClauseSelections.s5 = [];
+  unreadable[0].requiredClauseSelections.s5 = "none";
   assert(accepts(unreadable[0]));
   assert.equal(
     readSourceEvidenceReading(
@@ -600,6 +602,43 @@ test("Complete reading requires every original selection and its own reference i
     false,
   );
   assert.equal(JSON.stringify(complete), before);
+});
+
+test("One clause-set choice preserves multiple original rows without a repeated pointer", () => {
+  const plan = buildSourceEvidenceReadingRequest(contractContext(), config);
+  const answer: any[] = responses(plan);
+  const part = plan.requests.findIndex((p) =>
+    p.requiredClauseIds.includes("s5"),
+  );
+  answer[part].observations.push({
+    kind: "condition",
+    serviceRef: "s1",
+    evidence: [{ sourceRef: "s5" }, { sourceRef: "s6" }],
+  });
+  answer[part].requiredClauseSelections.s5 = "observations";
+  const original = JSON.stringify(answer);
+  const record = recordSourceEvidenceReading(answer, plan, metadata);
+  assert.equal(
+    record.responses[part].observations.length,
+    answer[part].observations.length,
+  );
+  assert.equal(JSON.stringify(answer), original);
+  const wrong = structuredClone(answer);
+  wrong[part].requiredClauseSelections.s5 = "observations_and_observations";
+  const accepts = compileInventedSourceEvidenceSchema(
+    plan.requests[part].responseFormat.json_schema.schema,
+  );
+  assert(!accepts(wrong[part]));
+  assert.throws(
+    () => recordSourceEvidenceReading(wrong, plan, metadata),
+    ZodError,
+  );
+  const both = structuredClone(answer);
+  both[part].requiredClauseSelections.s5 = "observations_and_issues";
+  assert.throws(
+    () => recordSourceEvidenceReading(both, plan, metadata),
+    /own original/,
+  );
 });
 
 test("A complete reading must preserve every original work clause, including language variants", () => {
