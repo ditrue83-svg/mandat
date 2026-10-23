@@ -73,6 +73,7 @@ vi.mock("../src/lib/operational-reading-runtime", async (importOriginal) => ({
     companyId === "toy-company" ? mock.grant : null,
 }));
 vi.mock("../src/worker/ai", () => ({
+  readAiResponseDiagnostic: () => null,
   infer: async () => {
     mock.calls++;
     if (!mock.queue.length) throw Error("Unexpected toy provider request");

@@ -27,6 +27,7 @@ import {
   aiReservedInputBytes,
 } from "../src/worker/ai";
 import { aiBudgetPaused } from "../src/worker/ai-budget-pause";
+import { providerAccessPaused } from "../src/worker/ai-access-pause";
 
 const expectedModel = "mistralai/Ministral-3-14B-Instruct-2512";
 const privateResponseText = "provider-private-content-never-log";
@@ -284,6 +285,85 @@ describe("OpenAI native Responses", () => {
       },
     };
   }
+  it.each([401, 403])(
+    "stops admission after HTTP%s, preserves uncertainty and only reopens for an explicit new credential",
+    async (status) => {
+      const secret = "old-key-must-not-be-in-reports";
+      vi.stubEnv("OPENAI_API_KEY", secret);
+      const fetcher = mockResponse(
+        {
+          error: {
+            type: "authentication_error",
+            code: "invalid_api_key",
+            message: privateResponseText,
+          },
+        },
+        status,
+      );
+      await expect(
+        infer(
+          publication,
+          "documentary-operational-reading:toy",
+          "source",
+          8192,
+          configuredTransport,
+          "instructions",
+          undefined,
+          options,
+        ),
+      ).rejects.toThrow(`HTTP ${status}`);
+      const before = await db.select().from(schema.aiUsage);
+      expect(before).toHaveLength(1);
+      expect(before[0]).toMatchObject({ status: "uncertain", costChf: null });
+      expect(await providerAccessPaused("openai")).toBe(true);
+      await expect(
+        infer(
+          publication,
+          "documentary-operational-reading:other",
+          "source",
+          8192,
+          configuredTransport,
+          "instructions",
+          undefined,
+          options,
+        ),
+      ).rejects.toThrow("sospeso");
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(await db.select().from(schema.aiUsage)).toEqual(before);
+      const block = await db.select().from(schema.settings);
+      expect(block).toHaveLength(1);
+      expect(JSON.stringify(block)).not.toContain(secret);
+      expect(JSON.stringify(block)).not.toContain(privateResponseText);
+      vi.stubEnv("DOCUMENTARY_LLM_REASONING_EFFORT", "medium");
+      expect(await providerAccessPaused("openai")).toBe(true);
+      vi.stubEnv("OPENAI_API_KEY", "new-explicit-test-credential");
+      expect(await providerAccessPaused("openai")).toBe(false);
+      fetcher.mockImplementationOnce(
+        async () =>
+          new Response(JSON.stringify(answer()), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+      );
+      await infer(
+        publication,
+        "new-authorized-request",
+        "new source",
+        8192,
+        configuredTransport,
+        "instructions",
+        undefined,
+        options,
+      );
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(
+        (await db.select().from(schema.aiUsage)).find(
+          (r) => r.id === before[0].id,
+        ),
+      ).toEqual(before[0]);
+      expect(await db.select().from(schema.settings)).toEqual(block);
+    },
+  );
   beforeEach(() => vi.stubEnv("OPENAI_API_KEY", "openai-test-key"));
   it.each([true, false])(
     "settles a large streaming response only when terminalCompleted=%s, with one POST",

@@ -14,10 +14,8 @@ import {
   readOperationalGrant,
   readOperationalRuntimeRecord,
 } from "@/lib/operational-reading-runtime";
-import {
-  readOperationalEvidence,
-} from "@/lib/lot-operational-evidence";
-import { infer, type AiTransport } from "./ai";
+import { readOperationalEvidence } from "@/lib/lot-operational-evidence";
+import { infer, readAiResponseDiagnostic, type AiTransport } from "./ai";
 export class OperationalInputsChanged extends Error {}
 // One durable owner/source/config claim, before any reservation or provider work.
 // A delivered/uncertain/rejected request is never automatically sent again.
@@ -40,7 +38,8 @@ export async function ensureOperationalReading(
     plan = buildOperationalRuntimePlan(input, target),
     db = getDb(),
     targetKey = assessmentTargetKey(target);
-  if((await readOperationalGrant(db,input.companyId))!==grantId)throw new Error("Operational processing permission unavailable");
+  if ((await readOperationalGrant(db, input.companyId)) !== grantId)
+    throw new Error("Operational processing permission unavailable");
   await options.beforeRequest();
   const older = await db
     .select()
@@ -146,17 +145,15 @@ export async function ensureOperationalReading(
     cancelled = false;
   const guard = async () => {
     try {
-      if((await readOperationalGrant(db,input.companyId))!==grantId)throw new Error("Operational processing permission changed");
+      if ((await readOperationalGrant(db, input.companyId)) !== grantId)
+        throw new Error("Operational processing permission changed");
       await options.beforeRequest();
     } catch (e) {
       cancelled = true;
       throw e;
     }
   };
-  async function call(
-    stage: "reading" | "review",
-    task: typeof plan.task,
-  ) {
+  async function call(stage: "reading" | "review", task: typeof plan.task) {
     await guard();
     const purpose = `documentary-operational-${stage}:${id}`;
     try {
@@ -197,7 +194,7 @@ export async function ensureOperationalReading(
       .where(eq(operationalReadingRuns.id, id));
     await guard();
     validation = true;
-    const checked = {answer:plan.protocol.decodeReading(reading)};
+    const checked = { answer: plan.protocol.decodeReading(reading) };
     if (checked.answer.issues.length)
       throw new Error("Operational reading has unresolved issues");
     const task = plan.protocol.reviewTask(reading);
@@ -214,7 +211,7 @@ export async function ensureOperationalReading(
         at: clock().toISOString(),
         model: plan.configuration.model,
       }),
-      result = wrapOperationalRecord(record, plan, {reading, review});
+      result = wrapOperationalRecord(record, plan, { reading, review });
     validation = false;
     // Authorization/source/config is rechecked inside the commit lock as well.
     await guard();
@@ -248,6 +245,8 @@ export async function ensureOperationalReading(
       })
       .where(eq(operationalReadingRuns.id, id));
     if (cancelled) throw new OperationalInputsChanged();
+    const accessStatus = readAiResponseDiagnostic(error)?.httpStatus;
+    if (accessStatus === 401 || accessStatus === 403) throw error;
     return { status: "held" as const };
   }
 }

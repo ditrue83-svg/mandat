@@ -21,6 +21,8 @@ import { DOCUMENTARY_ADOPTION_CAPABILITY } from "@/lib/documentary-capability";
 import { loadDocumentaryRuntimeActivation } from "@/lib/documentary-runtime-config";
 import { recoverStaleAiReservations } from "./ai";
 import { aiBudgetPaused, budgetAwareConsumer } from "./ai-budget-pause";
+import { documentaryAccessPaused } from "./ai-access-pause";
+import { runDocumentaryJob } from "./documentary-consumer";
 import {
   AUTOMATIC_COMPARISON_QUEUE,
   automaticComparisonEnabled,
@@ -102,14 +104,21 @@ async function main() {
   // worker; consuming and rejecting them would exhaust their retry budget.
   const synchronizeComparisonConsumer = budgetAwareConsumer({
     paused: async () =>
-      !automaticComparisonEnabled() || (await aiBudgetPaused()),
+      !automaticComparisonEnabled() ||
+      (await aiBudgetPaused()) ||
+      (await documentaryAccessPaused()),
     start: () =>
       boss.work<AutomaticComparisonJob>(
         AUTOMATIC_COMPARISON_QUEUE,
         { batchSize: 1 },
         async ([job]) => {
-          await runAutomaticComparison(job.data, { signal: job.signal });
-          await requestNotificationSweeps(boss);
+          await runDocumentaryJob(
+            async () => {
+              await runAutomaticComparison(job.data, { signal: job.signal });
+              await requestNotificationSweeps(boss);
+            },
+            () => boss.offWork(AUTOMATIC_COMPARISON_QUEUE, { wait: false }),
+          );
         },
       ),
     stop: () => boss.offWork(AUTOMATIC_COMPARISON_QUEUE, { wait: true }),

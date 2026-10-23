@@ -10,6 +10,10 @@ import {
 } from "@/lib/source-scope-review";
 import { DateTime } from "luxon";
 import {
+  providerAccessPaused,
+  recordProviderAccessBlock,
+} from "./ai-access-pause";
+import {
   aiModel,
   aiProvider,
   aiProviderConfiguration,
@@ -792,6 +796,10 @@ export async function infer(
   const reservedChf = recordedCost(reserve);
   if (reservedChf === null)
     throw new AiUnavailable("Riserva AI fuori capacità del registro");
+  if (await providerAccessPaused(provider))
+    throw new AiUnavailable(
+      "Accesso al provider AI sospeso: verificare la credenziale.",
+    );
   const month = DateTime.now().setZone("Europe/Zurich").toFormat("yyyy-MM");
   const id = crypto.randomUUID();
   try {
@@ -893,6 +901,14 @@ export async function infer(
   } catch (error) {
     const usage =
       error instanceof AiResponseRejected ? error.usage : knownUsage;
+    const accessStatus = readAiResponseDiagnostic(error)?.httpStatus;
+    if (accessStatus === 401 || accessStatus === 403) {
+      try {
+        await recordProviderAccessBlock(provider, accessStatus);
+      } catch {
+        console.error("ai_access_pause_persistence_failed");
+      }
+    }
     const costChf = usage
       ? recordedCost(
           (usage.inputTokens * input + usage.outputTokens * output) / 1e6,
