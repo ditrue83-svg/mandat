@@ -17,6 +17,7 @@ export function assertLunaReleaseConfiguration(
   env: AiEnvironment,
   attestation: unknown,
   expectedBuild: string,
+  expectedMonthlyBudgetChf = 10,
 ) {
   function require(condition: boolean, code: string): asserts condition {
     if (!condition) throw new Error(code);
@@ -25,7 +26,8 @@ export function assertLunaReleaseConfiguration(
   require(env.MANDAT_BUILD_ID === expectedBuild, "BUILD_MISMATCH");
   require(env.APP_MODE === "live", "LIVE_MODE_REQUIRED");
   require(env.DOCUMENTARY_COMPARISON_ENABLED === "true", "COMPARISON_DISABLED");
-  require(env.DOCUMENTARY_OPERATIONAL_READING_ENABLED === "true", "OPERATIONAL_READING_DISABLED");
+  require(env.DOCUMENTARY_OPERATIONAL_READING_ENABLED ===
+    "true", "OPERATIONAL_READING_DISABLED");
   require(Boolean(
     env.MANDAT_DOCUMENTARY_RELEASE_FILE?.trim(),
   ), "ATTESTATION_PATH_REQUIRED");
@@ -43,7 +45,10 @@ export function assertLunaReleaseConfiguration(
   require(Boolean(env.OPENAI_API_KEY?.trim()), "RUNTIME_CREDENTIAL_MISSING");
   require(configuration.rates.input === 0.15 &&
     configuration.rates.output === 0.75, "BASELINE_RATES_MISMATCH");
-  require(Number(env.AI_MONTHLY_BUDGET_CHF) === 10, "MONTHLY_CAP_MISMATCH");
+  require(Number.isFinite(expectedMonthlyBudgetChf) &&
+    expectedMonthlyBudgetChf > 0, "EXPECTED_MONTHLY_CAP_INVALID");
+  require(Number(env.AI_MONTHLY_BUDGET_CHF) ===
+    expectedMonthlyBudgetChf, "MONTHLY_CAP_MISMATCH");
   const activation = assertDocumentaryAdoptionActivation({
     enabled: true,
     attestation,
@@ -61,7 +66,7 @@ export function assertLunaReleaseConfiguration(
     mapEffort: "none" as const,
     endpoint: `${endpoint.baseUrl}/responses`,
     rates: configuration.rates,
-    monthlyCapChf: 10,
+    monthlyCapChf: expectedMonthlyBudgetChf,
     attestationReleaseId: activation.attestation.releaseId,
     // No credential values or full environment are returned.
     runtimeCredentialPresent: true,

@@ -26,6 +26,7 @@ import {
   type AiResponseDiagnostic,
   aiReservedInputBytes,
 } from "../src/worker/ai";
+import { aiBudgetPaused } from "../src/worker/ai-budget-pause";
 
 const expectedModel = "mistralai/Ministral-3-14B-Instruct-2512";
 const privateResponseText = "provider-private-content-never-log";
@@ -686,6 +687,10 @@ describe("OpenAI native Responses", () => {
     const rows = await db.select().from(schema.aiUsage);
     expect(rows).toHaveLength(1);
     expect(rows[0].reservedChf).toBe("9.999900");
+    expect(await aiBudgetPaused()).toBe(true);
+    vi.stubEnv("AI_MONTHLY_BUDGET_CHF", "20");
+    expect(await aiBudgetPaused()).toBe(false);
+    expect(await db.select().from(schema.aiUsage)).toEqual(rows);
   });
 });
 

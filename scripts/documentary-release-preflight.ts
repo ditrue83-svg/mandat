@@ -8,6 +8,9 @@ try {
     process.env,
     activation.attestation,
     process.argv[2] || "",
+    // A changed cap must be explicit in the separately approved rollout.
+    // Legacy invocations remain pinned to CHF10.
+    process.argv[3] === undefined ? 10 : Number(process.argv[3]),
   );
   console.info(JSON.stringify(report));
 } catch {

@@ -823,8 +823,17 @@ export async function infer(
     if (error instanceof BudgetExceeded)
       await getDb()
         .insert(settings)
-        .values({ key: "ai_budget_blocked", value: month })
-        .onConflictDoUpdate({ target: settings.key, set: { value: month } });
+        .values([
+          { key: "ai_budget_blocked", value: month },
+          {
+            key: "ai_budget_blocked_limit",
+            value: { month, budgetChf: budget },
+          },
+        ])
+        .onConflictDoUpdate({
+          target: settings.key,
+          set: { value: sql`excluded.value` },
+        });
     throw error;
   }
   await getDb()

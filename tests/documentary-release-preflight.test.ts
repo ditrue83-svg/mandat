@@ -11,6 +11,23 @@ import {
   DOCUMENTARY_RELEASE_ATTESTATION_VERSION,
 } from "../src/lib/documentary-capability";
 const build = "a".repeat(40);
+test("a changed cap requires an explicit expected value; the old baseline stays pinned", () => {
+  const changed = { ...env(), AI_MONTHLY_BUDGET_CHF: "30" };
+  expect(() =>
+    assertLunaReleaseConfiguration(changed, attestation(), build),
+  ).toThrow("MONTHLY_CAP_MISMATCH");
+  expect(
+    assertLunaReleaseConfiguration(changed, attestation(), build, 30)
+      .monthlyCapChf,
+  ).toBe(30);
+  expect(() =>
+    assertLunaReleaseConfiguration(env(), attestation(), build, 30),
+  ).toThrow("MONTHLY_CAP_MISMATCH");
+  for (const cap of [0, -1, NaN, Infinity])
+    expect(() =>
+      assertLunaReleaseConfiguration(changed, attestation(), build, cap),
+    ).toThrow("EXPECTED_MONTHLY_CAP_INVALID");
+});
 function env() {
   return {
     APP_MODE: "live",

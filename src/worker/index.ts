@@ -20,6 +20,7 @@ import {
 import { DOCUMENTARY_ADOPTION_CAPABILITY } from "@/lib/documentary-capability";
 import { loadDocumentaryRuntimeActivation } from "@/lib/documentary-runtime-config";
 import { recoverStaleAiReservations } from "./ai";
+import { aiBudgetPaused, budgetAwareConsumer } from "./ai-budget-pause";
 import {
   AUTOMATIC_COMPARISON_QUEUE,
   automaticComparisonEnabled,
@@ -99,15 +100,21 @@ async function main() {
   });
   // Pausing the feature leaves durable jobs untouched for the next enabled
   // worker; consuming and rejecting them would exhaust their retry budget.
-  if (automaticComparisonEnabled())
-    await boss.work<AutomaticComparisonJob>(
-      AUTOMATIC_COMPARISON_QUEUE,
-      { batchSize: 1 },
-      async ([job]) => {
-        await runAutomaticComparison(job.data, { signal: job.signal });
-        await requestNotificationSweeps(boss);
-      },
-    );
+  const synchronizeComparisonConsumer = budgetAwareConsumer({
+    paused: async () =>
+      !automaticComparisonEnabled() || (await aiBudgetPaused()),
+    start: () =>
+      boss.work<AutomaticComparisonJob>(
+        AUTOMATIC_COMPARISON_QUEUE,
+        { batchSize: 1 },
+        async ([job]) => {
+          await runAutomaticComparison(job.data, { signal: job.signal });
+          await requestNotificationSweeps(boss);
+        },
+      ),
+    stop: () => boss.offWork(AUTOMATIC_COMPARISON_QUEUE, { wait: true }),
+  });
+  await synchronizeComparisonConsumer();
   await boss.createQueue(LOT_RECONCILIATION_QUEUE, {
     retryLimit: 2,
     retryDelay: 60,
@@ -256,6 +263,7 @@ async function main() {
     },
   );
   const heartbeat = async () => {
+    await synchronizeComparisonConsumer();
     if (automaticComparisonEnabled())
       await reconcileAutomaticComparisonLeases();
     const recoveredAiReservations = await recoverStaleAiReservations();
