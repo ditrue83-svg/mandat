@@ -53,7 +53,7 @@ import {
 } from "./source-contract-clauses";
 
 export const AUTOMATIC_COMPARISON_VERSION =
-  "documentary-service-comparison-v95-documentary-participation-context";
+  "documentary-service-comparison-v96-source88-reader41";
 export const automaticComparisonModel = documentaryAiModel;
 export const AUTOMATIC_COMPARISON_LIMITS = Object.freeze({
   sourceUtf16: 200_000,

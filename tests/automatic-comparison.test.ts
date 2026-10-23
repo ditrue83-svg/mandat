@@ -2878,6 +2878,10 @@ test.each([
     comparisonVersion: "documentary-service-comparison-v84-central",
     sourceVersion: "documentary-source-interpretation-v66",
   },
+  {
+    comparisonVersion: "documentary-service-comparison-v95-documentary-participation-context",
+    sourceVersion: "documentary-source-interpretation-v87-common84-integrated",
+  },
 ])(
   "Historical $comparisonVersion / $sourceVersion stays stale without rewriting evidence",
   ({ comparisonVersion, sourceVersion }) => {
@@ -2913,7 +2917,7 @@ test.each([
     const before = JSON.stringify(historical);
     assert.equal(
       request.version,
-      "documentary-service-comparison-v95-documentary-participation-context",
+      "documentary-service-comparison-v96-source88-reader41",
     );
     assert.notEqual(historical.inputHash, request.inputHash);
     assert.equal(readAutomaticComparison(historical, request), null);
@@ -2941,6 +2945,11 @@ test.each([
       resolveAutomaticComparison(input, [historical, stored]).comparison?.id,
       stored.id,
     );
+    assert.throws(() => readAutomaticComparison({
+      ...historical,
+      version: request.version,
+      inputHash: request.inputHash,
+    }, request));
     assert.equal(JSON.stringify(historical), before);
   },
 );
